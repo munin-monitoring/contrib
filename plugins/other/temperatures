@@ -1,0 +1,97 @@
+#!/usr/bin/perl -w
+#
+# Copyright (C) 2006 Lars Strand
+#
+# Plugin to fetch temperature from weather.noaa.gov
+#
+# Parameters supported:
+#
+#       config
+#       autoconf
+#
+# Magic markers:
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+
+# Find areacodes here http://weather.noaa.gov/
+my @wcode = undef;
+
+if (defined($ENV{wcode})) {
+    @wcode = split(' ', $ENV{wcode});
+} else {
+    @wcode = ("ENGM", "ENBR", "ENVA", "ENTC");
+}
+
+my $unit  = $ENV{unit}    || "C";     # "C" = Celsius, "F" = Fahrenheit
+my $proxy = $ENV{proxy}   || undef;   # Example: "http://proxy.foo.bar:8080/"
+
+my $ret = undef;
+if (! eval "require LWP::UserAgent;")
+{
+    $ret = "LWP::UserAgent not found";
+}
+
+if (defined $ARGV[0] and $ARGV[0] eq "autoconf") {
+    if (defined $ret) {
+	print "no ($ret)\n";
+	exit 1;
+    } else {
+	print "yes\n";
+	exit 0;
+    }
+}
+
+my $datasource = "http://weather.noaa.gov/pub/data/observations/metar/decoded/";
+
+my $ua = LWP::UserAgent->new(timeout => 30);
+$ua->agent('Munin');
+
+# Use proxy, if defined.
+if (defined($proxy)) {
+    $ua->proxy(['http'], $proxy);
+}
+
+if (defined $ARGV[0] and $ARGV[0] eq "config") {
+
+    print "graph_title Outside temperature\n";
+    print "graph_args --base 1000 -l 0\n";
+    print "graph_category sensors\n";
+    print "graph_info This graph shows temperatures fetched from weather.nooa.gov.\n";
+
+    if ($unit =~ /F/) {
+	print "graph_vlabel temp in F\n";
+    } else {
+	print "graph_vlabel temp in C\n";
+    }
+    
+    for my $station (@wcode) {
+	my $url = "$datasource$station.TXT";
+	my $response = $ua->request(HTTP::Request->new('GET',$url));
+	# New York City, Central Park, NY, United States (KNYC) 40-47-00N 073-58-00W 48M
+        if ($response->content =~ /^((.*?),.*\)).*\n/) {
+	    print "$station.label $2\n";
+	    print "$station.info $1\n";
+	} else {
+	    print "$station.label $station\n";
+	}
+    }
+    exit 0;
+}
+
+for my $station (@wcode) {
+    my $url = "$datasource$station.TXT";
+    my $response = $ua->request(HTTP::Request->new('GET',$url));
+
+    if ($response->content =~ /Temperature:\s*(.*)\s+F\s*\(\s*(.*)\s+C/) {
+	if ($unit =~ /F/) {
+	    print "$station.value $1\n";
+	} else {
+	    print "$station.value $2\n";
+	}
+    } else {
+	print "$station.value U\n";
+    }
+}
+
