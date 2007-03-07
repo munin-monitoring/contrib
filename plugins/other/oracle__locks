@@ -1,0 +1,161 @@
+#!/usr/bin/perl -w
+# Plugin for monitor oracle locks
+#
+# Licenced under GPL v2.
+#
+# Usage:
+#
+#       Symlink into /etc/munin/plugins/ and add the monitored
+#       database to the filename. e.g.:
+#
+#       ln -s /usr/share/munin/plugins/oracle__locks \
+#         /etc/munin/plugins/oracle_<databasename>_locks
+#       This should, however, be given through autoconf and suggest.
+#
+#       If required, give username, password and/or oracle server
+#       host through environment variables.
+#
+#
+# Parameters:
+#	autoconf
+#       config   (required)
+#
+# Config variables:
+#
+#       dbhost     - Which database server to use. Defaults to
+#                    'localhost'.
+#       dbname     - Which database to use. Defaults to template1
+#       dbuser     - A Postgresql user account with read permission to
+#                    the given database. Defaults to
+#                    'postgres'. Anyway, Munin must be told which user
+#                    this plugin should be run as.
+#       dbpass     - The corresponding password, if
+#                    applicable. Default to undef. Remember that
+#                    pg_hba.conf must be configured accordingly.
+#
+# Magic markers
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use DBI;
+
+my $dbhost = $ENV{'dbhost'} || '127.0.0.1';
+my $dbname = $ENV{'dbname'} || 'ocrl';
+my $dbuser = $ENV{'dbuser'} || 'oracle';
+my $dbport = $ENV{'dbport'} || '1521';
+my $dbpass = $ENV{'dbpass'} || '';
+
+# Check for DBD::Oracle
+if (! eval "require DBD::Oracle;") {
+     exit 1;
+}
+
+my $dsn = "DBI:Oracle:dbname=$dbname;host=$dbhost;port=$dbport;sid=$dbname";
+#print "$dsn\n";
+my $dbh = DBI->connect ($dsn, $dbuser,
+			$dbpass,
+			{RaiseError =>1}) || die "";
+
+
+
+if (exists $ARGV[0]) {
+    if ($ARGV[0] eq 'autoconf') {
+	# Check for DBD::Oracle
+	if (! eval "require DBD::Oracle;") {
+	     print "no (DBD::Oracle not found)";
+	     exit 1;
+	}
+        if ($dbh) {
+            print "yes\n";
+            exit 0;
+        } else {
+            print "no Unable to access Database $dbname on host $dbhost as user $dbuser.\nError returned was: ". $DBI::errstr;
+            exit 1;
+	}
+    }
+
+    if ($ARGV[0] eq "config") {
+	print "graph_title Oracle locks for $dbname\n";
+	print "graph_args --base 1000 -l 0\n";
+	print "graph_vlabel Locks\n";
+	print "graph_category oracle\n";
+	print "graph_info Shows oracle locks\n";
+	print "graph_scale no\n";
+	print "RS.label Row Share Locks\n";
+	print "RS.info Row Share Oracle locks\n";
+	print "RS.type GAUGE\n";
+	#print "RS.warning 5\n";
+	#print "RS.critical 10\n";
+	print "RE.label Row Exclusive locks\n";
+	print "RE.info Row Exclusive oracle locks\n";
+	print "RE.type GAUGE\n";
+	#print "RE.warning 5\n";
+	#print "RE.critical 10\n";
+	print "S.label Share locks\n";
+	print "S.info Row Share oracle locks\n";
+	print "S.type GAUGE\n";
+	#print "S.warning 5\n";
+	#print "S.critical 10\n";
+	print "SRX.label Share Row Exclusive locks\n";
+	print "SRX.info Share Row Exclusive oracle locks\n";
+	print "SRX.type GAUGE\n";
+	#print "SRX.warning 5\n";
+	#print "SRX.critical 10\n";
+	print "X.label Exclusive locks\n";
+	print "X.info Exclusive oracle locks\n";
+	print "X.type GAUGE\n";
+	#print "X.warning 5\n";
+	#print "X.critical 10\n";
+	print "MR.label Media Recovery (Share) locks\n";
+	print "MR.info Media Recovery (Share) oracle locks\n";
+	print "MR.type GAUGE\n";
+	#print "MR.warning 5\n";
+	#print "MR.critical 10\n";
+	print "RT.label Redo Thread (Exclusive) locks\n";
+	print "RT.info Redo Thread (Exclusive) oracle locks\n";
+	print "RT.type GAUGE\n";
+	#print "RT.warning 5\n";
+	#print "RT.critical 10\n";
+	print "XR.label XR locks\n";
+	print "XR.info XR oracle locks\n";
+	print "XR.type GAUGE\n";
+	#print "XR.warning 5\n";
+	#print "XR.critical 10\n";
+	print "TS.label Temp Segment locks\n";
+	print "TS.info Temp Segment oracle locks\n";
+	print "TS.type GAUGE\n";
+	#print "TS.warning 5\n";
+	#print "TS.critical 10\n";
+	exit 0;
+    }
+}
+
+#select MODE_HELD,count(MODE_HELD) from dba_locks group by MODE_HELD;
+my $sql="select type,count(*) from v\$lock group by type";
+my $sth = $dbh->prepare ($sql);
+$sth->execute ();
+my $type = 0;
+my $count = 0;
+my ($RS,$RE,$S,$SRX,$X,$MR,$RT,$XR,$TS) = (0,0,0,0,0,0,0,0,0);
+while ( ($type, $count) = $sth->fetchrow ()) {
+	#print "$type.value $count\n";
+	if ( $type eq "RS" )  {$RS=$count} ;
+	if ( $type eq "RE" )  {$RE=$count} ;
+	if ( $type eq "S" )   {$S=$count} ;
+	if ( $type eq "SRX" ) {$SRX=$count} ;
+	if ( $type eq "X" )   {$X=$count} ;
+	if ( $type eq "MR" )  {$MR=$count} ;
+	if ( $type eq "RT" )  {$RT=$count} ;
+	if ( $type eq "XR" )  {$XR=$count} ;
+	if ( $type eq "TS" )  {$TS=$count} ;
+}
+print "RS.value $RS\n";
+print "RE.value $RE\n";
+print "S.value $S\n";
+print "SRX.value $SRX\n";
+print "X.value $X\n";
+print "MR.value $MR\n";
+print "RT.value $RT\n";
+print "XR.value $XR\n";
+print "TS.value $TS\n";
