@@ -1,0 +1,81 @@
+#!/bin/sh
+#
+# Plugin to monitor the amavis mail filter.
+#
+# Parameters understood:
+#
+# 	config   (required)
+# 	autoconf (optional)
+#
+# Config variables:
+#
+#       amavislog    - file where amavis logs are written
+#
+# $Log: amavis,v $
+# Revision 1.2  2007/04/02 11:30:55  cvserver
+# Logtail in a variable
+#
+
+mktempfile () {
+mktemp -t /tmp
+}       
+
+AMAVIS_LOG=${logfile:-/var/log/amavis.log}
+LOGTAIL=${logtail:-`which logtail`}
+STATEFILE=/usr/local/var/munin/plugin-state/amavis.offset
+
+if [ "$1" = "autoconf" ]; then
+        if [ -f "${AMAVIS_LOG}" -a -n "${LOGTAIL}" -a -x "${LOGTAIL}" ] ; then
+		echo yes
+		exit 0
+	else
+		echo no
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title Amavis filter statistics'
+	echo 'graph_order virus spam_maybe spam_sure total'
+	echo 'graph_vlabel nb'
+	echo 'virus.label virus'
+	echo 'spam_maybe.label probably spam'
+	echo 'spam_sure.label surely spam'
+	echo 'total.label total'
+	exit 0
+fi
+
+total=U
+virus=U
+spamm=U
+spams=U
+
+ARGS=0
+`$LOGTAIL /etc/hosts 2>/dev/null >/dev/null`
+if [ $? = 66 ]; then
+    if [ ! -n "$logtail" ]; then
+	ARGS=1
+    fi
+fi
+
+TEMP_FILE=`mktempfile munin-amavis.XXXXXX`
+
+if [ -n "$TEMP_FILE" -a -f "$TEMP_FILE" ]
+then
+	if [ $ARGS != 0 ]; then
+	    $LOGTAIL ${AMAVIS_LOG} $STATEFILE | grep 'amavis\[.*\]:' > ${TEMP_FILE}
+	else
+	    $LOGTAIL ${AMAVIS_LOG} $STATEFILE | grep 'amavis\[.*\]:' > ${TEMP_FILE}
+	fi
+	total=`cat ${TEMP_FILE} | wc -l`
+	virus=`grep INFECTED ${TEMP_FILE} | wc -l`
+	spamm=`grep 'Passed.*Hits: 1[0-9][.]' ${TEMP_FILE} | wc -l`
+	spams=`grep 'Passed.*Hits: [2-9][0-9][0-9]*[.]' ${TEMP_FILE} | wc -l`
+
+	/bin/rm -f $TEMP_FILE
+fi
+
+echo "virus.value ${virus}"
+echo "spam_maybe.value ${spamm}"
+echo "spam_sure.value ${spams}"
+echo "total.value ${total}"
