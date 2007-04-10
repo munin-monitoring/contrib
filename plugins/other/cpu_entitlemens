@@ -1,0 +1,60 @@
+#!/bin/sh
+#
+# Copyright (C) 2006 Jens Schanz
+#
+# Plugin to monitor the capacity entitlement
+# of the system in units of physical CPUs
+# on a power5 system for linux
+#
+# Parameters:
+#
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+#
+# $Log: lop5-cpu_entitlement.sh,v $
+# Revision 1.1  2006/12/08 10:08:33  schanz
+# *** empty log message ***
+#
+#
+# Revision 1.0  20.11.2006 - first build
+#
+# If you have any suggestions, questions, or enhancements, feel free to email
+# me at mail@jensschanz.de
+#
+# Let's go ...
+#
+# Magick markers (optional - used by munin-config and some installation
+# scripts):
+#%# family=auto
+#%# capabilities=autoconf
+
+LPARCFG=/proc/ppc64/lparcfg
+
+# check input parameters
+if [ "$1" = "autoconf" ]; then
+	echo yes
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title CPU entitlements'
+	echo 'graph_args -l 0'
+	echo 'graph_category Power5'
+	echo 'graph_vlabel entitlements'
+	echo 'graph_info This graph shows the actual and max entitlements for a LPAR'
+
+	echo 'entitlements.label entitlements'
+	echo 'entitlementsMax.label max entitlements'
+	exit 0
+fi
+
+# let's do the main job
+
+unset LANG
+
+# get partition_entitled_capacity
+echo -n "entitlements.value "
+cat $LPARCFG | grep partition_entitled_capacity | awk -F = '{print $2}'
+
+echo -n "entitlementsMax.value "
+cat $LPARCFG | grep partition_max_entitled_capacity | awk -F = '{print $2}'
