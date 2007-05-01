@@ -1,0 +1,104 @@
+#!/bin/sh
+#
+# Wildcard-plugin to monitor IP addresses through iptables. To monitor an
+# IP, link fwbuilder_<ipaddress> to this file. E.g.
+#
+#    ln -s /usr/share/node/node/plugins-auto/fwbuilder_ /etc/munin/node.d/fwbuilder_192.168.0.1
+#
+# ...will monitor the IP 192.168.0.1.
+#
+# Aditionally, you need Accountingrules in fwbuilder
+#	fwbuilder creates Chains in INPUT-, OUTPUT- and FORWARD-Chain
+#	with Rules that "RETURN"
+#	You will have to specify rule options with name "ACCOUNTING" for the 
+#	rules to use, otherwise no rules will be found.
+#	try "fwbuilder_ suggest" to see if all is ok. 
+#    
+#
+# Furthermore, this plugin needs to be run as root for iptables to work
+#
+# This plugin is based on the if_ plugin.
+#
+#$Log$
+#Revision 2.1 2007/05/01 08:36:32 ga
+# changed to use rulename ACCOUNTING set in fwbuilder
+#
+#Revision 2.0 2007/04/01 08:41:54 ga
+#copied ip_ to fwbuilder_ and changed to usee Rules from it
+#some things rewritten to speed up
+#
+#Revision 1.7  2004/12/10 10:47:49  jimmyo
+#Change name from ${scale} to ${graph_period}, to be more consistent.
+#
+#Revision 1.6  2004/12/09 22:12:56  jimmyo
+#Added "graph_period" option, to make "graph_sums" usable.
+#
+#Revision 1.5  2004/11/21 00:17:12  jimmyo
+#Changed a lot of plugins so they use DERIVE instead of COUNTER.
+#
+#Revision 1.4  2004/09/10 23:06:30  jimmyo
+#Added accidentally deleted exit.
+#
+#Revision 1.3  2004/09/10 23:02:22  jimmyo
+#Plugin linux/ip_ now does more proper autoconfig/suggest.
+#
+#Revision 1.2  2004/05/20 13:57:12  jimmyo
+#Set categories to some of the plugins.
+#
+#Revision 1.1  2004/05/16 16:28:40  jimmyo
+#Linux/ip_ wildcard plugin contributed by Mathy Vanvoorden (SF#954851).
+#
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf suggest
+exec 2>/dev/null
+
+IP=${0/*fwbuilder_/}
+IP=${IP/-/\/}
+
+if [ "$1" = "autoconf" ]; then
+	if [ -r /proc/net/dev ]; then
+		iptables -L INPUT -v -n -x >/dev/null 2>/dev/null
+		if [ $? -gt 0 ]; then
+			echo "no (could not run iptables as user `whoami`)"
+			exit 1
+		else
+			echo yes
+			exit 0
+		fi
+	else
+		echo "no (/proc/net/dev not found)"
+		exit 1
+	fi
+fi
+
+if [ "$1" = "suggest" ]; then
+	# find Chains for Accounting
+	iptables -L -n |grep ^ACCOUNTING |awk '{printf "%s\n%s\n",$4,$5}'| sort -u |sed 's#\/#-#'
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+        echo "graph_order out in"
+        echo "graph_title $IP traffic"
+        echo 'graph_args --base 1024'
+        echo 'graph_vlabel bytes per ${graph_period}'
+	echo 'graph_category network'
+        echo 'out.label sent'
+        echo 'out.type DERIVE'
+        echo 'out.min 0'
+        echo 'out.cdef out,8,*'
+        echo 'in.label received'
+        echo 'in.type DERIVE'
+        echo 'in.min 0'
+        echo 'in.cdef in,8,*' 
+        exit 0
+fi;
+
+echo "in.value $(( $(iptables -L -n -v -x |grep "ACCOUNTING" |awk '{printf "%s %s\n",$2,$9}' |grep $IP |awk '{printf "%s + ",$1}') 0 ))"
+echo "out.value $(( $(iptables -L -n -v -x |grep "ACCOUNTING" |awk '{printf "%s %s\n",$2,$8}' |grep $IP |awk '{printf "%s + ",$1}') 0 ))"
+
