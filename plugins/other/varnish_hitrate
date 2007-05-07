@@ -1,0 +1,36 @@
+#! /bin/sh
+# anders@aftenposten.no, 2007-09-19
+# Shows the rate of requests (per second) for Varnish
+
+PATH="$PATH:/usr/local/bin"
+export PATH
+
+vversion=`varnishstat -V 2>&1 | egrep "^varnishstat" | perl -p -e "s@varnishstat\s*@@;s@\(@@;s@\)@@;s@varnish-@@"`
+
+pvstat() {
+	# $1: vname $2: grabstat
+	printf "$1.value "
+	case $vversion in
+	1.0*) varnishstat -1 | egrep "$2" | awk '{print $1}';;
+	*) varnishstat -1 | egrep "$2" | awk '{print $2}';;
+	esac
+}
+
+case $1 in
+autoconf) echo yes;;
+config)
+	echo 'graph_title Hitrate'
+	echo 'graph_vlabel hits per second'
+	echo 'graph_category varnish'
+	echo 'graph_info This graph shows the rate of requests, hits per second'
+
+	echo 'requests.label requests'
+#	echo 'requests.type COUNTER'
+	echo 'requests.type DERIVE'
+	echo 'requests.min 0'
+	echo 'requests.graph yes'
+	;;
+*)
+	pvstat requests 'Client requests received$'
+	;;
+esac
