@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+# Script to monitor PowerDNS performance
+#
+# Parameters understood:
+#
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+#%# family=auto
+#%# capabilities=autoconf
+
+command="/etc/init.d/pdns dump"
+
+if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title Power DNS queries'
+        echo 'graph_args -l 0 --base 1000'
+        echo 'graph_vlabel numbers of'
+        echo 'graph_category Power DNS'
+        echo 'graph_info This graph shows Power DNS performance on the machine.'
+        echo 'recursing_answers.label recursing answers'
+        echo 'recursing_answers.type DERIVE'
+        echo 'recursing_answers.min 0'
+        echo 'recursing_answers.info Number of recursive answers sent out'
+        echo 'recursing_questions.label recursing queries'
+        echo 'recursing_questions.type DERIVE'
+        echo 'recursing_questions.min 0'
+        echo 'recursing_questions.info Number of queries sent to recursor'
+        echo 'tcp_answers.label tcp answers'
+        echo 'tcp_answers.type DERIVE'
+        echo 'tcp_answers.min 0'
+        echo 'tcp_answers.info Number of answers sent out over TCP'
+        echo 'tcp_queries.label tcp queries'
+        echo 'tcp_queries.type DERIVE'
+        echo 'tcp_queries.min 0'
+        echo 'tcp_queries.info Number of TCP queries received'
+        echo 'udp_answers.label udp answers'
+        echo 'udp_answers.type DERIVE'
+        echo 'udp_answers.min 0'
+        echo 'udp_answers.info Number of answers sent out over UDP'
+        echo 'udp_queries.label udp queries'
+        echo 'udp_queries.type DERIVE'
+        echo 'udp_queries.min 0'
+        echo 'udp_queries.info Number of UDP queries received'
+        exit 0
+fi
+
+
+$command | sed 's/=\([0-9]\+\),/.value \1\n/g' | grep udp-'\|'recursing'\|'tcp | sed 's/-/_/g'
