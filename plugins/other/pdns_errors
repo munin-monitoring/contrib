@@ -1,0 +1,41 @@
+#!/bin/bash
+#
+# Script to monitor PowerDNS performance
+#
+# Parameters understood:
+#
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+#%# family=auto
+#%# capabilities=autoconf
+
+command="/etc/init.d/pdns dump"
+
+if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title Power DNS errors'
+        echo 'graph_args -l 0 --base 1000'
+        echo 'graph_vlabel numbers of'
+        echo 'graph_category Power DNS'
+        echo 'graph_info This graph shows Power DNS performance on the machine.'
+        echo 'corrupt_packets.label corrupt packets'
+        echo 'corrupt_packets.type DERIVE'
+        echo 'corrupt_packets.min 0'
+        echo 'corrupt_packets.info Number of corrupt packets received'
+        echo 'servfail_packets.label servfail packets'
+        echo 'servfail_packets.type DERIVE'
+        echo 'servfail_packets.min 0'
+        echo 'servfail_packets.info Number of times a server-failed packet was sent out'
+        echo 'timedout_packets.label timedout packets'
+        echo 'timedout_packets.type DERIVE'
+        echo 'timedout_packets.min 0'
+        echo 'timedout_packets.info Number of packets which weren not answered within timeout set'
+        exit 0
+fi
+
+
+$command | sed 's/=\([0-9]\+\),/.value \1\n/g' | grep corrupt'\|'servfail'\|'timedout | sed 's/-/_/g'
