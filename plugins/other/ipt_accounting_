@@ -1,0 +1,83 @@
+#!/bin/sh
+#
+# iptables Accounting Tool
+#
+# What it does:
+#  It accounts data based on the counters of iptables
+#
+# How it works:
+#  You have to create a rule like this:
+#   iptables -I INPUT -m comment --comment "ACC-Name" ...
+#   iptables -I OUTPUT -m comment --comment "ACC-Name" ...
+#
+#  You can create custom rules which matches any package which should
+#  be accounted. But the comment *must* begin with "ACC-"  and a rule
+#  should be created for input and output for measuring the direction.
+#
+#  Please specify no target on this rule, so it just counts the data.
+#
+# Some Examples:
+#  iptables -I INPUT -p udp -d 12.34.56.78 --dport 8767 -m comment --comment "ACC-teamspeak"
+#  iptables -I OUTPUT -p udp -s 12.34.56.78 --sport 8767 -m comment --comment "ACC-teamspeak"
+#  iptables -I INPUT -p tcp -d 12.34.56.78 --dport 25 -m comment --comment "ACC-mailserver"
+#  iptables -I OUTPUT -p tcp -s 12.34.56.78 --sport 25 -m comment --comment "ACC-mailserver"
+#
+# This plugin needs to be run as root for iptables to work!
+#
+# created by Markus Frosch aka lazyfrosch
+# more Information on: http://www.lazyfrosch.de/linux/munin-ipt-accounting
+# based on ip_ by jimmyo
+#
+#$Log$
+#Revision 0.1  2007/06/13 16:35:00  lazyfrosch
+#First Release
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+ACC=`basename $0 | sed 's/^ipt_accounting_//g'`
+
+if [ "$1" = "autoconf" ]; then
+        if [ -r /proc/net/dev ]; then
+                iptables -L INPUT -v -n -x >/dev/null 2>/dev/null
+                if [ $? -gt 0 ]; then
+                        echo "no (could not run iptables as user `whoami`)"
+                        exit 1
+                else
+                        echo yes
+                        exit 0
+                fi
+        else
+                echo "no (/proc/net/dev not found)"
+                exit 1
+        fi
+fi
+
+if [ "$1" = "suggest" ]; then
+        iptables -L INPUT -v -x -n 2>/dev/null | sed -n 's/^.*\/\* ACC\-\([a-zA-Z]*\) \*\/.*$/\1/p'
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+        echo "graph_order out in"
+        echo "graph_title iptables traffic for $ACC"
+        echo 'graph_args --base 1000'
+        echo 'graph_vlabel bits per ${graph_period}'
+        echo 'graph_category network'
+        echo 'out.label sent'
+        echo 'out.type DERIVE'
+        echo 'out.min 0'
+        echo 'out.cdef out,8,*'
+        echo 'in.label received'
+        echo 'in.type DERIVE'
+        echo 'in.min 0'
+        echo 'in.cdef in,8,*'
+        exit 0
+fi;
+
+iptables -L INPUT -v -n -x | grep -m1 "\/\* ACC\-"$ACC" \*\/" | awk "{ print \"in.value \" \$2 }"
+iptables -L OUTPUT -v -n -x | grep -m1 "\/\* ACC\-"$ACC" \*\/" | awk "{ print \"out.value \" \$2 }"
