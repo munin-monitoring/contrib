@@ -1,0 +1,67 @@
+#!/bin/sh
+#
+# Script to monitor memory status of the xen host
+#
+# Written by immerda project (admin(_at_)immerda.ch)
+# 2007
+# License: GPL
+#
+# Parameters understood:
+#
+#     config    (required)
+#     autoconf  (optional - used by munin-config)
+#
+
+XM='/usr/sbin/xm'
+
+if [ "$1" = "autoconf" ]; then
+        if [ -e $XM ]; then
+                echo yes
+                exit 0
+        fi
+        echo "no (xm not found)"
+        exit 1
+fi
+
+if [ "$1" = "config" ]; then
+
+        echo 'graph_title Xen Memory'
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_scale no'
+        echo 'graph_vlabel MB'
+        echo 'graph_category xen'
+        echo 'graph_info This graph shows of many mS wall time where used by a domain'
+                # xm info | while read name bla value; do echo "$name $value"; done
+         $XM info | while read name bla value; do
+                                #total_memory 2047
+                                #free_memory 1476
+                name=`echo $name | sed -e"s/-/_/"`
+
+                if [ "$name" = "total_memory" ]; then
+                        echo "$name.label $name"
+                        echo "$name.type GAUGE"
+                        echo "$name.min 0"
+                        echo "$name.info total memory"
+                                fi
+                if [ "$name" = "free_memory" ]; then
+                        echo "$name.label $name"
+                        echo "$name.type GAUGE"
+                    echo "$name.draw AREA"
+#                    echo "$name.draw STACK"
+                        echo "$name.min 0"
+                        echo "$name.info free memory"
+                                fi
+        done
+        exit 0
+fi
+
+$XM info | while read name bla value; do
+        name=`echo $name | sed -e"s/-/_/"`
+        if [ "$name" = "total_memory" ]; then
+                echo "$name.value $value"
+        fi
+        if [ "$name" = "free_memory" ]; then
+                echo "$name.value $value"
+        fi
+done
+
