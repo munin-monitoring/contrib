@@ -1,0 +1,101 @@
+#!/bin/bash
+# This script is intended for use with Munin to monitor
+# ping response time from hosts and through interfaces specified.
+# v. 1.1, 12/16/2007
+# (c) Alex Yanchenko (yanchenko{at}gmail.com), 2007
+# Distributed under GPL v.3 (http://www.gnu.org/licenses/gpl-3.0.txt)
+#
+# The plugin can utilize automatic configuration,
+# here are the basic steps (require root privileges):
+# 1. Copy it as /usr/share/munin/plugins/pinger
+# 2. Make executable: "chmod 755 /usr/share/munin/plugins/pinger"
+# 3. Customize hosts, interfaces and ping count below
+# 4. As pinging takes much time, add a
+# --
+# [pinger]
+# timeout 60
+# --
+# record to /etc/munin/munin-node.conf to avoid timeouts.
+# 5. Run "munin-node-configure --shell", you should see smth like
+# "ln -s /usr/share/munin/plugins/pinger /etc/munin/plugins/pinger"
+# 6. Run the proposed command to create a link.
+# 7. To verify, run "munin-node-configure", you should notice the "pinger" record
+#
+# Plugin                     | Used | Suggestions
+# ------                     | ---- | -----------
+# pinger                     | yes  |
+#
+# 8. Restart munin: "/etc/init.d/munin-node restart"
+# 9. Hold on for 5 minutes at most and watch the graphs appear.
+#
+#%# family=contrib
+#%# capabilities=autoconf
+
+#----- PROPERTIES START -----#
+# An array of interfaces to ping through, space-separated.
+# In case vnstat is installed, interface names will be fetced
+# from it, 'nicknames'included.
+INTERFACE=(eth2 eth3)
+
+# An array of hosts to ping, space-separated.
+HOST=(dc.volia.com hosting.rbc.ru slicehost.com)
+
+# Ping count, higher values lead to more precise
+# results yet take more time
+PING=3
+#----- PROPERTIES END -----#
+
+# Try to get interface name from vnstat, make sure the name is assigned
+function IF_NAME() {
+        ARG=$1
+        if [[ $(which vnstat &>/dev/null; echo $?) == 0 ]]
+                then
+                        IF_NAME="$(vnstat | grep "$ARG" | cut -d" " -f2,3 | cut -d":" -f1)"
+                else
+                        IF_NAME="$ARG"
+        fi
+        echo $IF_NAME
+}
+
+# Ping given host through a given interface
+function PINGER() {
+        ping $2 -c${PING} -I$1 | grep "rtt min/avg/max/mdev" | cut -d" " -f4 | cut -d"/" -f2 | cut -d"." -f1
+}
+
+case $1 in
+	autoconf)
+		which ping
+	       	if [[ "$?" = "0" ]]; then
+	               	echo yes
+	                exit 0
+	       	else
+	               	echo "no (ping not present)"
+	                exit 1
+	       	fi
+		;;
+        config)
+cat << EOM
+graph_title Pinger
+graph_category network
+graph_info A nice thingy to ping remote hosts.
+graph_vlabel msec
+graph_args --base 1000 --lower-limit 0
+EOM
+                        for (( i=0; i<"${#HOST[*]}"; i++ ))
+                                do
+                                        for (( j=0; j<"${#INTERFACE[*]}"; j++ ))
+                                                do
+                                                        echo "${j}_${i}.label $(IF_NAME ${INTERFACE[$j]}) - ${HOST[$i]}"
+                                        done
+                        done
+                ;;
+        *)
+                        for (( i=0; i<"${#HOST[*]}"; i++ ))
+                                do
+                                        for (( j=0; j<"${#INTERFACE[*]}"; j++ ))
+                                                do
+                                                        echo "${j}_${i}.value $(PINGER ${INTERFACE[$j]} ${HOST[$i]})"
+                                                done
+                                done
+                ;;
+esac
