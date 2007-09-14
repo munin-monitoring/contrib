@@ -1,0 +1,26 @@
+#!/bin/sh
+
+H=`echo $0 | awk -F_ '{print $2}'`
+
+if [ "$1" = "config" ] ; then
+
+	echo "graph_title Ping RTT $H"
+	echo "graph_category network"
+	echo "graph_info this graph shows the average RTT of five pings to $H"
+	echo "graph_vlabel ping_rtt"
+	echo "ping_rtt.label ms"
+	echo "ping_rtt.warning 12"
+	echo "ping_rtt.critical 15"
+	echo "ping_loss.warning 40"
+	echo "ping_loss.critical 60"
+	exit
+fi
+
+/sbin/ping -W 1 -c 5 $H > /tmp/munin-node-ping-$H
+
+RTTAVG=`sed -n '2,6p' /tmp/munin-node-ping-$H | sed -e 's/.*time=//g' -e 's/ ms//g' | awk '{ ORS= "" ; print $1 " " }' | sed -e 's#$# + + + + 3 k 4 / p#g' | dc`
+PKTLOSS=`sed -n 9p /tmp/munin-node-ping-$H | sed -e 's/.*received, //g' -e 's/% packet loss//g'`
+
+echo "ping_rtt.value $RTTAVG"
+echo "ping_loss.value $PKTLOSS"
+
