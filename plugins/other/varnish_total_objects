@@ -1,0 +1,34 @@
+#! /bin/sh
+# anders@aftenposten.no, 2007-05-08
+# Shows the total number of objects in Varnish cache
+
+PATH="$PATH:/usr/local/bin"
+export PATH
+
+vversion=`varnishstat -V 2>&1 | egrep "^varnishstat" | perl -p -e "s@varnishstat\s*@@;s@\(@@;s@\)@@;s@varnish-@@"`
+
+pvstat() {
+	# $1: vname $2: grabstat
+	printf "$1.value "
+	case $vversion in
+	1.0*) varnishstat -1 | egrep "$2" | awk '{print $1}';;
+	*) varnishstat -1 | egrep "$2" | awk '{print $2}';;
+	esac
+}
+
+case $1 in
+autoconf) echo yes;;
+config)
+	echo 'graph_title Objects'
+	echo 'graph_vlabel objects'
+	echo 'graph_category varnish'
+	echo 'graph_info This graph shows the total number of objects in Varnish cache'
+
+	echo 'objects.label objects'
+	echo 'objects.type GAUGE'
+	echo 'objects.graph yes'
+	;;
+*)
+	pvstat objects 'N struct object$'
+	;;
+esac
