@@ -1,0 +1,74 @@
+#! /usr/bin/perl
+# anders@aftenposten.no, 2007-04-11
+# Shows the response time to fetch a web page
+
+use Sys::Hostname;
+use Time::HiRes qw( time );
+use IO::Socket;
+
+# ----- config -----
+$url = "http://cache.mydomain.org/img/logocomp.gif";
+$host = "localhost";
+$comment = "2K Comp logo from localhost";
+#$host = hostname;
+# ----- config -----
+
+sub geturl {
+	my $data;
+	my $sock = new IO::Socket::INET (
+					PeerAddr => $host,
+					PeerPort => 80,
+					Proto => 'tcp'
+					);
+	return(0) unless ($sock);
+	print $sock "GET $baseurl HTTP/1.1\nHost: $vhost\nConnection: close\n\n";
+	while (<$sock>) {
+		$data .= $_;
+	}
+	close($sock);
+
+	# Debug
+	#my @response = split(/\n/, $data);
+	#my $httpresponse = $response[0];
+	#chomp($httpresponse);
+	#$httpresponse =~ s@\r@@g;
+	#print "HTTP response code: $httpresponse\n";
+}
+
+sub cktime {
+	$vhost = $url;
+	$vhost =~ s@^\w+://(.+?)/.*@\1@;
+
+	$proto = $url;
+	$proto =~ s@^(\w+)://.*@\1@;
+
+	$baseurl = $url;
+	$baseurl =~ s@^\w+://.+?(/)@\1@;
+
+	$tick1 = time();
+	geturl;
+	$tick2 = time();
+
+	$tspent = $tick2-$tick1;
+	$msecs = ($tspent * 1000);
+
+	printf "timespent.value %.3f\n", $msecs;
+}
+
+if ($ARGV[0] && $ARGV[0] eq "autoconf") {
+	print "yes\n";
+} elsif ($ARGV[0] && $ARGV[0] eq "config") {
+	if ($comment) {
+		print "graph_title HTTP response time ($comment)\n";
+	} else {
+		print "graph_title HTTP response time\n";
+	}
+	print "graph_vlabel ms\n";
+	print "graph_category HTTP\n";
+	print "graph_info This graph shows the response time in milliseconds, to load a web page\n";
+	print "timespent.label timespent\n";
+	print "timespent.type GAUGE\n";
+	print "timespent.graph yes\n";
+} else {
+	cktime;
+}
