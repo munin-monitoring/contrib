@@ -1,0 +1,74 @@
+#!/bin/sh
+#
+# Plugin to monitor the number of CVE vulnerabilities present on a Debian
+# system (using debsecan). Might work on other distib, who knows...
+#
+# Inspiration of the moment 10/10/2007
+#
+# Nicolas BOUTHORS <nbouthors@nbi.fr> http://nbi.fr/
+#
+# Licence : Public Domain
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+# Auto enable if we have debsecan only
+if [ "$1" = "autoconf" ] ; then 
+  if [ -x /usr/bin/debsecan ]; then
+    echo yes
+  else
+    echo no
+  fi
+  exit 0
+fi
+
+# Fail if we don't have debsecan 
+if [ ! -x /usr/bin/debsecan ]; then
+  exit 1
+fi
+
+if [ "$1" = "config" ] ; then
+  cat <<EOF_
+graph_title DebSecan : vulnerabilities
+graph_args -l 0 --base 1000
+graph_vlabel number of CVE
+graph_category system
+graph_period second
+graph_info This graph show the number of known vulnerabilities present on your system. Use debsecan to see detail.
+high.label high
+high.type GAUGE
+high.max 50000
+high.min 0
+high.info The number CVE marked high high priority
+medium.label medium
+medium.type GAUGE
+medium.max 50000
+medium.min 0
+medium.info The number CVE marked medium high priority
+low.label low
+low.type GAUGE
+low.max 50000
+low.min 0
+low.info The number CVE marked low high priority
+other.label other
+other.type GAUGE
+other.max 50000
+other.min 0
+other.info The number CVE with unspecified priority
+EOF_
+  exit 0
+fi
+
+debsecan 2> /dev/null > /tmp/debsecan.munin.$$
+high=`grep -c '(high urgency)' /tmp/debsecan.munin.$$`
+medium=`grep -c '(medium urgency)' /tmp/debsecan.munin.$$`
+low=`grep -c '(low urgency)' /tmp/debsecan.munin.$$`
+other=`grep -c -v -e '(low urgency)' -e '(medium urgency)' -e '(high urgency)' /tmp/debsecan.munin.$$`
+cat <<EOF_
+high.value $high
+medium.value $medium
+low.value $low
+other.value $other
+EOF_
+
+rm -f /tmp/debsecan.munin.$$
