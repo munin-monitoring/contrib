@@ -1,0 +1,47 @@
+#!/bin/bash
+#
+# Plugin to monitor clock offset and delay, using ntpdate
+#
+# Parameters understood:
+#
+# 	config   (required)
+#
+# Author: Rune Nordbøe Skillingstad <rune.skillingstad@ntnu.no>
+#
+# Magic markers - optional - used by installation scripts and
+# munin-node-configure:
+#
+#%# family=manual
+#%# capabilities=
+#
+
+NTPDATE="/usr/sbin/ntpdate"
+PEER=$(basename $0 | sed -e 's/^ntpdate_//' -e 's/_/./g')
+
+if [ ! -x "$NTPDATE" ]; then
+  echo "Can't find ntpdate executable"
+  exit 1
+fi
+
+if [ "$PEER" = "" ]; then
+  echo "Unknown peer"
+  exit 1
+fi
+
+if [ "$1" = "config" ]; then
+  echo "graph_title NTP offset and dealy to peer $PEER"
+  echo "graph_args --base 1000 --vertical-label msec"
+  echo "offset.label Offset"
+  echo "offset.draw LINE2"
+  echo "delay.label Delay"
+  echo "delay.draw LINE2"
+  exit 0
+fi
+
+DATA=($($NTPDATE -q $PEER | awk '/^server.*offset/{gsub(/,/,"");printf "%s %s", ($6*1000), ($8*1000);}'))
+
+echo "offset.value "${DATA[0]}
+echo "delay.value "${DATA[1]}
+
+exit 0
+
