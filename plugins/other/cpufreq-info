@@ -1,0 +1,100 @@
+#!/bin/bash
+#
+# Plugin to measure CPU frequency via cpufreq-info binary.
+# This makes the plugin run on linux machines only.
+# However the same goes for using sysfs directly.
+#
+# Contributed by Jo Schulze
+#
+# Config variables:
+#
+#
+# Requires:
+# cpufrequtils	http://www.kernel.org/pub/linux/utils/kernel/cpufreq/cpufrequtils.html
+#
+# @remarks
+# jo20061130	using cpufreq-info should simplify the whole thing
+# jo20061202	tested on AMD K8 X2, intel Core 2 Duo
+#
+# $Log$
+#
+# Magic markers - optional - used by installation scripts and
+# munin-config:
+#
+#%# family=manual
+#%# capabilities=autoconf
+
+LC_ALL="C"
+
+CINFOBIN="/usr/bin/cpufreq-info"
+
+nCPU=$(grep -c "^processor" /proc/cpuinfo)
+
+function getFreq ()
+{
+	i=0
+	while ((i < nCPU)); do
+		affc=`$CINFOBIN -a -c $i`
+		internal=`echo $affc | tr ' ' '_'`
+		cpus=( $affc )
+		n=${#cpus[@]}
+
+		freq=`$CINFOBIN -f -c $i`
+		echo "freq_$internal.value $freq"
+
+		((i += n))
+	done
+}
+
+function getAvail ()
+{
+	i=0
+	while ((i < nCPU)); do
+		affc=`$CINFOBIN -a -c $i`
+		internal=`echo $affc | tr ' ' '_'`
+		label=`echo $affc | tr ' ' ','`
+		cpus=( $affc )
+		n=${#cpus[@]}
+
+		echo "freq_$internal.label CPU $i (Core $label)"
+		echo "freq_$internal.type GAUGE"
+		echo "freq_$internal.info Hz"
+
+		((i += n))
+	done
+}
+
+function config ()
+{
+cat <<CONFIGTXT
+graph_title CPU frequency(s)
+graph_args --base 1000 -l 0
+graph_vlabel Hz
+graph_category system
+graph_info This graph shows the CPU frequency(s).
+CONFIGTXT
+	getAvail
+}
+
+function autoconf ()
+{
+	if [ -x $CINFOBIN ]; then
+		echo "yes"
+	else
+		echo "no"
+	fi
+	exit 0
+}
+
+case $1 in
+"autoconf")
+	autoconf
+	;;
+"config")
+	config
+	;;
+*)
+	getFreq
+	;;
+esac
+
