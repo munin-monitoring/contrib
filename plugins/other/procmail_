@@ -1,0 +1,103 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use YAML;
+
+my (%conf, $state, $have_read, $totlines);
+
+%conf = (logfile => $ENV{LOGFILE} || '/home/user/.procmail/log',
+	 state => $ENV{STATEFILE} || '/var/lib/munin/plugin-state/munin-plugin-procmail.state');
+
+$state = YAML::LoadFile($conf{state});
+$have_read = 0;
+
+unless (-f $conf{logfile} and -r $conf{logfile}) {
+    die "$conf{logfile} does not exist or is not readable!" ;
+}
+
+if (@ARGV and $ARGV[0] eq 'autoconf') {
+    print "yes\n";
+} elsif (@ARGV and $ARGV[0] eq 'config') {
+    print config();
+} else {
+    print fetch();
+    # Update the offset, clear the numbers - Only when fetching!
+    $state->{offset} += $have_read;
+    $state->{folders}{$_} = 0 foreach keys %{$state->{folders}};
+}
+
+YAML::DumpFile($conf{state}, $state);
+exit 0;
+
+sub config {
+    # If config is ever called without having first a successful run, it should not die!
+    $state->{folders} ||= {};
+
+    print "graph_title Destination folders for Postfix\n",
+    "graph_vlabel Received mails\n",
+    "graph_category Mail\n",
+    "graph_info Gives you the total mails stored by Postfix by folder\n";
+    print "$_.label $_\n" foreach sort keys %{$state->{folders}};
+}
+
+sub fetch {
+    my ($fh);
+
+    if ($fh = open_log()) {
+	$state->{folders} ||= {};
+
+	while (my $folder = next_used_folder($fh)) {
+	    $state->{folders}{$folder}++;
+	}
+    }
+
+    print "$_.value $state->{folders}{$_}\n" foreach sort keys %{$state->{folders}};
+}
+
+sub next_used_folder {
+    my ($fh);
+    $fh = shift;
+    while (my $lin = <$fh>) {
+	$have_read++;
+	next unless $lin =~ m!^\s*Folder: ([^\s/]+)!;
+	next unless $1;
+	return $1;
+    }
+    return undef;
+}
+
+sub open_log {
+    my ($fh, $offset, $lines_to_read);
+    $offset = get_log_offset();
+    get_log_size();
+
+    $lines_to_read = $totlines - $offset;
+    open($fh, "tail -$lines_to_read $conf{logfile}|") or die $!;
+
+    return $fh;
+}
+
+sub get_log_size {
+    my $tot = `wc -l $conf{logfile}`;
+    $tot =~ /^(\d+) /;
+    return $totlines = $1;
+}
+
+sub get_log_offset {
+    my ($size);
+    # The offset is expressed as the number of lines to skip. We get to that 
+    # point getting the total log size (get_log_size) and using tail for the
+    # difference. If the offset is larger than the file itself, we get it 
+    # whole (it might have just been rotated). 
+    $size = get_log_size();
+
+    $state->{offset} ||= 0;
+    $state->{offset} = 0 if $size < $state->{offset};
+
+    return $state->{offset};
+}
+
+sub hush {
+    return unless $ENV{FOLLOW};
+    warn @_;
+}
