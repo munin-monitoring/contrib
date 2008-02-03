@@ -1,0 +1,572 @@
+#!/usr/bin/perl
+# -*- perl -*-
+#
+# Plugin to graph http performance
+# Version: 0.8.7
+#
+# The purpose of this plugin is to monitor several properties of a web page.
+# All measurements are done for the complete web page, including images, css
+# and other content a standard browser would download automatically.
+#
+# This version supports monitoring:
+#   * The total time to download a complete web page (using serial GET requests)
+#   * The total size of a web page
+#   * The different response codes (200, 404, 500, etc)
+#   * The different tags (img src, a href, etc)
+#   * The the different content types (image/png, text/css/, etc)
+#   * The number of elements the web page consists of
+# 
+# Author:  Espen Braastad / Linpro AS
+#          espen@linpro.no
+#
+##### Short usage guide: #####
+#
+# Requirements:
+#  * The server running this plugin must be allowed  to connect to the web 
+#    server(s) you are going to monitor.
+#  * Some perl modules: 
+#    Time::HiRes, LWP::UserAgent, HTML::LinkExtor, LWP::ConnCache
+#
+# Initial configuration:
+#  1. Copy this file to /usr/share/munin/plugins/
+#
+#  2. Create a file (/etc/munin/http_load_urls.txt) with one
+#     full url per line, as many as you want, i.e.:
+#      $ echo "http://www.dn.no/" >> /etc/munin/urls.txt
+#      $ echo "http://www.intrafish.no/" >> /etc/munin/urls.txt
+#
+#  3. Add a cron job running the plugin with cron as the argument:
+#     */15 * * * * <user> /usr/share/munin/plugins/http_load_ cron
+#     <user> should be the user that has write permission to
+#     the $cachedir directory set below. Set the intervals to
+#     whatever you want.
+#
+#     For verbose output (for debugging) you can do:
+#     sudo -u <user> /usr/share/munin/plugins/http_load_ cron verbose
+#
+#  4. Run munin-node-configure --suggest --shell and run the symlink
+#     commands manually to update the munin-node plugin list.
+#  
+# (5. If you want to change the filter which the plugin uses to select which
+#     tags to follow in a web page, edit the subroutine called "filter" below.)
+#
+# Add a new url to monitor:
+#  1. Add a new line in /etc/munin/urls.txt with the full URL, i.e.:
+#      $ echo "http://www.linpro.no/" >> /etc/munin/http_load_urls.txt
+#
+#  2. Run munin-node-configure --suggest --shell and manually
+#     add the new symlink(s)
+#
+#  3. /etc/init.d/munin-node restart
+#
+# Remove a url from monitoring:
+#  1. Remove it from /etc/munin/http_load_urls.txt
+#
+#  2. Remove ${cachedir}/http_load_<url_id>*
+#
+#  3. Remove /etc/munin/plugins/http_load_<url_id>*
+#
+#  4. /etc/init.d/munin-node restart
+#
+#####
+#
+# Todo:
+#   * Add support for forking to simulate real browsers
+#   * Use checksums as fieldnames
+#
+# $Id: $
+#
+# Magic markers:
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+use strict;
+use Time::HiRes qw( gettimeofday tv_interval );
+use LWP::UserAgent;
+use HTML::LinkExtor;
+use LWP::ConnCache;
+
+my $url_file="/etc/munin/http_load_urls.txt";
+my $cachedir="/var/lib/munin/plugin-state";
+
+my $debug=0;
+my $timeout=10;
+my $max_redirects=10;
+my $scriptname="http_load_";
+my $category="network"; # The munin graph category
+my $useragent="Mozilla/5.0";
+
+# Function to read the $url_file and return the contents in a hash
+sub read_urls{
+	my $file=$_[0];
+	my %urls=();
+	if(-r $file){
+		open(FILE,'<'.$file);
+		while (<FILE>) { 
+			my $url=$_;
+			chomp($url);
+			my $id=get_id($url);
+			if(length($id)>0){
+				$urls{$id}=$url;
+			}
+		}
+		close (FILE);
+	}
+	return %urls;
+}
+
+# Function to read cache, return a hash
+sub read_cache{
+	my $file=$_[0];
+	my %cache=();
+	if(-r $file){
+		open(FILE,'<'.$file);
+		while (<FILE>) { 
+			m/^(\S*)\s+(.*)$/;
+			$cache{ $1 } = $2;
+		}
+		close (FILE);
+	}
+	return %cache;
+}
+
+# Function to filter the html tags, which files do we want to download
+sub filter{
+	my $tag=$_[0];
+	my $status=1;
+
+	# Some example data:
+	# link href http://www.intrafish.no/template/include/css/intrafish.css
+	# script src http://www.intrafish.no/template/include/js/intrafish.js
+	# a href http://adserver.adtech.de/?adlink%7C2.0%7C405%7C119488%7C1%7C16%7CADTECH;grp=8491;loc=300;
+	# img src http://adserver.adtech.de/?adserv%7C2.0%7C405%7C119488%7C1%7C16%7CADTECH;grp=8491;
+	# area href http://go.vg.no/cgi-bin/go.cgi/sol/http://www.sol.no/sgo/vg/http://www.sol.no/underholdning/humor/?partnerid=vg
+
+	# status=1 => do download (default)
+	# status=0 => do not download
+
+	if("$tag" eq "form action"){
+		$status=0;
+	}
+	if("$tag" eq "a href"){
+		$status=0;
+	}
+	if("$tag" eq "area href"){
+		$status=0;
+	}
+	return $status;
+}
+
+# Return the cache file name for this plugin
+sub get_cache_file_name{
+	my $scriptname=$_[0];
+	my $id=$_[1];
+	my $type=$_[2];
+	my $file="";
+
+	$file = $scriptname . $id . ".cache";
+	$debug && print "Cache file: " . $file . "\n";
+
+	return $file;
+}
+
+# Get fieldname (making sure it is munin "compatible" as a fieldname)
+# 1. Remove all non-word characters from a string)
+# 2. Make sure it has maximum 19 characters
+sub get_fieldname{
+	my $url=$_[0];
+	$url =~ s/\W//g;
+	if(length($url) > 19){
+		$url =  substr($url, 0, 19);
+	}
+	return $url;
+}
+
+# Same as get_fieldname except it doesn't substr
+sub get_id{
+	my $url=$_[0];
+	$url =~ s/\W//g;
+	return $url;
+}
+
+$debug && print "Scriptname: " . $scriptname . "\n";
+
+# Get the url id and the type of the graph
+#
+# The filename format is http_load_X_Y where
+# X: The line number in urls.txt
+# X: The type of graph (elements, size, loadtime, ..)
+
+my ($id,$type);
+$0 =~ /http_load(?:_([^_]+)|)_(.+)\s*$/;
+$id  = $1;
+$type = $2;
+
+$debug && print "Id: $id, Type: $type\n";
+
+if($ARGV[0] and $ARGV[0] eq "autoconf") {
+	my %urls=&read_urls($url_file);
+	if(keys(%urls) gt 0){
+		print "yes\n";
+		exit(0);
+	} else {
+		print "no\n";
+		exit(1);
+	}
+
+} elsif($ARGV[0] and $ARGV[0] eq "suggest") {
+	# get the url list, print suggestions for usage
+	my %urls=&read_urls($url_file);
+	while ( my ($id, $url) = each(%urls) ) {
+        	$debug && print "id: $id => url: $url\n";
+        	print $id . "_size\n";
+        	print $id . "_loadtime\n";
+        	print $id . "_response\n";
+        	print $id . "_tags\n";
+        	print $id . "_type\n";
+        	print $id . "_elements\n";
+    	}
+	exit(0);
+
+} elsif($ARGV[0] and $ARGV[0] eq "cron") {
+	# This thing is run by cron and should write a cache file for munin-node to 
+	# read from
+
+	my $verbose=0;
+	if($ARGV[1] and $ARGV[1] eq "verbose") {
+		$verbose=1;
+		print "Verbose output\n";
+	}
+
+	my %urls=&read_urls($url_file);
+	my %output;
+	my %res;
+	my $t0;
+	my ($request,$response,$status,$link,$contents,$page_parser,$cachefile);
+
+	while ( my ($id, $url) = each(%urls) ) {
+        	$verbose && print "Fetching $url (id: $id)... \n";
+		
+		$t0=0;
+		$status=0;
+		%output=();
+		my $host="";
+		if($url =~ m/\w+\:\/\/([^\/]+).*/){
+			$host=$1;
+        		$verbose && print " Host: $host\n";
+		}
+
+		$output{"url"}=$url;
+		$output{"timestamp"}=time();
+        	$verbose && print " Timestamp: " . $output{"timestamp"} . "\n";
+
+	        my $browser = LWP::UserAgent->new();
+
+		$browser->agent($useragent);
+	        $browser->timeout(${timeout});
+		$browser->max_redirect( $max_redirects );
+		$browser->conn_cache(LWP::ConnCache->new());
+
+		$response = $browser->get($url);
+
+		# Calculating time from now:
+		$t0 = [gettimeofday];
+	        if ($response->is_success()) {
+	                $status=1;
+			$output{"elements_" . $host}+=1;
+	        }
+
+        	$contents = $response->content();
+	        $output{"loadtime_" . $host} += sprintf("%.6f",tv_interval ( $t0, [gettimeofday]));
+        	$output{"size_" . $host}+=length($contents);
+		$output{"response_" . $host . "_" . $response->code}+=1;
+		$output{"type_" . $response->content_type}+=1;
+
+	        $page_parser = HTML::LinkExtor->new(undef, $url);
+	        $page_parser->parse($contents)->eof;
+	        my @links = $page_parser->links;
+        	$verbose && print " Processing links:\n";
+
+        	%res=();
+	        foreach $link (@links){
+			my $tag=$$link[0] . " " . $$link[1];
+			
+			$output{"tags_" . $$link[0] . "-" . $$link[1]}+=1;
+	
+			if(filter($tag)){
+				$verbose && print "  Processing: " . $$link[0] . " " . $$link[1] . " " . $$link[2] . "\n";
+
+				# Extract the hostname and add it to the hash
+				if($$link[2] =~ m/http\:\/\/([^\/]+).*/){
+					$host=$1;
+					$output{"elements_" . $host}+=1;
+				}
+
+                	        my $suburl=$$link[2];
+	
+				$t0 = [gettimeofday];
+				$response = $browser->get($suburl);
+	        		$output{"loadtime_" . $host} += sprintf("%.6f",tv_interval ( $t0, [gettimeofday]));
+
+        			$contents = $response->content();
+        			$output{"size_" . $host}+=length($contents);
+				$output{"response_" . $host . "_" . $response->code}+=1;
+				$output{"type_" . $response->content_type}+=1;
+
+				$verbose && print "              Response: " . $response->code . " Size: " . length($contents) . "\n";
+			} else {
+				$verbose && print "  Skipping:   " . $$link[0] . " " . $$link[1] . " " . $$link[2] . "\n";
+			}
+		}
+
+		$cachefile=$cachedir . "/" . &get_cache_file_name($scriptname,$id,$type);
+		$debug && print "Reading cache file: " . $cachefile . "... ";
+
+		my %input=read_cache($cachefile);
+
+		$debug && print "done\n";
+
+		# Resetting all values to 0 before adding new values
+		while ( my ($id, $value) = each(%input) ) {
+			$input{$id}="U";
+    		}
+		
+		# Adding new values
+		while ( my ($id, $value) = each(%output) ) {
+			$input{$id}=$value;
+        		$verbose && print " Result: " . $id . " -> " . $value . "\n";
+    		}
+		
+		# Writing the cache
+		$verbose && print "Writing cache file: " . $cachefile . "... ";
+		open(FILE,">".$cachefile);
+		while ( my ($id, $value) = each(%input) ) {
+			print FILE $id . " " . $value . "\n";
+		}
+		close(FILE);
+		$verbose && print "done\n";
+	}
+	exit(0);
+}elsif($ARGV[0] and $ARGV[0] eq "config") {
+	my %urls=&read_urls($url_file);
+	
+        print "graph_title $urls{$id} ${type}\n";
+        print "graph_args -l 0 --base 1000\n";
+        print "graph_category " . $category . "\n";
+	$debug && print "Reading cache file\n";
+	my $cachefile=$cachedir . "/" . &get_cache_file_name($scriptname,$id,$type);
+	my %cache=read_cache($cachefile);
+
+	my $count=0;
+	$debug && print "The cache file contains " . keys(%cache) . " lines\n";
+
+	if($type eq "size"){
+                print "graph_vlabel Bytes\n";
+		print "graph_total Total\n";
+         	print "graph_info This graph is generated by a set of serial GETs to calculate the total size of $urls{$id}.\n";
+
+		if(keys(%cache)>0){
+			for my $key ( sort reverse keys %cache ){
+				my $value=$cache{$key};
+				
+				if($key =~ m/^size_(\S+)$/){
+					my $host=$1;
+					my $value=$value;
+
+					my $name=$1;
+					$name=get_fieldname($name);
+	
+        	        		print "$name.label from $host\n";
+        	        		print "$name.min 0\n";
+        	        		print "$name.max 20000000\n";
+					if($count eq 0){
+						print "$name.draw AREA\n";
+					} else {
+						print "$name.draw STACK\n";
+					}
+					$count+=1;
+				}
+			}
+		}
+	}elsif($type eq "loadtime"){
+                print "graph_vlabel Seconds\n";
+		print "graph_total Total\n";
+         	print "graph_info This graph is generated by a set of serial GETs to calculate the total time to load $urls{$id}. ";
+		print "Note that browsers usually fork() the GET requests, resulting in a shorter total loading time.\n";
+		
+		if(keys(%cache)>0){
+			for my $key ( sort reverse keys %cache ){
+				my $value=$cache{$key};
+
+				if($key =~ m/^loadtime_(\S+)$/){
+					my $host=$1;
+					my $value=$value;
+
+					my $name=$1;
+					$name=get_fieldname($name);
+	
+        	        		print "$name.label from $host\n";
+        	        		print "$name.min 0\n";
+        	        		print "$name.max 400\n";
+					if($count eq 0){
+						print "$name.draw AREA\n";
+					} else {
+						print "$name.draw STACK\n";
+					}
+					$count+=1;
+				}
+			}
+		}
+
+	}elsif($type eq "elements"){
+                print "graph_vlabel Number of elements\n";
+		print "graph_total Total\n";
+        	print "graph_info This graph is generated by a set of serial GETs to count the number of elements (images, CSS files, etc) from $urls{$id}.\n";
+	
+		if(keys(%cache)>0){
+			for my $key ( sort reverse keys %cache ){
+				my $value=$cache{$key};
+       
+				if($key =~ m/^elements_(\S+)$/){
+					my $host=$1;
+					my $value=$value;
+
+					my $name=$1;
+					$name=get_fieldname($name);
+	
+        	        		print "$name.label from $host\n";
+        	        		print "$name.min 0\n";
+        	        		print "$name.max 10000\n";
+					if($count eq 0){
+						print "$name.draw AREA\n";
+					} else {
+						print "$name.draw STACK\n";
+					}
+					$count+=1;
+				}
+			}
+		}
+	}elsif($type eq "response"){
+                print "graph_vlabel Server response code count\n";
+		print "graph_total Total\n";
+         	print "graph_info This graph is generated by a set of serial GETs to visualize the server response codes received while loading $urls{$id}.\n";
+
+		if(keys(%cache)>0){
+			for my $key ( sort reverse keys %cache ){
+				my $value=$cache{$key};
+
+				if($key =~ m/^response_(\S+)$/){
+					my $host=$1;
+					my $value=$value;
+
+					my $name=$1;
+					$name=get_fieldname($name);
+
+					$host =~ s/\_/ /g;
+					$host =~ s/(\S+)\s(\d+)/ /g;
+					$host=$1;
+					my $code=$2;
+	
+        	        		print "$name.label $host ($code)\n";
+        	        		print "$name.min 0\n";
+        	        		print "$name.max 10000\n";
+					if($count eq 0){
+						print "$name.draw AREA\n";
+					} else {
+						print "$name.draw STACK\n";
+					}
+					$count+=1;
+				}
+			}
+		}
+	}elsif($type eq "type"){
+                print "graph_vlabel Content type count\n";
+		print "graph_total Total\n";
+         	print "graph_info This graph is generated by a set of serial GETs to visualize the different content types $urls{$id} consists of.\n";
+
+		if(keys(%cache)>0){
+			for my $key ( sort reverse keys %cache ){
+				my $value=$cache{$key};
+
+				if($key =~ m/^type_(\S+)$/){
+					my $type=$1;
+					my $value=$value;
+
+					my $name=$1;
+					$name=get_fieldname($name);
+
+					#$host =~ s/\_/ /g;
+					#$host =~ s/(\S+)\s(\S+)/ /g;
+					#$host=$1;
+					#my $type=$2;
+	
+        	        		print "$name.label $type\n";
+        	        		print "$name.min 0\n";
+        	        		print "$name.max 100000\n";
+					if($count eq 0){
+						print "$name.draw AREA\n";
+					} else {
+						print "$name.draw STACK\n";
+					}
+					$count+=1;
+				}
+			}
+		}
+	}elsif($type eq "tags"){
+                print "graph_vlabel HTML tag count\n";
+		print "graph_total Total\n";
+         	print "graph_info This graph is generated by a set of serial GETs to visualize the different tags $urls{$id} consists of.\n";
+
+		if(keys(%cache)>0){
+			for my $key ( sort reverse keys %cache ){
+				my $value=$cache{$key};
+
+				if($key =~ m/^tags_(\S+)$/){
+					my $host=$1;
+					my $value=$value;
+
+					my $name=$1;
+					$name=get_fieldname($name);
+
+					$host =~ s/\W/ /g;
+	
+        	        		print "$name.label $host\n";
+        	        		print "$name.min 0\n";
+        	        		print "$name.max 100000\n";
+					if($count eq 0){
+						print "$name.draw AREA\n";
+					} else {
+						print "$name.draw STACK\n";
+					}
+					$count+=1;
+				}
+			}
+		}
+	}
+	exit(0); 
+} else {
+	my $cachefile=$cachedir . "/" . &get_cache_file_name($scriptname,$id,$type);
+	$debug && print "Reading cache file: " . $cachefile . "\n";
+	my %cache=read_cache($cachefile);
+	$debug && print "Number of lines in cache file: " . keys(%cache) . "\n";
+
+	if(keys(%cache)>0){
+		for my $key ( sort keys %cache ){
+			my $value=$cache{$key};
+			if($key =~ m/^([A-Za-z]+)\_(\S+)$/){
+				my $name=$2;
+				
+				if ($1 eq $type){
+					$name=get_fieldname($name);
+					print $name . ".value " . $value . "\n";
+				}
+			} elsif(m/^(\S+)\s+(\S+)$/){
+				if ($1 eq $type){
+					print $1 . ".value " . $2 . "\n";
+				}
+			}
+		}
+	}
+} 
+
+# vim:syntax=perl
