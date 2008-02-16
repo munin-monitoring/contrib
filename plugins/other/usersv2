@@ -1,0 +1,61 @@
+#!/usr/bin/perl -w
+
+#Plugin created by:
+# Stephen Hodgson
+# Malone College - CPSC
+# ported to perl and extended by Thomas Gutzler, 2008 (thomas.gutzler@gmail.com)
+
+# Feel free to modify this plugin, but if you do, be kind and email it back to me.  I'm all for improvements that anyone can make.
+
+# - This simple plugin figures out how many users are logged into the linux box
+# - The plugin takes advantage of the linux 'who' command.
+# - The who command is used to list all login names and number of users logged on.
+# - This information is used to output to values:
+#   1. total amount of users logged in
+#   2. amount of unique users logged in
+
+# Even though this plugin should run without configuration, it is possible to tell it the location of the who command
+# Configuration example
+# [usersv2]
+# env.who_cmd /usr/bin/who
+
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+
+my $who_cmd = exists $ENV{who_cmd} ? $ENV{who_cmd} : 'who';
+
+if ((exists $ARGV[0]) && ($ARGV[0] eq "autoconf")) {
+	my @who = ("$who_cmd -q >/dev/null 2>&1");
+	my $ret = system(@who);
+	if ($ret == 0) {
+		print "yes\n";
+		exit 0;
+	} else {
+		print "no\n";
+		exit 1;
+	}
+}
+
+if ((exists $ARGV[0]) && ($ARGV[0] eq "config")) {
+	print "graph_title Users Online\n";
+	print "graph_args --base 1000 -l 0\n";
+	print "graph_scale no\n";
+	print "graph_vlabel Number of users\n";
+	print "graph_category system\n";
+	print "graph_info This graph shows the amount of (unique) users logged in\n";
+	print "users.label total users\n";
+	print "users.info something like who | wc -l\n";
+	print "uusers.label unique users\n";
+	print "uusers.info something like who | cut -f -1 -d ' ' | sort | uniq | wc -l\n";
+	exit 0;
+}
+
+my @who = split(/\s+/, `$who_cmd -q | head -1`);
+print "users.value ".scalar(@who)."\n";
+
+my %who;
+$who{$_} = 1 foreach (@who);
+print "uusers.value ".scalar(keys %who)."\n";
+
