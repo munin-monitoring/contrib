@@ -1,0 +1,101 @@
+#!/bin/bash
+#
+# Wildard-plugin to monitor node "states" in Condor pool.
+#
+# Author: Šarūnas Burdulis, sarunas(a)mail.saabnet.com, 2008
+#
+# Runs 'condor_status' and gets totals of nodes
+# ("slots") for different Condor "states".
+#
+# Parameters understood:
+#
+#	config   (required)
+# 	autoconf (optional - used by munin-config)
+#	suggest  (optional - used by munin-config)
+#
+# Configurable variables:
+#
+# 	env.condor_status - Path to condor_status executable,
+#		defaults to /usr/local/condor/bin/condor_status
+# 	env.constraint - Condor ClassAds constraint(s), as they are
+#		specified on the condor_status command line. For example, 
+#		to monitor 64-bit Linux nodes only, set:
+#		env.constraint 'arch=="x86_64" && opsys=="linux"'
+#
+# Magic markers - optional - used by installation scripts and
+# munin-config:
+#
+#%# family=contrib
+#%# capabilities=autoconf
+
+# optional tag
+TAG=`basename $0 | sed 's/^condor_states_//g'`
+if [ -z "$TAG" ]; then
+    GRAPHTITLE="States"
+else
+    GRAPHTITLE="States (${TAG})"
+fi
+
+# env.condor_status
+if [ ! -z "$condor_status" ]; then
+    CS="$condor_status"
+else
+    CS="/usr/local/condor/bin/condor_status"
+fi
+
+# env.constraint
+if [ ! -z "$constraint" ]; then
+    CONS="-constraint ${constraint}"
+else
+    CONS=
+fi
+ 
+if [ "$1" = "autoconf" ]; then
+    echo "no"
+    exit 1
+fi
+
+if [ "$1" = "suggest" ]; then
+    echo "For example: condor_states_Linux-x86_64."
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+	echo "graph_title "$GRAPHTITLE""
+	echo "graph_order Preempting Claimed Matched Unclaimed Owner"
+	echo "graph_args --lower-limit 0 "
+	echo 'graph_vlabel VMs'
+	echo 'graph_scale no'
+	echo 'graph_info Shows Condor slot states from condor_status.'
+	echo 'graph_category Condor'
+	echo 'graph_period second'
+	echo 'Preempting.label Preempting'
+	echo 'Preempting.draw AREA'
+	echo 'Preempting.type GAUGE'
+	echo "Preempting.info Slots in Preempting state" 
+	echo 'Claimed.label Claimed'
+	echo 'Claimed.draw STACK'
+	echo 'Claimed.type GAUGE'
+	echo 'Claimed.info Slots in Claimed state'
+	echo 'Matched.label Matched'
+	echo 'Matched.draw STACK'
+	echo 'Matched.type GAUGE'
+	echo 'Matched.info Slots in Matched state'
+	echo 'Unclaimed.label Unclaimed'
+	echo 'Unclaimed.draw STACK'
+	echo 'Unclaimed.type GAUGE'
+	echo 'Unclaimed.info Slots in Unclaimed state'
+	echo 'Owner.label Owner'
+	echo 'Owner.draw STACK'
+	echo 'Owner.type GAUGE'
+	echo 'Owner.info Slots in Owner state'
+	exit 0
+fi
+
+# condor_status -cons 'arch=="x86_64" && opsys=="linux"' -total
+#                Total Owner Claimed Unclaimed Matched Preempting Backfill
+#   X86_64/LINUX    22     1      18         3       0          0        0
+#   x86_64/LINUX     8     0       8         0       0          0        0
+#          Total    30     1      26         3       0          0        0
+eval $CS $CONS -total | awk '/Total   / {print "Preempting.value " $7 "\nClaimed.value " $4 "\nMatched.value " $6 "\nUnclaimed.value " $5 "\nOwner.value " $3 }'
+				    
