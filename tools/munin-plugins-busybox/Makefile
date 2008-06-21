@@ -1,0 +1,16 @@
+CC=gcc
+CFLAGS=-W -Wall -pedantic -Wextra -g -O2
+OBJS=main.o common.o cpu.o entropy.o forks.o fw_packets.o interrupts.o load.o \
+     open_files.o open_inodes.o processes.o swap.o uptime.o
+LINKS=cpu entropy forks fw_packets interrupts load open_files open_inodes \
+      processes swap uptime
+
+%.o:%.c
+	${CC} ${CFLAGS} -c $< -o $@
+all:main
+	for l in ${LINKS}; do test -f $$l || ln -s main $$l; done
+main:${OBJS}
+	${CC} ${CFLAGS} $^ -o $@
+clean:
+	rm -f main ${OBJS} ${LINKS}
+.PHONY:all clean
