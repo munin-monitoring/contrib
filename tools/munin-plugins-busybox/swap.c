@@ -50,7 +50,7 @@ int swap(int argc, char **argv) {
 			}
 		}
 		fclose(f);
-		if(!in*out) {
+		if(!(in*out)) {
 			fputs("no usable data on /proc/vmstat\n", stderr);
 			return 1;
 		}
