@@ -7,10 +7,10 @@ LINKS=cpu entropy forks fw_packets interrupts load open_files open_inodes \
 
 %.o:%.c
 	${CC} ${CFLAGS} -c $< -o $@
-all:main
-	for l in ${LINKS}; do test -f $$l || ln -s main $$l; done
-main:${OBJS}
+all:munin-plugins-busybox
+	for l in ${LINKS}; do test -f $$l || ln -s munin-plugins-busybox $$l; done
+munin-plugins-busybox:${OBJS}
 	${CC} ${CFLAGS} $^ -o $@
 clean:
-	rm -f main ${OBJS} ${LINKS}
+	rm -f munin-plugins-busybox ${OBJS} ${LINKS}
 .PHONY:all clean
