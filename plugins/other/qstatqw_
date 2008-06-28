@@ -1,0 +1,106 @@
+#!/bin/ksh
+#################################################################
+# Title : Qstat plugin for Munin                                #
+# Author : Benjamin DUPUIS - Poil				#
+# Email : poil@quake.fr						#
+# First release :  18/10/2007					#
+#---------------------------------------------------------------#
+
+#################################################################
+# Variable :							#
+#---------------------------------------------------------------#
+qstat_exe='/usr/bin/qstat'
+
+#---------------------------------------------------------------#
+# End of config
+script_name=$(basename $0)
+#################################################################
+
+#################################################################
+#       Help		                                        #
+#---------------------------------------------------------------#
+usage() {
+	echo 'For testing the script, run qstat_ GameType IP Port'
+	echo ' - GameType : q3s, q4s ... run qstat for seeing available gametype'
+	echo 'For munin you must ln -s /usr/share/munin/plugins/qstat_ /etc/munin/plugins/qstat_GameType_IP2test_Port'
+	echo 'Perhaps you must have to set qstat_exe path, actually on'${qstat_exe};
+	echo 'Have Fun'
+}
+
+config() {
+	if [ "${script_name}" != "qstat_" ]; then
+                gametype=$(echo ${script_name} | cut -d_ -f2)
+                ip=$(echo ${script_name} | cut -d_ -f3)
+                port=$(echo ${script_name} | cut -d_ -f4)
+        else
+                gametype=$1
+                ip=$2
+                port=$3
+        fi
+
+echo "graph_title Number of players on ${gametype} - ${ip}:${port}
+graph_vlabel players
+#graph_args --base 1000 -r --lower-limit 0 --upper-limit 64
+graph_category games
+maxplayer.label bots
+player.label players"
+}
+
+#################################################################
+#       Quake Stat, call qstat	                                #
+#---------------------------------------------------------------#
+quake_stat() {
+	if [ "${script_name}" != "qstat_" ]; then
+		gametype=$(echo ${script_name} | cut -d_ -f2)
+		ip=$(echo ${script_name} | cut -d_ -f3)
+		port=$(echo ${script_name} | cut -d_ -f4)
+	else
+		gametype=$1
+		ip=$2
+		port=$3
+	fi
+
+	if [ ! -z ${gametype} ] && [ ! -z ${gametype} ] && [ ! -z ${gametype} ]; then
+		dummy=$(${qstat_exe} -P -pa -sort P -${gametype} ${ip}:${port} | grep team | grep -wv 0ms | wc -l)
+		dummy2=$(${qstat_exe} -P -pa -sort P -${gametype} ${ip}:${port} | grep team | grep -w 0ms | wc -l)
+		playervalue=$dummy
+		maxplayervalue=$dummy2
+
+		if [ -z "${playervalue}" ]; then
+			playervalue=0
+		fi
+
+		if [ -z "${maxplayervalue}" ]; then
+		        maxplayervalue=0
+		fi
+
+
+		echo "maxplayer.value "${maxplayervalue};
+		echo "player.value "${playervalue};
+	else
+		echo "maxplayer.value U"
+		echo "player.value U"
+	fi
+}
+
+#################################################################
+#	Main 							#
+#---------------------------------------------------------------#
+case $1 in
+	config)
+		config
+		exit 0
+   	;;
+	help | ?)
+		usage
+		exit 0
+	;;
+	autoconf)
+		echo "no (edit the script for set qstat path)"
+	;;
+	*)
+		quake_stat $1 $2 $3
+		exit 0
+	;;
+esac
+
