@@ -1,0 +1,193 @@
+#!/usr/bin/perl -w
+#
+# munin plugin for monitoring cpu frequency
+# Since multiple cpus on one graph doesn't really work, this plugin links to a cpu, i.e. cpufreq_cpu0
+# 
+# written by BenV / JuNe
+# email: benv-munin@junerules.com
+#
+# Version: 0.1
+#
+# Requires:
+#   Storable         (saving state)
+#
+# Parameters:
+#
+#	config		required
+#
+# Configurable variables
+#   statedir    	location where the state file is saved. Defaults to /var/lib/munin/plugin-state.
+#   statefile    	name that's appended to statedir as filename for saving state. Defaults to "cpufreq_$cpu.state"
+#
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+use strict;
+
+if ($ARGV[0] and $ARGV[0] eq "autoconf" ) {
+	# Check required perl modules
+	unless (eval "require Storable")
+	{
+		print "No (Missing Storable)\n";
+		exit 1;
+	}
+	# Check for required proc/sys files
+	if (-d "/sys/devices/system/cpu/cpu0/cpufreq")
+	{
+		print "Yes\n";
+		exit 0;
+	}
+	print "No (Couldn't find /sys/devices/system/cpu/cpu0/cpufreq dir)";
+	exit 1;
+}
+
+if ($ARGV[0] and $ARGV[0] eq 'suggest' ) {
+	foreach my $d (</sys/devices/system/cpu/cpu[0-9]*/cpufreq/>)
+	{
+		$d =~ /(cpu[0-9]+)/i;
+		print "$1\n";
+	}
+	exit 0;
+}
+
+if (eval "require Storable")
+{
+	Storable->import(qw /lock_store lock_nstore lock_retrieve/);
+}
+else
+{
+	die "Sorry, you don't have Storable. (update your perl!)\n";
+}
+
+# Let's see what is requested.
+my $target;
+if ($0 =~ /_(cpu\d+)$/i)
+{
+	$target = $1;
+}
+else
+{
+	die "Error: we need to know what cpu you want, so link this plugin as cpufreq_cpu0 orso.";
+}
+
+my $statedir	= $ENV{"statedir"} || "/var/lib/munin/plugin-state/";
+my $statefile = $statedir.($ENV{"statefile"} || "/cpufreq_$target.state");
+$statefile = glob($statefile); # Make it saner, remove tildes. Not foolproof though ;)
+
+my $cpufreq;
+
+eval { $cpufreq = lock_retrieve($statefile); };
+unless(defined($cpufreq))
+{
+	print STDERR "Couldn't read state file! (ignore this error on first run)\n";
+	$cpufreq = {};
+}
+
+my $cpufreq_now = {};
+foreach my $d (</sys/devices/system/cpu/$target/cpufreq/stats/>)
+{
+	unless(open(TIS, "<", "$d"."/time_in_state"))
+	{
+		die "Could not open ${d}/time_in_state: $!\n";
+	}
+	$d =~ /(cpu[0-9]+)/i;
+	my $cpu = $1;
+	while(<TIS>)
+	{
+		if (/^(\d+)\s(\d+)/)
+		{
+			$cpufreq_now->{$cpu}{$1} = $2;
+			$cpufreq_now->{total}{$cpu} = 0 unless(defined($cpufreq_now->{$cpu}));
+			$cpufreq_now->{total}{$cpu} += $2;
+		}
+	}
+	close(TIS);
+}
+
+# Let's figure out the percentages.
+my %freq_p;
+my $cpu = $target;
+foreach my $freq (keys %{$cpufreq_now->{$cpu}})
+{
+	my $new = $cpufreq_now->{$cpu}{$freq};
+	my $old = (defined($cpufreq->{$cpu}{$freq})?$cpufreq->{$cpu}{$freq}:0); # If no old data, we average everything.
+	my $total = $cpufreq_now->{total}{$cpu};
+	$total -= $cpufreq->{total}{$cpu} if (defined($cpufreq->{total}{$cpu}));
+	if (defined($total) && $total > 0)
+	{
+		my $p = ($new - $old) / $total;
+		$freq_p{$cpu}{$freq} = $p * 100.0;
+		$freq_p{avg}{$cpu} += $p * $freq; # Average speed, weighted average
+	}
+	else
+	{
+		$freq_p{$cpu}{$freq} = 0;
+	}
+}
+
+if ( $ARGV[0] and $ARGV[0] eq "config" ) 
+{
+	print "graph_title Cpu frequency usage of $target\n";
+	print "graph_args --base 1000 -l 0\n";
+	print "graph_vlabel CPU Frequency %\n";
+	print "graph_category System\n";
+	print "graph_info This graph shows information about the cpu frequency scaling of your CPU(s)\n";
+
+	my $count = 0;
+	my ($r,$g,$blue) = (0,255,0);
+	my $range = scalar(keys(%{$freq_p{$cpu}}));
+	my $step = (255+255) / ($range - 1);
+	# In order to let color work, let's go from green to yellow to red -- 00FF00 to FFFF00 to FF0000. 256 and 256 steps.
+	foreach my $freq (sort { $a <=> $b } keys %{$freq_p{$cpu}})
+	{
+		printf "freq_%d.label %s\n", $freq, "$freq KHz";
+		printf "freq_%d.info %s\n", $freq, "Time $cpu spent (percentage) running on $freq KHz";
+		printf "freq_%d.type GAUGE\n", $freq;
+		printf "freq_%d.draw %s\n", $freq, ($count++?"STACK":"AREA");
+		printf "freq_%d.colour %02X%02X%02X\n", $freq, $r,$g,$blue;
+		# Update color
+		my $s = $step;
+		if ($r < 255)
+		{
+			$r += $s;
+			if ($r > 255)
+			{
+				$s = $r - 255;
+				$r = 255;
+				$g -= $s;
+			}
+		}
+		else
+		{
+			$g -= $step;
+			$g = 0 if ($g < 0);
+		}
+	}
+	printf "cpuspeed_avg.label %s\n", "Average speed of cpu $cpu";
+	printf "cpuspeed_avg.info %s\n", "Average speed of cpu $cpu scaled to a percentage";
+	printf "cpuspeed_avg.GAUGE\n";
+	printf "cpuspeed_avg.LINE2\n";
+	printf "cpuspeed_avg.colour 0000FF\n";
+	exit 0;
+}
+
+# Print requested garbage.
+foreach my $freq (sort { $a <=> $b } keys %{$freq_p{$cpu}})
+{
+	printf "freq_%d.value %s\n", $freq, $freq_p{$cpu}{$freq};
+}
+# Average speed should be as a percentage as well. So divide it by the max freq.
+my $max_freq = (sort { $a <=> $b } keys %{$freq_p{$cpu}})[-1];
+if (defined($max_freq) && $max_freq > 0)
+{
+	printf "cpuspeed_avg.value %d\n", $freq_p{avg}{$cpu} / $max_freq * 100;
+}
+
+# Save state!
+eval { lock_nstore($cpufreq_now, $statefile) };
+if ($@)
+{
+	print STDERR "[$0] Error writing state file!\n";
+}
+
+exit 0;
