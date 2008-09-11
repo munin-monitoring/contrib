@@ -1,0 +1,283 @@
+#!/usr/bin/ruby
+#
+# Plugin to monitor the Tomcat servers.  
+#
+# Original Author: Rune Nordboe Skillingstad <runesk@linpro.no>
+# Rewrite: laxis <laxis@magex.hu> 2008.05
+# 
+# Requirements: 
+#       - Needs access to http://<user>:<password>@localhost:8080/manager/status?XML=true (or modify the 
+#         address for another host). A munin-user in $CATALINA_HOME/conf/tomcat-users.xml 
+#         should be set up for this to work. 
+#	- libxml-ruby
+# 
+# Install:
+#       - copy script to /etc/munin
+#       - cd /etc/munin
+#       - ./tomcat install
+#
+# Tip: To see if it's already set up correctly, just run this plugin 
+# with the parameter "autoconf". If you get a "yes", everything should 
+# work like a charm already. 
+# 
+# tomcat-users.xml example: 
+#     <user username="munin" password="<set this>" roles="standard,manager"/> 
+# 
+# Parameters supported: 
+# 
+#       config 
+#       autoconf 
+#	install
+# 
+# Configurable variables 
+# 
+#	host      - Destination host
+#	port      - HTTP port numbers 
+#       timeout   - Connection timeout 
+#       request   - Override default status-url 
+#       user      - Manager username 
+#       password  - Manager password 
+#       connector - Connector to query, defaults to "http-".$PORT 
+#
+# Sample config:
+#  [tomcat_*]
+#  env.host 127.0.0.1
+#  env.port 8080
+#  env.request /manager/status?XML=true
+#  env.user munin
+#  env.password pass
+#  env.timeout 30
+#  env.connector jk-8009
+# 
+# Magic markers: 
+#%# family=auto
+#%# capabilities=autoconf
+
+
+require 'net/http'
+require 'xml/libxml'
+
+@host = ENV.member?('host') ? ENV['host']: "127.0.0.1"
+@port = ENV.member?('port') ? ENV['port']: 8080
+@request = ENV.member?('request') ? ENV['request']: "/manager/status?XML=true"
+@user = ENV.member?('user') ? ENV['user']: "munin"
+@password = ENV.member?('password') ? ENV['password']: "munin"
+@timeout = ENV.member?('timeout') ? ENV['timeout']: 30
+@connector = ENV.member?('connector') ? ENV['connector']: "http-#{@port}";
+
+# hash
+w = {
+    "jvmMemory" =>  { "max" => "U",
+		    "total" => "U",
+            	    "used" => "U" },
+    "threadInfo" =>  { "maxThreads" => "U",
+		    "currentThreadCount" => "U",
+		    "currentThreadsBusy" => "U" },
+    "requestMaxTime" => { "maxTime" => "U" },
+    "requestTime" => { "avgTime" => "U" },
+    "requestCount" => { "requestCount" => "U",
+		    "errorCount" => "U" },
+    "requestBytes" => { "bytesReceived" => "U",
+		    "bytesSent" => "U" }
+    }
+
+# http request
+def getstat()
+    Net::HTTP.start(@host, @port) do |http|
+	http.open_timeout = @timeout
+	req = Net::HTTP::Get.new(@request)
+	req.basic_auth @user, @password
+	response = http.request(req)
+	response.value()
+    return response.body
+    end rescue begin
+	return false
+    end
+end
+
+def autoconf()
+    begin
+        if getstat()
+            puts "yes"
+            return 0
+        end
+    rescue
+        puts "no (#{$!})"
+        return 1
+    end
+end
+
+if ARGV[0] == "autoconf"
+    exit autoconf()
+end
+
+if ARGV[0] == "install"
+    exit if autoconf() != 0
+    Dir["plugins/tomcat*"].each { |f|
+        print "removing #{f}\n"
+        File.unlink f
+    }
+    w.each { |k, v|
+        print "installing plugins/tomcat_#{k}\n"
+        File.symlink "../tomcat", "plugins/tomcat_#{k}" if ! FileTest.symlink? "plugins/tomcat_#{k}"
+    }
+    exit
+end
+
+# open stderr
+e = IO.new(2, "w")
+
+mode = $0.gsub /.*\/tomcat_/, ""
+if mode =~ /tomcat/ then
+    e.puts "Invalid mode"
+    exit 1
+end
+
+# munin config request
+if ARGV[0] == "config"
+    puts "graph_title tomcat_#{mode}"
+    puts "graph_args -l 0 --base 1000"
+    #print "graph_order "
+    #w[mode].each { |k, v|
+        #print "#{k} "
+    #}
+    #puts
+    case mode
+        when "jvmMemory"
+            puts "graph_category tomcat"
+            puts "graph_vlabel bytes"
+	    puts "graph_order max total used"
+	    w[mode].each { |k, v|
+                puts "#{k}.label #{k}"
+                puts "#{k}.type GAUGE"
+                puts "#{k}.min 0"
+                puts "#{k}.draw AREA"
+            }
+        when "requestCount"
+            puts "graph_category tomcat"
+	    puts "graph_order requestCount errorCount"
+            puts "graph_vlabel Request / sec"
+	    w[mode].each { |k, v|
+                puts "#{k}.label #{k}"
+                puts "#{k}.type COUNTER"
+                puts "#{k}.min 0"
+                puts "#{k}.draw AREA" if k == "requestCount"
+                puts "#{k}.draw LINE2" if k != "requestCount"
+            }
+        when "requestBytes"
+            puts "graph_category tomcat"
+	    puts "graph_vlabel bytes in (-) / out (+) per ${graph_period}"
+	    w[mode].each { |k, v|
+                puts "#{k}.label #{k}"
+                puts "#{k}.type DERIVE"
+                puts "#{k}.min 0"
+                puts "#{k}.graph no" if k == "bytesReceived"
+                puts "#{k}.negative bytesReceived" if k == "bytesSent"
+
+            }
+        when "requestMaxTime"
+            puts "graph_category tomcat"
+            puts "graph_vlabel sec"
+	    w[mode].each { |k, v|
+                puts "#{k}.label #{k}"
+                puts "#{k}.type GAUGE"
+                puts "#{k}.min 0"
+                puts "#{k}.draw LINE2"
+            }
+        when "requestTime"
+            puts "graph_category tomcat"
+            puts "graph_vlabel Average RequestTime (sec) / Request"
+	    w[mode].each { |k, v|
+                puts "#{k}.label #{k}"
+                puts "#{k}.type GAUGE"
+                puts "#{k}.min 0"
+                puts "#{k}.draw LINE2"
+            }
+        when "threadInfo"
+            puts "graph_category tomcat"
+            puts "graph_order maxThreads currentThreadCount currentThreadsBusy"
+	    w[mode].each { |k, v|
+                puts "#{k}.label #{k}"
+                puts "#{k}.type GAUGE"
+                puts "#{k}.min 0"
+                puts "#{k}.draw AREA"
+            }
+    end
+    exit 0
+end
+
+
+# XML parsolasa
+begin
+    parser = XML::Parser.string(getstat())
+    doc = parser.parse
+end rescue begin
+    e.puts "Parse error"
+    exit 1
+end
+
+# root element kivalasztasa
+root = doc.root
+if root.name != "status"
+    e.puts "Invalid XML"
+    exit 1
+end
+
+# copy jvm memory datas to hash
+node = doc.find('//status/jvm/memory').first
+w["jvmMemory"]["used"] = node.property("total").to_i - node.property("free").to_i
+w["jvmMemory"]["total"] = node.property("total")
+w["jvmMemory"]["max"] = node.property("max")
+
+# copy connector datas to hash
+doc.find('//status/connector').each do |node|
+if node.property("name") == @connector
+	node.each do |child|
+	    if child.name == "threadInfo"
+		w["threadInfo"]["maxThreads"] = child.property("maxThreads")
+		w["threadInfo"]["currentThreadCount"] = child.property("currentThreadCount")
+		w["threadInfo"]["currentThreadsBusy"] = child.property("currentThreadsBusy")
+	    end
+	    if child.name == "requestInfo"
+		w["requestMaxTime"]["maxTime"] = child.property("maxTime")
+		w["requestTime"]["avgTime"] = sprintf "%.2f", (child.property("processingTime").to_f / child.property("requestCount").to_f / 1000)
+		w["requestCount"]["requestCount"] = child.property("requestCount")
+		w["requestCount"]["errorCount"] = child.property("errorCount")
+		w["requestBytes"]["bytesReceived"] = child.property("bytesReceived")
+		w["requestBytes"]["bytesSent"] = child.property("bytesSent")
+	    end
+	end
+    end
+end
+
+# print result
+w[mode].each do |k, v|
+    printf "#{k}.value %s\n", v
+end
+
+# XML Output:
+#<?xml version="1.0" encoding="utf-8"?>
+#<?xml-stylesheet type="text/xsl" href="/manager/xform.xsl" ?>
+#<status>
+#    <jvm>
+#	<memory free='110552760' total='257425408' max='1034027008'/>
+#    </jvm>
+#    <connector name='http-8080'>
+#	<threadInfo  maxThreads="40" currentThreadCount="1" currentThreadsBusy="1" />
+#	<requestInfo  maxTime="14" processingTime="2619" requestCount="1911" errorCount="5" bytesReceived="0" bytesSent="3294996" />
+#	<workers>
+#	    <worker stage="S" requestProcessingTime="0" requestBytesSent="0" requestBytesReceived="0" remoteAddr="127.0.0.1" virtualHost="localhost" method="GET" currentUri="/manager/status" currentQueryString="XML=true" protocol="HTTP/1.0" />
+#	</workers>
+#    </connector>
+#    <connector name='jk-8009'>
+#	<threadInfo maxThreads="200" currentThreadCount="8" currentThreadsBusy="6" />
+#	<requestInfo maxTime="36961" processingTime="273750" requestCount="5485" errorCount="43" bytesReceived="0" bytesSent="57138822" />
+#	<workers>
+#	    <worker stage="K" requestProcessingTime="22683456" requestBytesSent="0" requestBytesReceived="0" remoteAddr="86.101.240.226" virtualHost="?" method="&#63;" currentUri="&#63;" currentQueryString="&#63;" protocol="&#63;" />
+#	    <worker stage="K" requestProcessingTime="35807" requestBytesSent="0" requestBytesReceived="0" remoteAddr="217.20.130.27" virtualHost="?" method="&#63;" currentUri="&#63;" currentQueryString="&#63;" protocol="&#63;" />
+#	    <worker stage="K" requestProcessingTime="32247045" requestBytesSent="0" requestBytesReceived="0" remoteAddr="89.147.76.234" virtualHost="?" method="&#63;" currentUri="&#63;" currentQueryString="&#63;" protocol="&#63;" />
+#	    <worker stage="K" requestProcessingTime="95860" requestBytesSent="0" requestBytesReceived="0" remoteAddr="217.20.130.27" virtualHost="?" method="&#63;" currentUri="&#63;" currentQueryString="&#63;" protocol="&#63;" />
+#	    <worker stage="K" requestProcessingTime="155940" requestBytesSent="0" requestBytesReceived="0" remoteAddr="217.20.130.27" virtualHost="?" method="&#63;" currentUri="&#63;" currentQueryString="&#63;" protocol="&#63;" />
+#	</workers>
+#    </connector>
+#</status>
