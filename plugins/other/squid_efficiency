@@ -1,0 +1,103 @@
+#!/bin/bash
+#
+# Copyright (C) 2006-2009 Benjamin Schweizer. All rights reserved.
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#
+#
+# Abstract
+# ~~~~~~~~
+# This is a plugin for the munin monitoring system. It graphs the cache
+# efficiency of your squid proxy servers and shows nice graphs for average
+# byte and request hits.
+#
+# Authors
+# ~~~~~~~
+# Benjamin Schweizer, http://benjamin-schweizer.de/contact
+#
+# Changes
+# ~~~~~~~
+# 2009-11-25, volker: added config options and docs
+# 2009-11-19, benjamin: fixed squid3 compatibility, minor rewrite
+# 2006-11-16, benjamin: removed 5 minutes stats, fixed 5% bug
+# 2006-10-26, benjamin: excluded negative values from result
+# 2006-10-11, benjamin: initial release.
+#
+# Todo
+# ~~~~
+# - we'll see
+#
+# Munin:
+#%# family=auto
+#%# capabilities=autoconf
+#
+# Config
+# ~~~~~~
+# This plugin supports munin-autoconf, but you might need to change the host
+# and port according to your actual setup. You can overwrite the defaults
+# in your node config (/etc/munin/plugin-conf.d/) like this:
+#
+#	[squid_efficiency]
+#	env.squidhost yourhost.example.com
+#	env.squidport 8080 
+#
+
+host=${squidhost:-localhost}
+port=${squidport:-3128}
+
+test "$1" = "autoconf" && {
+    which netcat > /dev/null || {
+        echo "netcat binary not found"
+        exit 1
+    }
+	DUMP=`printf "GET cache_object://$host/info HTTP/1.0\n\n" | netcat $host $port`
+    test -n "$DUMP"  || {
+        echo "http response empty"
+        exit 1
+    }
+    echo "yes"
+    exit 0
+}
+
+test "$1" = "config" && {
+	echo 'graph_title Squid Efficiency'
+	echo 'graph_info This graph shows the proxy efficiency.'
+	echo 'graph_category squid'
+	echo "graph_args --lower-limit 0 --upper-limit 100"
+	echo 'graph_vlabel %'
+	echo 'request.label request hits'
+	echo 'byte.label byte hits'
+	exit 0
+}
+
+DUMP=`printf "GET cache_object://$host/info HTTP/1.0\n\n" | netcat $host $port`
+# squid2
+#        Request Hit Ratios:     5min: 0.0%, 60min: 17.4%
+#        Byte Hit Ratios:        5min: 75.0%, 60min: 12.0%
+# squid3
+#        Hits as % of all requests:    5min: 0.0%, 60min: 0.0%
+#        Hits as % of bytes sent:    5min: 100.0%, 60min: 100.0%
+test -n "$DUMP"  || {
+    echo "http response empty"
+    exit 1
+}
+
+REQUEST_HITS=`echo "$DUMP" | grep -E "Request Hit Ratios|Hits as % of all requests" | cut -d ":" -f4 | cut -d "." -f1 | xargs echo`
+test $REQUEST_HITS -gt 0 || REQUEST_HITS=0
+BYTE_HITS=`echo "$DUMP" | grep -E "Byte Hit Ratios|Hits as % of bytes sent" | cut -d ":" -f4 | cut -d "." -f1 | xargs echo`
+test $BYTE_HITS -gt 0 || BYTE_HITS=0
+
+echo "request.value ${REQUEST_HITS}"
+echo "byte.value ${BYTE_HITS}"
+
+# eof.
