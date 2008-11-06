@@ -1,0 +1,90 @@
+#!/bin/bash
+
+#
+# (c) Tom Yates / Gatekeeper Technology Ltd. 2008
+#  with thanks to ipaccess.com who paid for this to be
+#  written, and permitted its redistribution under GPL (v3)
+
+# plugin must be linked as climate_FQDN_VAR, where FQDN is that
+#  of climate server and VAR is the variable (temp, rh, air, light, sound)
+#  you wish to retrieve
+# eg climate_mycm2.foo.com_temp
+
+# HOST is the hostname of the climate server, must be in /etc/hosts
+HOST=`basename $0 | cut -f2 -d_`
+
+# VAR is variable to grab (temp, rh, air, light, sound)
+VAR=`basename $0 | cut -f3 -d_`
+
+# it will retrieve and make available five data,
+#  temp (Temperature), rh (relative humidity), air (Air Flow), light
+#  (Light Level) and sound (Sound Level)
+
+
+# CONFIG
+case $1 in
+   config)
+echo host_name $HOST
+case $VAR in
+  temp)
+    echo graph_title Temperature 
+    echo graph_vlabel degrees C
+    echo temp.notify_alias Temperature
+    echo temp.warning 26
+    echo temp.critical 31
+    echo "temp.label Temperature (degrees C)" ;;
+  rh)
+    echo graph_title Relative Humidity 
+    echo graph_vlabel per cent
+    echo rh.notify_alias Relative Humidity
+    echo "rh.label Relative Humidity (%)" ;;
+  air)
+    echo graph_title Airflow 
+    echo air.notify_alias Airflow
+    echo air.label Airflow ;;
+  light)
+    echo graph_title Light level 
+    echo light.notify_alias Light Level
+    echo light.label Light level ;;
+  sound)
+    echo graph_title Sound level 
+    echo sound.notify_alias Sound Level
+    echo sound.label Sound Level ;;
+esac
+echo  graph_category Other
+exit 0;;
+
+esac
+
+
+
+# FETCH
+case $VAR in
+  temp)
+VALUE=`lynx --source http://${HOST}/ | grep -A 1 "Temperature" | tail -1 | \
+ sed 's/[^0-9.]//g' `
+echo temp.value $VALUE ;;
+
+  rh)
+VALUE=`lynx --source http://${HOST}/ | grep -A 1 "Relative Humidity" | \
+ tail -1 | sed 's/[^0-9.]//g' `
+echo rh.value $VALUE ;;
+
+  air)
+VALUE=`lynx --source http://${HOST}/ | grep -A 1 "Air Flow" | tail -1 | \
+ sed 's/[^0-9.]//g' `
+echo air.value $VALUE ;;
+
+  light)
+VALUE=`lynx --source http://${HOST}/ | grep -A 1 "Light Level" | tail -1 | \
+ sed 's/[^0-9.]//g' `
+echo light.value $VALUE ;;
+
+  sound)
+VALUE=`lynx --source http://${HOST}/ | grep -A 1 "Sound Level" | tail -1 | \
+ sed 's/[^0-9.]//g' `
+echo sound.value $VALUE ;;
+
+esac
+
+
