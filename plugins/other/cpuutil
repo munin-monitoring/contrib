@@ -1,0 +1,73 @@
+#!/sbin/sh
+
+# See /usr/include/sys/dk.h !
+PATH=/usr/bin:/usr/sbin:/sbin
+
+if [ "$1" = "autoconf" ]; then
+	echo yes
+	exit 0
+fi
+
+#ADBINPUT="./vmunix ."
+ADBINPUT="/stand/vmunix /dev/kmem"
+
+NMPINFO=$(	/bin/echo "nmpinfo/D" | \
+		/bin/adb -o $ADBINPUT 2>/dev/null | \
+		/bin/sed '/^nmpinfo: *[0-9]/!d;s/^[^:]*://' )
+
+echo_func () {
+	echo ${1}.label $2
+	echo ${1}.draw $3
+	echo ${1}.type DERIVE
+	echo ${1}.min 0
+	echo ${1}.cdef ${1},$NMPINFO,/
+}
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title CPU usage graph based on kernel counters'
+	echo 'graph_order sys user wio idle'
+#	graphmax=$(( $NMPINFO * 100 ))
+	graphmax=100
+	echo "graph_args -r -l 0 --upper-limit $graphmax"
+	echo 'graph_vlabel %'
+	echo 'graph_category processes'
+	echo 'graph_scale no'
+	echo 'graph_info This graph shows how CPU time is spent.'
+
+	echo_func sys system AREA
+	echo "sys.info CPU time spent in running the kernel code"
+
+	echo_func user user STACK
+	echo 'user.info CPU time spent by tunning application code'
+
+	echo_func wio iowait STACK
+	echo 'wio.info CPU idle time in waiting IO (disk)'
+
+	echo_func idle idle STACK
+	echo 'idle.info Idle CPU time'
+
+	exit 0
+fi
+
+CPU=0
+MAXCPU=$(( $NMPINFO * 72 ))
+ADBCMD="0d200\$w"
+
+while [ $CPU -lt $MAXCPU ]; do
+	ADBCMD="${ADBCMD}\nmcp_time+0d${CPU}/18D"
+	CPU=$(( $CPU + 72 ))
+done
+
+/bin/echo "${ADBCMD}\n\$q" | /bin/adb -o $ADBINPUT 2>/dev/null | \
+/bin/sed '/^mcp_time.*:.*[0-9]/!d;s/^[^:]*://' | /bin/awk \
+	'{ \
+		uh += $1 ; nh += $3 ; sh += $5 ; ih += $7 ; wh +=  $9 ; \
+		ul += $2 ; nl += $4 ; sl += $6 ; il += $8 ; wl += $10 ; \
+	}  END  { \
+		GIGA = 4294967296 ; \
+		printf( "sys.value  %0.f\n", sh * GIGA + sl ) ; \
+		printf( "user.value %0.f\n", ( uh + nh ) * GIGA + ul + nl ) ; \
+		printf( "wio.value  %0.f\n", wh * GIGA + wl ) ; \
+		printf( "idle.value %0.f\n", ih * GIGA + il ) ; \
+	}'
+
