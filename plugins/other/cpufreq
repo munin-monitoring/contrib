@@ -1,0 +1,55 @@
+#!/bin/sh
+# 
+# Plugin to monitor CPU speed on system that allow to reduce it for power saving
+#
+# probably only useful on laptops if you configure it to lower CPU frequency for
+# less power consumptoin. This plugin works by reading from the /sys file system.
+#
+# by dominik dot stadler at gmx.at
+#
+# Magic markers (optional - only used by munin-config and some
+# installation scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+if [ "$1" = "autoconf" ]; then
+	if [ -r /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq ]; then
+		echo yes
+		exit 0
+	else
+		echo no
+		exit 1
+	fi
+fi
+
+ 
+if [ "$1" = "config" ]; then
+	echo 'graph_title CPU speed'
+	echo 'graph_args --base 1000 -l 0'
+	echo 'graph_vlabel speed'
+#	echo 'graph_scale no'
+	echo 'graph_category system'
+	echo 'graph_info This graph shows the speed of the system fan.'
+	echo 'maxspeed.label maxspeed'
+	echo 'maxspeed.info The maximum speed of the CPU.'
+	echo 'minspeed.label minspeed'
+	echo 'minspeed.info The minimum speed of the CPU.'
+	echo 'cpuspeed.label speed'
+	echo 'cpuspeed.info The current speed of the CPU.'
+
+	exit 0
+fi
+
+echo -n "maxspeed.value "
+cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq
+echo -n "minspeed.value "
+cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq
+echo -n "cpuspeed.value "
+
+# cpuinfo_cur_freq is not readable for user munin, therefore using scaling_cur_freq for now, should 
+# be equal information, see http://wiki.ubuntuusers.de/Prozessortaktung
+# We could also configure this plugin to require root access, but I like it better this way.
+#cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+
