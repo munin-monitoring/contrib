@@ -6,6 +6,7 @@ int cpu(int argc, char **argv);
 int entropy(int argc, char **argv);
 int forks(int argc, char **argv);
 int fw_packets(int argc, char **argv);
+int if_err_(int argc, char **argv);
 int interrupts(int argc, char **argv);
 int load(int argc, char **argv);
 int open_files(int argc, char **argv);
@@ -35,6 +36,8 @@ int main(int argc, char **argv) {
 		case 'i':
 			if(!strcmp(progname+1, "nterrupts"))
 				return interrupts(argc, argv);
+			if(!strncmp(progname+1, "f_err_", 6))
+				return if_err_(argc, argv);
 			break;
 		case 'l':
 			if(!strcmp(progname+1, "oad"))
