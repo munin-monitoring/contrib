@@ -19,8 +19,8 @@ int cpu(int argc, char **argv) {
 			if(s && !strcmp(s, "yes"))
 				scaleto100=1;
 
-			if(!(f=fopen("/proc/stat", "r"))) {
-				fputs("cannot open /proc/stat\n", stderr);
+			if(!(f=fopen(PROC_STAT, "r"))) {
+				fputs("cannot open " PROC_STAT "\n", stderr);
 				return 1;
 			}
 			while(fgets(buff, 256, f)) {
@@ -37,7 +37,7 @@ int cpu(int argc, char **argv) {
 			fclose(f);
 
 			if(ncpu < 1 || extinfo < 4) {
-				fputs("cannot parse /proc/stat\n", stderr);
+				fputs("cannot parse " PROC_STAT "\n", stderr);
 				return 1;
 			}
 
@@ -114,14 +114,14 @@ int cpu(int argc, char **argv) {
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf")) {
-			if(0 == access("/proc/stat", R_OK))
+			if(0 == access(PROC_STAT, R_OK))
 				return writeyes();
 			else
-				return writeno("/proc/stat not readable");
+				return writeno(PROC_STAT " not readable");
 		}
 	}
-	if(!(f=fopen("/proc/stat", "r"))) {
-		fputs("cannot open /proc/stat\n", stderr);
+	if(!(f=fopen(PROC_STAT, "r"))) {
+		fputs("cannot open " PROC_STAT "\n", stderr);
 		return 1;
 	}
 	while(fgets(buff, 256, f)) {
@@ -152,6 +152,6 @@ int cpu(int argc, char **argv) {
 		}
 	}
 	fclose(f);
-	fputs("no cpu line found in /proc/stat\n", stderr);
+	fputs("no cpu line found in " PROC_STAT "\n", stderr);
 	return 1;
 }

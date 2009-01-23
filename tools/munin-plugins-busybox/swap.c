@@ -27,10 +27,10 @@ int swap(int argc, char **argv) {
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf")) {
-			if(0 == access("/proc/stat", R_OK))
+			if(0 == access(PROC_STAT, R_OK))
 				return writeyes();
 			else
-				return writeno("/proc/stat not readable");
+				return writeno(PROC_STAT " not readable");
 		}
 	}
 	if(!access("/proc/vmstat", F_OK)) {
@@ -56,15 +56,16 @@ int swap(int argc, char **argv) {
 		}
 		return 0;
 	} else {
-		if(!(f=fopen("/proc/stat", "r"))) {
-			fputs("cannot open /proc/stat\n", stderr);
+		if(!(f=fopen(PROC_STAT, "r"))) {
+			fputs("cannot open " PROC_STAT "\n", stderr);
 			return 1;
 		}
 		while(fgets(buff, 256, f)) {
 			if(!strncmp(buff, "swap ", 5)) {
 				fclose(f);
 				if(2 != sscanf(buff+5, "%d %d", &in, &out)) {
-					fputs("bad data on /proc/stat\n", stderr);
+					fputs("bad data on " PROC_STAT "\n",
+							stderr);
 					return 1;
 				}
 				printf("swap_in.value %d\nswap_out.value %d\n", in, out);
@@ -72,7 +73,7 @@ int swap(int argc, char **argv) {
 			}
 		}
 		fclose(f);
-		fputs("no swap line found in /proc/stat\n", stderr);
+		fputs("no swap line found in " PROC_STAT "\n", stderr);
 		return 1;
 	}
 }
