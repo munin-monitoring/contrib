@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include "common.h"
 
+#define ENTROPY_AVAIL "/proc/sys/kernel/random/entropy_avail"
+
 int entropy(int argc, char **argv) {
 	FILE *f;
 	int entropy;
@@ -20,12 +22,12 @@ int entropy(int argc, char **argv) {
 		if(!strcmp(argv[1], "autoconf"))
 			return writeyes();
 	}
-	if(!(f=fopen("/proc/sys/kernel/random/entropy_avail", "r"))) {
-		fputs("cannot open /proc/sys/kernel/random/entropy_avail\n", stderr);
+	if(!(f=fopen(ENTROPY_AVAIL, "r"))) {
+		fputs("cannot open " ENTROPY_AVAIL "\n", stderr);
 		return 1;
 	}
 	if(1 != fscanf(f, "%d", &entropy)) {
-		fputs("cannot read from /proc/sys/kernel/random/entropy_avail\n", stderr);
+		fputs("cannot read from " ENTROPY_AVAIL "\n", stderr);
 		fclose(f);
 		return 1;
 	}

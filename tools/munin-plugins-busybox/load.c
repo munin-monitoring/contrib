@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include "common.h"
 
+#define PROC_LOADAVG "/proc/loadavg"
+
 int load(int argc, char **argv) {
 	FILE *f;
 	int warn, crit;
@@ -32,12 +34,12 @@ int load(int argc, char **argv) {
 		if(!strcmp(argv[1], "autoconf"))
 			return writeyes();
 	}
-	if(!(f=fopen("/proc/loadavg", "r"))) {
-		fputs("cannot open /proc/loadavg\n", stderr);
+	if(!(f=fopen(PROC_LOADAVG, "r"))) {
+		fputs("cannot open " PROC_LOADAVG "\n", stderr);
 		return 1;
 	}
 	if(1 != fscanf(f, "%*f %f", &val)) {
-		fputs("cannot read from /proc/loadavg\n", stderr);
+		fputs("cannot read from " PROC_LOADAVG "\n", stderr);
 		fclose(f);
 		return 1;
 	}

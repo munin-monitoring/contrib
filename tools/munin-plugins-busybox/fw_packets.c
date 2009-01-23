@@ -4,6 +4,8 @@
 #include <ctype.h>
 #include "common.h"
 
+#define PROC_NET_SNMP "/proc/net/snmp"
+
 int fw_packets(int argc, char **argv) {
 	FILE *f;
 	char buff[1024], *s;
@@ -24,14 +26,14 @@ int fw_packets(int argc, char **argv) {
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf")) {
-			if(0 == access("/proc/net/snmp", R_OK))
+			if(0 == access(PROC_NET_SNMP, R_OK))
 				return writeyes();
 			else
-				return writeno("/proc/net/snmp not readable");
+				return writeno(PROC_NET_SNMP " not readable");
 		}
 	}
-	if(!(f=fopen("/proc/net/snmp", "r"))) {
-		fputs("cannot open /proc/net/snmp\n", stderr);
+	if(!(f=fopen(PROC_NET_SNMP, "r"))) {
+		fputs("cannot open " PROC_NET_SNMP "\n", stderr);
 		return 1;
 	}
 	while(fgets(buff, 1024, f)) {
@@ -55,6 +57,6 @@ int fw_packets(int argc, char **argv) {
 		}
 	}
 	fclose(f);
-	fputs("no ip line found in /proc/net/snmp\n", stderr);
+	fputs("no ip line found in " PROC_NET_SNMP "\n", stderr);
 	return 1;
 }

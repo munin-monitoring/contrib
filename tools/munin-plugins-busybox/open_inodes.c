@@ -3,6 +3,8 @@
 #include <unistd.h>
 #include "common.h"
 
+#define FS_INODE_NR "/proc/sys/fs/inode-nr"
+
 int open_inodes(int argc, char **argv) {
 	FILE *f;
 	int nr, freen;
@@ -21,19 +23,19 @@ int open_inodes(int argc, char **argv) {
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf")) {
-			if(0 == access("/proc/sys/fs/inode-nr", R_OK))
+			if(0 == access(FS_INODE_NR, R_OK))
 				return writeyes();
 			else
-				return writeno("/proc/sys/fs/inode-nr not readable");
+				return writeno(FS_INODE_NR " not readable");
 		}
 	}
-	if(!(f=fopen("/proc/sys/fs/inode-nr", "r"))) {
-		fputs("cannot open /proc/sys/fs/inode-nr\n", stderr);
+	if(!(f=fopen(FS_INODE_NR, "r"))) {
+		fputs("cannot open " FS_INODE_NR "\n", stderr);
 		return 1;
 	}
 	if(2 != fscanf(f, "%d %d", &nr, &freen)) {
 		fclose(f);
-		fputs("cannot read from /proc/sys/fs/inode-nr\n", stderr);
+		fputs("cannot read from " FS_INODE_NR "\n", stderr);
 		return 1;
 	}
 	fclose(f);
