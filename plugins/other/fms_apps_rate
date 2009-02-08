@@ -1,0 +1,262 @@
+#!/usr/bin/perl -w
+#
+# Plugin to monitor rate of new connections in applications of Flash Media
+# Server.
+#
+# Parameters:
+#
+#       config   (required)
+#       autoconf (optional - only used by munin-config)
+#
+# Requirements:
+#
+#       libwww-perl (LWP) Perl library
+#	      Proc::ProcessTable Perl module
+#   
+# Tested with:
+#       Debian Etch
+#       Macromedia Flash Media Server 2.0.3 r68
+#       Adobe Flash Media Server 3.0.1 r123
+#       Adobe Flash Media Server 3.5.0 r405
+#
+# $Log$
+# Revision 1.0  2009/01/25 05:07:23  muzso
+# Initial release.
+#
+# Usage
+# -----
+#
+#   1. You will need the following Perl modules for this plugin to work:
+#
+#        LWP - The World-Wide Web library for Perl
+#        Used modules: HTTP::Request, LWP::Simple, LWP::UserAgent
+#        http://search.cpan.org/perldoc?LWP
+#
+#        Proc::ProcessTable - Perl extension to access the unix process table
+#        http://search.cpan.org/perldoc?Proc::ProcessTable 
+#
+#      On a Debian/Ubuntu system:
+#        apt-get install libwww-perl libproc-process-perl
+#
+#      In Ubuntu and recent Debian (Lenny and later) versions the latter is
+#      renamed to libproc-processtable-perl, but for now (at the time of
+#      writing) libproc-process-perl still exists as a dummy package to provide
+#      backward compatibility.
+#
+#   2. You've to publish the "getApps" and "getAppStats" commands of the
+#      Flash Media Administration Server for use through the HTTP admin API.
+#      This means that you've to set "USERS.HTTPCOMMAND_ALLOW" to "true"
+#      in ${FMS_DIR}/conf/fms.ini and in ${FMS_DIR}/conf/Users.xml set the
+#      value of the node "Root/AdminServer/HTTPCommands/Allow" to contain
+#      "getApps" and "getAppStats" too (by default it allows only "ping").
+#
+#   3. If you want to monitor an FMS running locally (ie. on the same server
+#      where this plugin is deployed), then the plugin will autoconfigure
+#      itself by fetching parameters from the ${FMS_DIR}/conf/fms.ini config
+#      file of your FMS installation (autoconfigure will only work if the Flash
+#      Media Administration Server is running since the plugin fetches the
+#      location of the FMS directory through the current working directory of
+#      the "fmsadmin" process). For this you have to run the plugin with root
+#      privileges. To do so, specify in the Munin node plugin config file to
+#      use "root" user for the plugin.
+#
+#      On Debian/Ubuntu this file can be found at
+#        /etc/munin/plugin-conf.d/munin-node
+#
+#      The entry for the plugin should look like this:
+#        [fms_apps]
+#        user = root
+#
+#      If autoconfiguration does not work or you want to specify the parameters
+#      yourself (eg. you want to monitor an FMS that is on a different host),
+#      then add a plugin entry to the Munin node plugin config file like this:
+#        [fms_apps]
+#        env.fms_admin_host = fms.example.com
+#        env.fms_admin_port = 1111
+#        env.fms_admin_username = admin
+#        env.fms_admin_password = the_admin_password
+#
+#     For a local FMS the fms_admin_host can be set to "localhost".
+#
+#     If you're using the env.fms_admin_* variables for configuration, then
+#     the plugin does not require root privileges.
+#
+#     However if doing so, it is strongly advised that you restrict access to
+#     the Munin node plugin config file. It should be readable only by the
+#     Munin node daemon since your FMS admin password should not be accessible
+#     by any other user.
+#     In case of Debian/Ubuntu the /etc/munin/plugin-conf.d/munin-node file
+#     is owned by root and the munin-node process runs with root privileges,
+#     so the correct permission is to have the file readable only by root.
+#
+#
+#
+# Note: in case something "bad" happens (eg. plugin is run as non-root and
+#       autoconfiguration is used) the plugin writes some informative message
+#       to stderr to make debugging easier. This should not affect the normal
+#       operation of munin-node since only the stdout of the plugins is used
+#       and that's always kept as munin-node expects.
+#
+#
+#
+# Magic markers (optional - used by munin-config and installation scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+
+
+use strict;
+use LWP::UserAgent;
+use LWP::Simple;
+use Proc::ProcessTable;
+
+my ($host, $port, $username, $password);
+
+sub get_apps {
+	my @applist;
+	my $ua = LWP::UserAgent->new(timeout => 30);
+	my $url = sprintf("http://%s:%d/admin/getApps?auser=%s\&apswd=%s", $host, $port, $username, $password);
+
+	my $response = $ua->request(HTTP::Request->new('GET', $url));
+	if ( $response->content =~ /<data>[^<]*(<.*>)[^>]*<\/data>/is ) {
+		my $apps = $1;
+		while ( $apps =~ /<_[0-9]+> *([^<]*) *<\/_[0-9]+>/gi ) {
+			my $appname = $1;
+			$appname =~ s/[^a-zA-Z0-9_]/_/g;
+			push(@applist, $appname);
+		}
+	}
+	return @applist;
+}
+
+if ( defined($ENV{fms_admin_host}) and length($ENV{fms_admin_host}) > 0 ) {
+	$host = $ENV{fms_admin_host};
+}
+if ( defined($ENV{fms_admin_port}) and length($ENV{fms_admin_port}) > 0 ) {
+	$port = $ENV{fms_admin_port};
+}
+if ( defined($ENV{fms_admin_username}) and length($ENV{fms_admin_username}) > 0 ) {
+	$username = $ENV{fms_admin_username};
+}
+if ( defined($ENV{fms_admin_password}) and length($ENV{fms_admin_password}) > 0 ) {
+	$password = $ENV{fms_admin_password};
+}
+
+if ( !( defined($host) and defined($port) and defined($username) and defined($password) ) ) {
+	# Autoconfiguration:
+	# 1. Find the "fmsadmin" process and assume that FMS is installed in the
+	#    current working directory of the process.
+	# 2. Look for the FMS config file in ${FMS_DIR}/conf/fms.ini.
+	# 3. Fetch host, port, admin username and password values from the
+	#    config file.
+	
+	# check that plugin is running with root privileges
+	if ( $> == 0 ) {
+		my $ProcTable = new Proc::ProcessTable;
+		PROC_LOOP: foreach my $proc (@{$ProcTable->table}) {
+			# match any filename starting with "fmsadmin"
+			# (this way the plugin might work on platforms other
+			#  than linux too)
+			if ( defined($proc->{fname}) and $proc->{fname} =~ /^fmsadmin/i and defined($proc->{cwd}) ) {
+				my $fms_config = $proc->{cwd} . "/conf/fms.ini";
+				if ( open(my $fp, '<', $fms_config) ) {
+					while (my $line = <$fp>) {
+						chomp($line);
+						if ( $line =~ /^ *SERVER\.ADMIN_USERNAME *= *([^ ].*) *$/ ) {
+							$username = $1;
+						} elsif ( $line =~ /^ *SERVER\.ADMIN_PASSWORD *= *([^ ].*) *$/ ) {
+							$password = $1;
+						} elsif ( $line =~ /^ *SERVER\.ADMINSERVER_HOSTPORT *= *([^ ]*)/ ) {
+							my @data = split(":", $1);
+							if ( $#data > 0 ) {
+								if ( defined($data[0]) and length($data[0]) > 0 ) {
+									$host = $data[0];
+								} else {
+									$host = "localhost";
+								}
+								$port = $data[1];
+							}
+						}
+						# exit the loop if we've got all parameters
+						last PROC_LOOP if defined($host) and defined($port) and defined($username) and defined($password);
+					}
+				} else {
+					print(STDERR "Can't open FMS config file (" . $fms_config . "): $!\n");
+				}
+				# exit the loop since we've already found the process
+				# that we were looking for, we just failed to find
+				# all required parameters in fms.ini (or failed to
+				# find fms.ini at all in (cwd of fmsadmin)/conf
+				last PROC_LOOP;
+			}
+		}
+	} else {
+		print(STDERR "Plugin must be run with root privileges for autoconfiguration to work!\n");
+	}
+}
+
+if ( defined($ARGV[0]) ) {
+	if ( $ARGV[0] eq "autoconf" ) {
+		if ( defined($host) and defined($port) and defined($username) and defined($password) ) {
+			print("yes\n");
+			exit 0;
+		} else {
+			print("no\n");
+			exit 1;
+		}
+	} elsif ( $ARGV[0] eq "config" ) {
+		print <<'END_GRAPH_CONFIG';
+graph_title Flash Media Server application connection rates
+graph_args -l 0 --base 1000
+graph_vlabel new connections per ${graph_period}
+graph_category network
+graph_period minute
+graph_info This graph shows the number of new connections per ${graph_period} for each application on the Flash Media Server.
+END_GRAPH_CONFIG
+		if ( defined($host) and defined($port) and defined($username) and defined($password) ) {
+			my @apps = get_apps();
+			if ( $#apps >= 0 ) {
+				foreach my $app (@apps) {
+					print <<"END_APP_CONFIG";
+fms_app_total_$app.label $app
+fms_app_total_$app.type DERIVE
+fms_app_total_$app.min 0
+END_APP_CONFIG
+				}
+				exit 0;
+			} else {
+				print(STDERR "Failed to get list of applications from the Flash Media Administration Server!\n");
+				exit 1;
+			}
+		} else {
+			print(STDERR "Failed to get all parameters needed for the connection to the Flash Media Administration Server!\n");
+			exit 1;
+		}
+	}
+}
+
+if ( defined($host) and defined($port) and defined($username) and defined($password) ) {
+	my @apps = get_apps();
+	if ( $#apps >= 0 ) {
+		my $ua = LWP::UserAgent->new(timeout => 30);
+		foreach my $app (@apps) {
+			my $url = sprintf("http://%s:%d/admin/getAppStats?auser=%s\&apswd=%s\&app=%s", $host, $port, $username, $password, $app);
+			my $response = $ua->request(HTTP::Request->new('GET', $url));
+			if ( $response->content =~ /<data>.*<total_connects>[^0-9]*([0-9]+)[^0-9]*<\/total_connects>.*<\/data>/is ) {
+				print("fms_app_total_$app.value $1\n");
+			} else {
+				print(STDERR "Failed to get total number of played streams for the \"$app\" application from the Flash Media Administration Server!\n");
+				print("fms_app_total_$app.value U\n");
+			}
+		}
+		exit 0;
+	} else {
+		print(STDERR "Failed to get list of applications from the Flash Media Administration Server!\n");
+		exit 1;
+	}
+} else {
+	print(STDERR "Failed to get all parameters needed for the connection to the Flash Media Administration Server!\n");
+	exit 2;
+}
+
