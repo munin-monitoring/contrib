@@ -1,0 +1,108 @@
+#!/usr/bin/perl -w
+#
+# Plugin to monitor BGP table summary statistics on a cisco router.
+#
+# Original Author: Peter Holzleitner
+#
+# Revision 1.0  2009/05/04 16:00:00 holzlp
+# Initial version
+#
+# Configuration variables:
+#
+# 	iosuser - username (default "")
+# 	iospass - password (default "")
+#
+# Parameters:
+#
+# 	config    (required)
+#
+# Magic markers (optional - only used by munin-config and some
+# installation scripts):
+#%# family=auto
+
+
+use Net::Telnet::Cisco;
+
+
+if ($0 =~ /^(?:|.*\/)cisco_bgp_([^_]+)$/) {
+    $host  = $1;
+    }
+
+
+
+if ($ARGV[0] and $ARGV[0] eq "autoconf")
+{
+	if (-r "/proc/meminfo")
+	{
+		print "yes\n";
+		exit 0;
+	}
+	else
+	{
+		print "/proc/meminfo not found\n";
+		exit 1;
+	}
+}
+
+
+my @BGP_nbr;
+my @BGP_pfx;
+my $tot_pfx;
+my $iosuser = $ENV{iosuser} || "";
+my $iospass = $ENV{iospass} || "";
+
+&fetch_bgpstats($host, $iosuser, $iospass);
+
+
+if ($ARGV[0] and $ARGV[0] eq "config") {
+    print "host_name $host\n";
+    print "graph_args --base 1024 -l 0 --vertical-label Prefixes\n";
+    print "graph_title BGP Neighbour Statistics\n";
+    print "graph_category network\n";
+    print "graph_info This graph shows the number of BGP prefixes received by neighbour.\n";
+
+    my($n, $i);  $n = scalar @BGP_nbr;  $i = 0;
+    while($n--) {
+	my $neigh = $BGP_nbr[$i++];
+	print "n$i.label $neigh\n";
+	}
+
+#    print "total.label Total\n";
+#    print "total.info Total number of prefixes in the BGP table\n";
+
+    } else {
+
+    my($n, $i);  $n = scalar @BGP_nbr;  $i = 0;
+    while($n--) {
+        my $pfx   = $BGP_pfx[$i++];
+        print "n$i.value $pfx\n";
+        }
+#    print "total.value $tot_pfx\n";
+    }
+
+
+
+
+sub fetch_bgpstats
+    {
+    my $hostname = shift;
+    my $username = shift;
+    my $password = shift;
+    my $session = Net::Telnet::Cisco->new(Host => $host);
+    $session->login($username, $password);
+    my @output = $session->cmd('show ip bgp summary');
+
+    # Neighbor        V          AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd
+    # 12.23.34.45     4        9999  410819    9522  2401634    0    0 6d14h      281237
+
+    foreach(@output) {
+	$tot_pfx = $1 if /^BGP activity (\d+)\/(\d+) prefixes/;
+	next unless /^(\d+\.\d+\.\d+\.\d+)\s+\d+\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+[0-9a-z]+\s+(\d+)/;
+	my ($neigh, $as, $pfx) = ($1, $2, $3);
+	push @BGP_nbr,  "$neigh (AS $as)";
+	push @BGP_pfx,  $pfx;
+	}
+    }
+
+
+# vim:syntax=perl:ts=8
