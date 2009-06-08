@@ -1,0 +1,63 @@
+#!/bin/sh
+#
+# tcp: Plugin to monitor IPV4/6 TCP socket status on a Linux host.
+#
+# License: GPLv2
+#
+# Copyright 2009 Tim Small - tim@seoss.co.uk
+#
+# Parameters supported:
+#
+#    config
+#    autoconf
+#
+#
+# Magic markers?
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+case $1 in
+    config)
+        cat <<EOF
+graph_title TCP
+graph_vlabel TCP Sockets
+graph_category network
+graph_args -l 0
+graph_info TCP socket states for the local machine
+EOF
+	for i in established syn_sent syn_recv fin_wait1 fin_wait2 time_wait close close_wait last_ack listen closing
+	do
+		echo ${i}.label $i
+		echo ${i}.draw LINE2
+		echo ${i}.info Sockets in state $i
+	done
+
+        exit 0
+	;;
+    autoconf)
+        if [ -f /proc/net/tcp -o -f /proc/net/tcp6 ] ; then
+	    echo yes
+	    exit 0
+	else
+	    echo no
+	    exit 1
+	fi
+esac
+
+# See #include <netinet/tcp.h>
+
+cat /proc/net/tcp* | awk '
+  BEGIN  { STATE["01"]=STATE["02"]=STATE["03"]=STATE["04"]=STATE["05"]=STATE["06"]=STATE["07"]=STATE["08"]=STATE["09"]=STATE["0A"]=STATE["0B"]=0; }
+  match ($4, /0[0-9A-B]/) { STATE[$4]++; }
+  END    { print "established.value " STATE["01"];
+           print "syn_sent.value "    STATE["02"];
+	   print "syn_recv.value "    STATE["03"];
+	   print "fin_wait1.value "   STATE["04"];
+	   print "fin_wait2.value "   STATE["05"];
+	   print "time_wait.value "   STATE["06"];
+	   print "close.value "       STATE["07"];
+	   print "close_wait.value "  STATE["08"];
+	   print "last_ack.value "    STATE["09"];
+	   print "listen.value "      STATE["0A"];
+	   print "closing.value "     STATE["0B"];
+	 }'
