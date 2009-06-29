@@ -1,0 +1,69 @@
+#!/bin/sh
+#
+# k8temp
+#
+# Plugin to monitor the CPU temperature through lm-sensors
+# on multicore AMD cpus 
+#
+# Author: Marc Schiffbauer <marc@schiffbauer.net>
+#
+# Requirements:
+# 	- A configured lm-sensors installation with k8temp kernel module
+#	- rewuired shell commands: sensors, grep, sed, uniq, cut
+#
+# Parameters supported:
+#
+# 	config
+# 	autoconf
+#
+# Magic markers:
+#%# capabilities=autoconf
+
+# VERSION 1.0
+
+case $1 in
+	config)
+		I=1
+		LAST_CORE=""
+		echo "graph_title CPU temperature"
+		echo "graph_vlabel temperature in °C"
+		echo "graph_options light"
+		echo "graph_info This graph shows temperature of all CPU cores in °C"
+		echo "graph_category sensors"
+		sensors -uA | grep "^Core" | while read CORE FOO TEMP REST; do
+			if [ "$LAST_CORE" == "$CORE" ]; then
+				I=$((I+1))
+			else
+				I=1
+			fi
+			LAST_CORE=$CORE
+			CORE_NUM=$(echo $CORE | sed 's/Core//')
+			echo "core${CORE_NUM}_${I}.label Core ${CORE_NUM} sensor $I"
+			#echo "core${CORE_NUM}_${I}.draw LINE1"
+			echo "core${CORE_NUM}_${I}.warning 65"
+			echo "core${CORE_NUM}_${I}.critical 80"
+		done
+        	exit 0
+	;;
+	autoconf)
+	if [ "$(sensors -uA | grep "^Core" | uniq)" ]; then
+                echo "yes"
+                exit 0
+        else
+                echo "no"
+                exit 1
+        fi
+esac
+ 
+sensors -uA | grep "^Core" | while read CORE FOO TEMP REST; do
+	if [ "$LAST_CORE" == "$CORE" ]; then
+		I=$((I+1))
+	else
+		I=1
+	fi
+	LAST_CORE=$CORE
+	CORE_NUM=$(echo $CORE | sed 's/Core//')
+	TEMP=$(echo $TEMP | cut -d"." -f1)
+	echo "core${CORE_NUM}_${I}.value $TEMP"
+done
+ 
