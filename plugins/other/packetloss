@@ -1,0 +1,60 @@
+#!/bin/sh
+#
+# Copyright (c) 2009 Sven-Hendrik Haase
+# Copyright (C) 2004 Jimmy Olsen
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+#
+# Plugin to monitor packet loss
+#
+# Please note that sometimes it can take quite long for the plugin to return
+# a value on a network with lots of packet loss.
+# You therefore need to account for it by appending the following to your
+# plugin-conf.d/munin-node. Remember to restart munin-node afterwards.
+# Append the next 3 lines to plugin-conf.d/munin-node:
+# [packetloss_*]
+# timeout 60
+# user root
+#
+# Parameters:
+#
+# 	ping_args      - Arguments to ping (default "-c 2")
+# 	ping_args2     - Arguments after the host name (required for Solaris)
+# 	ping           - Ping program to use
+# 	host           - Host to ping
+#
+# Arguments for Solaris:
+#      ping_args      -s
+#      ping_args2     56 2
+#
+#%# family=manual
+
+file_host=`basename $0 | sed 's/^packetloss_//g'`
+host=${host:-${file_host:-www.google.com}}
+
+if [ "$1" = "config" ]; then
+	echo "graph_title Packet loss to $host (in %)"
+	echo 'graph_args --upper-limit 100 -l 0'
+	echo 'graph_vlabel %'
+	echo 'graph_category network'
+	echo 'graph_info This graph shows packet loss statistics.'
+	echo "packetloss.label $host"
+	echo "packetloss.info Packet loss statistics for $host."
+	echo 'packetloss.draw LINE2'
+	exit 0
+fi
+
+${ping:-ping} ${ping_args:-'-c 10'} ${host} ${ping_args2} | perl -n -e 'print "packetloss.value $1\n" if /(\d+)% packet loss/;'
