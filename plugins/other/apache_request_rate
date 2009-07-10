@@ -1,0 +1,41 @@
+#!/usr/bin/env ruby
+require 'rubygems'
+require 'json'
+require 'open-uri'
+
+if ARGV.first == 'config'
+  puts 'graph_category Apache'
+  puts 'graph_title Requests per second'
+  puts 'graph_vlabel reqs/sec'
+  puts 'graph_scale no'
+  puts 'requests_per_second.label Apache reqs/sec'
+  exit 0
+end
+
+STATUS_URL = 'http://localhost/server-status?auto'
+TMPFILE = '/tmp/apache-status-monitor'
+SECONDS_BEFORE_STALE = 900
+
+begin
+  previous_sample = File.exists?(TMPFILE) ? JSON.parse(File.open(TMPFILE, 'r').read) : {}
+  output = {}
+
+  apache_status = open(STATUS_URL).read
+  new_total_requests = apache_status.match(/Total Accesses: (\d+)$/)[1].to_i  #subtract one to account for request we just made!
+  sample_duration = previous_sample['updated_at'] ? Time.now - Time.at(previous_sample['updated_at'].to_i) : nil
+
+  if sample_duration && sample_duration < SECONDS_BEFORE_STALE
+      output['requests_per_second'] = "%0.2f" % ((new_total_requests - 1 - previous_sample['total_requests'].to_i) / sample_duration.to_f)
+  else
+      output = {}
+  end
+
+  # Write back to tmpfile
+  new_tmp_data = {'total_requests' => new_total_requests, 'updated_at' => Time.now.to_i}
+  File.open(TMPFILE, 'w') { |f| f.puts(new_tmp_data.to_json)}
+
+  puts "requests_per_second.value #{output['requests_per_second']}"
+rescue Exception => e
+  puts "Exception: #{e.message}"
+  exit -1
+end
