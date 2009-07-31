@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# Monitor disk iostat on FreeBSD host.
+#
+# Parameters understood:
+#
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+#
+# Magic markers (optional - used by munin-config and installation
+# scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+PATH=/bin:/usr/bin
+
+if [ "$1" = "autoconf" ]; then
+  echo yes
+  exit 0
+fi
+
+DISKS=`/usr/sbin/iostat -dIn9 | head -1`
+
+if [ "$1" = "config" ]; then
+  echo 'graph_title IOstat xfrs'
+  echo 'graph_args -l 0'
+  echo 'graph_vlabel Transfers per ${graph_period}'
+  echo 'graph_category disk'
+  echo 'graph_info This graph shows disk load on the machine.'
+
+  for D in $DISKS
+  do
+    if echo $D | grep -vq '^pass'; then
+      echo "$D.label $D"
+      echo "$D.type DERIVE"
+      echo "$D.min 0"
+    fi
+  done
+
+  exit 0
+fi
+
+VALUES=`/usr/sbin/iostat -dIn9 | tail -1`
+COL=2   # 2nd value for each disk is grabbed
+
+for D in $DISKS
+do
+  if echo $D | grep -vq '^pass'; then
+    echo -n "$D.value "
+    echo $VALUES | cut -d ' ' -f $COL
+  fi
+  COL=$(($COL + 3))
+done
