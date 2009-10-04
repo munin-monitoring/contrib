@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# Plugin to monitor Radiator AUTH lag statistics
+#
+# Parameters:
+#
+# 	config   (required)
+# 	autoconf (optional - only used by munin-config)
+#
+# Config variables:
+#
+#       statisticsdir     - Radiator AUTH statistics directory
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#%# family=auto
+#%# capabilities=autoconf
+
+STATISTICSDIR=/usr/radius/radiator/log/STATISTICS
+if [ "$statisticsdir"  ]; then STATISTICSDIR=$statisticsdir ; fi
+
+
+if [ "$1" = "autoconf" ]; then
+        if [ -d ${STATISTICSDIR} ] ; then
+                echo yes
+                exit 0
+        else
+                echo no
+                exit 1
+        fi
+fi
+
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title Radiator AUTH response lag'
+	echo 'graph_vlabel time'
+	echo 'graph_args -l 0'
+	echo 'graph_category radiator'
+	echo 'graph_info This graph displayes AUTH response lag of all radiator processes combined.'
+	#
+	# Count all statistics files and create labels
+	for COUNT in `ls $STATISTICSDIR/Statistics-auth* | sed -r 's/auth([1-9]{1})\.log$/auth0\1\.log/g' | sort | awk -F"auth" '{print $2}' | sed 's/\.log//g'`; do
+		echo 'radiator'$COUNT'.label radiator_'$COUNT' '
+		echo 'radiator'$COUNT'.type GAUGE'
+		echo 'radiator'$COUNT'.info radiator proc '$COUNT
+	done
+	exit 0
+fi
+
+# Print values for all statistics files
+for FILE in `ls $STATISTICSDIR/Statistics-auth* | sed -r 's/auth([1-9]{1})\.log$/auth0\1\.log/g' | sort`; do
+	echo -n radiator`echo $FILE | awk -F"auth" '{print $2}' | sed 's/\.log//g'`".value "
+	grep "ServerConfig" `echo $FILE | sed -r 's/auth[0]([1-9])\.log$/auth\1\.log/g'` | tail -1 | awk -F"|" '{print $3}'
+done
