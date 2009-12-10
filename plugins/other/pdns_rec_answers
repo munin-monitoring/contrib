@@ -1,0 +1,75 @@
+#!/bin/sh
+#
+#  pdns_recursor munin plugin.
+#  Written by Sean Reifschneider <jafo@tummy.com> 2009-12-03
+#  Placed in the public domain
+#
+#  Requires running as root:
+#
+#    echo '[pdns_rec_*]' >/etc/munin/plugin-conf.d/pdns_rec
+#    echo 'user root' >>/etc/munin/plugin-conf.d/pdns_rec
+
+if [ "$1" = "autoconf" ]; then
+	if [ -e /usr/bin/rec_control ]; then
+		echo yes
+		exit 0
+	else
+		echo no
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title PDNS Recursor Answer Times'
+	echo 'graph_order a b c d e f'
+	echo 'graph_vlabel queries'
+	echo 'graph_info Time required per answer.'
+	echo 'graph_category pdns'
+
+	echo 'a.label in 1ms'
+	echo 'a.min 0'
+	echo 'a.max 100000'
+	echo 'a.type COUNTER'
+	echo 'a.info Answers within 1ms.'
+
+	echo 'b.label in 10ms'
+	echo 'b.min 0'
+	echo 'b.max 100000'
+	echo 'b.type COUNTER'
+	echo 'b.info Answers from 1ms to 10ms.'
+
+	echo 'c.label in 100ms'
+	echo 'c.min 0'
+	echo 'c.max 100000'
+	echo 'c.type COUNTER'
+	echo 'c.info Answers within 10ms to 100ms.'
+
+	echo 'd.label in 1s'
+	echo 'd.min 0'
+	echo 'd.max 100000'
+	echo 'd.type COUNTER'
+	echo 'd.info Answers within 100ms to 1s.'
+
+	echo 'e.label over 1s'
+	echo 'e.min 0'
+	echo 'e.max 100000'
+	echo 'e.type COUNTER'
+	echo 'e.info Answers requiring more than 1s.'
+
+	echo 'f.label timeouts'
+	echo 'f.min 0'
+	echo 'f.max 100000'
+	echo 'f.type COUNTER'
+	echo 'f.info Answers that never came.'
+
+	exit 0
+fi
+
+echo a.value `rec_control get answers0-1`
+echo b.value `rec_control get answers1-10`
+echo c.value `rec_control get answers10-100`
+echo d.value `rec_control get answers100-1000`
+echo e.value `rec_control get answers-slow`
+echo f.value `rec_control get outgoing-timeouts`
+
+exit 0
