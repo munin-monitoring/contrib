@@ -1,0 +1,318 @@
+#! /usr/bin/perl -w
+
+=head1 NAME
+
+nutups2_ - Plugin to monitor UPSes managed by NUT
+
+=head1 CONFIGURATION
+
+Generally none needed.
+
+If you have installed NUT at a non-standard location, then you can specify its
+location like:
+
+  [nutups2_*]
+    env.upsc /some/location/bin/upsc
+
+=head1 WARNING AND CRITICAL SETTINGS
+
+If upsc reports 'high' and 'low' values for some attribute, those will used
+as the critical range. Otherwise the following environment variables can be
+used to set the defaults for all fields:
+
+    env.warning
+    env.critical
+
+You can also control individual fields like:
+
+    env.input_L1.warning
+    env.output.critical
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=head1 FEATURES
+
+The plugin supports reporting battery charge, UPS load, input/output
+frequencies/currents/voltages, apparent and real power output, humidity and
+temperature readings. Note however that different UPS models report different
+levels of detail; the plugin reports whatever information the NUT UPS driver
+(and in turn the UPS itself) provides.
+
+Although the 'suggest' command will only offer UPSes for which the local host
+is the master, you can also monitor remote UPSes if you include the host name
+in the symlink, like:
+
+	nutups2_<upsname>@<hostname or address>_frequency
+
+etc.
+
+=head1 AUTHOR
+
+Gábor Gombás <gombasg@sztaki.hu>
+
+=head1 LICENSE
+
+GPLv2 or later
+
+=cut
+
+use strict;
+use Munin::Plugin;
+use Carp;
+
+my $UPSC = $ENV{'upsc'} || 'upsc';
+
+# For the 'filter' field, the first sub-match should contain the name to
+# display, and the second sub-match should indicate if it is a nominal
+# value instead of a sensor reading.
+my %config = (
+	charge => {
+		filter => qr/^(.*)\.(?:charge|load)$/,
+		title => 'UPS load and battery charge',
+		args => '--base 1000 -l 0 -u 100',
+		vlabel => '%',
+		config => \&common_config,
+		fetch => \&common_fetch,
+	},
+	current => {
+		filter => qr/^(.*)\.current(\.nominal)?$/,
+		title => 'UPS current',
+		args => '--base 1000 -l 0',
+		vlabel => 'Amper',
+		config => \&common_config,
+		fetch => \&common_fetch,
+	},
+	frequency => {
+		filter => qr/^(.*)\.frequency(\.nominal)?$/,
+		title => 'UPS frequency',
+		args => '--base 1000 -l 0',
+		vlabel => 'Hz',
+		config => \&common_config,
+		fetch => \&common_fetch,
+	},
+	humidity => {
+		filter => qr/^(.*)\.humidity$/,
+		title => 'UPS humidity',
+		args => '--base 1000 -l 0',
+		vlabel => '%',
+		config => \&common_config,
+		fetch => \&common_fetch,
+	},
+	power => {
+		filter => qr/^(.*)\.power(\.nominal)?$/,
+		title => 'UPS apparent power',
+		args => '--base 1000 -l 0',
+		vlabel => 'VA',
+		config => \&common_config,
+		fetch => \&common_fetch,
+	},
+	realpower => {
+		filter => qr/^(.*)\.realpower(\.nominal)?$/,
+		title => 'UPS real power',
+		args => '--base 1000 -l 0',
+		vlabel => 'Watt',
+		config => \&common_config,
+		fetch => \&common_fetch,
+	},
+	temperature => {
+		filter => qr/^(.*)\.temperature$/,
+		title => 'UPS temperature',
+		args => '--base 1000 -l 0',
+		vlabel => 'Celsius',
+		config => \&common_config,
+		fetch => \&common_fetch,
+	},
+	voltage => {
+		filter => qr/^(.*)\.voltage(\.nominal)?$/,
+		title => 'UPS voltage',
+		args => '--base 1000 -l 0',
+		vlabel => 'Volt',
+		config => \&common_config,
+		fetch => \&common_fetch,
+	},
+);
+
+sub read_ups_values {
+	my $ups = shift;
+
+	my @lines = `$UPSC $ups 2>/dev/null`;
+	my $values = {};
+	for my $line (@lines) {
+		chomp $line;
+
+		my ($key, $value) = $line =~ m/^([^:]+):\s+(\S.*)$/;
+		$values->{$key} = $value;
+	}
+	return $values;
+}
+
+sub graph_config {
+	my ($func, $ups, $values) = @_;
+
+	print "graph_title " . $config{$func}->{'title'} . " ($ups)\n";
+	print "graph_vlabel " . $config{$func}->{'vlabel'} . "\n";
+	print "graph_args " . $config{$func}->{'args'} . "\n";
+	print "graph_category sensors\n";
+
+	my @info;
+	push @info, 'Manufacturer: "' . $values->{'ups.mfr'} . '"'
+		if exists $values->{'ups.mfr'} and $values->{'ups.mfr'} ne 'unknown';
+	push @info, 'Model: "' . $values->{'ups.model'} . '"'
+		if exists $values->{'ups.model'};
+	push @info, 'Serial: "' . $values->{'ups.serial'} . '"'
+		if exists $values->{'ups.serial'};
+	map { s/\s+/ /g } @info;
+	print "graph_info " . join(', ', @info) . "\n"
+		if @info;
+}
+
+sub print_range_warning {
+	my ($id, $key, $values) = @_;
+
+	if (exists $values->{$key . '.minimum'}) {
+		print $id . ".min " . $values->{$key . '.minimum'} . "\n";
+	}
+	if (exists $values->{$key . '.maximum'}) {
+		print $id . ".max " . $values->{$key . '.maximum'} . "\n";
+	}
+
+	my $range = '';
+	if (exists $values->{$key . '.high'}) {
+		$range = $values->{$key . '.high'};
+	}
+	if (exists $values->{$key . '.low'}) {
+		$range = $values->{$key . '.low'} . ':' . $range;
+	}
+	# print_thresholds() needs 'undef' for no range
+	undef $range unless $range;
+	print_thresholds($id, undef, undef, undef, $range);
+}
+
+# Example keys for voltages:
+#	battery.voltage
+#	battery.voltage.minimum
+#	battery.voltage.maximum
+#	battery.voltage.nominal
+#	input.voltage
+#	input.voltage.minimum
+#	input.voltage.maximum
+#	input.bypass.L1-N.voltage
+#	input.L1-N.voltage
+#	output.voltage
+#	output.voltage.nominal
+#	output.L1-N.voltage
+#
+# Replace 'voltage' with 'current' in the above list to get an example
+# for current keys.
+#
+# Frequency keys:
+#	input.frequency
+#	input.frequency.nominal
+#	input.bypass.frequency
+#	input.bypass.frequency.nominal
+#	output.frequency
+#	output.frequency.nominal
+#	output.frequency.minimum
+#	output.frequency.maximum
+sub common_config {
+	my ($func, $ups) = @_;
+
+	my $values = read_ups_values($ups);
+	graph_config($func, $ups, $values);
+	for my $key (sort keys %$values) {
+		my ($field, $nominal) = $key =~ $config{$func}->{'filter'};
+		next unless $field;
+
+		$field .= $nominal if $nominal;
+		my $id = clean_fieldname($field);
+
+		# These labels look better this way and are still short enough
+		$field = $key if $func =~ m/(charge|temperature|humidity)/;
+
+		# Beautification
+		$field = ucfirst($field);
+		$field =~ s/\./ /g;
+
+		print $id . ".label " . $field . "\n";
+		print $id . ".type GAUGE\n";
+
+		# Draw nominal values a litle thinner
+		print $id . ".draw LINE1\n" if $nominal;
+
+		print_range_warning($id, $key, $values);
+	}
+}
+
+sub common_fetch {
+	my ($func, $ups) = @_;
+
+	my $values = read_ups_values($ups);
+	for my $key (sort keys %$values) {
+		my ($field, $nominal) = $key =~ $config{$func}->{'filter'};
+		next unless $field;
+
+		$field .= $nominal if $nominal;
+		my $id = clean_fieldname($field);
+
+		print $id . ".value " . $values->{$key} . "\n";
+	}
+}
+
+if ($ARGV[0] and $ARGV[0] eq 'autoconf') {
+	# The former nutups_ plugin parsed upsmon.conf. But for a large UPS
+	# that powers dozens or hundreds of machines, that would mean
+	# monitoring the same UPS from every host it powers, which does not
+	# make sense. Using upsc and defaulting to localhost means that
+	# 'autoconf' will only enable the plugin on the UPS master node, where
+	# upsd is running.
+	my @upses = `$UPSC -l 2>/dev/null`;
+	if ($?) {
+		if ($? == -1) {
+			print "no (program '$UPSC' was not found)\n";
+		}
+		else {
+			print "no (program '$UPSC -l' returned error)\n";
+		}
+		exit 0;
+	}
+
+	map { chomp $_ } @upses;
+	unless (@upses and $upses[0]) {
+		print "no (program '$UPSC' listed no units)\n";
+	}
+	else {
+		print "yes\n";
+	}
+	exit 0;
+}
+
+if ($ARGV[0] and $ARGV[0] eq 'suggest') {
+	my @upses = `$UPSC -l 2>/dev/null`;
+	for my $ups (@upses) {
+		chomp $ups;
+		for my $metric (keys %config) {
+			my $values = read_ups_values($ups);
+			my @keys = grep { +$_ =~ $config{$metric}->{'filter'} } keys(%$values);
+			print $ups . '_' . $metric . "\n" if @keys;
+		}
+	}
+	exit 0;
+}
+
+croak("Unknown command line arguments") if $ARGV[0] and $ARGV[0] ne 'config';
+
+# The UPS name may contain underscores
+my $fn_re = join('|', keys %config);
+my ($ups, $func) = $0 =~ m/nutups2_(.*)_($fn_re)$/;
+
+if ($ARGV[0] and $ARGV[0] eq 'config') {
+	$config{$func}->{'config'}($func, $ups);
+}
+else {
+	$config{$func}->{'fetch'}($func, $ups);
+}
+
+exit 0;
