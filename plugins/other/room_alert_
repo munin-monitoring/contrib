@@ -1,0 +1,110 @@
+#!/usr/bin/ruby
+
+# Plugin to monitor Room Alert 11E environmental units.
+# Requires ruby and the ruby SNMP library.
+#
+# Written by Phil Gold <phil_g@pobox.com>.
+#
+# Usage: Copy or link into /etc/munin/node.d/.  End word can be either
+#        "temperature" or "humidity".
+#
+# Parameters:
+#
+# 	config   (required)
+# 	autoconf (optional - used by munin-config)
+#
+# Config variables:
+#
+#       units     - DNS names of environmental units
+#       community - Community to use to access the Room Alert unit
+#                   Defaults to 'public'.
+#       variables of the form label_<unit>_<num>, where dots and dashes in the
+#         unit names are replaced with underscores - labels for specific sensors
+#         in the unit.
+#         e.g. env.label_192_168_1_115_2 Main Unit
+#
+# Example config:
+#
+#       [room_alert_*]
+#       env.units unit1.example.com unit2.example.com
+#       env.community private
+#       env.label_unit1_example_com_2 Main Unit
+#       env.label_unit1_example_com_3 Rack 2 Sensor
+
+require 'snmp'
+
+base_oid = "enterprises.20916.1.3.1"
+
+case $0.match('[^_]+$')[0]
+when "temperature"
+  subchannel = 1
+  name = "temperature"
+  label = "°C"
+  letter = "t"
+when "humidity"
+  subchannel = 3
+  name = "humidity"
+  label = "% Relative Humidity"
+  letter = "h"
+else
+  exit 1
+end
+
+def is_vb_valid(vb, subchannel)
+  return (vb.name[-1] == 0 and vb.name[-2] == subchannel and vb.value > 1)
+end
+
+def field_name(unit, vb, letter)
+  clean_unit = unit.gsub(/[.-]/, '_')
+  sensor = vb.name[-3].to_s
+  return "#{clean_unit}_#{letter}#{sensor}"
+end
+
+def label(unit, vb)
+  clean_unit = unit.gsub(/[.-]/, '_')
+  sensor = vb.name[-3].to_s
+  label = "#{unit} " + (ENV["label_#{clean_unit}_#{sensor}"] || "sensor #{sensor}")
+end
+
+units = (ENV['units'] || "").split(/\s+/)
+community = ENV['community'] || "public"
+
+case ARGV[0]
+when "autoconf"
+  puts "no"
+  exit 1
+when "config"
+  puts "graph_title Room Alert 11E units (#{name} probes)"
+  puts "graph_vlabel #{label}"
+  puts "graph_category sensors"
+  if name == "humidity"
+    puts "graph_args --lower-limit 0 --upper-limit 100"
+  end
+  units.each do |unit|
+    SNMP::Manager.open(:Host => unit,
+                       :Community => community,
+                       :Version => :SNMPv1) do |manager|
+      manager.walk(base_oid) do |vb|
+        if not is_vb_valid(vb, subchannel)
+          next
+        end
+        puts "#{field_name(unit, vb, letter)}.label #{label(unit, vb)}"
+      end
+    end
+  end
+  exit 0
+end
+
+
+units.each do |unit|
+  SNMP::Manager.open(:Host => unit,
+                     :Community => community,
+                     :Version => :SNMPv1) do |manager|
+    manager.walk(base_oid) do |vb|
+      if not is_vb_valid(vb, subchannel)
+        next
+      end
+      puts "#{field_name(unit, vb, letter)}.value #{vb.value.to_f / 100}"
+    end
+  end
+end
