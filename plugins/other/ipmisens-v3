@@ -1,0 +1,572 @@
+#!/usr/bin/perl -w
+#
+# ipmisens3
+# Munin plugin to read IPMI sensor data
+# Zoltan HERPAI (c) 2009 <wigyori@uid0.hu>
+#
+#	Symlink this script into your /etc/munin/plugins directory in the
+#	following way:
+#
+#	ipmisens2_[machine]_[sensors]
+#	Supported machines:
+#	- Sun x4100/4100m2/4200/4200m2: x4x00 (temp, volt, fan)
+#	- Sun V20z (V40z?): v20z (temp, volt, fan)
+#	- IBM x346: x346 (temp, volt, fan)
+#	- Sun x2100/2100m2/2200/2200m2: x2100 (temp, volt, fan)
+#	- Intel SHG2 mainboard: shg2 (temp, volt, fan)
+#	- Sun x2250: x2250 (temp, volt, fan)
+#	- Sun x4150: x4150 (temp, volt, fan)
+#	- Verari VB1205XM: vb1205 (temp, volt)
+#	- Dell PowerEdge 2650: pe2650 (temp, volt, fan)
+#	- IBM x3200/x3550: ibmx3xx0 (temp, volt, fan)
+#	- IBM LS20/LS21: ibmlsxx (temp, volt)
+#	- IBM HS21: ibmhsxx (volt)
+# - asmb2 missing due to lack of output yet
+#
+# Revision 3.00early	2009/09/01 Zoltan HERPAI <wigyori@uid0.hu>
+#			* Complete rewrite in perl.
+#			* Sun x2100, x2100M2 and x2200 are now supported in 'x2100' machtype
+#			* Bunch of new machtypes are supported
+#
+
+use strict;
+use POSIX;
+use FindBin qw($Script);
+
+my $IPMITOOL = '/usr/bin/ipmitool';
+my $curtime = time();
+my $TEMPFILE = "/var/lib/munin/plugin-state/ipmisens3";
+# set the ipmidump expiration to 1 day
+my $TEMPREFRESH = 86400;
+my $debug = 0;
+
+##############
+# You should not need to edit anything below here
+#
+$ENV{PATH} = '/bin:/usr/bin:/usr/sbin';
+$ENV{IFS} = "\n";
+
+# Test if ipmitool is available
+`$IPMITOOL help 2> /dev/null`;
+if ($?)
+{
+	print "no ($IPMITOOL not found)";
+	exit 1;
+}
+
+$0 =~ /.*_(.*)_(.*)/;
+my $machine = $1;
+my $sensor = $2;
+
+print "Machine: $machine , sensor: $sensor\n" if ($debug);
+
+# check expiration time of the dumpfile
+if ( -f $TEMPFILE && $curtime - (stat($TEMPFILE))[9] >= $TEMPREFRESH )
+{
+	print "Unlinking $TEMPFILE...\n" if ($debug);
+	unlink ($TEMPFILE);
+}
+
+if ( ! -f $TEMPFILE )
+{
+	print "Writing dumpfile $TEMPFILE...\n" if ($debug);
+	`$IPMITOOL sdr dump $TEMPFILE` || die $!;
+	if ($?)
+	{
+		print "no (retcode $?)\n";
+		exit 2;
+	}
+}
+
+# Read the sensors
+my @ipmioutput = `$IPMITOOL sdr -S $TEMPFILE`;
+if ($?)
+{
+	print "no (retcode $?)\n";
+	exit 3;
+}
+
+my $arg;
+if ( defined($ARGV[0]) )
+{
+	if ( $ARGV[0] eq 'config' )	{ $arg = 'config'; }
+	if ( $ARGV[0] eq 'autoconf' )	{ $arg = 'autoconf'; }
+	
+	if ( $arg eq 'autoconf' )	{ print "no\n"; exit 0; }
+	
+	my %cnf;
+	if ( $arg eq 'config' )
+	{
+		# Base sensor config
+		if ( $sensor eq 'temp' )
+		{
+			%cnf = (
+				'graph_title' => 'Temperature',
+				'graph_vlabel' => 'C',
+				'graph_category' => 'sensors',
+			);
+		}
+		
+		if ( $sensor eq 'volt' )
+		{
+			%cnf = (
+				'graph_title' => 'Voltages',
+				'graph_vlabel' => 'Volts',
+				'graph_category' => 'sensors',
+			);
+		}
+		
+		if ( $sensor eq 'fan' )
+		{
+			%cnf = (
+				'graph_title' => 'Fan speeds',
+				'graph_vlabel' => 'RPM',
+				'graph_category' => 'sensors',
+			);
+		}
+		
+		# Static descriptors
+		my %base;
+		
+		# Sun x4100
+		$base{'x4x00'}->{'mbt_amb'} = 'Mainboard';
+		$base{'x4x00'}->{'fpt_amb'} = 'FP';
+		$base{'x4x00'}->{'pdbt_amb'} = 'PSU';
+		$base{'x4x00'}->{'iot_amb'} = 'Disks';
+		$base{'x4x00'}->{'p0t_core'} = 'CPU0';
+		$base{'x4x00'}->{'p1t_core'} = 'CPU1';
+		$base{'x4x00'}->{'ft0fm0f0'} = 'ft0.fm0.f0';
+		$base{'x4x00'}->{'ft0fm1f0'} = 'ft0.fm1.f0';
+		$base{'x4x00'}->{'ft0fm2f0'} = 'ft0.fm2.f0';
+		$base{'x4x00'}->{'ft0fm0f1'} = 'ft0.fm0.f1';
+		$base{'x4x00'}->{'ft0fm1f1'} = 'ft0.fm1.f1';
+		$base{'x4x00'}->{'ft0fm2f1'} = 'ft0.fm2.f1';
+		$base{'x4x00'}->{'ft1fm0f0'} = 'ft1.fm0.f0';
+		$base{'x4x00'}->{'ft1fm1f0'} = 'ft1.fm1.f0';
+		$base{'x4x00'}->{'ft1fm2f0'} = 'ft1.fm2.f0';
+		$base{'x4x00'}->{'ft1fm0f1'} = 'ft1.fm0.f1';
+		$base{'x4x00'}->{'ft1fm1f1'} = 'ft1.fm1.f1';
+		$base{'x4x00'}->{'ft1fm2f1'} = 'ft1.fm2.f1';
+		$base{'x4x00'}->{'mbv_bat'} = 'BAT';
+		$base{'x4x00'}->{'mbv_3v3stby'} = '3.3VSTBY';
+		$base{'x4x00'}->{'mbv_3v3'} = '3.3V';
+		$base{'x4x00'}->{'mbv_5v'} = '5V';
+		$base{'x4x00'}->{'mbv_12v'} = '+12V';
+		$base{'x4x00'}->{'mbv_dash12v'} = '-12V';
+		$base{'x4x00'}->{'mbv_2v5core'} = 'MB 2.5V';
+		$base{'x4x00'}->{'mbv_1v8core'} = 'MB 1.8V';
+		$base{'x4x00'}->{'mbv_1v2core'} = 'MB 1.2V';
+		$base{'x4x00'}->{'p0v_1v5'} = 'CPU0 1.5V';
+		$base{'x4x00'}->{'p0v_2v5core'} = 'CPU0 2.5V';
+		$base{'x4x00'}->{'p0v_1v25core'} = 'CPU0 1.25V';
+		$base{'x4x00'}->{'p1v_1v5'} = 'CPU1 1.5V';
+		$base{'x4x00'}->{'p1v_2v5core'} = 'CPU1 2.5V';
+		$base{'x4x00'}->{'p1v_1v25core'} = 'CPU1 1.25V';
+		# Sun x4100m2 extents
+		$base{'x4x00'}->{'mbv_1v5core'} = 'MB 1.5V';
+		$base{'x4x00'}->{'p0v_vddio'} = 'CPU0 VDDIO';
+		$base{'x4x00'}->{'p0v_vdd'} = 'CPU0 VDD';
+		$base{'x4x00'}->{'p0v_vtt'} = 'CPU0 VTT';
+		$base{'x4x00'}->{'p1v_vddio'} = 'CPU1 VDDIO';
+		$base{'x4x00'}->{'p1v_vdd'} = 'CPU1 VDD';
+		$base{'x4x00'}->{'p1v_vtt'} = 'CPU1 VTT';
+		# Sun x4600 extents
+		$base{'x4x00'}->{'mbv_1v2'} = 'MB +1.2V';
+		$base{'x4x00'}->{'mbv_1v5'} = 'MB +1.5V';
+		$base{'x4x00'}->{'mbv_2v5'} = 'MB +2.5V';
+		$base{'x4x00'}->{'mbv_3v3aux_r'} = 'MB +3.3VAUX';
+		$base{'x4x00'}->{'p0v_12v'} = 'CPU0 module +12V';
+		$base{'x4x00'}->{'p1v_12v'} = 'CPU1 module +12V';
+		$base{'x4x00'}->{'p2v_12v'} = 'CPU2 module +12V';
+		$base{'x4x00'}->{'p3v_12v'} = 'CPU3 module +12V';
+		$base{'x4x00'}->{'p4v_12v'} = 'CPU4 module +12V';
+		$base{'x4x00'}->{'p5v_12v'} = 'CPU5 module +12V';
+		$base{'x4x00'}->{'p6v_12v'} = 'CPU6 module +12V';
+		$base{'x4x00'}->{'p7v_12v'} = 'CPU7 module +12V';
+		$base{'x4x00'}->{'p0v_2v5'} = 'CPU0 module +2.5V';
+		$base{'x4x00'}->{'p1v_2v5'} = 'CPU1 module +2.5V';
+		$base{'x4x00'}->{'p2v_2v5'} = 'CPU2 module +2.5V';
+		$base{'x4x00'}->{'p3v_2v5'} = 'CPU3 module +2.5V';
+		$base{'x4x00'}->{'p4v_2v5'} = 'CPU4 module +2.5V';
+		$base{'x4x00'}->{'p5v_2v5'} = 'CPU5 module +2.5V';
+		$base{'x4x00'}->{'p6v_2v5'} = 'CPU6 module +2.5V';
+		$base{'x4x00'}->{'p7v_2v5'} = 'CPU7 module +2.5V';
+		$base{'x4x00'}->{'p0v_1v2'} = 'CPU0 module +1.2V';
+		$base{'x4x00'}->{'p1v_1v2'} = 'CPU1 module +1.2V';
+		$base{'x4x00'}->{'p2v_1v2'} = 'CPU2 module +1.2V';
+		$base{'x4x00'}->{'p3v_1v2'} = 'CPU3 module +1.2V';
+		$base{'x4x00'}->{'p4v_1v2'} = 'CPU4 module +1.2V';
+		$base{'x4x00'}->{'p5v_1v2'} = 'CPU5 module +1.2V';
+		$base{'x4x00'}->{'p6v_1v2'} = 'CPU6 module +1.2V';
+		$base{'x4x00'}->{'p7v_1v2'} = 'CPU7 module +1.2V';
+		$base{'x4x00'}->{'p0v_3v3aux_r'} = 'CPU0 module +3.3VAUX';
+		$base{'x4x00'}->{'p1v_3v3aux_r'} = 'CPU1 module +3.3VAUX';
+		$base{'x4x00'}->{'p2v_3v3aux_r'} = 'CPU2 module +3.3VAUX';
+		$base{'x4x00'}->{'p3v_3v3aux_r'} = 'CPU3 module +3.3VAUX';
+		$base{'x4x00'}->{'p4v_3v3aux_r'} = 'CPU4 module +3.3VAUX';
+		$base{'x4x00'}->{'p5v_3v3aux_r'} = 'CPU5 module +3.3VAUX';
+		$base{'x4x00'}->{'p6v_3v3aux_r'} = 'CPU6 module +3.3VAUX';
+		$base{'x4x00'}->{'p7v_3v3aux_r'} = 'CPU7 module +3.3VAUX';
+		$base{'x4x00'}->{'p0v_3v3led'} = 'CPU0 module +3.3V LED';
+		$base{'x4x00'}->{'p1v_3v3led'} = 'CPU1 module +3.3V LED';
+		$base{'x4x00'}->{'p2v_3v3led'} = 'CPU2 module +3.3V LED';
+		$base{'x4x00'}->{'p3v_3v3led'} = 'CPU3 module +3.3V LED';
+		$base{'x4x00'}->{'p4v_3v3led'} = 'CPU4 module +3.3V LED';
+		$base{'x4x00'}->{'p5v_3v3led'} = 'CPU5 module +3.3V LED';
+		$base{'x4x00'}->{'p6v_3v3led'} = 'CPU6 module +3.3V LED';
+		$base{'x4x00'}->{'p7v_3v3led'} = 'CPU7 module +3.3V LED';
+		$base{'x4x00'}->{'p2v_1v25core'} = 'CPU2 1.25V';
+		$base{'x4x00'}->{'p3v_1v25core'} = 'CPU3 1.25V';
+		$base{'x4x00'}->{'p4v_1v25core'} = 'CPU4 1.25V';
+		$base{'x4x00'}->{'p5v_1v25core'} = 'CPU5 1.25V';
+		$base{'x4x00'}->{'p6v_1v25core'} = 'CPU6 1.25V';
+		$base{'x4x00'}->{'p7v_1v25core'} = 'CPU7 1.25V';
+		$base{'x4x00'}->{'p0v_core'} = 'CPU0 Vcore';
+		$base{'x4x00'}->{'p1v_core'} = 'CPU1 Vcore';
+		$base{'x4x00'}->{'p2v_core'} = 'CPU2 Vcore';
+		$base{'x4x00'}->{'p3v_core'} = 'CPU3 Vcore';
+		$base{'x4x00'}->{'p4v_core'} = 'CPU4 Vcore';
+		$base{'x4x00'}->{'p5v_core'} = 'CPU5 Vcore';
+		$base{'x4x00'}->{'p6v_core'} = 'CPU6 Vcore';
+		$base{'x4x00'}->{'p7v_core'} = 'CPU7 Vcore';
+		# Sun x4600 temp extents
+		$base{'x4x00'}->{'p2t_core'} = 'CPU2';
+		$base{'x4x00'}->{'p3t_core'} = 'CPU3';
+		$base{'x4x00'}->{'p4t_core'} = 'CPU4';
+		$base{'x4x00'}->{'p5t_core'} = 'CPU5';
+		$base{'x4x00'}->{'p6t_core'} = 'CPU6';
+		$base{'x4x00'}->{'p7t_core'} = 'CPU7';
+		$base{'x4x00'}->{'p0t_amb'} = 'CPU0 module';
+		$base{'x4x00'}->{'p1t_amb'} = 'CPU1 module';
+		$base{'x4x00'}->{'p2t_amb'} = 'CPU2 module';
+		$base{'x4x00'}->{'p3t_amb'} = 'CPU3 module';
+		$base{'x4x00'}->{'p4t_amb'} = 'CPU4 module';
+		$base{'x4x00'}->{'p5t_amb'} = 'CPU5 module';
+		$base{'x4x00'}->{'p6t_amb'} = 'CPU6 module';
+		$base{'x4x00'}->{'p7t_amb'} = 'CPU7 module';
+		$base{'x4x00'}->{'mbt_amb0'} = 'System board 0';
+		$base{'x4x00'}->{'mbt_amb1'} = 'System board 1';
+		$base{'x4x00'}->{'mbt_amb2'} = 'System board 2';
+		
+		# Sun V20z (V40z?)
+		$base{'v20z'}->{'ambient'} = 'System';
+		$base{'v20z'}->{'cpu0die'} = 'CPU0 die';
+		$base{'v20z'}->{'cpu0mem'} = 'CPU0 mem';
+		$base{'v20z'}->{'cpu1die'} = 'CPU1 die';
+		$base{'v20z'}->{'cpu1mem'} = 'CPU1 mem';
+		$base{'v20z'}->{'gbeth'} = 'GBNIC';
+		$base{'v20z'}->{'hddbp'} = 'HDD backplane';
+		$base{'v20z'}->{'sp'} = 'Service CPU';
+		
+		# Sun x2100
+		$base{'x2100'}->{'cpucorevoltage'} = 'CPU core';
+		$base{'x2100'}->{'batteryvolt'} = 'VBAT';
+		$base{'x2100'}->{'ddr26v'} = 'DDR 2.6V';
+		$base{'x2100'}->{'vcc33v'} = '+3.3V';
+		$base{'x2100'}->{'vcc5v'} = '+5V';
+		$base{'x2100'}->{'vcc12v'} = '+12V';
+		$base{'x2100'}->{'cputemp'} = 'CPU';
+		$base{'x2100'}->{'system'} = 'System';
+		# Sun x2100M2 extents
+		$base{'x2100'}->{'ddrp118v'} = 'DDR P1 1.8V';
+		$base{'x2100'}->{'vcc33vstb'} = '+3.3VSTBY';
+		$base{'x2100'}->{'ambienttemp'} = 'System';
+		# Sun x2200 extents
+		$base{'x2100'}->{'ddrp018v'} = 'DDR P0 1.8V';
+		$base{'x2100'}->{'ambienttemp0'} = 'System temp 0';
+		$base{'x2100'}->{'ambienttemp1'} = 'System temp 1';
+		$base{'x2100'}->{'cpu0temp'} = 'CPU0 temp';
+		$base{'x2100'}->{'cpu1temp'} = 'CPU1 temp';
+		
+		# Intel SHG2
+		$base{'shg2'}->{'baseboard12v'} = 'MB 12V';
+		$base{'shg2'}->{'baseboard15v'} = 'MB 1.5V';
+		$base{'shg2'}->{'baseboard25v'} = 'MB 2.5V';
+		$base{'shg2'}->{'baseboard33v'} = 'MB 3.3V';
+		$base{'shg2'}->{'baseboard33vsb'} = '3.3VSTBY';
+		$base{'shg2'}->{'baseboard5v'} = 'MB 5V';
+		$base{'shg2'}->{'baseboarddash12v'} = 'MB -12V';
+		$base{'shg2'}->{'batteryvoltage'} = 'VBAT';
+		$base{'shg2'}->{'processorvrm'} = 'VRM';
+		
+		# IBM x346
+		$base{'x346'}->{'125vsense'} = '+1.25V';
+		$base{'x346'}->{'12vasense'} = '+12V A';
+		$base{'x346'}->{'12vbsense'} = '+12V B';
+		$base{'x346'}->{'12vcsense'} = '+12V C';
+		$base{'x346'}->{'13vsense'} = '+1.3V';
+		$base{'x346'}->{'15vsense'} = '+1.5V';
+		$base{'x346'}->{'18vsense'} = '+1.8V';
+		$base{'x346'}->{'25vsense'} = '+2.5V';
+		$base{'x346'}->{'5vsense'} = '+5V';
+		$base{'x346'}->{'cpu1vcore'} = 'CPU1 Vcore';
+		$base{'x346'}->{'cpu2vcore'} = 'CPU2 Vcore';
+		$base{'x346'}->{'cpuvtt'} = 'CPU VTT';
+		$base{'x346'}->{'dash12vsense'} = '-12V';
+		$base{'x346'}->{'vbat'} = 'VBAT';
+		$base{'x346'}->{'cpu1'} = 'CPU1';
+		$base{'x346'}->{'cpu2'} = 'CPU2';
+		$base{'x346'}->{'dasd'} = 'DASD';
+		$base{'x346'}->{'ambient'} = 'System';
+		
+		# Sun x2250
+		$base{'x2250'}->{'3v3_stby'} = '3.3VSTBY';
+		$base{'x2250'}->{'3v3'} = '+3.3V';
+		$base{'x2250'}->{'5v'} = '+5V';
+		$base{'x2250'}->{'12v'} = '+12V';
+		$base{'x2250'}->{'1v5'} = '+1.5V';
+		$base{'x2250'}->{'1v8'} = '+1.8V';
+		$base{'x2250'}->{'0v9'} = '+0.9V';
+		$base{'x2250'}->{'vtt'} = 'VTT';
+		$base{'x2250'}->{'1v5_esb'} = 'ESB +1.5V';
+		$base{'x2250'}->{'1v2_nic'} = 'NIC +1.2V';
+		$base{'x2250'}->{'1v8_nic'} = 'NIC +1.8V';
+		$base{'x2250'}->{'1v5_fbd'} = 'FBDIMM +1.5V';
+		
+		# Sun x4150
+		$base{'x4150'}->{'mb_t_amb0'} = 'MB Sensor 0';
+		$base{'x4150'}->{'mb_t_amb1'} = 'MB Sensor 1';
+		$base{'x4150'}->{'mb_t_amb2'} = 'MB Sensor 2';
+		$base{'x4150'}->{'mb_t_amb3'} = 'MB Sensor 3';
+		$base{'x4150'}->{'ps0_t_amb'} = 'PS 1 temp';
+		$base{'x4150'}->{'ps1_t_amb'} = 'PS 2 temp';
+		$base{'x4150'}->{'t_amb'} = 'System';
+		$base{'x4150'}->{'ps0_f0'} = 'PS 1 fan';
+		$base{'x4150'}->{'ps1_f0'} = 'PS 2 fan';
+		$base{'x4150'}->{'mb_p0_v_vcc'} = 'CPU0 VCC';
+		$base{'x4150'}->{'mb_p1_v_vcc'} = 'CPU1 VCC';
+		$base{'x4150'}->{'mb_v_12v'} = '+12V';
+		$base{'x4150'}->{'mb_v_1v5'} = '+1.5V';
+		$base{'x4150'}->{'mb_v_1v8'} = '+1.8V';
+		$base{'x4150'}->{'mb_v_2v5stby'} = '+2.5VSTBY';
+		$base{'x4150'}->{'mb_v_3v3'} = '+3.3V';
+		$base{'x4150'}->{'mb_v_3v3stby'} = '+3.3VSTBY';
+		$base{'x4150'}->{'mb_v_5v'} = '+5V';
+		$base{'x4150'}->{'mb_v_nic'} = 'NIC';
+		$base{'x4150'}->{'mb_v_vtt'} = 'VTT';
+		$base{'x4150'}->{'ps0_v_in'} = 'PS 1 voltage in';
+		$base{'x4150'}->{'ps0_v_out'} = 'PS 1 voltage out';
+		$base{'x4150'}->{'ps1_v_in'} = 'PS 2 voltage in';
+		$base{'x4150'}->{'ps1_v_out'} = 'PS 2 voltage out';
+		
+		# Verari VB1205XM
+		$base{'vb1205'}->{'12v'} = '+12V';
+		$base{'vb1205'}->{'1_2v'} = '+1.2V';
+		$base{'vb1205'}->{'1_5v'} = '+1.5V';
+		$base{'vb1205'}->{'3_3v'} = '+3.3V';
+		$base{'vb1205'}->{'5v'} = '+5V';
+		$base{'vb1205'}->{'5vsb'} = '+5VSTBY';
+		$base{'vb1205'}->{'cpu1vcore'} = 'CPU1 Vcore';
+		$base{'vb1205'}->{'cpu2vcore'} = 'CPU2 Vcore';
+		$base{'vb1205'}->{'dash12v'} = '-12V';
+		$base{'vb1205'}->{'vbat'} = 'VBAT';
+		$base{'vb1205'}->{'cputemp1'} = 'CPU 1 temp';
+		$base{'vb1205'}->{'cputemp2'} = 'CPU 2 temp';
+		$base{'vb1205'}->{'systemp'} = 'System';
+		
+		# Dell PowerEdge 2650
+		$base{'pe2650'}->{'esmmbfan1'} = 'Fan 1';
+		$base{'pe2650'}->{'esmmbfan2'} = 'Fan 2';
+		$base{'pe2650'}->{'esmmbfan3'} = 'Fan 3';
+		$base{'pe2650'}->{'esmmbfan4'} = 'Fan 4';
+		$base{'pe2650'}->{'esmmbfan5'} = 'Fan 5';
+		$base{'pe2650'}->{'esmmbfan6'} = 'Fan 6';
+		$base{'pe2650'}->{'esmmbfan7'} = 'Fan 7';
+		$base{'pe2650'}->{'esmmb12'} = 'MB +12V';
+		$base{'pe2650'}->{'esmmb25'} = 'MB +2.5V';
+		$base{'pe2650'}->{'esmmb33'} = 'MB +3.3V';
+		$base{'pe2650'}->{'esmmb5'} = 'MB +5V';
+		$base{'pe2650'}->{'esmmbbat'} = 'VBAT';
+		$base{'pe2650'}->{'esmmbdash12'} = 'MB -12V';
+		$base{'pe2650'}->{'esmrombpk'} = 'ROMB PK';
+		$base{'pe2650'}->{'esmvtt'} = 'VTT';
+		$base{'pe2650'}->{'esmcpu'} = 'CPU';
+		$base{'pe2650'}->{'esm5aux'} = '5V AUX';
+		$base{'pe2650'}->{'esmcpu1'} = 'CPU1';
+		$base{'pe2650'}->{'esmcpu2'} = 'CPU2';
+		$base{'pe2650'}->{'esmfrti_o'} = 'Front I/O';
+		$base{'pe2650'}->{'esmriser'} = 'Riser';
+		
+		# IBM x3200
+		$base{'ibmx3xx0'}->{'planar12v'} = '+12V';
+		$base{'ibmx3xx0'}->{'planar15v'} = '+1.5V';
+		$base{'ibmx3xx0'}->{'planar18v'} = '+1.8V';
+		$base{'ibmx3xx0'}->{'planar33v'} = '+3.3V';
+		$base{'ibmx3xx0'}->{'planar5v'} = '+5V';
+		$base{'ibmx3xx0'}->{'cpuvcore'} = 'CPU Vcore';
+		$base{'ibmx3xx0'}->{'cpuvtt'} = 'VTT';
+		$base{'ibmx3xx0'}->{'ambient'} = 'System';
+		$base{'ibmx3xx0'}->{'cpu'} = 'CPU';
+		# IBM x3550 extents
+		$base{'ibmx3xx0'}->{'planarvbat'} = 'VBAT';
+		
+		# IBM LS41
+		$base{'ibmlsxx'}->{'12vsense'} = '+12V';
+		$base{'ibmlsxx'}->{'3_3vsense'} = '+3.3V';
+		$base{'ibmlsxx'}->{'5vsense'} = '+5V';
+		$base{'ibmlsxx'}->{'planarvbat'} = 'VBAT';
+		# IBM LS20 extents
+		$base{'ibmlsxx'}->{'1_8vsense'} = '+1.8V';
+		$base{'ibmlsxx'}->{'1_8vsbsense'} = '+1.8VSB';
+		$base{'ibmlsxx'}->{'12vsbsense'} = '+12VSB';
+		$base{'ibmlsxx'}->{'12v_isense'} = '+12V_I';
+		
+		# IBM HS21 
+		$base{'ibmhsxx'}->{'planar0_9v'} = '+0.9V';
+		$base{'ibmhsxx'}->{'planar12v'} = '+12V';
+		$base{'ibmhsxx'}->{'planar3_3v'} = '+3.3V';
+		$base{'ibmhsxx'}->{'planar5v'} = '+5V';
+		$base{'ibmhsxx'}->{'planarvbat'} = 'VBAT';
+
+
+		# Machine config, run through the file/output
+		my $label; my $tmp;
+		foreach my $line ( @ipmioutput )
+		{
+			$line =~ s/\s+/ /g;
+			if ( $sensor eq 'fan' && $line =~ /.*RPM.*ok/ )
+			{
+				if ( $machine eq 'x4x00' ) { $line =~ /(.*)\.speed.*/; $label = $1; }
+				if ( $machine eq 'v20z' ) { $line =~ /(.*)\.tach.*/; $label = $1; }
+				if ( $machine eq 'x2100') { $line =~ s/(.*)\s+\|.*RPM.*/\L$1/; $label = $line; }
+				if ( $machine eq 'x346' ) { $line =~ /(.*) Tach.*/; $label = $1; }
+				if ( $machine eq 'shg2' ) { $line =~ s/(.*)\s+\|.*RPM.*\|\s+ok/$1/; $label = $1; }
+				if ( $machine eq 'x2250' ) { $line =~ /(.*)\/TACH.*RPM.*/; $label = $1; }
+				if ( $machine eq 'x4150' ) { $line =~ /(.*)\/TACH.*RPM.*/; $label = $1; }
+				if ( $machine eq 'pe2650' ) { $line =~ /(.*) RPM\s+\|.*RPM.*/; $label = $1; }
+				if ( $machine eq 'ibmx3xx0' ) { $line =~ /(.*) Tach.*/; $label = $1; }
+				
+			}
+			
+			if ( $sensor eq 'temp' && $line =~ /.*degree.*ok/ )
+			{
+				if ( $machine eq 'x4x00' ) { $line =~ /(.*)\ \|.*deg.*/; $label = $1; }
+				if ( $machine eq 'v20z' ) { $line =~ /(.*)temp.*/; $label = $1; }
+				if ( $machine eq 'x2100') { $line =~ s/(.*)\s+\|.*deg.*/\L$1/; $label = $line; }
+				if ( $machine eq 'x346' ) { $line =~ /(.*) Temp.*/; $label = $1; }
+				if ( $machine eq 'shg2' ) { $line =~ /(.*)\s+\|.*deg.*/; $label = $1; }
+				if ( $machine eq 'x2250' ) { $line =~ /MB\/T\_(.*)\s+\|.*deg.*/; $label = $1; }
+				if ( $machine eq 'x4150' ) { $line =~ /(.*)\s+\|.*deg.*/; $label = $1; }
+				if ( $machine eq 'vb1205' ) { $line =~ /(.*)\s+\|.*deg.*/; $label = $1; }
+				if ( $machine eq 'pe2650' ) { $line =~ /(.*) Temp.*/; $label = $1; }
+				if ( $machine eq 'ibmx3xx0' ) { $line =~ /(.*) Temp.*/; $label = $1; }
+				if ( $machine eq 'ibmlsxx' ) { $line =~ /(.*) TEMP.*/; $label = $1; }
+				
+			}
+			
+			if ( $sensor eq 'volt' && $line =~ /.*Volts.*/ )
+			{
+				if ( $machine eq 'x4x00' ) { $line =~ /(.*)\ \|.*Volts.*/; $label = $1; }
+				if ( $machine eq 'v20z' ) { $line =~ /(.*)\ \|.*Volts.*/; $label = $1; }
+				if ( $machine eq 'x2100') { $line =~ s/(.*)\s+\|.*Volts.*/\L$1/; $label = $line; }
+				if ( $machine eq 'x346' ) { $line =~ /(.*)\s+\|.*Volts.*/; $label = $1; }
+				if ( $machine eq 'shg2' ) { $line =~ /(.*)\s+\|.*Volts.*/; $label = $1; }
+				if ( $machine eq 'x2250' ) { $line =~ /MB\/V\_(.*)\s+\|.*Volts.*/; $label = $1; }
+				if ( $machine eq 'x4150' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1;  }
+				if ( $machine eq 'vb1205' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1; $label =~ s/\./_/g; }
+				if ( $machine eq 'pe2650' ) { $line =~ /(.*) Volt\s+\|.*Volts.*/; $label = $1; }
+				if ( $machine eq 'ibmx3xx0' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1; }
+				if ( $machine eq 'ibmlsxx' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1; $label =~ s/\./_/g; }
+				if ( $machine eq 'ibmhsxx' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1; $label =~ s/\./_/g; }
+				
+				
+			}
+			
+			if ( $label )
+			{
+				$label =~ s/\.//g;
+				$label =~ s/\-/dash/g;
+				$label =~ s/\+//;
+				$label =~ s/\s+//g;
+				$label =~ s/(.*)/\L$1/;
+				$label =~ s/\//_/g;
+				
+				if ( $base{$machine}->{$label} )
+				{
+					$cnf{ $label. '.label' } = $base{$machine}->{$label};
+				}
+				else
+				{
+					$cnf{ $label. '.label' } = $label;
+				}
+			}	
+
+			undef ($label);
+		}
+		foreach my $key ( sort(keys(%cnf)) )
+		{
+			print "$key $cnf{$key}\n";
+		}
+	}
+	exit 0;
+}
+
+my %res; my $label; my $value;
+foreach my $line ( @ipmioutput )
+{
+	$line =~ s/\s+/ /g;
+	if ( $sensor eq 'fan' && $line =~ /.*RPM.*ok/ )
+	{
+		if ( $machine eq 'x4x00' ) { $line =~ /(.*)\.speed\s+\|\s+(\d+) RPM.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'v20z' ) { $line =~ /(.*)\.tach\s+\|\s+(\d+) RPM.*/;  $label = $1; $value = $2; }
+		if ( $machine eq 'x2100' ) { $line =~ s/(.*)\s+\|\s+(\S+) RPM.*/\L$1/; $label = $line; $value = $2; }
+		if ( $machine eq 'x346' ) { $line =~ /(.*) Tach\s+\| (\d+) RPM.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'shg2' ) { $line =~ /(.*)\s+\|\s+(.*) RPM.*\|.*ok/; $label = $1; $value = $2; }
+		if ( $machine eq 'x2250' ) { $line =~ /(.*)\/TACH\s+\|\s+(.*) RPM.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'x4150' ) { $line =~ /(.*)\/TACH\s+\|\s+(\S+) RPM.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'pe2650' ) { $line =~ /(.*) RPM\s+\|\s+(\S+) RPM.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'ibmx3xx0' ) { $line =~ /(.*) Tach\s+\|\s+(\S+) RPM.*/; $label = $1; $value = $2; }
+	}
+	
+	if ( $sensor eq 'temp' && $line =~ /.*degree.*ok/ )
+	{
+		if ( $machine eq 'x4x00' ) { $line =~ /(.*)\s+\|\s+(\S+)\ deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'v20z' ) { $line =~ /(.*)temp\s+\|\s+(\S+)\ deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'x2100' ) { $line =~ s/(.*)\s+\|\s+(\d+) deg.*/\L$1/; $label = $line; $value = $2; }
+		if ( $machine eq 'x346' ) { $line =~ /(.*) Temp\s+\|\s+(\d+) deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'shg2' ) { $line =~ /(.*)\s+\|\s+(\d+) deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'x2250' ) { $line =~ /MB\/T\_(.*)\s+\|\s+(\d+) deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'x4150' ) { $line =~ /(.*)\s+\|\s+(\S+) deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'vb1205' ) { $line =~ /(.*)\s+\|\s+(\S+) deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'pe2650' ) { $line =~ /(.*) Temp\s+\|\s+(\S+) deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'ibmx3xx0' ) { $line =~ /(.*) Temp\s+\|\s+(\S+) deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'ibmlsxx' ) { $line =~ /(.*) TEMP\s+\|\s+(\S+) deg.*/; $label = $1; $value = $2; }
+	}
+	
+	if ( $sensor eq 'volt' && $line =~ /.*Volt.*ok/ )
+	{
+		if ( $machine eq 'x4x00' ) { $line =~ /(.*)\ \|\s+(\S+)\ Volt.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'v20z' ) { $line =~ /(.*)\s+\|\s+(\S+)\ Volt.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'x2100' ) { $line =~ s/(.*)\s+\|\s+(\S+)\ Volt.*/\L$1/; $label = $line; $value = $2; }
+		if ( $machine eq 'x346' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'shg2' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'x2250' ) { $line =~ /MB\/V\_(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'x4150' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'vb1205' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; $label =~ s/\./_/g; }
+		if ( $machine eq 'pe2650' ) { $line =~ /(.*) Volt\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'ibmx3xx0' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'ibmlsxx' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; $label =~ s/\./_/g; }
+		if ( $machine eq 'ibmhsxx' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; $label =~ s/\./_/g; }
+		
+	}
+
+	if ( $label )
+	{
+		$label =~ s/\.//g;
+		$label =~ s/\-/dash/g;
+		$label =~ s/\+//;
+		$label =~ s/\s+//g;
+		$label =~ s/(.*)/\L$1/;
+		$label =~ s/\//_/g;
+                                		
+		$res{$label} = $value;
+	}
+	undef ($label);
+}
+
+my $key;
+foreach $key ( sort(keys(%res)) )
+{
+	print "$key.value ".$res{$key}."\n";
+}
+
