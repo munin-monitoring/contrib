@@ -1,0 +1,190 @@
+#!/usr/bin/perl -w
+# -*- perl -*- 
+
+=head1 NAME
+
+acpi_batt_ Munin plugin to monitor the (note|net)book battery states through procfs
+
+=head1 APPLICABLE SYSTEMS
+
+Notebooks and netbooks with avialable /proc/acpi/battery
+
+=head1 CONFIGURATION
+
+Configured change the name of symbolic link
+
+acpi_batt_X_capacity - chart of Design capacity, Last full capacity, Design capacity low,
+                       Design capacity warning, Capacity granularity 1, Capacity granularity 2,
+                       Remaining capacity, Present rate (mA)
+acpi_batt_X_percents - percentage chart of Current voltage, Current capacity, Full capacity (of design)
+acpi_batt_X_voltage  - chart of Design voltage, Present voltage
+Where X is the number of battery from /proc/acpi/battery/BATX
+
+=head1 INTERPRETATION
+
+The plugin shows:
+ Design capacity
+ Last full capacity
+ Design capacity low
+ Design capacity warning
+ Capacity granularity 1
+ Capacity granularity 2
+ Remaining capacity
+ Present rate (mA)
+ Percentage Current/design voltage
+ Percentage Full/current capacity
+ Percentage Design/full capacity
+ Design voltage
+ Present voltage
+
+=head1 MAGIC MARKERS
+
+#%# family=power
+
+=head1 VERSION 
+=head1 BUGS 
+
+None known.
+
+=head1 AUTHOR
+
+Gorlow Maxim <sheridan@sheridan-home.ru>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+
+use strict;
+#use Data::Dumper;
+
+my ($graph_type, $batt_num);
+if ($0 =~ /^(?:|.*\/)acpi_batt_([^_]+)_(.+)$/)
+{
+    $graph_type = $2;
+    $batt_num = $1;
+}
+elsif (!defined($batt_num) or !defined($graph_type)) {
+    die "# Error: couldn't understand what I'm supposed to monitor."; }
+
+#print "$batt_num, $graph_type \n";
+
+sub trim
+{
+	my($string)=@_;
+	for ($string)
+	{
+		s/^\s+//;
+		s/\s+$//;
+	}
+	return $string;
+}
+
+
+sub read_data
+{
+	my $file = $_[0];
+	my ($fh, $var, $val);
+	my @tmp;
+	my $result = {};
+	open($fh, '<', "/proc/acpi/battery/BAT${batt_num}/${file}") or die $!;
+	foreach my $line (<$fh>)
+	{
+		chomp ($line);
+		($var, $val) = split(':', $line);
+		if ( $val =~ m/^\s*$/ )
+		{
+			$val = "unknown";
+		}
+		elsif ( $var ne "batery type" or $var ne "serial number" or $var ne "OEM info" )
+		{ 
+			@tmp = split(" " ,$val);
+			$val = trim($tmp[0]);
+		}
+		$result->{$var} = $val;
+		#print "$var, -$val- \n";
+	}
+	close($fh);
+	return $result;
+}
+
+my $batt_data = {};
+$batt_data->{'info'}  = read_data("info" );
+$batt_data->{'state'} = read_data("state");
+
+#print Dumper($batt_data);
+
+if ($ARGV[0] and $ARGV[0] eq "config")
+{
+	my $batt_name = sprintf("%s %s %s", $batt_data->{'info'}{'OEM info'}, $batt_data->{'info'}{'battery type'}, $batt_data->{'info'}{'model number'});
+	print  ("graph_args --base 1000\n");
+	printf ("graph_title Battery %s (%s) %s\n" , $batt_num, $batt_name, $graph_type);
+	printf ("graph_info This graph shows battery %s (%s) %s\n" , $batt_num, $batt_name, $graph_type);
+	print  ("graph_category power\n");
+	if ($graph_type eq "capacity")
+	{
+		print  ("graph_vlabel Capacity, mAh\n");
+		print  ("dc.label Design capacity\ndc.type GAUGE\ndc.draw AREA\n");
+		print  ("lfc.label Last full capacity\nlfc.type GAUGE\nlfc.draw AREA\n");
+		print  ("dcl.label Design capacity low\ndcl.type GAUGE\ndcl.draw LINE2\n");
+		print  ("dcw.label Design capacity warning\ndcw.type GAUGE\ndcw.draw LINE2\n");
+		print  ("cg1.label Capacity granularity 1\ncg1.type GAUGE\ncg1.draw LINE2\n");
+		print  ("cg2.label Capacity granularity 2\ncg2.type GAUGE\ncg2.draw LINE2\n");
+		print  ("rc.label Remaining capacity\nrc.type GAUGE\nrc.draw LINE2\n");
+		print  ("pr.label Present rate (mA)\npr.type GAUGE\npr.draw LINE2\n");
+	}
+	elsif ($graph_type eq "voltage")
+	{
+		print  ("graph_vlabel Voltage, mV\n");
+		print  ("d.label Design voltage\nd.type GAUGE\nd.draw AREA\n");
+		print  ("p.label Present voltage\np.type GAUGE\np.draw AREA\n");
+	}
+	elsif ($graph_type eq "percents")
+	{
+		print  ("graph_vlabel %\n");
+		print  ("cv.label Current voltage\ncv.type GAUGE\ncv.draw LINE2\n");
+		print  ("cc.label Current capacity\ncc.type GAUGE\ncc.draw LINE2\n");
+		print  ("fc.label Full capacity (of design)\nfc.type GAUGE\nfc.draw LINE2\n");
+	}
+	exit 0;
+}
+
+#$batt_data->{'info'}{''}
+sub percent
+{
+	my ($full, $current) = @_[0..1];
+	return $current/($full/100);
+}
+
+if ($graph_type eq "capacity")
+{
+	printf ("dc.value %s\n", $batt_data->{'info'}{'design capacity'});
+	printf ("lfc.value %s\n", $batt_data->{'info'}{'last full capacity'});
+	printf ("dcl.value %s\n", $batt_data->{'info'}{'design capacity low'});
+	printf ("dcw.value %s\n", $batt_data->{'info'}{'design capacity warning'});
+	printf ("cg1.value %s\n", $batt_data->{'info'}{'capacity granularity 1'});
+	printf ("cg2.value %s\n", $batt_data->{'info'}{'capacity granularity 2'});
+	printf ("rc.value %s\n", $batt_data->{'state'}{'remaining capacity'});
+	printf ("pr.value %s\n", $batt_data->{'state'}{'present rate'});
+}
+elsif ($graph_type eq "voltage")
+{
+	printf ("d.value %s\n", $batt_data->{'info'}{'design voltage'});
+	printf ("p.value %s\n", $batt_data->{'state'}{'present voltage'});
+}
+elsif ($graph_type eq "percents")
+{
+	printf ("cv.value %s\n", percent($batt_data->{'info'}{'design voltage'},$batt_data->{'state'}{'present voltage'}));
+	printf ("cc.value %s\n", percent($batt_data->{'info'}{'design capacity'},$batt_data->{'state'}{'remaining capacity'}));
+	printf ("fc.value %s\n", percent($batt_data->{'info'}{'design capacity'},$batt_data->{'info'}{'last full capacity'}));
+}
+
+
+
+
+
+
+
+
