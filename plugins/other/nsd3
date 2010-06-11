@@ -1,0 +1,159 @@
+#!/usr/bin/python
+#%# family=auto
+#%# capabilities=suggest autoconf
+
+
+"""
+Munin plugin to monitor NSD3 statistics
+J.T.Sage <jtsage@gmail.com>, 2010/06/10
+
+To use:
+ln -s path_to_this_script /etc/munin/plugins/nsd
+
+Configuration
+[nsd]
+	user nsd
+	env.statsfile /var/log/nsd.log
+	env.pidfile /var/run/nsd3/nsd.pid
+
+Notes:
+  Note that the plugin has a built in half second pause for the lastest NSD3 
+  statistics to write.  This is done via a SIGUSR1 signal to the process.  
+  If your system is sufficiently loaded to the point that half a second
+  is not enough time for the file to be written to, please update that 
+  number in the source.  It should be more than long enough for most
+  users.
+"""
+
+import os
+import sys
+import subprocess
+import time
+import re
+
+STATS_FILE = os.environ.get('statsfile', '/var/log/nsd.log')
+PID_FILE = os.environ.get('pidfile', '/var/run/nsd3/nsd.pid')
+
+def print_config():
+    """Generates and prints a munin config for a given chart."""
+
+    print "graph_title NSD3 Queries"
+    print "graph_vlabel qps"
+    print "graph_category network"
+    print "graph_info Queries per second"
+    print "a.label A"
+    print "a.type DERIVE"
+    print "a.min 0"
+    print "aaaa.label AAAA"
+    print "aaaa.type DERIVE"
+    print "aaaa.min 0"
+    print "ptr.label PTR"
+    print "ptr.type DERIVE"
+    print "ptr.min 0"
+    print "mx.label MX"
+    print "mx.type DERIVE"
+    print "mx.min 0"
+    print "type252.label AXFR"
+    print "type252.type DERIVE"
+    print "type252.min 0"
+    print "snxd.label NXDOMAIN"
+    print "snxd.type DERIVE"
+    print "snxd.min 0"
+    print "rq.label Total Successful"
+    print "rq.type DERIVE"
+    print "rq.min 0"
+  
+
+def print_values():
+    """Gets NSD's latest stats."""
+    
+    pidf = open(PID_FILE, 'r')
+    pidn = pidf.read()
+    pidf.close();
+    statscmd = ['kill', '-SIGUSR1']
+    statscmd.append(pidn.strip())
+    dropstats = subprocess.call(statscmd)
+
+    time.sleep(.5) # Wait for the log to write.
+    statf = open(STATS_FILE, 'r')
+    stats = tail(statf, 10)
+
+    nstats = []
+    xstats = []
+
+    for line in stats:
+        if "XSTATS" in line:
+            xstats.append(line.strip())
+        if "NSTATS" in line:
+            nstats.append(line.strip())
+
+    matches = re.compile(' A=(\d+)').findall(nstats[-1])
+    if matches == []:
+        print "a.value 0"
+    else:
+        print "a.value " + matches[0]
+
+    matches = re.compile(' AAAA=(\d+)').findall(nstats[-1])
+    if matches == []:
+        print "aaaa.value 0"
+    else:
+        print "aaaa.value " + matches[0]    
+
+    matches = re.compile(' PTR=(\d+)').findall(nstats[-1])
+    if matches == []:
+        print "ptr.value 0"
+    else:
+        print "ptr.value " + matches[0]
+
+
+    matches = re.compile(' MX=(\d+)').findall(nstats[-1])
+    if matches == []:
+        print "mx.value 0"
+    else:
+        print "mx.value " + matches[0]
+
+    matches = re.compile(' TYPE252=(\d+)').findall(nstats[-1])
+    if matches == []:
+        print "type252.value 0"
+    else:
+        print "type252.value " + matches[0]
+
+    matches = re.compile(' SNXD=(\d+) ').findall(xstats[-1])
+    if matches == []:
+        print "snxd.value 0"
+    else:
+        print "snxd.value " + matches[0]
+
+    matches = re.compile(' RQ=(\d+) ').findall(xstats[-1])
+    if matches == []:
+        print "rq.value 0"
+    else:
+        print "rq.value " + matches[0]
+
+def tail( f, window=20 ):
+    f.seek( 0, 2 )
+    bytes= f.tell()
+    size= window
+    block= -1
+    while size > 0 and bytes+block*1024  > 0:
+        f.seek( block*1024, 2 ) # from the end!
+        data= f.read( 1024 )
+        linesFound= data.count('\n')
+        size -= linesFound
+        block -= 1
+    f.seek( block*1024, 2 )
+    f.readline() # find a newline
+    lastBlocks= list( f.readlines() )
+    return lastBlocks[-window:]
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        if  sys.argv[1] == 'autoconf':
+            print 'yes'
+            sys.exit(0)
+
+    if len(sys.argv) > 1 and sys.argv[1] == 'config':
+        print_config()
+        sys.exit(0)
+
+    print_values()
