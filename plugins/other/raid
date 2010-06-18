@@ -5,7 +5,7 @@
 # Plugin to monitor RAID status 
 #
 # Results are % of healthy drives in a raid device
-#
+# and % rebuilt of devices that are resyncing. 
 #
 #%# family=contrib
 #%# capabilities=autoconf
@@ -30,7 +30,7 @@ if ( $ARGV[0] and $ARGV[0] eq "config" )
     print "graph_category disk\n";
     print "graph_info This graph monitors RAID disk health.  Values are percentage of healthy drives in each raid group.  Degraded devices are marked Critical.\n";
     print "graph_args --base 1000 -l 0\n";
-    print "graph_vlabel % healthy\n";
+    print "graph_vlabel % healthy/rebuilt\n";
     print "graph_scale  no\n";
 }
 
@@ -51,17 +51,32 @@ if ( $ARGV[0] and $ARGV[0] eq "config" )
 	    print "$dev.info $type $members\n";
 	    # 100: means less than 100
 	    print "$dev.critical 100:\n";	
+	    print $dev, "_rebuild.label $dev rebuilt\n";
+	    print $dev, "_rebuild.info $type\n";
+	    print $dev, "_rebuild.critical 100:\n";	
 	} 
 	else
 	{
-	    my $pct = 100 * $nact / $nmem; 
+	    my $pct = 100 * $nact / $nmem;
+	    my $rpct = 100;
+	    if ( $pct < 100 )
+	    {
+		my $output = `/sbin/mdadm -D /dev/$dev | grep Rebuild`;
+		if( $output =~ /([0-9]+)% complete/ )
+		{
+			$rpct = $1;
+		}
+		else
+		{
+			$rcpt = 0;
+		}
+	    }
 	    print "$dev.value $pct\n";
+	    print $dev, "_rebuild.value $rpct\n";
 	}
 	$text = $';
     } 
 }
 
 exit 0;
-
-# vim:syntax=perl
 
