@@ -1,0 +1,96 @@
+#!/usr/bin/perl 
+# -*- perl -*-
+
+=head1 NAME
+
+dar_uptime - Munin plugin to monitor darwin system uptime.
+
+=head1 APPLICABLE SYSTEMS
+
+Should work on any darwin (Mac OS X) system with the 'uptime' command.
+
+=head1 CONFIGURATION
+
+None needed
+
+=head1 INTERPRETATION
+
+The plugin runs the uptime command, and parses the value into days.
+
+=head1 BUGS
+
+Limited test data set, probably fails some of the time - very likely
+on systems with a very low uptime.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+  v.0.0.1
+
+=head1 AUTHOR
+
+Copyright (C) 2010.
+
+Original version by J.T.Sage (at) gmail (dot) com.
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+use Munin::Plugin;
+
+if ( defined($ARGV[0])) {
+    if ($ARGV[0] eq 'autoconf') {
+	$uname = `uname`;
+	if ( not ( $uname =~ /Darwin/ ) ) { print "no (not a Darwin System)\n"; }
+	else {
+		if ( not -x "/usr/bin/uptime" ) { print "no (uptime not found)\n"; }
+		else {
+			print "yes\n";
+		}
+	}
+	exit 0;
+    }
+
+    if ( $ARGV[0] eq "config" ) {
+	print "graph_title Uptime\n";
+	print "graph_args --base 1000 -l 0 \n";
+	print "graph_vlabel uptime in days\n";
+	print "graph_category system\n";
+	print "uptime.label uptime\n";
+	print "uptime.draw AREA\n";
+	exit 0;
+    }
+}
+
+@uptime = `/usr/bin/uptime`; 
+foreach(@uptime) {
+	$_ =~ m/^.+up (.+?), \d+ us.+$/;
+	$timestr = $1; 
+	if ( $timestr =~ m/^(\d+) day.+?$/ ) {
+		$days = $1;
+	} else { $days = 0; }
+	if ( $timestr =~ m/(\d+) h/ ) {
+		$hrs = $1;
+	} else { $hrs = 0; }
+	if ( $timestr =~ m/(\d+)\:(\d+)/ ) {
+		$hours = $1; $min = $2;
+	} else { $hours = 0; $min = 0; }
+	if ( $timestr =~ m/(\d+) m/ ) {
+		$mint = $1;
+	} else {
+		$mint = 0;
+	}
+	$total = ( $days * 24 * 60 * 60 ) + ( ( $hrs + $hours ) * 60 * 60 ) + ( ( $min + $mint ) * 60 );
+	$daysf = $total / ( 24 * 60 * 60 );
+	$daysi = ( int( $daysf * 1000 ) / 1000 );
+	print "uptime.value " . $daysi . "\n";
+}
+
+# vim:syntax=perl
