@@ -18,6 +18,7 @@ The following environment settings are the default configuration.
    env.squidport 3128
    env.squiduser [empty]
    env.squidpasswd [empty]
+   env.squidreqtimeout 5
 
 =head1 INTERPRETATION
 
@@ -30,7 +31,7 @@ The plugin shows various statistics, current it:
 - memory
 - mean object size
 - cpu
-- median service times
+- median service times per 5 and 60 min
 - internal data structures
 
 =head1 MAGIC MARKERS
@@ -64,10 +65,11 @@ use Munin::Plugin;
 
 need_multigraph();
 
-my $squid_host   = $ENV{squidhost}   || "gate.bng.local";
-my $squid_port   = $ENV{squidport}   || 3128;
-my $squid_user   = $ENV{squiduser}   || "root";
-my $squid_passwd = $ENV{squidpasswd} || "root";
+my $squid_host            = $ENV{squidhost}       || "localhost";
+my $squid_port            = $ENV{squidport}       || 3128;
+my $squid_user            = $ENV{squiduser}       || "";
+my $squid_passwd          = $ENV{squidpasswd}     || "";
+my $squid_request_timeout = $ENV{squidreqtimeout} || "5";
 
 sub make_request
 {
@@ -100,7 +102,7 @@ sub squid_requst
   die "Could not connect: $!\n" unless my $cachemgr = IO::Socket::INET->new(PeerAddr => $squid_host, 
                                                                             PeerPort => $squid_port, 
                                                                             Proto    => 'tcp', 
-                                                                            Timeout  => 5);
+                                                                            Timeout  => $squid_request_timeout);
   my $request = &make_request($what);
   $cachemgr->syswrite($request, length($request));
   return $cachemgr;
@@ -116,7 +118,7 @@ if($ARGV[0] and $ARGV[0] eq "config")
 {
   my %config;
   # ------------------------------------------------- squid_efficiency_ -----------------------------------------
-  foreach my $time ("5", "60")
+  foreach my $time (qw(5 60))
   {
     my $name = sprintf("squid_efficiency_%s", $time);
     $config{$name}{'graph'}{'title'}    = "Cache efficiency in ${time}min";
@@ -133,6 +135,11 @@ if($ARGV[0] and $ARGV[0] eq "config")
     $config{$name}{'field'}{'memory'}{'label'} = 'Memory hits of hit requests';
     $config{$name}{'field'}{'disk'}{'draw'}    = 'LINE1';
     $config{$name}{'field'}{'disk'}{'label'}   = 'Disk hits of hit requests';
+    foreach my $fld (qw(all bytes memory disk))
+    {
+      $config{$name}{'field'}{$fld}{'max'} = 100;
+      $config{$name}{'field'}{$fld}{'min'} = 0;
+    }
   }
   # ------------------------------------------------- squid_traffic -----------------------------------------
   $config{'squid_traffic'}{'graph'}{'title'}    = 'Traffic statistics';
@@ -156,7 +163,7 @@ if($ARGV[0] and $ARGV[0] eq "config")
   $config{'squid_traffic'}{'field'}{'icp_q_out'}{'label'}        = 'ICP queryes';
   $config{'squid_traffic'}{'field'}{'icp_r_out'}{'label'}        = 'ICP replies';
   $config{'squid_traffic'}{'field'}{'cd_out'}{'label'}           = 'Cache digest';
-  foreach my $fld ('client_http', 'server_all', 'server_http', 'server_ftp', 'server_other', 'icp', 'icp_q', 'icp_r', 'cd')
+  foreach my $fld (qw(client_http server_all server_http server_ftp server_other icp icp_q icp_r cd))
   {
     my ($namein, $nameout) = (sprintf("%s_in", $fld), sprintf("%s_out", $fld));
     $config{'squid_traffic'}{'field'}{$namein}{'type'}  = 'COUNTER';
@@ -204,7 +211,7 @@ if($ARGV[0] and $ARGV[0] eq "config")
   $config{'squid_requests'}{'field'}{'server_http_requests'}{'label'}  = 'Server HTTP';
   $config{'squid_requests'}{'field'}{'server_ftp_requests'}{'label'}   = 'Server FTP';
   $config{'squid_requests'}{'field'}{'server_other_requests'}{'label'} = 'Server other';
-  foreach my $fld ('client_http', 'server_all', 'server_http', 'server_ftp', 'server_other')
+  foreach my $fld (qw(client_http server_all server_http server_ftp server_other))
   {
     my ($errf, $reqf) = (sprintf("%s_errors", $fld), sprintf("%s_requests", $fld));
     $config{'squid_requests'}{'field'}{$errf}{'type'}  = 'COUNTER';
@@ -245,7 +252,7 @@ if($ARGV[0] and $ARGV[0] eq "config")
   $config{'squid_memory'}{'field'}{'ta'}{'label'}      = 'Total accounted';
   $config{'squid_memory'}{'field'}{'ma'}{'label'}      = 'memPool accounted';
   $config{'squid_memory'}{'field'}{'mu'}{'label'}      = 'memPool unaccounted';
-  foreach my $fld ('mi_tsia', 'mi_ob', 'mi_sb', 'mi_hb', 'mi_fsb', 'mi_fob', 'mi_tiu', 'mi_tf', 'mi_ts', 'ta', 'ma', 'mu')
+  foreach my $fld (qw(mi_tsia mi_ob mi_sb mi_hb mi_fsb mi_fob mi_tiu mi_tf mi_ts ta ma mu))
   {
      $config{'squid_memory'}{'field'}{$fld}{'draw'}  = 'LINE1';
      $config{'squid_memory'}{'field'}{$fld}{'cdef'}  = sprintf("%s,1024,*", $fld);
@@ -255,22 +262,28 @@ if($ARGV[0] and $ARGV[0] eq "config")
   $config{'squid_meanobject'}{'graph'}{'vlabel'}   = 'bytes';
   $config{'squid_meanobject'}{'graph'}{'args'}     = '--base 1000';
   $config{'squid_meanobject'}{'graph'}{'category'} = 'squid';
-  $config{'squid_meanobject'}{'graph'}{'order'}    = 'mi_tsia mi_ob mi_sb mi_hb mi_fsb mi_fob mi_tiu mi_tf mi_ts ta ma mu';
+  $config{'squid_meanobject'}{'graph'}{'order'}    = 'mos';
   $config{'squid_meanobject'}{'field'}{'mos'}{'label'} = 'Mean object size';
   $config{'squid_meanobject'}{'field'}{'mos'}{'draw'}  = 'LINE1';
   $config{'squid_meanobject'}{'field'}{'mos'}{'cdef'}  = 'mos,1024,*';
   # ------------------------------------------------- squid_cpu -----------------------------------------
   $config{'squid_cpu'}{'graph'}{'title'}    = 'CPU usage';
   $config{'squid_cpu'}{'graph'}{'vlabel'}   = '%';
-  $config{'squid_cpu'}{'graph'}{'args'}     = '--lower-limit 0';
+  $config{'squid_cpu'}{'graph'}{'args'}     = '--base 1000 --lower-limit 0';
   $config{'squid_cpu'}{'graph'}{'category'} = 'squid';
+  $config{'squid_cpu'}{'graph'}{'scale'}    = 'no';
   $config{'squid_cpu'}{'graph'}{'order'}    = 'cur av5 av60';
-  $config{'squid_cpu'}{'field'}{'cur'}{'label'} = 'Current';
-  $config{'squid_cpu'}{'field'}{'cur'}{'draw'}  = 'LINE1';
-  $config{'squid_cpu'}{'field'}{'av5'}{'label'} = '5 minute average';
-  $config{'squid_cpu'}{'field'}{'av5'}{'draw'}  = 'LINE1';
+  $config{'squid_cpu'}{'field'}{'cur'}{'label'}  = 'Current';
+  $config{'squid_cpu'}{'field'}{'cur'}{'draw'}   = 'LINE1';
+  $config{'squid_cpu'}{'field'}{'av5'}{'label'}  = '5 minute average';
+  $config{'squid_cpu'}{'field'}{'av5'}{'draw'}   = 'LINE1';
   $config{'squid_cpu'}{'field'}{'av60'}{'label'} = '60 minute average';
   $config{'squid_cpu'}{'field'}{'av60'}{'draw'}  = 'LINE1';
+  foreach my $fld (qw(cur av5 av60))
+  {
+    $config{'squid_cpu'}{'field'}{$fld}{'max'} = 100;
+    $config{'squid_cpu'}{'field'}{$fld}{'min'} = 0;
+  }
   # ------------------------------------------------- squid_ids -----------------------------------------
   $config{'squid_ids'}{'graph'}{'title'}    = 'Internal data structures';
   $config{'squid_ids'}{'graph'}{'vlabel'}   = 'Count';
@@ -281,12 +294,12 @@ if($ARGV[0] and $ARGV[0] eq "config")
   $config{'squid_ids'}{'field'}{'se'}{'draw'}  = 'LINE1';
   $config{'squid_ids'}{'field'}{'sewmo'}{'label'} = 'StoreEntries with MemObjects';
   $config{'squid_ids'}{'field'}{'sewmo'}{'draw'}  = 'LINE1';
-  $config{'squid_ids'}{'field'}{'hoci'}{'label'} = 'Hot object cache items';
-  $config{'squid_ids'}{'field'}{'hoci'}{'draw'}  = 'LINE1';
-  $config{'squid_ids'}{'field'}{'odo'}{'label'} = 'On-disk objects';
-  $config{'squid_ids'}{'field'}{'odo'}{'draw'}  = 'LINE1';
+  $config{'squid_ids'}{'field'}{'hoci'}{'label'}  = 'Hot object cache items';
+  $config{'squid_ids'}{'field'}{'hoci'}{'draw'}   = 'LINE1';
+  $config{'squid_ids'}{'field'}{'odo'}{'label'}   = 'On-disk objects';
+  $config{'squid_ids'}{'field'}{'odo'}{'draw'}    = 'LINE1';
   # ------------------------------------------------- squid_mst -----------------------------------------
-  foreach my $time ("5", "60")
+  foreach my $time (qw(5 60))
   {
     my $name = sprintf("squid_mst_%s", $time);
     $config{$name}{'graph'}{'title'}    = "Median service times in ${time} minuts";
@@ -296,18 +309,18 @@ if($ARGV[0] and $ARGV[0] eq "config")
     $config{$name}{'graph'}{'order'}    = 'hra cm ch nh nmr dl iq';
     $config{$name}{'field'}{'hra'}{'label'} = 'HTTP Requests (All)';
     $config{$name}{'field'}{'hra'}{'draw'}  = 'LINE1';
-    $config{$name}{'field'}{'cm'}{'label'} = 'Cache Misses';
-    $config{$name}{'field'}{'cm'}{'draw'}  = 'LINE1';
-    $config{$name}{'field'}{'ch'}{'label'} = 'Cache Hits';
-    $config{$name}{'field'}{'ch'}{'draw'}  = 'LINE1';
-    $config{$name}{'field'}{'nh'}{'label'} = 'Near Hits';
-    $config{$name}{'field'}{'nh'}{'draw'}  = 'LINE1';
+    $config{$name}{'field'}{'cm'}{'label'}  = 'Cache Misses';
+    $config{$name}{'field'}{'cm'}{'draw'}   = 'LINE1';
+    $config{$name}{'field'}{'ch'}{'label'}  = 'Cache Hits';
+    $config{$name}{'field'}{'ch'}{'draw'}   = 'LINE1';
+    $config{$name}{'field'}{'nh'}{'label'}  = 'Near Hits';
+    $config{$name}{'field'}{'nh'}{'draw'}   = 'LINE1';
     $config{$name}{'field'}{'nmr'}{'label'} = 'Not-Modified Replies';
     $config{$name}{'field'}{'nmr'}{'draw'}  = 'LINE1';
-    $config{$name}{'field'}{'dl'}{'label'} = 'DNS Lookups';
-    $config{$name}{'field'}{'dl'}{'draw'}  = 'LINE1';
-    $config{$name}{'field'}{'iq'}{'label'} = 'ICP Queries';
-    $config{$name}{'field'}{'iq'}{'draw'}  = 'LINE1';
+    $config{$name}{'field'}{'dl'}{'label'}  = 'DNS Lookups';
+    $config{$name}{'field'}{'dl'}{'draw'}   = 'LINE1';
+    $config{$name}{'field'}{'iq'}{'label'}  = 'ICP Queries';
+    $config{$name}{'field'}{'iq'}{'draw'}   = 'LINE1';
   }
   # ------------------------------------------------- out -----------------------------------------
   foreach my $graph (sort keys(%config))
@@ -317,7 +330,7 @@ if($ARGV[0] and $ARGV[0] eq "config")
     {
       printf ("graph_%s %s\n", $graph_option, $config{$graph}{'graph'}{$graph_option});
     }
-    foreach my $field_option ('label', 'type', 'draw', 'graph', 'cdef', 'negative')
+    foreach my $field_option (qw(label type draw graph cdef negative max min))
     {
       foreach my $graph_field (sort keys %{$config{$graph}{'field'}})
       {
@@ -433,8 +446,8 @@ while (my $line = $cm->getline)
 $cm = squid_requst('storedir');
 while (my $line = $cm->getline)
 {
-  if($line =~ /Maximum Swap Size.*:*/)       { $data{'squid_storedir'}{'maximum'}      = ($line =~ /(\d+)/g)[0]; next; }
-  if($line =~ /Current Store Swap Size.*:*/) { $data{'squid_storedir'}{'current'}      = ($line =~ /(\d+)/g)[0]; next; }
+  if($line =~ /Maximum Swap Size.*:*/)       { $data{'squid_storedir'}{'maximum'} = ($line =~ /(\d+)/g)[0]; next; }
+  if($line =~ /Current Store Swap Size.*:*/) { $data{'squid_storedir'}{'current'} = ($line =~ /(\d+)/g)[0]; next; }
 }
 # --------------------- print ----------------
 foreach my $mgraph (sort keys(%data))
