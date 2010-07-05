@@ -101,18 +101,26 @@ $ENV{LC_ALL} = 'C';
 my @drives;
 
 # Try to get a default set of drives
-if ($^O eq 'freebsd') {
-    opendir(DEV, '/dev');
-    @drives = grep /ad|da$/, readdir DEV;
-    closedir(DEV);
+if ($^O eq 'darwin') {
+  opendir(DEV, '/dev');
+  @drives = grep /^disk[0-9]+$/, readdir DEV;
+  closedir(DEV);
+} elsif ($^O eq 'freebsd') {
+  opendir(DEV, '/dev');
+  @drives = grep /^ad|da[0-9]+$/, readdir DEV;
+  closedir(DEV);
 } elsif ($^O eq 'linux') {
   # On Linux, we know how to enumerate ide drives.
   # SCSI is not as easy
   if (-d '/dev') {
     opendir(IDE, '/dev');
-    @drives = grep /sd[a-z]$/, readdir IDE;
+    @drives = grep /^sd[a-z]$/, readdir IDE;
     closedir(IDE);
   }
+} elsif (($^O eq 'netbsd') or ($^O eq 'openbsd')) {
+  opendir(DEV, '/dev');
+  @drives = grep /^wd|sd[0-9]+c$/, readdir DEV;
+  closedir(DEV);
 } elsif ($^O eq 'solaris') {
   @drives = map { s@.*/@@ ; $_ } glob '/dev/rdsk/c*t*d*s2';
 }
