@@ -32,7 +32,8 @@ The plugin shows:
 
 =head1 MAGIC MARKERS
 
-#%# family=power
+ #%# family=power
+ #%# capabilities=autoconf
 
 =head1 VERSION 
 
@@ -103,13 +104,13 @@ sub init
   my $sys_batt_count  = get_batteryes_count($sys_path );
   #print "$proc_batt_count $sys_batt_count\n";
   $proc_data_exists = $proc_batt_count > 0;
-  $sys_data_exists = $sys_batt_count > 0;
+  $sys_data_exists = $sys_batt_count   > 0;
   if ($proc_data_exists and $sys_data_exists and ($proc_batt_count != $sys_batt_count))
   {
     die "Something wrong, batteryes count from $proc_path and $sys_path not equal (proc: $proc_batt_count, sys: $sys_batt_count)!"
   }
-  if    ($proc_data_exists) { $batteryes_count = $proc_batt_count; }
-  elsif ($sys_data_exists) { $batteryes_count = $sys_batt_count; }
+  if     ($proc_data_exists) { $batteryes_count = $proc_batt_count; }
+  elsif  ($sys_data_exists)  { $batteryes_count = $sys_batt_count;  }
   unless ($batteryes_count)
   {
     die "Batteryes not found."
@@ -160,16 +161,16 @@ sub read_info
     if($sys_data_exists)
     {
       $info->{$i}{'manufacturer'}  = read_sys_data($i, 'manufacturer');
-      $info->{$i}{'battery_type'}  = read_sys_data($i, 'technology');
-      $info->{$i}{'model_name'}    = read_sys_data($i, 'model_name');
+      $info->{$i}{'battery_type'}  = read_sys_data($i, 'technology'   );
+      $info->{$i}{'model_name'}    = read_sys_data($i, 'model_name'   );
       $info->{$i}{'serial_number'} = read_sys_data($i, 'serial_number');
     }
     else
     {
       my $proc_info = read_proc_data($i, 'info');
-      $info->{$i}{'manufacturer'}  = $proc_info->{'OEM info'};
-      $info->{$i}{'battery_type'}  = $proc_info->{'battery type'};
-      $info->{$i}{'model_name'}    = $proc_info->{'model number'};
+      $info->{$i}{'manufacturer'}  = $proc_info->{'OEM info'     };
+      $info->{$i}{'battery_type'}  = $proc_info->{'battery type' };
+      $info->{$i}{'model_name'}    = $proc_info->{'model number' };
       $info->{$i}{'serial_number'} = $proc_info->{'serial number'};
     }
   }
@@ -183,30 +184,32 @@ sub read_data
   {
     if($sys_data_exists)
     {
-      $data->{$i}{'design_capacity'}    = read_sys_data($i, 'charge_full_design')/1000000;
-      $data->{$i}{'last_full_capacity'} = read_sys_data($i, 'charge_full')/1000000;
-      $data->{$i}{'remaining_capacity'} = read_sys_data($i, 'charge_now')/1000000;
-      $data->{$i}{'design_voltage'}     = read_sys_data($i, 'voltage_min_design')/1000000;
-      $data->{$i}{'present_voltage'}    = read_sys_data($i, 'voltage_now')/1000000;
-      $data->{$i}{'present_rate'}       = read_sys_data($i, 'current_now')/1000000;
+      my $divider = 1000000; # need for equvivalent sys and proc data
+      $data->{$i}{'design_capacity'}    = read_sys_data($i, 'charge_full_design')/$divider;
+      $data->{$i}{'last_full_capacity'} = read_sys_data($i, 'charge_full')       /$divider;
+      $data->{$i}{'remaining_capacity'} = read_sys_data($i, 'charge_now')        /$divider;
+      $data->{$i}{'design_voltage'}     = read_sys_data($i, 'voltage_min_design')/$divider;
+      $data->{$i}{'present_voltage'}    = read_sys_data($i, 'voltage_now')       /$divider;
+      $data->{$i}{'present_rate'}       = read_sys_data($i, 'current_now')       /$divider;
     }
     if($proc_data_exists)
     {
+      my $divider = 1000; # need for equvivalent sys and proc data
       my $proc_info = read_proc_data($i, 'info');
       unless($sys_data_exists)
       {
         my $proc_state = read_proc_data($i, 'state');
-        $data->{$i}{'design_capacity'}         = $proc_info ->{'design capacity'}/1000;
-        $data->{$i}{'last_full_capacity'}      = $proc_info ->{'last full capacity'}/1000;
-        $data->{$i}{'remaining_capacity'}      = $proc_state->{'remaining capacity'}/1000;
-        $data->{$i}{'design_voltage'}          = $proc_info ->{'design voltage'}/1000;
-        $data->{$i}{'present_voltage'}         = $proc_state->{'present voltage'}/1000;
-        $data->{$i}{'present_rate'}            = $proc_state->{'present rate'}/1000;
+        $data->{$i}{'design_capacity'}    = $proc_info ->{'design capacity'}   /$divider;
+        $data->{$i}{'last_full_capacity'} = $proc_info ->{'last full capacity'}/$divider;
+        $data->{$i}{'remaining_capacity'} = $proc_state->{'remaining capacity'}/$divider;
+        $data->{$i}{'design_voltage'}     = $proc_info ->{'design voltage'}    /$divider;
+        $data->{$i}{'present_voltage'}    = $proc_state->{'present voltage'}   /$divider;
+        $data->{$i}{'present_rate'}       = $proc_state->{'present rate'}      /$divider;
       }
-      $data->{$i}{'design_capacity_low'}     = $proc_info ->{'design capacity low'}/1000;
-      $data->{$i}{'design_capacity_warning'} = $proc_info ->{'design capacity warning'}/1000;
-      $data->{$i}{'capacity_granularity_1'}  = $proc_info ->{'capacity granularity 1'}/1000;
-      $data->{$i}{'capacity_granularity_2'}  = $proc_info ->{'capacity granularity 2'}/1000;
+      $data->{$i}{'design_capacity_low'}     = $proc_info ->{'design capacity low'}    /$divider;
+      $data->{$i}{'design_capacity_warning'} = $proc_info ->{'design capacity warning'}/$divider;
+      $data->{$i}{'capacity_granularity_1'}  = $proc_info ->{'capacity granularity 1'} /$divider;
+      $data->{$i}{'capacity_granularity_2'}  = $proc_info ->{'capacity granularity 2'} /$divider;
     }
     $data->{$i}{'current_voltage_percent'}  = percent($data->{$i}{'design_voltage'}    , $data->{$i}{'present_voltage'});
     $data->{$i}{'current_capacity_percent'} = percent($data->{$i}{'last_full_capacity'}, $data->{$i}{'remaining_capacity'});
@@ -247,6 +250,12 @@ my $fields =
 
 # ------------------------------------ start here -----------------------------------
 
+if (defined($ARGV[0]) and ($ARGV[0] eq 'autoconf')) 
+{
+  printf("%s\n", (-e $proc_path or -e $sys_path) ? "yes" : "no ($proc_path and $sys_path not exists)");
+  exit (0);
+}
+
 init();
 
 if ($ARGV[0] and $ARGV[0] eq "config")
@@ -256,9 +265,9 @@ if ($ARGV[0] and $ARGV[0] eq "config")
   foreach my $graph (keys %{$graphs})
   {
     my @order;
-    $config{$graph}{'graph'}{'title'}  = sprintf($graphs->{$graph}{'title'}, 'Mean batteryes');
-    $config{$graph}{'graph'}{'args'}   = $graphs->{$graph}{'args'};
-    $config{$graph}{'graph'}{'vlabel'} = $graphs->{$graph}{'vlabel'};
+    $config{$graph}{'graph'}{'title'}    = sprintf($graphs->{$graph}{'title'}, 'Mean batteryes');
+    $config{$graph}{'graph'}{'args'}     = $graphs->{$graph}{'args'};
+    $config{$graph}{'graph'}{'vlabel'}   = $graphs->{$graph}{'vlabel'};
     $config{$graph}{'graph'}{'category'} = 'power';
     foreach my $field (@{$graphs->{$graph}{'fields'}})
     {
@@ -277,10 +286,10 @@ if ($ARGV[0] and $ARGV[0] eq "config")
       my @b_order;
       my $battery_name = sprintf("BAT%s", $i);
       my $graph_name   = sprintf("%s.%s", $graph, $battery_name);
-      $config{$graph_name}{'graph'}{'title'}  = sprintf($graphs->{$graph}{'title'}, $battery_name);
-      $config{$graph_name}{'graph'}{'info'}   = sprintf("%s battery %s %s (sn: %s)", $info->{$i}{'battery_type'}, $info->{$i}{'manufacturer'}, $info->{$i}{'model_name'}, $info->{$i}{'serial_number'});
-      $config{$graph_name}{'graph'}{'args'}   = '--base 1000';
-      $config{$graph_name}{'graph'}{'vlabel'} = $graphs->{$graph}{'vlabel'};
+      $config{$graph_name}{'graph'}{'title'}    = sprintf($graphs->{$graph}{'title'}, $battery_name);
+      $config{$graph_name}{'graph'}{'info'}     = sprintf("%s battery %s %s (sn: %s)", $info->{$i}{'battery_type'}, $info->{$i}{'manufacturer'}, $info->{$i}{'model_name'}, $info->{$i}{'serial_number'});
+      $config{$graph_name}{'graph'}{'args'}     = '--base 1000';
+      $config{$graph_name}{'graph'}{'vlabel'}   = $graphs->{$graph}{'vlabel'};
       $config{$graph_name}{'graph'}{'category'} = 'power';
       foreach my $field (@{$graphs->{$graph}{'fields'}})
       {
@@ -348,6 +357,3 @@ foreach my $graph (sort keys %{$graphs})
     print "\n";
   }
 }
-
-
-
