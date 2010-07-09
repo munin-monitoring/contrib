@@ -1,30 +1,41 @@
 #!/usr/bin/perl -Tw
 
-# Plugin to monitor ZEO load, connected clients and errors/conflicts
+# Plugin to monitor ZEO connected clients, reads, writes and errors/conflicts
 #
 # Author: Terry Burton <tez@terryburton.co.uk>
 #
 # Revisions:
 #
 # 1.0  2010/07/08  First version
-#
+# 1.1  2010/07/09  Split load into reads and writes
+#                  Reads has logarithmic scale
+#                  Adjust some scaling factors
+#                  Support for INET connections, the new default
 # 
-# Invoke using symlinks to zeo_monitor_ in the form zeo_monitor_{load,clients,errors}_<storage_name>
+# Invoke using symlinks to zeo_monitor_ in the form zeo_monitor_{clients,reads,writes,errors}_<storage_name>
 #
-# Can be configured manually or by autoconf, for example:
+# This plugin can be configured manually or by autoconf (provided that the ZEO
+# monitor runs on the default port 8091.)
 #
 # root@munin:~ munin-node-configure --shell
 # ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_clients_1
 # ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_clients_temp
 # ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_errors_1
 # ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_errors_temp
-# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_load_1
-# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_load_temp
+# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_reads_1
+# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_reads_temp
+# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_writes_1
+# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_writes_temp
 #  
 #
 # Configuration variables:
 #
-#       zeomonitorsock - path to the zeo monitor server socket (default /var/run/zeo/zeo-monitor.sock)
+#       zeomonitoraddr - address:port of the zeo monitor server socket (default 127.0.0.1:8091)
+#       zeomonitorsock - path to the zeo monitor server socket
+#
+#   Note: This plugin will attempt to attach to the network socket given by
+#         zeomonitoraddr unless the path to a Unix domain socket is given with
+#         zeomonitorsock
 #
 # Parameters:
 #
@@ -32,7 +43,15 @@
 #       autoconf
 #       suggest
 #
-# Configuration example:
+# Configuration examples:
+#
+#   Connect to the monitor server running on TCP/4567
+#
+#       [zeo_monitor_*]
+#       user root
+#       env.zeomonitoraddr 127.0.0.1:4567
+#
+#   Connect to the monitor server running on a Unix domain socket
 #
 #       [zeo_monitor_*]
 #       user root
@@ -49,7 +68,9 @@ use Munin::Plugin;
 use File::Basename;
 use IO::Socket::UNIX qw(SOCK_STREAM);
 
-my $zeomonitorsock = exists $ENV{'zeomonitorsock'} ? $ENV{'zeomonitorsock'} : '/var/run/zeo/zeo-monitor.sock';
+my $zeomonitoraddr = exists $ENV{'zeomonitoraddr'} ? $ENV{'zeomonitoraddr'} : '127.0.0.1:8091';
+($zeomonitoraddr)=$zeomonitoraddr=~/(.*)/;
+my $zeomonitorsock = exists $ENV{'zeomonitorsock'} ? $ENV{'zeomonitorsock'} : '';
 ($zeomonitorsock)=$zeomonitorsock=~/(.*)/;
 
 if (basename($0) !~ /^zeo_monitor_/) {
@@ -88,14 +109,9 @@ if (defined $ARGV[0] and $ARGV[0] eq 'suggest') {
     my @storage_names;
 
     eval { @storage_names=parse_zeo_monitor(); };
+    exit 0 if ( $@ );
 
-    if ( $@ ) {
-        chomp $@;
-        print "no ($@)\n";
-        exit 1;
-    }
-
-    print "clients_$_\nload_$_\nerrors_$_\n" foreach @storage_names;
+    print "clients_$_\nreads_$_\nwrites_$_\nerrors_$_\n" foreach @storage_names;
     exit 0;
 
 }
@@ -127,19 +143,24 @@ clients.type GAUGE
 EOF
 }
 
-if ($mode eq 'load') {
+if ($mode eq 'reads') {
   print <<EOF;
-commits.label Commits (x1000)
-commits.type DERIVE
-commits.min 0
-commits.cdef commits,1000,*
+graph_args --logarithmic --lower-limit 1
 loads.label Loads
 loads.type DERIVE
 loads.min 0
-stores.label Stores (x10)
+EOF
+}
+
+if ($mode eq 'writes') {
+  print <<EOF;
+commits.label Commits (x10)
+commits.type DERIVE
+commits.min 0
+commits.cdef commits,10,*
+stores.label Stores
 stores.type DERIVE
 stores.min 0
-stores.cdef stores,10,*
 EOF
 }
 
@@ -176,10 +197,15 @@ clients.value $stats{clients}
 EOF
 }
 
-if ($mode eq 'load') {
+if ($mode eq 'reads') {
+  print <<"EOF";
+loads.value $stats{loads}
+EOF
+}
+
+if ($mode eq 'writes') {
   print <<"EOF";
 commits.value $stats{commits}
-loads.value $stats{loads}
 stores.value $stats{stores}
 EOF
 }
@@ -205,7 +231,12 @@ sub parse_zeo_monitor {
 
   my $storage_name=shift;
 
-  my $socket=IO::Socket::UNIX->new(Type => SOCK_STREAM,Peer => $zeomonitorsock ) or die("Can't connect to socket: $!\n");
+  my $socket;
+  if ($zeomonitorsock ne '') {
+    $socket=IO::Socket::UNIX->new(Type=>SOCK_STREAM,Peer=>$zeomonitorsock) or die("Can't connect to socket: $!\n");
+  } else {
+    $socket=IO::Socket::INET->new(Proto=>"tcp",PeerAddr=>$zeomonitoraddr) or die("Can't connect to port: $!\n");
+  }
   my $response=join('',<$socket>);
   close $socket;
 
