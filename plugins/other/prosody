@@ -1,0 +1,82 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# Copyright (c) 2010 Christoph Heer (Christoph.Heer@googlemail.com)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the \"Software\"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+import sys
+import os
+import telnetlib
+import re
+
+def main():	
+	mode = ""
+	try: mode = sys.argv[1]
+	except Exception, IndexError: mode = ""
+	wildcard = sys.argv[0].split("prosody_")[1].split("_")[0]
+
+	if wildcard == "c2s":
+		if mode == "config":
+			print "graph_title Prosody C2S Connections"
+			print "graph_vlabel users"
+			print "graph_category Prosody"
+		
+			print "all_client_connections.label client connections"
+			print "secure_client_connections.label secure client connections"
+			print "insecure_client_connections.label insecure client connections"
+			sys.exit(0)
+			
+		else:
+			Regex = re.compile(r"Total:\s(\d+)\s")
+			telnet = telnetlib.Telnet('localhost', 5582)
+			telnet.write("c2s:show_secure()")
+			telnetResponse = telnet.read_until("secure client connections", 5)
+			ParsedInfo = Regex.findall(telnetResponse)
+			scc = int(ParsedInfo[0])
+			print "secure_client_connections.value %s" % (scc)
+			
+			telnet.write("c2s:show_insecure()")
+			telnetResponse = telnet.read_until("insecure client connections", 5)
+			ParsedInfo = Regex.findall(telnetResponse)
+			icc = int(ParsedInfo[0])
+			print "insecure_client_connections.value %s" % (icc)
+			cc = scc + icc
+			print "all_client_connections.value %s" % (cc)
+			
+	elif wildcard == "s2s":
+		if mode == "config":
+			print "graph_title Prosody S2S Connections"
+			print "graph_vlabel servers"
+			print "graph_category Prosody"
+		
+			print "outgoing_connections.label outgoing connections"
+			print "incoming_connections.label incoming connections"
+			sys.exit(0)
+			
+		else:	
+			Regex = re.compile(r"(\d+) outgoing, (\d+)")
+			telnet = telnetlib.Telnet('localhost', 5582)
+			telnet.write("s2s:show()")
+			telnetResponse = telnet.read_until("connections", 5)
+			ParsedInfo = Regex.findall(telnetResponse)
+			print "outgoing_connections.value %s" % (ParsedInfo[0][0])
+			print "incoming_connections.value %s" % (ParsedInfo[0][1])
+		
+if __name__ == '__main__':
+	main()
