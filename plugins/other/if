@@ -19,6 +19,8 @@ WiFi interface signal and noise
 WiFi interface link quality
 Interface utilisation
 
+Virtual interface names prefixes with '~'
+
 =head1 CONFIGURATION
 
 This plugin is configurable environment variables.
@@ -36,8 +38,8 @@ Example:
     env.protect_peaks yes
 
 Protect peak:
-1. Protect wifi signal and noise values, all values > 0 print as nan
-2. protect all percent values. All values > 100 print as nan
+1. Protect wifi signal and noise values, all values > 0 print as NaN
+2. protect all percent values. All values > 100 print as NaN
 3. Protect bps values. env.if_max_bps must be set. All values > max_bps prints as 0
 4. protect pps values. env.if_max_bps must be set. All values > max_bps/minimal packet size, prints as 0
 
@@ -234,7 +236,7 @@ my $graphs =
 #        'field' - exists field, must be included in graph
 #          'name' => '' - field name
 #    }
-# 'peack_protect' => protect peaks. Using munin field.max and field.min and truncate data to nan
+# 'peack_protect' => protect peaks. Using munin field.max and field.min and truncate data to NaN
 #       protect types
 #        'max_interface_bps'     - maximum: max interface bps (if configured), minimum - zero
 #        'packet_size_range'     - maximum: mtu, minimum: minimal packet size (may be configured)
@@ -277,7 +279,7 @@ my $fields =
     'negative' =>
     {
       'type'  => 'dummy',
-      'value' => 'nan'
+      'value' => 'NaN'
     },
     'difference'    => 'per_secund'
   },
@@ -345,7 +347,7 @@ my $fields =
     'negative' =>
     {
       'type'  => 'dummy',
-      'value' => 'nan'
+      'value' => 'NaN'
     },
     'difference' => 'count'
   },
@@ -433,7 +435,7 @@ my $fields =
     'negative' =>
     {
       'type'  => 'dummy',
-      'value' => 'nan'
+      'value' => 'NaN'
     },
     'difference' => 'count'
   },
@@ -455,7 +457,7 @@ my $fields =
     'negative' =>
     {
       'type'  => 'dummy',
-      'value' => 'nan'
+      'value' => 'NaN'
     },
     'difference' => 'count'
   },
@@ -477,7 +479,7 @@ my $fields =
     'negative' =>
     {
       'type'  => 'dummy',
-      'value' => 'nan'
+      'value' => 'NaN'
     },
     'difference' => 'count'
   },
@@ -499,7 +501,7 @@ my $fields =
     'negative' =>
     {
       'type'  => 'dummy',
-      'value' => 'nan'
+      'value' => 'NaN'
     },
     'difference' => 'count'
   },
@@ -919,7 +921,7 @@ my $fields =
     'negative' =>
     {
       'type'  => 'dummy',
-      'value' => 'nan'
+      'value' => 'NaN'
     },
     'difference' => 'count'
   },
@@ -958,7 +960,7 @@ my $fields =
     'negative' =>
     {
       'type'  => 'dummy',
-      'value' => 'nan'
+      'value' => 'NaN'
     },
     'difference' => 'count'
   },
@@ -997,7 +999,7 @@ my $fields =
     'negative' =>
     {
       'type'  => 'dummy',
-      'value' => 'nan'
+      'value' => 'NaN'
     },
     'difference' => 'count'
   },
@@ -1072,7 +1074,7 @@ exit(0);
 sub get_file_content
 {
   my $file = $_[0];
-  return 'nan' if (-z $file);
+  return 'NaN' if (-z $file);
   open (FH, '<', $file) or die "$! $file \n";
   my $content = <FH>;
   close (FH);
@@ -1111,12 +1113,15 @@ sub get_interfaces
         elsif($suff eq 'G') { $bps = $num * 1000 * 1000 * 1000 / 8; }
         $interfaces->{$if}{'bps'} = $bps;
       }
+      if (-e sprintf("/sys/devices/virtual/net/%s", $if)) { $interfaces->{$if}{'virtual'} = 1; }
+      $interfaces->{$if}{'name'} = exists($interfaces->{$if}{'virtual'}) ? sprintf("~%s", $if) : $if;
     }
+    my ($maxlen, $tl) = (0, 0);
+    for (keys %{$interfaces}) { $tl = length($interfaces->{$_}{'name'}); $maxlen = $tl if $tl > $maxlen;  }
+    for (keys %{$interfaces}) { $interfaces->{$_}{'name'} = sprintf("[%${maxlen}s]", $interfaces->{$_}{'name'}); }
   }
-  else
-  {
-    die "$ifpath not exists\n";
-  }
+  else { die "$ifpath not exists\n"; }
+  
   return $interfaces;
 }
 
@@ -1188,7 +1193,6 @@ sub check_field_avialability
     {
       my $file = $fields->{$field}{'source'}{'location'};
       $file =~ s/:if:/$if/g;
-      #print "File source: $file\n";
       $fields->{$field}{'avialable'}{$if} = 1 if (-e $file);
     }
     #---------------------------- calculated ----------------
@@ -1198,7 +1202,7 @@ sub check_field_avialability
       if($fields->{$field}{'source'}{'calculated'}{'type'} eq 'percent')
       {
         my %avialable;
-        foreach my $a ('full', 'part')
+        for my $a ('full', 'part')
         {
           if($fields->{$field}{'source'}{'calculated'}{$a}{'source'} eq 'interface')
           {
@@ -1215,7 +1219,7 @@ sub check_field_avialability
       elsif($fields->{$field}{'source'}{'calculated'}{'type'} eq 'division')
       {
         my %avialable;
-        foreach my $a ('dividend', 'divider')
+        for my $a ('dividend', 'divider')
         {
           if($fields->{$field}{'source'}{'calculated'}{$a}{'source'} eq 'interface')
           {
@@ -1232,7 +1236,7 @@ sub check_field_avialability
       elsif($fields->{$field}{'source'}{'calculated'}{'type'} eq 'sum')
       {
         my $count = 0;
-        foreach my $a (@{$fields->{$field}{'source'}{'calculated'}{'sum'}})
+        for my $a (@{$fields->{$field}{'source'}{'calculated'}{'sum'}})
         {
           $count++ if (check_field_avialability($if, $a));
         }
@@ -1240,7 +1244,6 @@ sub check_field_avialability
       }
     }
   }
-  #printf("field %s from if %s -  %savialable\n", $field, $if, $fields->{$field}{'avialable'}{$if} ? '' : "un");
   return $fields->{$field}{'avialable'}{$if};
 }
 
@@ -1266,7 +1269,7 @@ sub concat_names
   }
   if (exists($interfaces->{$if}))
   {
-    $name = sprintf ("[%s] %s", $if, $name);
+    $name = sprintf ("%s %s", $interfaces->{$if}{'name'}, $name);
   }
   return $name;
 }
@@ -1277,10 +1280,10 @@ sub generate_field
   my ($config, $graph_name, $field, $if, $is_general_graph) = @_[0..4];
   return '' unless(check_field_avialability($if, $field));
   my $field_graph_name = $is_general_graph ? sprintf("%s_%s", $if, $field) : $field;
-  foreach my $option (keys %{$fields->{$field}{'munin'}}) 
+  for my $option (keys %{$fields->{$field}{'munin'}}) 
   {
     next if exists($config->{$graph_name}{'fields'}{$field_graph_name}{$option});
-    $config->{$graph_name}{'fields'}{$field_graph_name}{$option} = replace_if_template($fields->{$field}{'munin'}{$option}, $if); 
+    $config->{$graph_name}{'fields'}{$field_graph_name}{$option} = replace_if_template($fields->{$field}{'munin'}{$option}, $interfaces->{$if}{'name'}); 
   }
   if(exists($fields->{$field}{'cdef'}))
   {
@@ -1311,13 +1314,13 @@ sub generate_field
   # Fix field label on general graphs
   if ($is_general_graph and not $config->{$graph_name}{'fields'}{$field_graph_name}{'label'} =~ m/$if/)
   {
-    $config->{$graph_name}{'fields'}{$field_graph_name}{'label'} = sprintf ("[%s] %s", $if, $fields->{$field}{'munin'}{'label'});
+    $config->{$graph_name}{'fields'}{$field_graph_name}{'label'} = sprintf ("%s %s", $interfaces->{$if}{'name'}, $fields->{$field}{'munin'}{'label'});
   }
   # do peaks protect
   if($protect_peacks ne 'no' and exists($fields->{$field}{'peack_protect'}))
   {
     my $range = get_peak_range($field, $if);
-    foreach my $a (qw(min max))
+    for my $a (qw(min max))
     {
       if (exists($range->{$a}))
       {
@@ -1336,9 +1339,9 @@ sub generate_graph
   my $graph_name = $is_general_graph ? $graph : sprintf("%s.%s", $graph, $if);
   if($is_general_graph)
   {
-    foreach my $field (@{$graphs->{$graph}{'general_fields'}})
+    for my $field (@{$graphs->{$graph}{'general_fields'}})
     {
-      foreach my $general_if (keys %{$interfaces}) 
+      for my $general_if (keys %{$interfaces}) 
       {
         my $res_field = generate_field($config, $graph_name, $field, $general_if, 1);
         push(@order, $res_field) if $res_field ne '';
@@ -1347,7 +1350,7 @@ sub generate_graph
   }
   else
   {
-    foreach my $field (@{$graphs->{$graph}{'per_if_fields'}})
+    for my $field (@{$graphs->{$graph}{'per_if_fields'}})
     {
       my $res_field = generate_field($config, $graph_name, $field, $if, 0);
       push(@order, $res_field) if $res_field ne '';
@@ -1355,9 +1358,9 @@ sub generate_graph
   }
   if(scalar(@order) > 0)
   {
-    foreach my $option (keys %{$graphs->{$graph}{'munin'}}) 
+    for my $option (keys %{$graphs->{$graph}{'munin'}}) 
     {
-      $config->{$graph_name}{'graph'}{$option} = replace_if_template($graphs->{$graph}{'munin'}{$option}, $is_general_graph ? 'All interfaces' : $if); 
+      $config->{$graph_name}{'graph'}{$option} = replace_if_template($graphs->{$graph}{'munin'}{$option}, $is_general_graph ? 'All interfaces' : $interfaces->{$if}{'name'}); 
     }
     $config->{$graph_name}{'graph'}{'order'} = join(' ', @order); # if scalar(@order) > 1;
     unless($is_general_graph)
@@ -1372,7 +1375,7 @@ sub generate_graphs
 {
   my ($config, $graph) = @_[0..1];
   generate_graph($config, $graph, '', 1);
-  foreach my $if (keys %{$interfaces}) 
+  for my $if (keys %{$interfaces}) 
   {
     generate_graph($config, $graph, $if, 0);
   }
@@ -1383,21 +1386,18 @@ sub print_config
 {
   my $config = {};
   my $graph;
-  foreach $graph (keys %{$graphs})
-  {
-    generate_graphs($config, $graph);
-  }
+  for $graph (keys %{$graphs}) { generate_graphs($config, $graph); }
   #-------------------- print ---------------
-  foreach $graph (sort  keys %{$config})
+  for $graph (sort  keys %{$config})
   {
     printf ("multigraph %s\n", $graph);
-    foreach my $option (sort keys %{$config->{$graph}{'graph'}})
+    for my $option (sort keys %{$config->{$graph}{'graph'}})
     {
       printf ("graph_%s %s\n", $option, $config->{$graph}{'graph'}{$option});
     }
-    foreach my $field (sort keys %{$config->{$graph}{'fields'}})
+    for my $field (sort keys %{$config->{$graph}{'fields'}})
     {
-      foreach my $type (sort keys %{$config->{$graph}{'fields'}{$field}})
+      for my $type (sort keys %{$config->{$graph}{'fields'}{$field}})
       {
         printf ("%s.%s %s\n", $field, $type, $config->{$graph}{'fields'}{$field}{$type});
       }
@@ -1456,13 +1456,13 @@ sub protect_data_peak
   return $value if (
                      $protect_peacks ne 'no'    or
                      (
-                      $value ne 'nan'           and
+                      $value ne 'NaN'           and
                       exists($range->{'max'})   and
                       $value <= $range->{'max'} and
                       $value >= $range->{'min'}
                      )
                    );
-  return 'nan';
+  return 'NaN';
 }
 
 # --------------------------------- loading or calculating fields values ----------------------------
@@ -1474,7 +1474,7 @@ sub get_field_data
     # ----------------------------  file source ------------------------------------------------------------
     if($fields->{$field}{'source'}{'type'} eq 'file' and not exists($raw_data->{$if}{$field}))
     {
-      $raw_data->{$if}{$field} = get_file_content(replace_if_template($fields->{$field}{'source'}{'location'}, $if));;
+      $raw_data->{$if}{$field} = get_file_content(replace_if_template($fields->{$field}{'source'}{'location'}, $if));
       $data->{$if}{$field} = calc_diff($raw_data, $raw_prev_data, $if, $field);
     }
     # ----------------------------  calculated source ------------------------------------------------------------
@@ -1484,7 +1484,7 @@ sub get_field_data
       if($fields->{$field}{'source'}{'calculated'}{'type'} eq 'percent')
       {
         my $percents = {};
-        foreach my $pf (qw(full part))
+        for my $pf (qw(full part))
         {
           if ($fields->{$field}{'source'}{'calculated'}{$pf}{'source'} eq 'interface')
           {
@@ -1501,7 +1501,7 @@ sub get_field_data
       if($fields->{$field}{'source'}{'calculated'}{'type'} eq 'division')
       {
         my $division = {};
-        foreach my $df (qw(dividend divider))
+        for my $df (qw(dividend divider))
         {
           if ($fields->{$field}{'source'}{'calculated'}{$df}{'source'} eq 'interface')
           {
@@ -1512,13 +1512,13 @@ sub get_field_data
             $division->{$df} = get_field_data($data, $raw_data, $raw_prev_data, $if, $fields->{$field}{'source'}{'calculated'}{$df}{'name'});
           }
         }
-        $data->{$if}{$field} = $division->{'divider'} != 0 ? $division->{'dividend'}/$division->{'divider'} : 'nan';
+        $data->{$if}{$field} = $division->{'divider'} != 0 ? $division->{'dividend'}/$division->{'divider'} : 'NaN';
       }
       # -------------------------------- sum ---------------------------
       if($fields->{$field}{'source'}{'calculated'}{'type'} eq 'sum')
       {
         my $sum = 0;
-        foreach my $s (@{$fields->{$field}{'source'}{'calculated'}{'sum'}})
+        for my $s (@{$fields->{$field}{'source'}{'calculated'}{'sum'}})
         {
           $sum += get_field_data($data, $raw_data, $raw_prev_data, $if, $s);
         }
@@ -1558,16 +1558,16 @@ sub print_values
   my $raw_prev_data = restore_state_data();
   my $values   = {};
   $raw_data->{'timestamp'} = time();
-  foreach my $graph (keys %{$graphs})                                                                                     {
-    foreach my $field (@{$graphs->{$graph}{'general_fields'}})                                                          {
-      foreach my $if (keys %{$interfaces})                                                                            {
+  for my $graph (keys %{$graphs})                                                                                     {
+    for my $field (@{$graphs->{$graph}{'general_fields'}})                                                          {
+      for my $if (keys %{$interfaces})                                                                            {
         prepare_value($values, $field, sprintf("%s_%s", $if, $field), $graph, $if, $data, $raw_data, $raw_prev_data); } } }
-  foreach my $if (keys %{$interfaces}) 
+  for my $if (keys %{$interfaces}) 
   {
-    foreach my $graph (keys %{$graphs}) 
+    for my $graph (keys %{$graphs}) 
     {
         my $graph_name = sprintf("%s.%s", $graph, $if);
-        foreach my $field (@{$graphs->{$graph}{'per_if_fields'}})
+        for my $field (@{$graphs->{$graph}{'per_if_fields'}})
         {
           prepare_value($values, $field, $field, $graph_name, $if, $data, $raw_data, $raw_prev_data);
         }
@@ -1576,10 +1576,10 @@ sub print_values
   save_state_data($raw_data);
   exit (0) unless defined ($raw_prev_data); # first update need just for collect and save data
   # ------------------------ print ------------------------
-  foreach my $graph (sort (keys %{$values}))
+  for my $graph (sort (keys %{$values}))
   {
     printf ("multigraph %s\n", $graph);
-    foreach my $field (sort keys %{$values->{$graph}})
+    for my $field (sort keys %{$values->{$graph}})
     {
       printf("%s.value %s\n", $field, $values->{$graph}{$field});
     }
