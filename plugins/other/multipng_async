@@ -22,7 +22,7 @@ The following environment variables are used:
 
     host     - Whitespace-seperated list of hosts to ping
     times    - How many times to ping the hosts, 3 by default
-    timeout  - The ping timeout (ping -W), 1 by default
+    timeout  - The ping timeout (ping -W), 1 by default (ignored on Solaris)
     title    - The graph_title to use for the munin RRD graph
     category - What category the graph should be in, network by default
 
@@ -51,7 +51,8 @@ away from it due to having odd timing issues with it, and it had to
 run as root.
 
 This plugin requires the L<MooseX::POE> and L<POE::Quickie> modules
-from CPAN.
+from CPAN. It has been tested with the Linux, FreeBSD and Solaris
+L<ping(1)> implementations.
 
 =head1 AUTHOR
 
@@ -138,13 +139,27 @@ sub START {
         return;
     }
 
-    for ($self->hosts) {
+    for my $host ($self->hosts) {
         POE::Quickie->new->run(
-            Program     => [ 'ping', '-c', $self->times, '-W', $self->timeout, => $_ ],
+            Program     => [ $self->ping_arguments($host) ],
             StdoutEvent => 'stdout',
             ExitEvent   => 'exit',
-            Context     => $_,
+            Context     => $host,
         );
+    }
+}
+
+sub ping_arguments {
+    my ($self, $host) = @_;
+
+    given ($^O) {
+        when ('solaris') {
+            return ('ping', '-s', $host, '64', $self->times);
+        }
+        default {
+            # Linux and FreeBSD
+            return ('ping', '-c', $self->times, '-W', $self->timeout, => $host);
+        }
     }
 }
 
@@ -153,7 +168,10 @@ event stdout => sub {
 
     given ($output) {
         my $noslash = qr{[^/]+};
-        when (m[^rtt min/avg/max/mdev = (?<min>$noslash)/(?<avg>$noslash)/(?<max>$noslash)/]) {
+        # Linux output: rtt min/avg/max/mdev = 7.218/7.255/7.293/0.030 ms
+        # BSD output  : round-trip min/avg/max/stddev = 34.935/35.665/36.684/0.743 ms
+        # Solaris     : round-trip (ms)  min/avg/max/stddev = 5.82/5.95/6.01/0.11
+        when (m[= (?<min>$noslash)/(?<avg>$noslash)/(?<max>$noslash)/]) {
             $self->response->{ $context } = $+{avg};
         }
     }
