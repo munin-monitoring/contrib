@@ -1,12 +1,15 @@
 #!/bin/bash
 
-# written by lars falk-petersen, dev@falk-petersen.no
-# clewarecontrol device serial must be set in config file:
-#
-#  #munin/plugin-conf.d/cleware
+# Written by Lars Falk-Petersen, cleware@falk-petersen.no
+# Version 0.2. To be used with http://www.vanheusden.com/clewarecontrol/
+# Clewarecontrol device serial must be set in config file:
+
+#  #Put the following lines in /etc/munin/plugin-conf.d/cleware
 #  [cleware]
 #  #device serial. find it by running: clewarecontrol -l
 #  env.serial 7778
+#  #path of clewarecontrol
+#  env.bin /usr/bin/clewarecontrol
 
 case $1 in
    config)
@@ -23,11 +26,17 @@ EOM
         exit 0;;
 esac
 
-clewarecontrol -ag > /dev/null 2>&1
+[ ! $bin ] && bin="clewarecontrol"
+if [ ! $serial ]; then
+	echo "Serial not set! Hint: Read the top of this script."
+	exit 1
+fi
+
+$bin -ag > /dev/null 2>&1
 
 echo -n "temp.value "
-clewarecontrol -d $serial -b -rt
+$bin -d $serial -b -rt
 
 echo -n "hum.value "
-clewarecontrol -d $serial -b -rh
+$bin -d $serial -b -rh
 
