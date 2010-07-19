@@ -24,12 +24,22 @@ used as default for all fields:
   env.warning
   env.critical
 
-But each field (system user nice idle iowait irq softirq steal guest) can be controlled separately:
+But each field (system user nice etc...) can be controlled separately:
 For example:
 
   env.system_warning 70
   env.user_warning 70
   env.idle_critical 1
+
+Also each field of each cpu can be controlled separately
+For example:
+
+  env.cpu1_system_warning 70
+  env.cpu0_user_warning 70
+  env.cpu0_idle_critical 1
+
+Algoritm is easy: for example current graph limit is env.cpu0_idle_critical if defined env.cpu0_idle_critical or env.idle_critical if defined env.idle_critical
+or env.critical if defined env.critical. Or no limit
 
 =head1 INTERPRETATION
 
@@ -44,7 +54,7 @@ frequency shift frequencies, the percentage of use of frequencies
 
 =head1 VERSION
 
-  1.0
+  2.0
 
 =head1 BUGS
 
@@ -72,16 +82,7 @@ my $cpuinfo = {}; $cpuinfo->{'cpu_count'} = 0;
 my @stat_file_content = ();
 my $freq_mul = 1000; # CPU frequency multiplier from kHz to Hz
 
-$limits->{'warning'}  = $ENV{warning}  || undef;
-$limits->{'critical'} = $ENV{critical} || undef;
-for my $cname (@cnames)
-{
-  for my $t (qw(warning critical))
-  {
-    my $name = sprintf("%s_%s", $cname, $t);
-    $limits->{$name} = $ENV{$name} || undef;
-  }
-}
+
 
 my $graphs =
 {
@@ -112,19 +113,35 @@ my $graphs =
   },
   'cpu_freq' => # child of cpu_freq_trans
   {
-    'title'    => 'CPU:t: frequency',
+    'title'    => 'CPU:t: frequency (total)',
     'args'     =>  '--base 1000 -r --lower-limit 0 --upper-limit 100',
-    'vlabel'   => '%',
+    'vlabel'   => '% of total',
     'info'     => 'This graph shows CPU:t: frequency :i:',
+    'category' => 'cpu'
+  },
+  'cpu_freq_ps' => # child of cpu_freq_trans
+  {
+    'title'    => 'CPU:t: frequency (per secund)',
+    'args'     =>  '--base 1000 -r --lower-limit 0 --upper-limit 100',
+    'vlabel'   => '% per secund',
+    'info'     => 'This graph shows CPU:t: frequency per secund from last update :i:',
     'category' => 'cpu'
   },
   'cpu_freq_trans_table' => # child of cpu_freq_trans
   {
-    'title'    => 'CPU:t: frequency switches',
+    'title'    => 'CPU:t: frequency switches (total)',
     'args'     =>  '--base 1000 -r --lower-limit 0 --upper-limit 100',
-    'vlabel'   => 'count',
+    'vlabel'   => '% of total',
     'scale'    => 'no',
     'info'     => 'This graph shows CPU:t: frequency switches :i:',
+  },
+  'cpu_freq_trans_table_ps' => # child of cpu_freq_trans
+  {
+    'title'    => 'CPU:t: frequency switches (per secund)',
+    'args'     =>  '--base 1000 -r --lower-limit 0 --upper-limit 100',
+    'vlabel'   => '% per secund',
+    'scale'    => 'no',
+    'info'     => 'This graph shows CPU:t: frequency switches per secund from last update :i:',
   }
 };
 
@@ -302,26 +319,13 @@ sub check_exists
   {
     unless (exists($items_exists->{$t}{$cpu_num}))
     {
-      if ($t eq 'freq_hz')
-      {
-        $items_exists->{$t}{$cpu_num} = ( -e sprintf("%s/cpu%s/cpufreq/scaling_min_freq", $freq_path, $cpu_num) and
-                                          -e sprintf("%s/cpu%s/cpufreq/scaling_cur_freq", $freq_path, $cpu_num) and
-                                          -e sprintf("%s/cpu%s/cpufreq/scaling_max_freq", $freq_path, $cpu_num) );
-      }
-      elsif ($t eq 'freq_trans')
-      {
-        $items_exists->{$t}{$cpu_num} = -e sprintf("%s/cpu%s/cpufreq/stats/time_in_state", $freq_path, $cpu_num);
-      }
-      elsif ($t eq 'freq_times')
-      {
-        $items_exists->{$t}{$cpu_num} = -e sprintf("%s/cpu%s/cpufreq/stats/total_trans", $freq_path, $cpu_num);
-      }
-      elsif ($t eq 'freq_ttable')
-      {
-        $items_exists->{$t}{$cpu_num} = -e sprintf("%s/cpu%s/cpufreq/stats/trans_table", $freq_path, $cpu_num);
-      }
+      if ($t eq 'freq_hz')        { $items_exists->{$t}{$cpu_num} = ( -e sprintf("%s/cpu%s/cpufreq/scaling_min_freq"   , $freq_path, $cpu_num) and
+                                                                      -e sprintf("%s/cpu%s/cpufreq/scaling_cur_freq"   , $freq_path, $cpu_num) and
+                                                                      -e sprintf("%s/cpu%s/cpufreq/scaling_max_freq"   , $freq_path, $cpu_num));  }
+      elsif ($t eq 'freq_trans')  { $items_exists->{$t}{$cpu_num} =   -e sprintf("%s/cpu%s/cpufreq/stats/time_in_state", $freq_path, $cpu_num);   }
+      elsif ($t eq 'freq_times')  { $items_exists->{$t}{$cpu_num} =   -e sprintf("%s/cpu%s/cpufreq/stats/total_trans"  , $freq_path, $cpu_num);   }
+      elsif ($t eq 'freq_ttable') { $items_exists->{$t}{$cpu_num} =   -e sprintf("%s/cpu%s/cpufreq/stats/trans_table"  , $freq_path, $cpu_num);   }
     }
-    #print Dumper $items_exists;
     return $items_exists->{$t}{$cpu_num};
   }
   else
@@ -329,10 +333,7 @@ sub check_exists
     unless(exists($items_exists->{$t}{'total'}))
     {
       my $c = 0;
-      for (my $i=0; $i < $cpuinfo->{'cpu_count'}; $i++)
-      {
-        $c++ if (check_exists($t, $i));
-      }
+      for (my $i=0; $i < $cpuinfo->{'cpu_count'}; $i++) { $c++ if (check_exists($t, $i)); }
       $items_exists->{$t}{'total'} = $c > 0;
     }
     return $items_exists->{$t}{'total'};
@@ -450,7 +451,7 @@ sub prepare_graphs_fields
   # ------------------ cpu_utilisation -----------------------------------
   # ---------- general ----------------------
   append_graph($pg, 'cpu_utilisation', 'cpu', 'cpu_utilisation', '', '');
-  for my $cname (@cnames) { append_field($pg, 'cpu_utilisation', $cname, $cname, '', ''); build_limits($pg, 'cpu_utilisation', $cname); }
+  for my $cname (@cnames) { append_field($pg, 'cpu_utilisation', $cname, $cname, '', ''); append_utilisation_limits($pg, 'cpu_utilisation', $cname, undef); }
   if(check_exists('freq_hz')) { for (my $i = 0; $i < $cpuinfo->{'cpu_count'}; $i++) { append_field($pg, 'cpu_utilisation', sprintf("fp_%s", $i), 'freq_percent', $i, ''); } }
   # ---------------- childs -------------------
   if ($cpuinfo->{'cpu_count'} > 1)
@@ -459,7 +460,7 @@ sub prepare_graphs_fields
     {
       my $graph_name = sprintf("cpu_utilisation.cpu%s", $i);
       append_graph($pg, $graph_name, sprintf("CPU %s", $i), 'cpu_utilisation', $i, $cpuinfo->{$i}{'info'});
-      for my $cname (@cnames) { append_field($pg, $graph_name, $cname, $cname, '', ''); build_limits($pg, $graph_name, $cname); }
+      for my $cname (@cnames) { append_field($pg, $graph_name, $cname, $cname, '', ''); append_utilisation_limits($pg, $graph_name, $cname, $i); }
       if(check_exists('freq_hz', $i)) { append_field($pg, $graph_name, 'fp', 'freq_percent', '', ''); }
     }
   }
@@ -469,6 +470,7 @@ sub prepare_graphs_fields
   if(check_exists('freq_trans'))
   { 
     # ------------ general --------------------
+    # - cpu frequency transitions -
     append_graph($pg, 'cpu_frequency', 'cpu', 'cpu_freq_trans', '', '');
     for (my $i = 0; $i < $cpuinfo->{'cpu_count'}; $i++) { if (check_exists('freq_trans', $i)) { append_field($pg, 'cpu_frequency', sprintf("cpu_%s", $i), 'freq_trans', sprintf("CPU%s", $i), ''); } }
     append_field($pg, 'cpu_frequency', 'total', 'freq_trans', 'Total', '');
@@ -480,19 +482,25 @@ sub prepare_graphs_fields
       {
         if(check_exists('freq_times', $i))
         {
+          # - cpu frequencyes -
           my $graph_name = sprintf("cpu_frequency.percent_cpu%s", $i);
           append_graph($pg, $graph_name, sprintf("CPU %s", $i), 'cpu_freq', $i, $cpuinfo->{$i}{'info'});
+          for my $freq (@{$frequences->{'names'}{$i}}) { append_field($pg, $graph_name, sprintf("hz_%s", $freq), 'freq_hz', scaleNumber($freq, 'Hz'), ''); }
+          # - cpu frequencyes per secund -
+          $graph_name = sprintf("cpu_frequency.percent_ps_cpu%s", $i);
+          append_graph($pg, $graph_name, sprintf("CPU %s", $i), 'cpu_freq_ps', $i, $cpuinfo->{$i}{'info'});
           for my $freq (@{$frequences->{'names'}{$i}}) { append_field($pg, $graph_name, sprintf("hz_%s", $freq), 'freq_hz', scaleNumber($freq, 'Hz'), ''); }
         }
       }
     }
     if(check_exists('freq_ttable'))
     {
-      my $f_table = get_frequency_trans_table()  if check_exists('freq_ttable');
+      my $f_table = get_frequency_trans_table();
       for (my $i=0; $i < $cpuinfo->{'cpu_count'}; $i++)
       {
         if(check_exists('freq_ttable', $i))
         {
+          # - cpu frequencyes table -
           my $graph_name = sprintf("cpu_frequency.trans_table_cpu%s", $i);
           append_graph($pg, $graph_name, sprintf("CPU %s", $i), 'cpu_freq_trans_table', $i, $cpuinfo->{$i}{'info'});
           for my $from (sort keys %{$f_table->{'values'}{$i}})
@@ -500,7 +508,18 @@ sub prepare_graphs_fields
             for my $to (sort keys %{$f_table->{'values'}{$i}{$from}})
             {
               next if ($from eq $to);
-              append_field($pg, $graph_name, sprintf("f_%s_t_%s", $from, $to), 'freq_trans_table', sprintf("%s -> %s", scaleNumber($from, 'Hz'), scaleNumber($to, 'Hz')), '');
+              append_field($pg, $graph_name, sprintf("f_%s_t_%s", $from, $to), 'freq_trans_table', sprintf(". %9s -> %s", scaleNumber($from, 'Hz'), scaleNumber($to, 'Hz')), '');
+            }
+          }
+          # - cpu frequencyes table per secund -
+          $graph_name = sprintf("cpu_frequency.trans_table_ps_cpu%s", $i);
+          append_graph($pg, $graph_name, sprintf("CPU %s", $i), 'cpu_freq_trans_table_ps', $i, $cpuinfo->{$i}{'info'});
+          for my $from (sort keys %{$f_table->{'values'}{$i}})
+          {
+            for my $to (sort keys %{$f_table->{'values'}{$i}{$from}})
+            {
+              next if ($from eq $to);
+              append_field($pg, $graph_name, sprintf("f_%s_t_%s", $from, $to), 'freq_trans_table', sprintf(". %9s -> %s", scaleNumber($from, 'Hz'), scaleNumber($to, 'Hz')), '');
             }
           }
         }
@@ -521,20 +540,52 @@ sub prepare_graphs_fields
 
 
 # ------------------------------------ printing limits (for utilisation graphs) ----------------
-sub build_limits
+sub append_utilisation_limits
 {
-  my ($pg, $graph_name, $cname) = @_[0..2];
-  for my $t (qw(warning critical))
+  my ($pg, $graph_name, $cname, $i) = @_[0..3];
+  for my $type (qw(warning critical))
   {
-    my $e = sprintf("%s_%s", $cname, $t);
-    my $v = defined($limits->{$e}) ? $limits->{$e} : ( defined($limits->{$t})  ? $limits->{$t}  : undef );
-    if(defined($v)) { $pg->{$graph_name}{'fields'}{$cname}{$t} = $v; }
+    my $field = sprintf("%s_%s", $cname, $type);
+    my $cpu_field = defined($i) ? sprintf("cpu%s_%s_%s", $i, $cname, $type) : undef;
+    my $limit = (defined($i) and defined($limits->{'utilisation'}{$cpu_field})) ? 
+                $limits->{'utilisation'}{$cpu_field} : 
+                (
+                  defined($limits->{'utilisation'}{$field}) ? 
+                  $limits->{'utilisation'}{$field} : 
+                  ( 
+                    defined($limits->{'utilisation'}{$type})  ? 
+                    $limits->{'utilisation'}{$type}  : 
+                    undef 
+                  ) 
+                );
+    if(defined($limit)) { $pg->{$graph_name}{'fields'}{$cname}{$type} = $limit; }
+  }
+}
+
+# ---------------- loading limits -------------
+sub load_limits
+{
+  $limits->{'utilisation'}{'warning'}  = $ENV{warning}  || undef;
+  $limits->{'utilisation'}{'critical'} = $ENV{critical} || undef;
+  for my $cname (@cnames)
+  {
+    for my $t (qw(warning critical))
+    {
+      my $name = sprintf("%s_%s", $cname, $t);
+      $limits->{'utilisation'}{$name} = $ENV{$name} || undef;
+      for (my $i = 0; $i <= $cpuinfo->{'cpu_count'}; $i++)
+      {
+        $name = sprintf("cpu%s_%s_%s",$i, $cname, $t);
+        $limits->{'utilisation'}{$name} = $ENV{$name} || undef;
+      }
+    }
   }
 }
 
 # --------------------------------- graph configs ----------------------------
 sub print_config
 {
+  load_limits();
   my $config = prepare_graphs_fields();
   for my $g (sort keys %{$config})
   {
@@ -570,13 +621,14 @@ sub load_stats
   $stats->{'timestamp'} = time();
   $stats->{'cpu_util'}  = get_cpu_utilisation_stats()                                ;
   $stats->{'f_trans'}   = get_frequency_transitions()  if check_exists('freq_trans') ;
+  $stats->{'f_times'}   = get_frequency_times()        if check_exists('freq_times') ;
+  $stats->{'f_ttable'}  = get_frequency_trans_table()  if check_exists('freq_ttable');
 
   save_state_data($stats);
 
   # no need to store --------------------
   $stats->{'f_minmax'}  = get_cpu_curr_max_freqences() if check_exists('freq_hz')    ;
-  $stats->{'f_times'}   = get_frequency_times()        if check_exists('freq_times') ;
-  $stats->{'f_ttable'}  = get_frequency_trans_table()  if check_exists('freq_ttable');
+  
 
   #print Dumper $stats;
   return $stats;
@@ -762,9 +814,17 @@ sub calculate
       if (check_exists('freq_times', $i))
       {
         my $oneprc = $cstats->{'f_times'}{'total'}{$i}/100;
+        my $ps_total = 0;
         for my $hz (@{$cstats->{'f_times'}{'names'}{$i}})
         {
           $result->{'f_times'}{$i}{$hz} = divide($cstats->{'f_times'}{'values'}{$i}{$hz}, $oneprc);
+          $cstats->{'f_times'}{'%_ps'}{$i}{$hz} = one_second_part($cstats->{'f_times'}{'values'}{$i}{$hz}, $pstats->{'f_times'}{'values'}{$i}{$hz}, $timediff);
+          $ps_total += $cstats->{'f_times'}{'%_ps'}{$i}{$hz};
+        }
+        $ps_total = $ps_total/100;
+        for my $hz (@{$cstats->{'f_times'}{'names'}{$i}})
+        {
+          $result->{'f_times_ps'}{$i}{$hz} = divide($cstats->{'f_times'}{'%_ps'}{$i}{$hz}, $ps_total);
         }
       }
     }
@@ -777,12 +837,24 @@ sub calculate
       if (check_exists('freq_ttable', $i))
       {
         my $oneprc = $cstats->{'f_ttable'}{'total'}{$i}/100;
+        my $ps_total = 0;
         for my $from (keys %{$cstats->{'f_ttable'}{'values'}{$i}})
         {
           for my $to (keys %{$cstats->{'f_ttable'}{'values'}{$i}{$from}})
           {
             next if ($from eq $to);
             $result->{'f_ttable'}{$i}{$from}{$to} = divide($cstats->{'f_ttable'}{'values'}{$i}{$from}{$to}, $oneprc);
+            $cstats->{'f_ttable'}{'%_ps'}{$i}{$from}{$to} = one_second_part($cstats->{'f_ttable'}{'values'}{$i}{$from}{$to}, $pstats->{'f_ttable'}{'values'}{$i}{$from}{$to}, $timediff);
+            $ps_total += $cstats->{'f_ttable'}{'%_ps'}{$i}{$from}{$to};
+          }
+        }
+        $ps_total = $ps_total/100;
+        for my $from (keys %{$cstats->{'f_ttable'}{'values'}{$i}})
+        {
+          for my $to (keys %{$cstats->{'f_ttable'}{'values'}{$i}{$from}})
+          {
+            next if ($from eq $to);
+            $result->{'f_ttable_ps'}{$i}{$from}{$to} = divide($cstats->{'f_ttable'}{'%_ps'}{$i}{$from}{$to}, $ps_total);
           }
         }
       }
@@ -828,6 +900,8 @@ sub prepare_graphs_values
         {
           my $graph_name = sprintf("cpu_frequency.percent_cpu%s", $i);
           for my $freq (keys %{$data->{'f_times'}{$i}}) { $pg->{$graph_name}{sprintf("hz_%s", $freq)} = $data->{'f_times'}{$i}{$freq}; }
+          $graph_name = sprintf("cpu_frequency.percent_ps_cpu%s", $i);
+          for my $freq (keys %{$data->{'f_times_ps'}{$i}}) { $pg->{$graph_name}{sprintf("hz_%s", $freq)} = $data->{'f_times_ps'}{$i}{$freq}; }
         }
       }
     }
@@ -843,6 +917,14 @@ sub prepare_graphs_values
             for my $to (keys %{$data->{'f_ttable'}{$i}{$from}})
             {
               $pg->{$graph_name}{sprintf("f_%s_t_%s", $from, $to)} = $data->{'f_ttable'}{$i}{$from}{$to};
+            }
+          }
+          $graph_name = sprintf("cpu_frequency.trans_table_ps_cpu%s", $i);
+          for my $from (keys %{$data->{'f_ttable_ps'}{$i}})
+          {
+            for my $to (keys %{$data->{'f_ttable_ps'}{$i}{$from}})
+            {
+              $pg->{$graph_name}{sprintf("f_%s_t_%s", $from, $to)} = $data->{'f_ttable_ps'}{$i}{$from}{$to};
             }
           }
         }
