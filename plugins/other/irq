@@ -1,0 +1,469 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+
+=head1 NAME
+
+irq - Plugin to monitor inerrupts.
+
+=head1 APPLICABLE SYSTEMS
+
+All Linux systems
+
+=head1 CONFIGURATION
+
+None need
+
+=head2 WARNING AND CRITICAL SETTINGS
+
+You can set warning and critical levels for each of the data
+series the plugin reports.
+'General' graph support cpu-irqtype limits and irqtype limits
+Examples:
+[irq]
+env.warning_cpu1_sirq_total 550
+env.critical_cpu0_irq_total 600
+env.warning_irq_total 700
+env.critical_sirq_total 700
+
+'Child' graphs support cpu-irqtype-irqname and irqtype-irqname limits
+Examples:
+[irq]
+env.warning_cpu0_irq_7 100
+env.critical_cpu1_sirq_HI 100
+env.warning_irq_LOC 100
+env.critical_irq_12 200
+env.warning_sirq_BLOCK 1000
+
+Note: irqtype: sirq, irq; sirq - Software IRQ; irq name you can see in [] on graph
+
+=head1 INTERPRETATION
+
+The plugin shows each cpu interrupts: summary and IRQ/Software IRQ per CPU
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+  1.0
+
+=head1 BUGS
+
+I can not understand, how set limit to mirrored fields, so they may not display correctly
+
+=head1 AUTHOR
+
+Gorlow Maxim aka Sheridan <sheridan@sheridan-home.ru> (email and jabber)
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+use strict;
+use warnings;
+use Munin::Plugin;
+use Data::Dumper;
+my $IRQi = {};
+
+
+my $graphs =
+{
+  'irq_total' =>
+  {
+    'title'    => 'Interrupts per cpu',
+    'args'     => '--base 1000',
+    'vlabel'   => 'count of IRQ (+) / sIRQ (-) per secund',
+    'info'     => 'This graph shows interrupts per secund from last update',
+    'category' => 'system'
+  },
+  'irq_cpu' =>
+  {
+    'title'    => 'CPU:cpu: :irq_type:',
+    'args'     => '--base 1000',
+    'vlabel'   => 'count per secund',
+    'info'     => 'This graph shows :irq_type: for CPU:cpu: per secund from last update',
+    'category' => 'cpu :cpu:'
+  }
+};
+
+my $fields =
+{
+  'irq' =>
+  {
+    'label' => '[:irq:] :irqinfo:',
+    'info'  => ':irq:: :irqinfo:',
+    'type'  => 'GAUGE',
+    'draw'  => 'LINE1'
+  },
+  'irq_sirq' =>
+  {
+    'label' => 'CPU:cpu: sIRQ/IRQ',
+    'info'  => 'Total sIRQ/IRQ for CPU:cpu:',
+    'type'  => 'GAUGE',
+    'draw'  => 'LINE1'
+  }
+};
+
+my $irq_types =
+{
+  'irq'  => 'Interrupts',
+  'sirq' => 'Software interrupts'
+};
+
+my $irq_descriptions = 
+{
+  'HI'      => 'High priority tasklets',
+  'TIMER'   => 'Timer bottom half',
+  'NET_TX'  => 'Transmit network packets',
+  'NET_RX'  => 'Receive network packets',
+  'SCSI'    => 'SCSI bottom half',
+  'TASKLET' => 'Handles regular tasklets'
+};
+
+# ----------------- main ----------------
+need_multigraph();
+# -- autoconf --
+if (defined($ARGV[0]) and ($ARGV[0] eq 'autoconf')) 
+{
+  printf("%s\n", (-e "/proc/interrupts" and -e "/proc/softirqs") ? "yes" : "no (stats not exists)");
+  exit (0);
+}
+# -- config --
+load_irq_info();
+if (defined($ARGV[0]) and ($ARGV[0] eq 'config')) { print_config(); exit (0); }
+# -- values --
+print_values(); exit(0);
+
+# ----------------- sub's ----------------
+
+# ----------------------- trim whitespace at begin and end of string ------------
+sub trim
+{
+  my    ($string) = @_;
+  for   ($string) { s/^\s+//; s/\s+$//; }
+  return $string;
+}
+
+
+# -------------------------- loading irq stats ---------------------------------
+sub load_irq_info_file
+{
+  my $file      = $_[0];
+  my $info      = {};
+  my $cpu_count = 0;
+  my $summ      = 0;
+  open (FH, '<', $file) or die "$! $file \n";
+  for my $line (<FH>)
+  {
+    chomp $line;
+    if($line =~ m/:/)
+    {
+      my ($name, $stat) = split(/:/, trim($line));
+      my @data = split(/\s+/, trim($stat));
+      for (my $i=0; $i<$cpu_count; $i++)
+      {
+        if (defined $data[$i])
+        {
+          $info->{'info'}{$i}{$name} = $data[$i];
+          $info->{'summ'}{$i}       += $data[$i];
+        }
+      }
+      if(scalar(@data) > $cpu_count)
+      {
+        my $iname = '';
+        ($iname = $line) =~ s/^.*:(\s+\d+)+\s+(.*)$/$2/;
+        if ($iname ne '')
+        {
+          if ($iname =~ m/.*-.*-.*/)
+          {
+            my @parts = ($iname =~ /^((\w+-)*\w+)\s+(.*)\s*$/g);
+            $iname = sprintf("%s (%s)", $parts[0], $parts[2]);
+          }
+          $info->{'description'}{$name} = $iname;
+        }
+      }
+      elsif(exists ($irq_descriptions->{$name}))
+      {
+        $info->{'description'}{$name} = $irq_descriptions->{$name};
+      }
+    }
+    else
+    {
+      my @cpus = split(/\s+/, trim($line));
+      $cpu_count = scalar(@cpus);
+      for (my $i=0; $i<$cpu_count; $i++)
+      {
+        $info->{'summ'}{$i} = 0;
+      }
+    }
+  }
+  close (FH);
+  $info->{'cpu_count'} = $cpu_count;
+  return $info;
+}
+
+# -------------- loading all IRQ statistics ---------------------------
+sub load_irq_info
+{
+  my ($irq, $sirq) = (load_irq_info_file("/proc/interrupts"), load_irq_info_file("/proc/softirqs"));
+  $IRQi->{'stat'}{'irq' } = $irq ->{'info'};
+  $IRQi->{'stat'}{'sirq'} = $sirq->{'info'};
+  $IRQi->{'summ'}{'irq' } = $irq ->{'summ'};
+  $IRQi->{'summ'}{'sirq'} = $sirq->{'summ'};
+  $IRQi->{'description'}{'irq' } = $irq ->{'description'} if exists($irq ->{'description'});
+  $IRQi->{'description'}{'sirq'} = $sirq->{'description'} if exists($sirq->{'description'});
+  $IRQi->{'cpu_count'} = $irq ->{'cpu_count'};
+}
+
+# ------------------ loading limits ---------------------
+sub load_limits
+{
+  my $flags = {};
+  my $limits = {};
+  my $name = '';
+  for my $irq_type (qw(irq sirq))
+  {
+    for my $t (qw(warning critical))
+    {
+      $name = sprintf("%s_%s_total", $t, $irq_type); # env.warning_irq_total 22
+      $limits->{'irq_total'}{$irq_type}{$t} = $ENV{$name} || undef;
+      for (my $i=0; $i < $IRQi->{'cpu_count'}; $i++)
+      {
+        $name = sprintf("%s_cpu%s_%s_total", $t, $i, $irq_type); # env.warning_cpu1_sirq_total 1112
+        $limits->{'irq_total_percpu'}{$irq_type}{$t}{$i} = $ENV{$name} || undef;
+        for my $irq_name (keys %{$IRQi->{'stat'}{$irq_type}{$i}})
+        {
+          $name = sprintf("%s_cpu%s_%s_%s", $t, $i, $irq_type, $irq_name); # env.warning_cpu0_irq_7 25
+          $limits->{'percpu_perirq'}{$irq_type}{$t}{$i}{$irq_name} = $ENV{$name} || undef;
+          $name = sprintf("%s_%s_%s", $t, $irq_type, $irq_name);
+          unless (exists($flags->{$name}))
+          {
+            $limits->{'perirq'}{$irq_type}{$t}{$irq_name} = $ENV{$name} || undef; # env.critical_sirq_RCU 14
+            $flags->{$name} = 1;
+          }
+        }
+      }
+    }
+  }
+  return $limits;
+}
+
+# -------------------------------- replacing strings ------------------------
+sub replace
+{
+  my ($string, $needle, $replacement) = @_[0..2];
+  $string =~ s/$needle/$replacement/g;
+  return $string;
+}
+
+# ----------------- append limit values to general graph fields-----------------------------
+sub append_total_limit
+{
+  my ($limits, $gr, $irq_type, $field_name, $cpu_num) = @_[0..4];
+  for my $t (qw(warning critical))
+  {
+    my $limit = defined($limits->{'irq_total_percpu'}{$irq_type}{$t}{$cpu_num}) ? $limits->{'irq_total_percpu'}{$irq_type}{$t}{$cpu_num} :
+                ($limits->{'irq_total'}{$irq_type}{$t} || undef);
+    if (defined($limit))
+    {
+      $gr->{'irq'}{'fields'}{$field_name}{$t} = $limit;
+    }
+  }
+}
+
+# ----------------- append limit values to chields graphs fields-----------------------------
+sub append_cpu_limit
+{
+  my ($limits, $gr, $irq_type, $field_name, $graph_name, $cpu_num, $irq_name) = @_[0..6];
+  for my $t (qw(warning critical))
+  {
+    my $limit = defined($limits->{'percpu_perirq'}{$irq_type}{$t}{$cpu_num}{$irq_name}) ? $limits->{'percpu_perirq'}{$irq_type}{$t}{$cpu_num}{$irq_name} :
+                ($limits->{'perirq'}{$irq_type}{$t}{$irq_name} || undef);
+    if (defined($limit))
+    {
+      $gr->{$graph_name}{'fields'}{$field_name}{$t} = $limit;
+    }
+  }
+}
+
+# ------------------------------ preparing graphs configurations ------------------------------
+sub prepare_graphs
+{
+  my $gr = {};
+  my $limits = load_limits();
+  # --- general graph ---
+  $gr->{'irq'}{'graph'} = $graphs->{'irq_total'};
+  $gr->{'irq'}{'graph'}{'order'} = "";
+  for (my $i=0; $i < $IRQi->{'cpu_count'}; $i++)
+  {
+    # --- general fields ---
+    my ($up_field_name, $down_field_name) = (sprintf("i%s", $i), sprintf("si%s", $i));
+    append_total_limit($limits, $gr, 'irq',  $up_field_name,   $i);
+    append_total_limit($limits, $gr, 'sirq', $down_field_name, $i);
+    $gr->{'irq'}{'graph'}{'order'} .= sprintf(" %s %s", $down_field_name, $up_field_name);
+    $gr->{'irq'}{'fields'}{$up_field_name}{'type'}   = $fields->{'irq_sirq'}{'type'};
+    $gr->{'irq'}{'fields'}{$down_field_name}{'type'} = $fields->{'irq_sirq'}{'type'};
+    $gr->{'irq'}{'fields'}{$up_field_name}{'draw'}   = $fields->{'irq_sirq'}{'draw'};
+    $gr->{'irq'}{'fields'}{$down_field_name}{'draw'} = $fields->{'irq_sirq'}{'draw'};
+    
+    $gr->{'irq'}{'fields'}{$up_field_name}{'label'} = replace($fields->{'irq_sirq'}{'label'}, ':cpu:', $i);
+    $gr->{'irq'}{'fields'}{$up_field_name}{'info'}  = replace($fields->{'irq_sirq'}{'info'} , ':cpu:', $i);
+    $gr->{'irq'}{'fields'}{$down_field_name}{'label'} = 'NaN';
+    $gr->{'irq'}{'fields'}{$down_field_name}{'info'}  = 'NaN';
+    
+    $gr->{'irq'}{'fields'}{$up_field_name}{'negative'} = $down_field_name;
+    $gr->{'irq'}{'fields'}{$down_field_name}{'graph'}  = 'no';
+    
+    # --- child graphs ---
+    for my $irq_type (qw(irq sirq))
+    {
+      my $graph_name = sprintf("irq.%s_cpu%s", $irq_type, $i);
+      $gr->{$graph_name}{'graph'}{'order'} = "";
+      $gr->{$graph_name}{'graph'}{'args'} = $graphs->{'irq_cpu'}{'args'};
+      $gr->{$graph_name}{'graph'}{'vlabel'} = $graphs->{'irq_cpu'}{'vlabel'};
+      for my $go (qw(title info))
+      {
+        $gr->{$graph_name}{'graph'}{$go} = replace($graphs->{'irq_cpu'}{$go}, ':irq_type:', $irq_types->{$irq_type});
+        $gr->{$graph_name}{'graph'}{$go} = replace($gr->{$graph_name}{'graph'}{$go}, ':cpu:', $i);
+      }
+      $gr->{$graph_name}{'graph'}{'category'} = replace($graphs->{'irq_cpu'}{'category'}, ':cpu:', $i);
+      # -- child fields --
+      my @irq_names = keys %{$IRQi->{'stat'}{$irq_type}{$i}};
+      # names splitted for better sorting
+      for my $irq_name ((
+                          (sort {int $a <=> int $b} grep{/^\d/}            @irq_names), 
+                          (sort                     grep{!/(^\d|ERR|MIS)/} @irq_names),
+                          (sort                     grep{/(ERR|MIS)/     } @irq_names)
+                        ))
+      {
+        my $field_name = clean_fieldname(sprintf("irq_%s", $irq_name));
+        append_cpu_limit($limits, $gr, $irq_type, $field_name, $graph_name, $i, $irq_name);
+        $gr->{$graph_name}{'graph'}{'order'} .= ' '.$field_name;
+        for my $fo (qw(label info))
+        {
+          $gr->{$graph_name}{'fields'}{$field_name}{$fo} = replace($fields->{'irq'}{$fo}, ':irq:', $irq_name);
+          $gr->{$graph_name}{'fields'}{$field_name}{$fo} = replace($gr->{$graph_name}{'fields'}{$field_name}{$fo},
+                                                                   ':irqinfo:', 
+                                                                   exists($IRQi->{'description'}{$irq_type}{$irq_name}) ?
+                                                                    $IRQi->{'description'}{$irq_type}{$irq_name} :
+                                                                    '');
+        }
+        $gr->{$graph_name}{'fields'}{$field_name}{'type'} = $fields->{'irq'}{'type'};
+        $gr->{$graph_name}{'fields'}{$field_name}{'draw'} = $fields->{'irq'}{'draw'};
+      }
+    }
+  }
+  return $gr;
+}
+
+# --------------------------------- graph configs ----------------------------
+sub print_config
+{
+  my $config = prepare_graphs();
+  for my $g (sort keys %{$config})
+  {
+    printf("multigraph %s\n", $g);
+    for my $go (sort keys %{$config->{$g}{'graph'}}) { printf("graph_%s %s\n", $go, $config->{$g}{'graph'}{$go}); }
+    for my $f (sort keys %{$config->{$g}{'fields'}}) { for my $fo (sort keys %{$config->{$g}{'fields'}{$f}}) { printf("%s.%s %s\n", $f, $fo, $config->{$g}{'fields'}{$f}{$fo}); } }
+    print "\n";
+  }
+}
+
+# ----------------------------------- saving state data using munin --------------------
+sub save_state_data
+{
+  my $data = $_[0];
+  my $d = Data::Dumper->new([$data]);
+  $d->Indent(0);
+  save_state($d->Dump);
+}
+
+# -------------------------------- loading previous state data using munin -------------------
+sub restore_state_data
+{
+  my $VAR1;
+  my $states = (restore_state())[0];
+  eval $states if defined $states;
+  return $VAR1;
+}
+
+# ----------------------------- loading statistic and save it for feature use--------------
+sub load_stats
+{
+  delete ($IRQi->{'description'});
+  $IRQi->{'timestamp'} = time();
+  save_state_data($IRQi);
+  return $IRQi;
+}
+
+# ----------- calculate current and previous values difference -----------------------
+sub diff_value
+{
+  my ($pvalue, $cvalue, $timediff) = @_[0..2];
+  return 'NaN' if $timediff <= 0 or $pvalue > $cvalue;
+  return ($cvalue - $pvalue)/$timediff;
+}
+
+# -----------------  calculating values ---------------------
+sub calculate
+{
+  my ($pstats, $cstats) = @_[0..1];
+  my $data = {};
+  my $timediff = $cstats->{'timestamp'} - $pstats->{'timestamp'};
+  for my $irq_type (qw(irq sirq))
+  {
+    for (my $i=0; $i < $IRQi->{'cpu_count'}; $i++)
+    {
+      $data->{'summ'}{$irq_type}{$i} = diff_value($pstats->{'summ'}{$irq_type}{$i}, $cstats->{'summ'}{$irq_type}{$i}, $timediff);
+      for my $irq_name (keys %{$cstats->{'stat'}{$irq_type}{$i}})
+      {
+        $data->{'stat'}{$irq_type}{$i}{$irq_name} = diff_value($pstats->{'stat'}{$irq_type}{$i}{$irq_name}, $cstats->{'stat'}{$irq_type}{$i}{$irq_name}, $timediff);
+      }
+    }
+  }
+  return $data;
+}
+
+# --------------------- preparing graphs values config ------------------------
+sub prepare_graphs_values
+{
+  my $data = $_[0];
+  my $values = {};
+  for (my $i=0; $i < $IRQi->{'cpu_count'}; $i++)
+  {
+    $values->{'irq'}{sprintf("i%s",  $i)} = $data->{'summ'}{'irq'} {$i};
+    $values->{'irq'}{sprintf("si%s", $i)} = $data->{'summ'}{'sirq'}{$i};
+    for my $irq_type (qw(irq sirq))
+    {
+      my $graph_name = sprintf("irq.%s_cpu%s", $irq_type, $i);
+      for my $irq_name (keys %{$data->{'stat'}{$irq_type}{$i}})
+      {
+        my $field_name = clean_fieldname(sprintf("irq_%s", $irq_name));
+        $values->{$graph_name}{$field_name} = $data->{'stat'}{$irq_type}{$i}{$irq_name};
+      }
+    }
+  }
+  return $values;
+}
+
+# -------------------------------- printing values -----------------------------------
+sub print_values
+{
+  my $pstats = restore_state_data();
+  my $cstats = load_stats();
+  if (exists ($pstats->{'timestamp'}))
+  {
+    my $values = prepare_graphs_values(calculate($pstats, $cstats));
+    for my $g (sort keys %{$values})
+    {
+      printf("multigraph %s\n", $g);
+      for my $f (sort keys %{$values->{$g}}) { printf("%s.value %s\n", $f, $values->{$g}{$f}); }
+      print "\n";
+    }
+  }
+}
+
