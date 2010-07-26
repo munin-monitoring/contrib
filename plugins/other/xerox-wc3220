@@ -1,0 +1,62 @@
+#!/bin/sh
+
+PRINTER_IP=${host:-"10.10.10.10"}
+TMP_DIR=${tmp:-"/tmp"}
+
+: << =cut
+
+=head1 NAME
+
+Xerox-WC3220 - Plugin to monitor consumables level and status on Xerox WorkCentre 3220
+
+=head1 CONFIGURATION
+
+PRINTER_IP
+
+=head1 AUTHOR
+
+Oleksiy Kochkin
+
+=head1 LICENSE
+
+As is.
+
+=back
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=autoconf
+  
+=cut
+
+case $1 in
+config)
+
+echo "graph_title Consumables level @ $PRINTER_IP"
+echo 'graph_vlabel %'
+echo 'graph_category printers'
+echo 'graph_scale no'
+echo 'black.label Black toner level'
+echo 'black.draw LINE2'
+echo 'black.type GAUGE'
+echo 'black.colour 000000'
+echo 'black.warning 5:'
+echo 'black.critical 1:'
+echo 'black.min 0'
+echo 'black.max 100'
+exit 0;;
+esac
+
+wget -q -o /dev/null -O $TMP_DIR/$PRINTER_IP-Supplies.html http://$PRINTER_IP/status/Supplies.html
+
+
+TONER_STR=$(grep "<td width=5%>" "$TMP_DIR/$PRINTER_IP-Supplies.html") 
+#<td width=5%>99%</td>
+
+echo -n "black.value "
+echo $TONER_STR | egrep -o "5%>[0-9]{1,2}" | egrep -o "[0-9]{1,2}$"
+
+
+rm $TMP_DIR/$PRINTER_IP-Supplies.html
+           
