@@ -1,0 +1,38 @@
+#!/bin/sh
+
+# Change to show your outside interface
+INTERFACE="eth2"
+
+case $1 in 
+	config)
+	    cat <<'EOM'
+graph_title Monthly Bandwidth average
+graph_vlabel Bytes
+average.label current average
+monthly.label monthly projection
+average.info Your average bandwidth usage based on uptime
+monthly.info Your projected monthly bandwidth usage based on uptime
+graph_category network
+graph_args  --base 1024 -l 0
+graph_info This graph show your current average bandwidth usage and projected 30 day average based on your current consumption since the last reboot
+average.warning 8.33
+monthly.warning 250
+EOM
+	exit 0;;
+esac
+
+
+INPUT=`ifconfig $INTERFACE|grep bytes|awk '{print $2}'|sed s/bytes://g`
+OUTPUT=`ifconfig $INTERFACE|grep bytes|awk '{print $6}'|sed s/bytes://g`
+
+TOTAL=$(($INPUT+$OUTPUT))
+
+UPTIME=`cat /proc/uptime | cut -d'.' -f1-1`
+UPV=`echo "scale=3;$UPTIME/60/60/24"|bc`
+
+DAILY=`echo "scale=3;$TOTAL/$UPV"|bc`
+MONTHLY=`echo "scale=3;$DAILY*30"|bc`
+
+
+echo "average.value $DAILY"
+echo "monthly.value $MONTHLY"
