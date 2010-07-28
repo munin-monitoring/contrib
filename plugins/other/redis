@@ -38,8 +38,8 @@ my $PORT = exists $ENV{'port'} ? $ENV{'port'} : 6379;
 
 my $server = "$HOST:$PORT";
 my $sock = IO::Socket::INET->new(
-	PeerAddr => $server,
-	Proto => 'tcp'
+    PeerAddr => $server,
+    Proto => 'tcp'
 );
 
 print $sock "INFO\r\n";
@@ -50,29 +50,32 @@ read($sock, $rep, substr($result,1)) || die "can't read from socket: $!";
 
 my $hash;
 foreach (split(/\r\n/, $rep)) {
-  my ($key,$val) = split(/:/, $_, 2);
-  $hash->{$key} = $val;
+    my ($key,$val) = split(/:/, $_, 2);
+    $hash->{$key} = $val;
 }
 close ($sock);
+
+my $config = ( defined $ARGV[0] and $ARGV[0] eq "config" );
 
 
 $0 =~ s/(.+)redis_//g;
 
 switch ($0) {
     case "connected_clients" {
-	if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
+        if ( $config ) {
             print "graph_title Connected clients\n";
             print "graph_vlabel Connected clients\n";
             print "connected_clients.label connected clients\n";
             print "graph_category redis\n";
             exit 0;
-	}
-	print "connected_clients.value " . $hash->{'connected_clients'} . "\n";
+        }
+
+        print "connected_clients.value " . $hash->{'connected_clients'} . "\n";
     }
 
 
     case "per_sec" {
-	if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
+        if ( $config ) {
             print "graph_title Per second\n";
             print "graph_vlabel per \${graph_period}\n";
             print "graph_category redis\n";
@@ -81,20 +84,51 @@ switch ($0) {
             print "connections.label connections\n";
             print "connections.type COUNTER\n";
             exit 0;
-	}
-	print "requests.value ". $hash->{'total_commands_processed'} ."\n";
-	print "connections.value ". $hash->{'total_connections_received'} ."\n";
+        }
+
+        print "requests.value ". $hash->{'total_commands_processed'} ."\n";
+        print "connections.value ". $hash->{'total_connections_received'} ."\n";
     }
 
 
     case "used_memory" {
-	if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
+        if ( $config ) {
             print "graph_title Used memory\n";
             print "graph_vlabel Used memory\n";
             print "used_memory.label used memory\n";
             print "graph_category redis\n";
             exit 0;
-	}
-	print "used_memory.value ". $hash->{'used_memory'}  ."\n";
+        }
+
+        print "used_memory.value ". $hash->{'used_memory'}  ."\n";
+    }
+    
+    case "used_keys" {
+        my $dbs;
+        foreach my $key (keys %{$hash}) {
+            if ( $key =~ /^db\d+$/ && $hash->{$key} =~ /keys=(\d+),expires=(\d+)/ ) {
+                $dbs->{$key} = [ $1, $2 ];
+            }
+        }
+
+        if ( $config ) {
+            print "graph_title Used keys\n";
+            print "graph_vlabel Used keys\n";
+            print "graph_category redis\n";
+
+            foreach my $db (keys %{$dbs}) {
+                printf "%s_keys.label %s keys\n", $db, $db;
+                printf "%s_expires.label %s expires\n", $db, $db;
+            }
+
+            exit 0;
+        }
+
+        foreach my $db (keys %{$dbs}) {
+            printf "%s_keys.value %d\n", $db, $dbs->{$db}[0];
+            printf "%s_expires.value %d\n", $db, $dbs->{$db}[1];
+        }
     }
 }
+
+# vim: ft=perl ai ts=4 sw=4 et:
