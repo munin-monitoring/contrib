@@ -3,11 +3,14 @@
 # Monitors memory usage in openVZ or Virtuozzo
 # based on http://www.huschi.net/archiv/speicher-anzeigen-mit-vzfree.html
 # Author: Michael Richter, http://osor.de/ 
+# Cleaned up and translated to english by: Marian Sigler <m@qjym.de>, 2010-08-13
 #
 #%# capabilities=autoconf
 
+BEANCOUNTERS=/proc/user_beancounters
+
 if [ "$1" == "autoconf" ]; then
-	if [ -e /proc/user_beancounters ]; then
+	if [ -e $BEANCOUNTERS ]; then
 		echo yes
 		exit 0
 	else
@@ -16,46 +19,46 @@ if [ "$1" == "autoconf" ]; then
 	fi
 fi
 
-x=$(cat /proc/user_beancounters | grep privvmpages| awk 'BEGIN{ cur=max=bar=lim=fail=0; }{ cur+=$2; max+=$3;bar+=$4;lim+=$5;fail+=$6 } END {print cur*4*1024,max*4*1024,bar*4*1024,lim*4*1024,fail}')
-
-      momentan=$(echo $x| awk '{print $1}')
-maximalgenutzt=$(echo $x| awk '{print $2}')
-      barriere=$(echo $x| awk '{print $3}')
-maximalnutzbar=$(echo $x| awk '{print $4}')
-        fehler=$(echo $x| awk '{print $5}')
-
-zu=$(cat /proc/user_beancounters | grep oomguarpages | awk 'BEGIN{ bar=0; }{ bar+=$4 } END { print bar*4*1024}') 
-
-zugesichert=$(echo $zu| awk '{print $1}')
+if [ ! -r $BEANCOUNTERS ]; then
+    echo "$BEANCOUNTERS not readable" >&2
+    exit 1
+fi
 
 if [ "$1" == "config" ]; then
-	echo "graph_args --base 1024 -l 0 --vertical-label Speicher --upper-limit $maximalnutzbar";
-	echo "graph_title VPS Speichernutzung"
-	echo "graph_category system"
-	echo "graph_info Diese Grafik zeigt die Speichernutzung."
-	echo "graph_order maximal momentan zugesichert barriere limit"
-	
-	echo "momentan.label Momentan"
-	echo "momentan.draw AREA"
-	echo "momentan.info Aktueller Speicherverbrauch"
-	echo "maximal.label Maximal"
-	echo "maximal.draw AREA"
-	echo "maximal.info Maximaler Speicherverbrauch"
-	echo "zugesichert.label Zugesichert"
-	echo "zugesichert.draw LINE2"
-	echo "zugesichert.info Zugesicherter Speicher"
-	echo "barriere.label Barriere"
-	echo "barriere.draw LINE2"
-	echo "barriere.info Maximal erlaubter Speicher"
-	echo "limit.label Limit"
-	echo "limit.draw LINE2"
-	echo "limit.info Maximal nutzbarer Speicher"
+    limit=$(awk '/privvmpages/ {print $5*4096}' $BEANCOUNTERS)
+    cut -c9- <<EOF
+        graph_args --base 1024 -l 0 --vertical-label bytes --upper-limit $limit
+        graph_title VPS memory usage
+        graph_category system
+        graph_info Shows memory usage and VPS memory limits.
+        graph_order maxheld held oomguar barrier limit
+
+        held.label held
+        held.draw AREA
+        held.info currently held memory
+        maxheld.label maxheld
+        maxheld.draw AREA
+        maxheld.info maximum held memory
+        oomguar.label guaranteed
+        oomguar.draw LINE2
+        oomguar.info memory guaranteed for OOM
+        barrier.label barrier
+        barrier.draw LINE2
+        barrier.info memory usage barrier
+        limit.label limit
+        limit.draw LINE2
+        limit.info memory usage limit
+EOF
 	exit 0
 fi
 
-echo "momentan.value $momentan"
-echo "maximal.value $maximalgenutzt"
-echo "zugesichert.value $zugesichert"
-echo "barriere.value $barriere"
-echo "limit.value $maximalnutzbar"
+if [ $# -gt 0 ]; then
+    echo "Invalid argument: $1" >&2
+    exit 1
+fi
 
+
+
+
+awk '/privvmpages/ {print "held.value", $2*4096 "\nmaxheld.value", $3*4096 "\nbarrier.value", $4*4096 "\nlimit.value", $5*4096}' $BEANCOUNTERS
+awk '/oomguarpages/ { print "oomguar.value", $4*4096 }' $BEANCOUNTERS
