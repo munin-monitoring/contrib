@@ -39,14 +39,19 @@ Possible TODOs:
 
 # CONFIGURATION
 
-server = "127.0.0.1:8000"
-user = "admin"
-pw = "your_icecast_admin_password"
+server = "radio.schlag.fr:2342"
+user = "lta-admin"
+pw = "suckm3g00dyaoldbitch"
 
 # Exclude these hosts when calculating listening duration / listeners count
 # (we use this to prevent our aircheck recording system from appearing in the stats)
 #exclude = ("123.123.123.123",)
 exclude = ()
+
+# Exclude these sources from calcultation
+# Ever add fallback sources to this list
+#source_exclude = ["/fallback.mp3", "/fallback.ogg"]
+source_exclude = ("/fallback.mp3", "/fallback.ogg")
 
 # /CONFIGURATION
 
@@ -68,9 +73,10 @@ f.close()
 
 sources = []
 for s in tree.getiterator("source"):
-	sources.append({"mount": s.attrib["mount"],
-			"listeners": s.find("listeners").text,
-			"connected": s.find("Connected").text})
+	if s.attrib["mount"] not in source_exclude:
+		sources.append({"mount": s.attrib["mount"],
+				"listeners": s.find("listeners").text,
+				"connected": s.find("Connected").text})
 
 plugin_name = basename(argv[0])
 
@@ -91,7 +97,7 @@ try:
 			print "graph_category Icecast"
 			print "graph_vlabel hours"
 			for s in sources:
-				print "%s.label source %s" % (s["mount"].strip("/").replace(".","_"), s["mount"])
+				print "%s.label source %s" % (s["mount"].strip("/").replace(".","_").replace("-","_"), s["mount"])
 		elif plugin_name == "icecast_traffic":
 			print "graph_title Icecast outgoing traffic"
 			print "graph_args --base 1024 -l 0"
@@ -99,7 +105,7 @@ try:
 			print "graph_vlabel bytes / second"
 			is_first = True
 			for s in sources:
-				sname = s["mount"].strip("/").replace(".","_")
+				sname = s["mount"].strip("/").replace(".","_").replace("-","_")
 				print "%s.label source %s" % (sname, s["mount"])
 				print "%s.type DERIVE" % sname
 				print "%s.min 0" % sname
@@ -116,7 +122,7 @@ try:
 			print "graph_vlabel listeners"
 			is_first = True
 			for s in sources:
-				sname = s["mount"].strip("/").replace(".","_")
+				sname = s["mount"].strip("/").replace(".","_").replace("-","_")
 				print "%s.label source %s" % (sname, s["mount"])
 				if is_first:
 					print "%s.draw AREA" % sname
@@ -131,7 +137,7 @@ except IndexError:
 
 if plugin_name == "icecast_uptime":
 	for s in sources:
-		print "%s.value %s" % (s["mount"].strip("/").replace(".","_"), int(s["connected"]) / 3600.)
+		print "%s.value %s" % (s["mount"].strip("/").replace(".","_").replace("-","_"), int(s["connected"]) / 3600.)
 		
 elif plugin_name == "icecast_traffic":
 	f = opener.open("http://%s/admin/stats.xml" % server)
@@ -139,7 +145,7 @@ elif plugin_name == "icecast_traffic":
 	tree.parse(f)
 	f.close()
 	for s in tree.getiterator("source"):
-		print "%s.value %s" % (s.attrib["mount"].strip("/").replace(".","_"), s.find("total_bytes_sent").text)
+		print "%s.value %s" % (s.attrib["mount"].strip("/").replace(".","_").replace("-","_"), s.find("total_bytes_sent").text)
 
 else:
 	durations = {}
@@ -168,5 +174,5 @@ else:
 		print "mdn.value %s" % median
 	else:
 		for s in sources:
-			print "%s.value %s" % (s["mount"].strip("/").replace(".","_"), len(durations[s["mount"]]))
+			print "%s.value %s" % (s["mount"].strip("/").replace(".","_").replace("-","_"), len(durations[s["mount"]]))
 
