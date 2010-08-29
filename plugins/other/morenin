@@ -1,0 +1,95 @@
+#!/usr/bin/perl
+#
+# Script by Simon Avery ( http://digdilem.org / digdilem@gmail.com ) to query munin.conf and collate various types of graphs on the same page from different machines.
+# Eg - show all the load daily graphs for all your machines on one page. Review ALL your machines' disk space, memory, cpu, loads for the past day, week, month or year - one click!
+# Reason: Makes it easier (for me!) to review a lot of machines (I have 28) for unusual patterns.
+#
+# Options - supply on the url:
+# period=day / week  (default: day)
+# type = df / whatever (default:df) - which reporting type to use.
+# scale=pixel (How many pixels wide to scale the graphs, override default with $cellwidth below
+#
+# Installation:
+# 1. Copy this script to a webfolder of your choice, ensuring CGI is allowed there.
+# 2. Edit the four variables below to suit your configuration.
+# 3. Visit the script in your web browser.
+#
+# History:
+# v.1 - 30 August, 2010: Initial release.
+
+my $htmldir = '/internal/munin';		# What's the web address for munin's html dir? (Hint - where you normally go to see munin's overview)
+my $cfgfile = '/etc/munin/munin.conf';	# Where's the config file - must be readable
+my $numwide=5;		# How many graphs to go wide per row?
+my $default_cellwidth=350;	# How many pixels wide for the graphs? (Default)
+
+use CGI qw/:standard/;
+my $q = CGI->new;
+print $q->header() , $q->start_html('Morenin - Multiple server graphing tool');
+
+my $type = param("type") || 'df';		# Default type
+my $period = param("period") || 'day';	# Default period
+my $cellwidth = param("scale") || $default_cellwidth;  # Default image scale
+
+my @list; # list of names
+my $imgdir; # find from munin's conf
+
+open(CFG,"<$cfgfile") or die("Can't open munin config file: $cfgfile - $!\n");
+while(<CFG>) {
+	my $tidy = trim($_);
+	if ($tidy =~ /htmldir/i) { # Guess where the images are, so I can test whether to try and display them or not.
+		$tidy =~ s/\t/ /g;
+		($junk,$imgdir) = split(/ /,$tidy);
+		}
+	# search for identifier, Not very elegant, doesn't account for horribly done config files.
+	if ($tidy =~ m/^\[(.*)\]/)  {
+		push(@list,$1);
+		}
+	}
+close(CFG);
+sort(@list); # Sort it alpha-numerically
+
+print "Morenin - graphing ".scalar(@list)." <a href=\"$htmldir\">Munin</a> graphs for type $type, period <b>$period</b>:\n";
+# Some default links - add more here if you want 'em
+print qq~
+	<a href="?type=$type&period=day">Daily</a> ::
+	<a href="?type=$type&period=week">Weekly</a> ::
+	<a href="?type=$type&period=month">Monthly</a> ::
+	<a href="?type=$type&period=year">Yearly</a> ...::...
+
+	<a href="?period=$period&type=load">Load</a> ::
+	<a href="?period=$period&type=cpu">CPU</a> ::
+	<a href="?period=$period&type=df">DiskUse</a> ::
+	<a href="?period=$period&type=memory">Memory</a> ::
+	<a href="?period=$period&type=mysql_queries">MySql</a>
+	~;
+
+if (! defined $htmldir) { print "<br>Error: Can't find htmldir from config, this isn't going to work..."; }
+
+# Now output the frames and links
+my $widcnt=1; # Temp counter
+print "<hr><table border=\"1\"><tr>\n";
+
+foreach $i (@list[1..$#list])  # Step through each entry
+    {
+	next if (! -e "$imgdir/$i/$i-$type-$period.png"); 	# First check an image is there and not a null entry;
+
+	print "<td valign=\"top\">$i<br>";
+	print "<a href=\"$htmldir/$i/$i-$type.html\" title=\"Click to visit server's $type page\">\n";
+	print "<img src=\"$htmldir/$i/$i-$type-$period.png\" alt=\"$i-$type-$period.png\" width=\"$cellwidth\">";
+	print "</a>\n";
+	print "</td>\n";
+
+	if ($widcnt++ >= $numwide) { print "</tr><tr>\n"; 	 $widcnt=1;	} # wrap the cells
+	}
+
+print "</tr></table>\n";
+
+$q->end_html;
+
+sub trim($)
+{
+	my $string = shift;
+	$string =~ s/^\s+//;
+	$string =~ s/\s+$//;
+	return $string;
+}
