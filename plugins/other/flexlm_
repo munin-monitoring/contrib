@@ -35,10 +35,11 @@
 #  - LMFEATURES:		The individual features of each vendor daemon to graph
 #  - LMDISPLAYNAME:	use the LMDISPLAYNAME instead of the daemon name when
 #							generating graph names
-#	- LMGRAPHISSUED:	Generate a graph of the number of licenses issued for 
-#							each feature .
+#	- LMGRAPHISSUED:	If set generate a graph of the number of licenses issued for 
+#							each feature.
 #  - LMSTAT:			The path to the lmstat binary
 #  - LMLICFILE:		The path to the FlexLM License File
+#  - LMLOGARITHMIC	If set then graph use a logarithmic scale
 #  
 # $Log$
 # Revision 1.00	20090807	nassarmu
@@ -71,7 +72,6 @@ if ( ! $ENV{'LMFEATURES'} ) {
 our $lmstat;
 our $lmlicfile;
 our $lmdisplayname;
-our $lmgraphissued;
 if ( $ENV{'LMSTAT'} ) {
 	$lmstat = $ENV{'LMSTAT'};
 } else {
@@ -86,11 +86,6 @@ if ( $ENV{'LMDISPLAYNAME'} ) {
 	$lmdisplayname = $ENV{'LMDISPLAYNAME'};
 } else {
 	$lmdisplayname = $daemon;
-}
-if ( $ENV{'LMGRAPHISSUED'} ) {
-	$lmgraphissued = "1";
-} else {
-	$lmgraphissued = "0";
 }
 
 # Parse LMFEATURES
@@ -111,15 +106,20 @@ if ( $ARGV[0] and $ARGV[0] eq "autoconf" ) {
 # print out a config screen when asked.
 if ( $ARGV[0] and $ARGV[0] eq "config" ) {
 	print "graph_title FlexLM License usage for $lmdisplayname\n";
-	print "graph_args --base 1000 --vertical-label licenses -l 0\n";
+	if ( $ENV{'LMLOGARITHMIC'} ) {
+		print "graph_args --base 1000 --vertical-label licenses --lower-limit 0.01 --logarithmic\n";
+	}
+	else {
+		print "graph_args --base 1000 --vertical-label licenses -l 0\n";
+	}
 	print "graph_category licensing\n";
 	print "graph_period minute\n";
 	foreach my $feature (@features) {
 		my $clean_feature = clean_fieldname($feature);
-		print "$clean_feature".".label $feature actual\n";
+		print "$clean_feature".".label $feature\n";
 		print "$clean_feature".".draw LINE2\n";
 		print "$clean_feature".".info The number of $feature licenses checked out\n";
-		if ( $lmgraphissued ) {
+		if ( $ENV{'LMGRAPHISSUED'} ) {
 			print "$clean_feature"."max.label $feature max\n";
 			print "$clean_feature"."max.draw LINE3\n";
 			print "$clean_feature"."max.info The total number of $feature licenses available\n";
@@ -128,9 +128,11 @@ if ( $ARGV[0] and $ARGV[0] eq "config" ) {
 	exit 0
 }
 
+my @results = `$lmstat -c $lmlicfile -S $daemon`;
+
 # pull the info from lmstat and print the results
 foreach my $feature (@features) {
-	my @results = `$lmstat -c $lmlicfile -S $daemon -f $feature`;
+	my @results = grep(/Users of $feature/, @results);
 	
 	foreach my $result (@results) {
 		if ($result =~ m/Users of $feature\:/ ) {
@@ -139,7 +141,7 @@ foreach my $feature (@features) {
 	
 			my $clean_feature = clean_fieldname($feature);
 			print "$clean_feature".".value $fields[10]\n";
-			if ( $lmgraphissued ) {
+			if ( $ENV{'LMGRAPHISSUED'} ) {
 				print "$clean_feature"."max.value $fields[5]\n";
 			}
 		}
