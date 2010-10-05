@@ -1,0 +1,100 @@
+#!/bin/sh
+# wordpress-munin plugin
+# 
+# Author Andre Darafarin
+# Version 0.1 05 Oct 2010
+#
+#
+: <<=cut
+=head1 NAME
+
+Wordpress-Munin plugin
+
+A simple Munin plugin to monitor some data from a running wordpress instance
+
+=head1 CONFIGURATION
+
+The plugin need access to the database of the wordpress instance.
+
+
+=head2 Config file
+
+Add file plugin-conf.d/wordpress and fill like this
+
+
+=over 4
+
+=item * [wordpress]
+# Name of section. Must be wordpress.
+
+=item * env.DB_NAME your_db_name
+# Replace your_db_name
+
+=item * env.DB_USER your_db_username
+# Replace you_db_username
+
+=item * env.DB_PASSWORD your_db_pass
+# Replace your_db_pass
+
+=item * env.DB_HOST host_of_your_db
+# Replace with host of database server. Will be localhost for many users. 
+
+=back
+
+
+
+=head1 VERSION
+
+0.1, Oct 05 2010
+
+=head1 AUTHOR
+
+Andre Darafarin, happypork.com
+=cut
+
+case $1 in
+   config)
+        cat <<'EOM'
+graph_title Wordpress average
+graph_order posts comments pingbacks users
+graph_vlabel Wordpress
+graph_info Some Statistics of Wordpress
+posts.label Posts
+posts.draw LINE3
+comments.label Comments
+pingbacks.label Pingbacks
+users.label Users
+EOM
+        exit 0;;
+esac
+
+# DBNAME=${logfile:-/var/log/syslog}
+
+POSTS=`mysql -h$DB_HOST  -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --execute="SELECT COUNT(*) FROM wp_posts WHERE post_status = 'publish' AND post_password = '' AND post_type = 'post';"`
+SHORTPOSTS="${POSTS:9}"
+
+COMMENTS=`mysql -h$DB_HOST -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --execute="SELECT COUNT(*) FROM wp_comments WHERE comment_approved = '1' AND comment_type = '';"`
+SHORTCOMMENTS="${COMMENTS:9}"
+
+PINGBACKS=`mysql -h$DB_HOST -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --execute="SELECT COUNT(*) FROM wp_comments WHERE comment_approved = '1' AND comment_type = 'pingback';"`
+SHORTPINGBACKS="${PINGBACKS:9}"
+
+USERS=`mysql -h$DB_HOST -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --execute="SELECT COUNT(*) FROM wp_users ;"`
+SHORTUSERS="${USERS:9}"
+
+
+#AUSGABE BEREICH
+echo -n "posts.value $SHORTPOSTS
+"
+
+echo -n  "comments.value $SHORTCOMMENTS   
+"
+
+echo -n "pingbacks.value $SHORTPINGBACKS 
+"
+
+echo -n "users.value $SHORTUSERS
+"
+
+
+
