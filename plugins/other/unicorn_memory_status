@@ -1,0 +1,80 @@
+#!/usr/bin/env ruby
+#
+#  unicorn_status - A munin plugin for Linux to monitor memory size of unicorn processes
+#
+#  Copyright (C) 2010 Shinji Furuya - shinji.furuya@gmail.com
+#  Licensed under the MIT license:
+#  http://www.opensource.org/licenses/mit-license.php
+#
+
+# set path to your rails app
+RAILS_ROOT = "/path/to/rails/app"
+
+module Munin
+  class UnicornMemoryStatus
+    attr_reader :pid_file
+
+    def initialize(rails_root)
+      @pid_file = "#{rails_root}/tmp/pids/unicorn.pid"
+    end
+
+    def master_pid
+      File.read(pid_file).to_i
+    end
+
+    def worker_pids
+      result = []
+      ps_output = `ps w --ppid #{master_pid}`
+      ps_output.split("\n").each do |line|
+        chunks = line.strip.split(/\s+/, 5)
+        pid, pcmd = chunks[0], chunks[4]
+        next if pid !~ /\A\d+\z/ or pcmd !~ /worker/
+          result << pid.to_i
+      end
+      result
+    end
+
+    def total_memory
+      result = 0
+      memory = memory_usage
+      result += memory[:master][master_pid]
+      memory[:worker].each do |pid, memory|
+        result += memory
+      end
+      result
+    end
+
+    def memory_usage
+      result = { :master => {master_pid => nil}, :worker => {} }
+      ps_output = `ps auxw | grep unicorn_rails`
+      ps_output.split("\n").each do |line|
+        chunks = line.strip.split(/\s+/, 11)
+        pid, pmem_rss, pcmd = chunks.values_at(1, 5, 10)
+        pmem = pmem_rss.to_i * 1024
+        pid = pid.to_i
+
+        if pid == master_pid
+          result[:master][pid] = pmem
+        elsif worker_pids.include?(pid)
+          result[:worker][pid] = pmem
+        end
+      end
+      result
+    end
+  end
+end
+
+case ARGV[0]
+when "autoconf"
+  puts "yes"
+when "config"
+  puts "graph_title Unicorn - Memory usage"
+  puts "graph_args --base 1024 -l 0"
+  puts "graph_vlabel bytes"
+  puts "graph_category Unicorn"
+  puts "total_memory.label total_memory"
+  puts "total_memory.draw LINE2"
+else
+  m = Munin::UnicornMemoryStatus.new(RAILS_ROOT)
+  puts "total_memory.value #{m.total_memory}"
+end
