@@ -4,7 +4,7 @@
 #
 # Munin plugin to show amount of memory used by vm
 #
-# Copyright Maxence Dunnewind, Rodolphe Quiédeville
+# Copyright Maxence Dunnewind, Rodolphe Quiédeville, Adrien Pujol
 #
 # License : GPLv3
 #
@@ -57,10 +57,16 @@ def fetch(vms):
     '''
     res = {}
     for pid in vms:
-        cmdline = open("/proc/%s/cmdline" % pid, "r")
-        amount = re.sub(r"^.*-m\x00(.*)\x00-smp.*$",r"\1", cmdline.readline())
-        ammount = int(amount) * 1024 * 1024
-        print "%s_mem.value %s" % (vms[pid], ammount) 
+        try:
+            cmdline = open("/proc/%s/cmdline" % pid, "r")
+            amount = re.sub(r"^.*-m\x00(.*)\x00-smp.*$",r"\1", cmdline.readline())
+            ammount = int(amount) * 1024 * 1024
+            print "%s_mem.value %s" % (vms[pid], ammount) 
+        except:
+            cmdline = open("/proc/%s/cmdline" % pid, "r")
+            amount = re.sub(r"^.*-m\x00(\d+).*$",r"\1", cmdline.readline())
+            ammount = int(amount) * 1024 * 1024
+            print "%s_mem.value %s" % (vms[pid], ammount) 
 
 def detect_kvm():
     ''' Check if kvm is installed
