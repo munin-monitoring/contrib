@@ -4,8 +4,7 @@
 #
 # Original Author: Peter Holzleitner
 #
-# Revision 1.0  2009/05/04 16:00:00 holzlp
-# Initial version
+# Revision 1.1  2010/10/14 19:19
 #
 # Configuration variables:
 #
@@ -22,27 +21,15 @@
 
 
 use Net::Telnet::Cisco;
+use Sys::Syslog;
 
 
 if ($0 =~ /^(?:|.*\/)cisco_bgp_([^_]+)$/) {
     $host  = $1;
     }
 
-
-
-if ($ARGV[0] and $ARGV[0] eq "autoconf")
-{
-	if (-r "/proc/meminfo")
-	{
-		print "yes\n";
-		exit 0;
-	}
-	else
-	{
-		print "/proc/meminfo not found\n";
-		exit 1;
-	}
-}
+($^O eq "linux" || $^O eq "openbsd") && Sys::Syslog::setlogsock('unix');
+openlog('munin.bgp', 'cons,pid', 'daemon');
 
 
 my @BGP_nbr;
@@ -89,16 +76,27 @@ sub fetch_bgpstats
     my $username = shift;
     my $password = shift;
     my $session = Net::Telnet::Cisco->new(Host => $host);
+
     $session->login($username, $password);
+    $session->cmd('terminal length 200');
+    $session->cmd('terminal width 200');
     my @output = $session->cmd('show ip bgp summary');
 
-    # Neighbor        V          AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd
-    # 12.23.34.45     4        9999  410819    9522  2401634    0    0 6d14h      281237
+# example output of router
+# ------------------------
+# [...]
+# Neighbor        V          AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd
+# 11.111.11.111   4      98765 12403694  509571 308911893    0    0 1d23h      329193
+# 122.122.122.122 4       1234 13242856  383827 308911879    0    0 00:08:22   330761
 
     foreach(@output) {
+        chomp; s/\r//g;
 	$tot_pfx = $1 if /^BGP activity (\d+)\/(\d+) prefixes/;
-	next unless /^(\d+\.\d+\.\d+\.\d+)\s+\d+\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+[0-9a-z]+\s+(\d+)/;
+        syslog('debug', "$hostname: $_\n");
+
+	next unless /^(\d+\.\d+\.\d+\.\d+)\s+\d+\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+[0-9a-z:]+\s+(\d+)/;
 	my ($neigh, $as, $pfx) = ($1, $2, $3);
+        syslog('debug', "$neigh (AS $as)");
 	push @BGP_nbr,  "$neigh (AS $as)";
 	push @BGP_pfx,  $pfx;
 	}
