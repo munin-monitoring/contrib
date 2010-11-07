@@ -26,7 +26,7 @@ Available Graphs contained in this Plugin
 
 bytes => This graphs the current network traffic in and out
 
-commands => I<MULTIGRAPH> This graphs the current commands being issued to the memcache machine. Multigraph breaks this down to per slab.
+commands => I<MULTIGRAPH> This graphs the current commands being issued to the memcache machine. B<Multigraph breaks this down to per slab.>
 
 conns => This graphs the current, max connections as well as avg conns per sec avg conns per sec is derived from total_conns / uptime.
 
@@ -37,16 +37,15 @@ items => I<MULTIGRAPH> This graphs the current items and total items in the memc
 memory => I<MULTIGRAPH> This graphs the current and max memory allocation B<Multigraph breaks this down to per slab.>
 
 The following example holds true for all graphing options in this plugin.
- Example: ln -s /usr/share/munin/plugins/memcached_multi.pl /etc/munin/plugins/memcached_bytes
+ Example: ln -s /usr/share/munin/plugins/memcached_multi_ /etc/munin/plugins/memcached_multi_bytes
 
 =head1 ADDITIONAL INFORMATION
 
 You will find that some of the graphs have LEI on them. This was done in order to save room
 on space for text and stands for B<Last Evicted Item>.
 
-The B<Timescale> variable formats certain graphs based on the following guidelines. This currently
-only effects the Request for Last Evicted Item graph.
- 1 => Seconds  B<time_scale higher than 4 or undef defaults to seconds>
+The B<Timescale> variable formats certain graphs based on the following guidelines.
+ 1 => Seconds
  2 => Minutes
  3 => Hours  B<*Default*>
  4 => Days
@@ -59,20 +58,16 @@ Thanks to dormando as well for putting up with me ;)
 
 =head1 AUTHOR
 
-Matthew West <mhwest at livejournal dot com>
+Matt West < https://code.google.com/p/memcached-munin-plugin/ >
 
 =head1 LICENSE
 
 GPLv2
 
-=head1 VERSION
-
-v1.21 - Tested against v1.4.5 Memcached Node
-
 =head1 MAGIC MARKERS
 
-    #%# family=auto
-    #%# capabilities=autoconf suggest
+#%# family=auto
+#%# capabilities=autoconf suggest
 
 =cut
 
@@ -90,7 +85,7 @@ my %stats;
 # stats and stats settings.
 
 my %items;
-# This gives us eviction rates and other error stats per slab
+# This gives us eviction rates and other hit stats per slab
 # We track this so we can see if something was evicted earlier than necessary
 
 my %chnks;
@@ -100,7 +95,6 @@ my %chnks;
 
 my $timescale = $ENV{timescale} || 3;
 # This gives us the ability to control the timescale our graphs are displaying.
-# As of right now, this only affects the graph for Last Request for Last Evicted Item (LEI)
 # The default it set to divide by hours, if you want to get seconds set it to 1.
 # Options: 1 = seconds, 2 = minutes, 3 = hours, 4 = days
 
@@ -136,6 +130,7 @@ $graphs{items} = {
     },
     datasrc => [
         { name => 'curr_items', label => 'Current Items', min => '0' },
+        { name => 'total_items', label => 'New Items', min => '0', type => 'DERIVE' },
     ],
 };
 
@@ -160,7 +155,7 @@ $graphs{bytes} = {
         title => 'Network Traffic',
         category => 'memcached',
         info => 'This graph shows the network traffic in (-) / out (+) of the machine',
-        order => 'bytes_read,bytes_written',
+        order => 'bytes_read bytes_written',
     },
     datasrc => [
         { name => 'bytes_read', type => 'DERIVE', label => 'Network Traffic coming in (-)', graph => 'no', cdef => 'bytes_read,8,*', min => '0' },
@@ -175,7 +170,7 @@ $graphs{conns} = {
         category => 'memcached',
         title => 'Connections',
         info => 'This graph shows the number of connections being handled by memcached',
-        order => 'max_conns,curr_conns,avg_conns',
+        order => 'max_conns curr_conns avg_conns',
     },
     datasrc => [
         { name => 'curr_conns', label => 'Current Connections', min => '0' },
@@ -747,21 +742,21 @@ sub time_scale {
     my $value;
 
     if ($configopt eq 'config') {
-        if (($timescale == 1) || ($timescale > 4) || (!defined($timescale))) {
+        if ($timescale == 1) {
             $value = "Seconds" . $origvalue;
         } elsif ($timescale == 2) {
             $value = "Minutes" . $origvalue;
-        } elsif ($timescale == 3) {
+        } elsif (($timescale == 3) || ($timescale > 4) || (!defined($timescale))) {
             $value = "Hours" . $origvalue;
         } elsif ($timescale == 4) {
             $value = "Days" . $origvalue;
         }
     } elsif ($configopt eq 'data') {
-        if (($timescale == 1) || ($timescale > 4) || (!defined($timescale))) {
+        if ($timescale == 1) {
             $value = sprintf("%02.2f", $origvalue / 1);
         } elsif ($timescale == 2) {
             $value = sprintf("%02.2f", $origvalue / 60);
-        } elsif ($timescale == 3) {
+        } elsif (($timescale == 3) || ($timescale > 4) || (!defined($timescale))) {
             $value = sprintf("%02.2f", $origvalue / 3600);
         } elsif ($timescale == 4) {
             $value = sprintf("%02.2f", $origvalue / 86400);
