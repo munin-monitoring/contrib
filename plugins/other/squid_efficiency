@@ -27,6 +27,8 @@
 #
 # Changes
 # ~~~~~~~
+# 2010-10-11: paulm: uses squidclient instead of netcat; some beautification.
+# 2010-01-20, homyakov: added disk and memory stats
 # 2009-11-25, volker: added config options and docs
 # 2009-11-19, benjamin: fixed squid3 compatibility, minor rewrite
 # 2006-11-16, benjamin: removed 5 minutes stats, fixed 5% bug
@@ -55,49 +57,71 @@
 host=${squidhost:-localhost}
 port=${squidport:-3128}
 
-test "$1" = "autoconf" && {
-    which netcat > /dev/null || {
-        echo "netcat binary not found"
-        exit 1
-    }
-	DUMP=`printf "GET cache_object://$host/info HTTP/1.0\n\n" | netcat $host $port`
-    test -n "$DUMP"  || {
-        echo "http response empty"
-        exit 1
-    }
-    echo "yes"
-    exit 0
-}
-
 test "$1" = "config" && {
 	echo 'graph_title Squid Efficiency'
-	echo 'graph_info This graph shows the proxy efficiency.'
+	echo 'graph_info This graph shows the proxy efficiency over the last five mins.'
 	echo 'graph_category squid'
 	echo "graph_args --lower-limit 0 --upper-limit 100"
 	echo 'graph_vlabel %'
 	echo 'request.label request hits'
 	echo 'byte.label byte hits'
+	echo 'memory.label memory request hits'
+	echo 'disk.label disk request hits'
 	exit 0
 }
 
-DUMP=`printf "GET cache_object://$host/info HTTP/1.0\n\n" | netcat $host $port`
 # squid2
 #        Request Hit Ratios:     5min: 0.0%, 60min: 17.4%
 #        Byte Hit Ratios:        5min: 75.0%, 60min: 12.0%
 # squid3
 #        Hits as % of all requests:    5min: 0.0%, 60min: 0.0%
 #        Hits as % of bytes sent:    5min: 100.0%, 60min: 100.0%
-test -n "$DUMP"  || {
-    echo "http response empty"
-    exit 1
-}
 
-REQUEST_HITS=`echo "$DUMP" | grep -E "Request Hit Ratios|Hits as % of all requests" | cut -d ":" -f4 | cut -d "." -f1 | xargs echo`
-test $REQUEST_HITS -gt 0 || REQUEST_HITS=0
-BYTE_HITS=`echo "$DUMP" | grep -E "Byte Hit Ratios|Hits as % of bytes sent" | cut -d ":" -f4 | cut -d "." -f1 | xargs echo`
-test $BYTE_HITS -gt 0 || BYTE_HITS=0
+DUMP=`squidclient -p $port -l $host cache_object://$host/info`
 
-echo "request.value ${REQUEST_HITS}"
-echo "byte.value ${BYTE_HITS}"
+# Request efficiency
+SQUID_LINE=`echo "$DUMP" | grep -E "Request Hit Ratios|Hits as % of all requests"`
+if [ $? -eq 0 ] ; then
+	# for the last hour:
+	#REQUEST_HITS=`echo $SQUID_LINE | cut -d ":" -f4 | cut -d "." -f1`
+	# for the last five mins:
+	REQUEST_HITS=`echo $SQUID_LINE | cut -d ":" -f3 | cut -d "." -f1`
+	test "$REQUEST_HITS" -gt 0 || REQUEST_HITS=0
+	echo "request.value ${REQUEST_HITS}"
+fi
+
+# Byte efficiency
+SQUID_LINE=`echo "$DUMP" | grep -E "Byte Hit Ratios|Hits as % of bytes sent"`
+if [ $? -eq 0 ] ; then
+	# for the last hour:
+	#BYTE_HITS=`echo $SQUID_LINE | cut -d ":" -f4 | cut -d "." -f1`
+	# for the last five mins:
+	BYTE_HITS=`echo $SQUID_LINE | cut -d ":" -f3 | cut -d "." -f1`
+	test "$BYTE_HITS" -gt 0 || BYTE_HITS=0
+	echo "byte.value ${BYTE_HITS}"
+fi
+
+# Memory
+SQUID_LINE=`echo "$DUMP" | grep -E "Request Memory Hit Ratios|Memory hits as % of hit requests"`
+if [ $? -eq 0 ] ; then
+	# for the last hour:
+	#MEM_REQUEST_HITS=`echo "$SQUID_LINE" | cut -d ":" -f4 | cut -d "." -f1 | xargs echo`
+	# for the last five mins:
+	MEM_REQUEST_HITS=`echo "$SQUID_LINE" | cut -d ":" -f3 | cut -d "." -f1 | xargs echo`
+	test $MEM_REQUEST_HITS -gt 0 || MEM_REQUEST_HITS=0
+	echo "memory.value ${MEM_REQUEST_HITS}"
+fi
+
+# Disk
+SQUID_LINE=`echo "$DUMP" | grep -E "Request Disk Hit Ratios|Disk hits as % of hit requests"`
+if [ $? -eq 0 ] ; then
+	# for the last hour:
+	#DISK_REQUEST_HITS=`echo "$SQUID_LINE" | cut -d ":" -f4 | cut -d "." -f1 | xargs echo`
+	# for the last five mins:
+	DISK_REQUEST_HITS=`echo "$SQUID_LINE" | cut -d ":" -f3 | cut -d "." -f1 | xargs echo`
+	test $DISK_REQUEST_HITS -gt 0 || DISK_REQUEST_HITS=0
+	echo "disk.value ${DISK_REQUEST_HITS}"
+fi
+
 
 # eof.
