@@ -1,0 +1,84 @@
+#!/usr/bin/python
+# shorewall_accounting v1.1
+#
+# A munin plugin for tracking traffic as recorded by shorewall accounting rules.
+# See "man shorewall-accounting" for all possible accounting rules.
+# Basically this plugin examines the output of "shorewall -x show accounting".
+# See http://atlee.ca/blog/2006/01/20/munin-shorewall/ for a description of
+# the original script by Chris AtLee.
+# 
+# Copyright 2010 Lars Kruse <devel@sumpralle.de>
+# Copyright 2006 Chris AtLee <chris@atlee.ca>
+#
+# Original publication: http://atlee.ca/blog/2006/01/20/munin-shorewall/
+# Released under the GPL v3
+
+import sys
+import commands
+import re
+
+ACCOUNTING_LINE_EXP = re.compile(r"^\s*\d+\s+(\d+)\s+(?P<prot>\w+)\s+(?P<opt>[\w-]+)\s+(?P<in>[\w*]+)\s+(?P<out>[\w*]+)\s+(?P<source>[\w./+-]+)\s+(?P<destination>[\w./+-]+)\s*(?P<details>.*)\s*$")
+KEY_ORDER = ["prot", "in", "out", "source", "destination", "details"]
+REPLACE_PATTERNS = {"prot": ("^all$", "allProt"),
+        "in": (r"^\*$", "allIn"),
+        "out": (r"^\*$", "allOut"),
+        "source": (r"^0\.0\.0\.0/0", "allSrc"),
+        "destination": (r"^0\.0\.0\.0/0", "allDst"),
+        "details": (r"^multiport\s+", ""),
+}
+
+
+def get_accounting_rule_fieldname(regdict):
+    items = []
+    # filter and clean all requested keys
+    for key in KEY_ORDER:
+        raw = regdict[key]
+        pattern, replacement = REPLACE_PATTERNS[key]
+        value = re.sub(pattern, replacement, raw).strip()
+        if value:
+            items.append(value)
+    result = "_".join(items)
+    # clean the fieldname: http://munin-monitoring.org/wiki/notes_on_datasource_names
+    result = re.sub(r"^[^A-Za-z_]", "_", result)
+    result = re.sub(r"[^A-Za-z0-9_]", "_", result)
+    return result
+
+def get_bytes_by_chain():
+    status, output = commands.getstatusoutput("shorewall -x show accounting")
+    if status != 0:
+        raise OSError("Error running command (%s)[%i]: %s" % (trafficCmd, status, output))
+    chains = {}
+    for line in output.splitlines():
+        m = ACCOUNTING_LINE_EXP.match(line)
+        if m is not None:
+            target = get_accounting_rule_fieldname(m.groupdict())
+            bytes = int(m.group(1))
+            if target in chains:
+                chains[target] += bytes
+            else:
+                chains[target] = bytes
+    retval = []
+    names = chains.keys()
+    names.sort()
+    for name in names:
+        retval.append((name, chains[name]))
+    return retval
+
+if len(sys.argv) > 1:
+    if sys.argv[1] == "autoconf":
+        print "yes"
+        sys.exit(0)
+    elif sys.argv[1] == "config":
+        print "graph_title Shorewall accounting"
+        print "graph_category network"
+        print "graph_vlabel bits per ${graph_period}"
+        for chain, bytes in get_bytes_by_chain():
+            print "%s.min 0" % chain
+            print "%s.type DERIVE" % chain
+            print "%s.label %s" % (chain, chain)
+            print "%s.cdef %s,8,*" % (chain, chain)
+        sys.exit(0)
+
+for chain, bytes in get_bytes_by_chain():
+    print "%s.value %i" % (chain, bytes)
+
