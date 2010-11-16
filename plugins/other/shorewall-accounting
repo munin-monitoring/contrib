@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# shorewall_accounting v1.1
+# shorewall_accounting v1.2
 #
 # A munin plugin for tracking traffic as recorded by shorewall accounting rules.
 # See "man shorewall-accounting" for all possible accounting rules.
@@ -12,14 +12,38 @@
 #
 # Original publication: http://atlee.ca/blog/2006/01/20/munin-shorewall/
 # Released under the GPL v3
+#
+# You can use symlinks of this script according to the following pattern:
+#    shorewall_accounting_prot: use only rules with a specific protocol
+#    shorewall_accounting_in: use only rules with a specific input interface
+#    shorewall_accounting_out: use only rules with a specific output interface
+#    shorewall_accounting_source: use only rules with a specific source IP
+#    shorewall_accounting_destination: use only rules with a specific destination IP
+#    shorewall_accounting_details: use only rules with specific details (e.g. a port)
+#
+# Here "specific" means: non-default (e.g. a protocol was specified).
+# Combinations are allowed:
+#    shorewall_accounting_prot_in_source: use only rules with a specific protocol, input interface and source IP
+#
 
 import sys
+import os
 import commands
 import re
 
+PLUGIN_BASE_NAME = "shorewall_accounting"
 ACCOUNTING_LINE_EXP = re.compile(r"^\s*\d+\s+(\d+)\s+(?P<prot>\w+)\s+(?P<opt>[\w-]+)\s+(?P<in>[\w*]+)\s+(?P<out>[\w*]+)\s+(?P<source>[\w./+-]+)\s+(?P<destination>[\w./+-]+)\s*(?P<details>.*)\s*$")
 KEY_ORDER = ["prot", "in", "out", "source", "destination", "details"]
-REPLACE_PATTERNS = {"prot": ("^all$", "allProt"),
+FILTER_PATTERNS = {
+        "prot": r"^all$",
+        "in": r"^\*$",
+        "out": r"^\*$",
+        "source": r"^0\.0\.0\.0/0$",
+        "destination": r"^0\.0\.0\.0/0$",
+        "details": r"^$",
+}
+REPLACE_PATTERNS = {
+        "prot": ("^all$", "allProt"),
         "in": (r"^\*$", "allIn"),
         "out": (r"^\*$", "allOut"),
         "source": (r"^0\.0\.0\.0/0", "allSrc"),
@@ -43,7 +67,17 @@ def get_accounting_rule_fieldname(regdict):
     result = re.sub(r"[^A-Za-z0-9_]", "_", result)
     return result
 
-def get_bytes_by_chain():
+def is_wanted(regdict, filter_list):
+    for item in filter_list:
+        # is the item empty?
+        if not regdict[item]:
+            return False
+        # is the default value (unfiltered) set?
+        if re.search(FILTER_PATTERNS[item], regdict[item]):
+            return False
+    return True
+
+def get_bytes_by_chain(filter_list):
     status, output = commands.getstatusoutput("shorewall -x show accounting")
     if status != 0:
         raise OSError("Error running command (%s)[%i]: %s" % (trafficCmd, status, output))
@@ -51,6 +85,9 @@ def get_bytes_by_chain():
     for line in output.splitlines():
         m = ACCOUNTING_LINE_EXP.match(line)
         if m is not None:
+            # check if this line was filtered
+            if not is_wanted(m.groupdict(), filter_list):
+                continue
             target = get_accounting_rule_fieldname(m.groupdict())
             bytes = int(m.group(1))
             if target in chains:
@@ -64,6 +101,16 @@ def get_bytes_by_chain():
         retval.append((name, chains[name]))
     return retval
 
+
+call_name = os.path.basename(sys.argv[0])
+if call_name.startswith(PLUGIN_BASE_NAME):
+    suffix = call_name[len(PLUGIN_BASE_NAME):]
+    suffixes = suffix.split("_")
+    # use only suffixes that are listed in FILTER_PATTERNS
+    filter_list = [item for item in suffixes if item in FILTER_PATTERNS]
+else:
+    filter_list = []
+
 if len(sys.argv) > 1:
     if sys.argv[1] == "autoconf":
         print "yes"
@@ -72,13 +119,13 @@ if len(sys.argv) > 1:
         print "graph_title Shorewall accounting"
         print "graph_category network"
         print "graph_vlabel bits per ${graph_period}"
-        for chain, bytes in get_bytes_by_chain():
+        for chain, bytes in get_bytes_by_chain(filter_list):
             print "%s.min 0" % chain
             print "%s.type DERIVE" % chain
             print "%s.label %s" % (chain, chain)
             print "%s.cdef %s,8,*" % (chain, chain)
         sys.exit(0)
 
-for chain, bytes in get_bytes_by_chain():
+for chain, bytes in get_bytes_by_chain(filter_list):
     print "%s.value %i" % (chain, bytes)
 
