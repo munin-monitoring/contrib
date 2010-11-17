@@ -26,7 +26,7 @@
 ##
 ## 1. Download the plugin to your plugins directory (e.g. /usr/share/munin/plugins)
 ## 2. Create 3 symlinks at the directory that us used by munin for plugins detection (e.g. /etc/munin/plugins): redis_connected_clients, redis_per_sec and and redis_used_memory
-## 3. Edit plugin-conf.d/munin-node if it is needed (env.host and  env.port variables are accepted)
+## 3. Edit plugin-conf.d/munin-node if it is needed (env.host and  env.port variables are accepted; set env.password for password protected Redis server)
 ## 4. Restart munin-node service
 
 use strict;
@@ -35,12 +35,18 @@ use Switch;
 
 my $HOST = exists $ENV{'host'} ? $ENV{'host'} : "127.0.0.1";
 my $PORT = exists $ENV{'port'} ? $ENV{'port'} : 6379;
+my $PASSWORD = exists $ENV{'password'} ? $ENV{'password'} : undef;
 
 my $server = "$HOST:$PORT";
 my $sock = IO::Socket::INET->new(
     PeerAddr => $server,
     Proto => 'tcp'
 );
+
+if ( defined( $PASSWORD )  ) {
+    print $sock "AUTH ", $PASSWORD, "\r\n";
+    my $result = <$sock> || die "can't read socket: $!";
+}
 
 print $sock "INFO\r\n";
 my $result = <$sock> || die "can't read socket: $!";
