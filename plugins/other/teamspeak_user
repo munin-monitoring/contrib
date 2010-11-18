@@ -7,6 +7,9 @@
 #
 # by Tim Wulkau - www.wulkau.de
 #
+# 18.11.10 - v0.4
+#            -added queryuser login
+#	     -subtract queryclients from usercount (tanks to Jakob Lenfers for the idea)
 # 02.10.10 - v0.3
 #            -fixed welcomemessage error
 # 31.01.10 - v0.2
@@ -24,6 +27,9 @@ use Net::Telnet;
 my $hostname = "localhost";    # serveraddress
 my $port = 10011;              # querryport (default: 10011)
 my @serverids = (1);           # array of virtualserverids (1,2,3,4,...) 
+
+my $username = "";	       # only set if the default queryuser hasn´t enough rights (should work without this)
+my $password = "";
 
 # SCRIPT START!
 if(exists $ARGV[0] and $ARGV[0] eq "config")
@@ -51,16 +57,23 @@ else
   {
     $telnet->cmd("use sid=$server");
     $telnet->waitfor("/error id=0 msg=ok/");
+    if($username && $password) {
+      $telnet->cmd("login $username $password");
+      $telnet->waitfor("/error id=0 msg=ok/");
+    }
     $telnet->cmd("serverinfo");
     
+    my $clients = 0;
+    my $queryclients = 0;
     my $line = $telnet->getline(Timeout=>5);
     if ($line =~ m/virtualserver_clientsonline=(\d+) /) {
-      print "$server.value ".($1-1)."\n";
+      $clients = $1;
     }
-    else {
-      print "$server.value 0\n";
+    if ($line =~ m/virtualserver_queryclientsonline=(\d+) /) {
+      $queryclients = $1;
     }
     $telnet->waitfor("/error id=0 msg=ok/");
+    print "$server.value ".($clients - $queryclients)."\n";
   }  
   $telnet->close;
 }
