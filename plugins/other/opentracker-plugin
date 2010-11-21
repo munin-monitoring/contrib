@@ -72,7 +72,7 @@ my $uri = $ENV{uri} || '/stats';
             { ... },
         ],
         results => {
-            { key => value }, You'll find the results info from a nagiostats call stored here.
+            { key => value }, You'll find the results info from fetch_stats call stored here.
             { ... },
         },
     }
@@ -224,7 +224,7 @@ if (defined $ARGV[0] && $ARGV[0] eq 'autoconf') {
     # well we can execute the binary, so lets make sure we can curl opentracker
     my $url = "http://".$host.":".$port.$uri."\?mode=version";
     my $ua = LWP::UserAgent->new;
-    $ua->timeout(5);
+    $ua->timeout(15);
     my $response = $ua->get($url);
     if ($response->is_success) {
         print "yes\n";
@@ -291,9 +291,9 @@ sub print_output {
     # Lets get our plugin, set our graph information, and print for Munin to process
     my ($plugin) = (@_);
     my $graph = $graphs{$plugin};
-    print "graph nagios_$plugin\n";
-    # Getting keys to pass to nagiostats for data retrieval
-    # call up fetch_nagios_stats with the keys we just got.
+    print "graph opentracker_$plugin\n";
+    # Getting keys to pass to fetch_stats for data retrieval
+    # call up fetch_stats with the keys we just got.
     my @keys = @{$graph->{keys}};
     fetch_stats($plugin,@keys);
     # print the results for the keys with the name for Munin to process
@@ -310,7 +310,7 @@ sub print_output {
 
 =head2 print_config
 
-    This subroutine prints out the config information for all of the main(root) graphs.
+    This subroutine prints out the main config information for all of the graphs.
     It takes one parameters, $plugin
 
         $plugin;    graph being called up to print config for 
@@ -323,7 +323,7 @@ sub print_config {
     # Lets get our plugin and graph, after that print for Munin to process it.
     my ($plugin) = (@_);
     my $graph = $graphs{$plugin};
-    print "graph nagios_$plugin\n";
+    print "graph opentracker_$plugin\n";
     # Lets print out graph's main config info.
     my %graphconf = %{$graph->{config}};
     while ( my ($key, $value) = each(%graphconf)) {
@@ -342,12 +342,13 @@ sub print_config {
 
 =head2 fetch_stats
 
-    This subroutine actually runs the nagiostats binary with the keys specified in an array
+    This subroutine actually fetches data from opentracker with the plugin specified
+    It will then parse the data using the keys assigned in an array.
     Two parameters are passed, $plugin and @keys, and it will return when complete.
 
         $plugin;    graph we are calling up, we use this to store the results in the hash
                     for easy recall later.
-        @keys;      keys we want the values for from nagiostats binary.
+        @keys;      keys we want the values for from opentracker stats url.
 
     Example: fetch_stats($plugin,@keys);
 
@@ -360,7 +361,7 @@ sub fetch_stats {
     # Lets create our url to fetch
     my $url = "http://".$host.":".$port.$uri."\?mode=".$plugin;
     my $ua = LWP::UserAgent->new;
-    $ua->timeout(5);
+    $ua->timeout(15);
     my $response = $ua->get($url);
     # Lets print some info since we got back some info
     if ($response->is_success) {
@@ -369,6 +370,9 @@ sub fetch_stats {
             my $value = shift(@tmparray);
             $graph->{results}->{$key} = $value;
         }
-    } 
+    } else {
+        print "Unable to Fetch data from URL: $url\n";
+        exit 1;
+    }
     return;
 }
