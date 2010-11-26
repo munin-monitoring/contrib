@@ -1,0 +1,87 @@
+#!/usr/local/bin/php
+<?php
+/*
+ * Munin plugin mysql_table_size
+ *
+ */
+
+$dbname   = getenv('dbname');
+$tables   = getenv('tables');
+$dsn      = getenv('dsn');
+$username = getenv('mysqluser');
+$password = getenv('mysqlpassword');
+$table_list = explode(' ',$tables);
+$text = "";
+//print_r($table_list);
+
+if($argc > 1 && $argv[1] == 'authconf') {
+  exit('yes');
+}
+
+foreach ($table_list as $_str_schema_table) {
+  $_ary_schema_table = explode('.',$_str_schema_table);
+  $schema = $_ary_schema_table[0];
+  $table  = $_ary_schema_table[1];
+  $text .= <<<EOT
+$table.label $schema.$table\n
+EOT;
+}
+
+if($argc > 1 && $argv[1] == 'config') {
+  $text = <<<EOT
+graph_title $dbname Table Data Size
+graph_category mysql_table_size_$dbname
+graph_vlabel Size
+graph_args --base 1024 -l 0
+$text
+EOT;
+  die($text);
+}
+
+$dbh = new PDO($dsn,$username,$password);
+$mysql = new MysqlTblSize($dbh);
+
+foreach ($table_list as $_str_schema_table) {
+  $_ary_schema_table = explode('.',$_str_schema_table);
+  $schema = $_ary_schema_table[0];
+  $table  = $_ary_schema_table[1];
+  
+  $row = $mysql->getTableSize($schema,$table);
+  $data_length = $row['data_length'];
+  echo "$table.value $data_length\n";
+}
+
+class MysqlTblSize {
+
+  private $dbh;
+
+  public function __construct($dbh) {
+    $this->dbh = $dbh;
+  }
+
+  public function getTableSize($schema,$table) {
+    $bind = array($schema,$table);
+    $sql = <<<EOT
+select data_length
+from information_schema.tables
+where table_schema = ? and table_name = ?
+EOT;
+    $stmt = $this->dbh->prepare($sql);
+    $stmt->execute($bind);
+    return $row = $stmt->fetch(PDO::FETCH_ASSOC);
+  }
+
+  public function getSchemaSize($schema) {
+    $bind = array($schema);
+    $sql = <<<EOT
+select sum( data_length ) sum_data_length 
+from information_schema.tables
+where table_schema = ?
+EOT;
+    $stmt = $this->dbh->prepare($sql);
+    $stmt->execute($bind);
+    return $row = $stmt->fetch(PDO::FETCH_ASSOC);
+  }
+
+
+}
