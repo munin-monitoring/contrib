@@ -8,20 +8,82 @@
 #	following way:
 #
 #	ipmisens2_[machine]_[sensors]
+#
 #	Supported machines:
-#	- Sun x4100/4100m2/4200/4200m2: x4x00 (temp, volt, fan)
-#	- Sun V20z (V40z?): v20z (temp, volt, fan)
-#	- IBM x346: x346 (temp, volt, fan)
-#	- Sun x2100/2100m2/2200/2200m2: x2100 (temp, volt, fan)
-#	- Intel SHG2 mainboard: shg2 (temp, volt, fan)
-#	- Sun x2250: x2250 (temp, volt, fan)
-#	- Sun x4150: x4150 (temp, volt, fan)
-#	- Verari VB1205XM: vb1205 (temp, volt)
+#	- Asus K8N-LR: asmb2 (temp, volt, fan)
+#	- Dell DCS-XS23: xs23 (temp, volt, fan)
+#	- Dell M610 blade: m610 (temp)
 #	- Dell PowerEdge 2650: pe2650 (temp, volt, fan)
-#	- IBM x3200/x3550: ibmx3xx0 (temp, volt, fan)
+#	- Fujitsu TX120: tx120 (temp, volt, fan)
+#	- HP Proliant ML350G5: proliantg5 (temp)
+#	- HP Proliant DL380G5: proliantg5 (temp)
+#	- HP Proliant DL385G1: hpasmcli (temp, fan)
+#	- IBM HS21/HS22/Dataplex DX360: ibmhsxx (volt)
 #	- IBM LS20/LS21: ibmlsxx (temp, volt)
-#	- IBM HS21: ibmhsxx (volt)
-# - asmb2 missing due to lack of output yet
+#	- IBM LS41: ibmls4x (temp, volt)
+#	- IBM x3200/x3550: ibmx3xx0 (temp, volt, fan)
+#	- IBM x346: x346 (temp, volt, fan)
+#	- Intel SHG2 mainboard: shg2 (temp, volt, fan)
+#	- Sun x2100/2100m2/2200/2200m2: x2100 (temp, volt, fan)
+#	- Sun x2250: x2250 (temp, volt, fan)
+#	- Sun x2270: x2270 (temp, volt, fan)
+#	- Sun x4100/4100m2/4200/4200m2/4600: x4x00 (temp, volt, fan)
+#	- Sun x4150: x4150 (temp, volt, fan)
+#	- Sun V20z (V40z?): v20z (temp, volt, fan)
+#	- Supermicro X7DB8/X7DCL: aocipmi20e (temp, volt, fan)
+#	- Supermicro X8DT6/X8DTT-F: hermon (temp, volt, fan)
+#	- Verari VB1205XM: vb1205 (temp, volt)
+#
+#	Supported but not tested:
+#	- HP DL145G2: asmb2 (temp, volt, fan)
+#
+#	Notes:
+#	- hpasmcli machtype requires HP's hpasmcli package, and the additional
+#	  hpasmcliget script.
+#
+# Outputs submitted by:
+# 	- Zoltan LAJBER <lajbi@lajli.gau.hu>
+#	- Gergely MADARASZ <gorgo@broadband.hu>
+#	- Louis van Belle <louis@van-belle.nl>
+#	- Andras GOT <andrej@antiszoc.hu>
+#	- Andras KORN <korn@chardonnay.math.bme.hu>
+#	- Tamas TEVESZ <ice@extreme.hu>
+#	- Gergely TOMKA <gergely@tomka.hu>
+#	- Gabor SZOLLOSI <dev@localnet.hu>
+#	- Reka KAROLYI <reka@karolyi.eu>
+#	- Andras HORVATH <Andras.Horvath@cern.ch>
+#
+# CHANGELOG
+#
+# Revision 3.01		2010/09/23 Zoltan HERPAI <wigyori@uid0.hu>
+#			* Add support for handling non-ipmitool-based machtypes
+#			* Add support for HP Proliant DL385G1
+#
+# Revision 3.00		2010/05/25 Zoltan HERPAI <wigyori@uid0.hu>
+#			* Add support for Supermicro X7DB8 via AOC IPMI20-E (aocipmi20e)
+#			* Add support for Supermicro X7DCL via AOC IPMI20-E (aocipmi20e)
+#			* Add support for Supermicro X8DT6 via Winbond Hermon BMC (hermon)
+#			* Add support for Supermicro X8DTT-F via Winbond Hermon BMC (hermon)
+#			* Add support for Dell M610 (m610)
+#			* Add support for HP DL380G5 (proliantg5)
+#			* Add support for HP ML350G5 (proliantg5)
+#			* Re-add support for Asus K8N-LR via ASMB2 (asmb2)
+#			* Add to-be-tested support for HP DL145G2 as per Paulo@muninexchange (asmb2)
+#
+# Revision 3.00early4	2010/01/09 Zoltan HERPAI <wigyori@uid0.hu>
+#			* Add support for IBM HS22 (ibmhsxx)
+#			* Add support for IBM iDataplex DX360 (ibmhsxx)
+#			* Add support for Dell DCS XS23-sc (xs23)
+#
+# Revision 3.00early3	2009/12/30 Zoltan HERPAI <wigyori@uid0.hu>
+#			* Support for easier debugging ($debug)
+#			* Add support for IBM LS41 (ibmls4x)
+#			* Add complete support for Sun x2270 (x2270)
+#			* Add support for Sun x4500 (x4x00)
+#			* Add support for Fujitsu-Siemens TX120 (tx120)
+#
+# Revision 3.00early2	2009/09/09 Zoltan HERPAI <wigyori@uid0.hu>
+#			* Minor bugfix due to munin brain damage
 #
 # Revision 3.00early	2009/09/01 Zoltan HERPAI <wigyori@uid0.hu>
 #			* Complete rewrite in perl.
@@ -30,6 +92,7 @@
 #
 
 use strict;
+use warnings;
 use POSIX;
 use FindBin qw($Script);
 
@@ -39,6 +102,7 @@ my $TEMPFILE = "/var/lib/munin/plugin-state/ipmisens3";
 # set the ipmidump expiration to 1 day
 my $TEMPREFRESH = 86400;
 my $debug = 0;
+my $devel = 0;
 
 ##############
 # You should not need to edit anything below here
@@ -46,40 +110,65 @@ my $debug = 0;
 $ENV{PATH} = '/bin:/usr/bin:/usr/sbin';
 $ENV{IFS} = "\n";
 
-# Test if ipmitool is available
-`$IPMITOOL help 2> /dev/null`;
-if ($?)
-{
-	print "no ($IPMITOOL not found)";
-	exit 1;
-}
-
 $0 =~ /.*_(.*)_(.*)/;
 my $machine = $1;
 my $sensor = $2;
 
-print "Machine: $machine , sensor: $sensor\n" if ($debug);
-
-# check expiration time of the dumpfile
-if ( -f $TEMPFILE && $curtime - (stat($TEMPFILE))[9] >= $TEMPREFRESH )
+# Test if ipmitool is available
+if ( !$devel )
 {
-	print "Unlinking $TEMPFILE...\n" if ($debug);
-	unlink ($TEMPFILE);
-}
-
-if ( ! -f $TEMPFILE )
-{
-	print "Writing dumpfile $TEMPFILE...\n" if ($debug);
-	`$IPMITOOL sdr dump $TEMPFILE` || die $!;
-	if ($?)
-	{
-		print "no (retcode $?)\n";
-		exit 2;
+	if ( $machine ne 'hpasmcli' ) {
+		`$IPMITOOL help 2> /dev/null`;
+		if ($?)
+		{
+			print "no ($IPMITOOL not found)";
+			exit 1;
+		}
 	}
 }
 
+
+print "Machine: $machine , sensor: $sensor\n" if ($debug);
+
+# check expiration time of the dumpfile
+if ( !$devel )
+{
+	if ( $machine ne 'hpasmcli' ) {
+		if ( -f $TEMPFILE && $curtime - (stat($TEMPFILE))[9] >= $TEMPREFRESH )
+		{
+			print "Unlinking $TEMPFILE...\n" if ($debug);
+			unlink ($TEMPFILE);
+		}
+	}
+}
+
+if ( !$devel )
+{
+	if ( $machine ne 'hpasmcli' ) {
+		if ( ! -f $TEMPFILE )
+		{
+			print "Writing dumpfile $TEMPFILE...\n" if ($debug);
+			`$IPMITOOL sdr dump $TEMPFILE` || die $!;
+			if ($?)
+			{
+				print "no (retcode $?)\n";
+				exit 2;
+			}
+		}
+	}
+}
+
+my @ipmioutput;
+
 # Read the sensors
-my @ipmioutput = `$IPMITOOL sdr -S $TEMPFILE`;
+if ( $machine ne 'hpasmcli' ) {
+	@ipmioutput = `$IPMITOOL sdr -S $TEMPFILE`;
+}
+else {
+	@ipmioutput = `cat /tmp/ipmi-sensors`;
+}
+#my @ipmioutput = `cat ~wigyori/ipmisens2/outputs/hp_ml350g5`;
+
 if ($?)
 {
 	print "no (retcode $?)\n";
@@ -87,8 +176,9 @@ if ($?)
 }
 
 my $arg;
-if ( defined($ARGV[0]) )
+if ( defined($ARGV[0]) && $ARGV[0] ne "" )
 {
+	print "argv: ".$ARGV[0]."\n" if ($debug);
 	if ( $ARGV[0] eq 'config' )	{ $arg = 'config'; }
 	if ( $ARGV[0] eq 'autoconf' )	{ $arg = 'autoconf'; }
 	
@@ -118,11 +208,20 @@ if ( defined($ARGV[0]) )
 		
 		if ( $sensor eq 'fan' )
 		{
-			%cnf = (
-				'graph_title' => 'Fan speeds',
-				'graph_vlabel' => 'RPM',
-				'graph_category' => 'sensors',
-			);
+			if ( $machine ne 'hpasmcli' ) {
+				%cnf = (
+					'graph_title' => 'Fan speeds',
+					'graph_vlabel' => 'RPM',
+					'graph_category' => 'sensors',
+				);
+			}
+			else {
+				%cnf = (
+					'graph_title' => 'Fan speeds',
+					'graph_vlabel' => '%',
+					'graph_category' => 'sensors',
+				);
+			}
 		}
 		
 		# Static descriptors
@@ -170,7 +269,7 @@ if ( defined($ARGV[0]) )
 		$base{'x4x00'}->{'p1v_vddio'} = 'CPU1 VDDIO';
 		$base{'x4x00'}->{'p1v_vdd'} = 'CPU1 VDD';
 		$base{'x4x00'}->{'p1v_vtt'} = 'CPU1 VTT';
-		# Sun x4600 extents
+		# Sun x4600 voltage extents
 		$base{'x4x00'}->{'mbv_1v2'} = 'MB +1.2V';
 		$base{'x4x00'}->{'mbv_1v5'} = 'MB +1.5V';
 		$base{'x4x00'}->{'mbv_2v5'} = 'MB +2.5V';
@@ -247,6 +346,26 @@ if ( defined($ARGV[0]) )
 		$base{'x4x00'}->{'mbt_amb0'} = 'System board 0';
 		$base{'x4x00'}->{'mbt_amb1'} = 'System board 1';
 		$base{'x4x00'}->{'mbt_amb2'} = 'System board 2';
+		# Sun x4500 voltage extents
+		$base{'x4x00'}->{'procp0v_1v25'} = 'CPU0 1.25V';
+		$base{'x4x00'}->{'procp1v_1v25'} = 'CPU1 1.25V';
+		$base{'x4x00'}->{'procp0v_1v5'} = 'CPU0 1.5V';
+		$base{'x4x00'}->{'procp1v_1v5'} = 'CPU1 1.5V';
+		$base{'x4x00'}->{'procp0v_2v5'} = 'CPU0 2.5V';
+		$base{'x4x00'}->{'procp1v_2v5'} = 'CPU1 2.5V';
+		$base{'x4x00'}->{'procv_1v8'} = 'CPU 1.8V';
+		$base{'x4x00'}->{'iov_1v5'} = 'IO 1.5V';
+		$base{'x4x00'}->{'iov_2v5'} = 'IO 2.5V';
+		$base{'x4x00'}->{'iov_5v_disk'} = 'IO 5V disk';
+		$base{'x4x00'}->{'iov_dash12v'} = 'IO -12V';
+		# Sun x4500 temp extents
+		$base{'x4x00'}->{'iofrontt_amb'} = 'IO front';
+		$base{'x4x00'}->{'ioreart_amb'} = 'IO rear';
+		$base{'x4x00'}->{'procfrontt_amb'} = 'CPU front';
+		$base{'x4x00'}->{'procreart_amb'} = 'CPU rear';
+		$base{'x4x00'}->{'procp0t_core'} = 'CPU0 temp';
+		$base{'x4x00'}->{'procp1t_core'} = 'CPU1 temp';
+		$base{'x4x00'}->{'dbpt_amb'} = 'DBP';
 		
 		# Sun V20z (V40z?)
 		$base{'v20z'}->{'ambient'} = 'System';
@@ -322,6 +441,22 @@ if ( defined($ARGV[0]) )
 		$base{'x2250'}->{'1v2_nic'} = 'NIC +1.2V';
 		$base{'x2250'}->{'1v8_nic'} = 'NIC +1.8V';
 		$base{'x2250'}->{'1v5_fbd'} = 'FBDIMM +1.5V';
+		
+		# Sun x2270
+		$base{'x2270'}->{'3v3_stby'} = '3.3VSTBY';
+		$base{'x2270'}->{'3v3'} = '+3.3V';
+		$base{'x2270'}->{'5v'} = '+5V';
+		$base{'x2270'}->{'12v'} = '+12V';
+		$base{'x2270'}->{'3v3_vbat'} = '3.3VBAT';
+		$base{'x2270'}->{'1v5'} = '+1.5V';
+		$base{'x2270'}->{'p0_1v5_ddr'} = 'DDR P0 +1.5V';
+		$base{'x2270'}->{'p1_1v5_ddr'} = 'DDR P1 +1.5V';
+		$base{'x2270'}->{'p0_1v8'} = 'P0 +1.8V';
+		$base{'x2270'}->{'p1_1v8'} = 'P1 +1.8V';
+		$base{'x2270'}->{'p0_vtt'} = 'P0 VTT';
+		$base{'x2270'}->{'p1_vtt'} = 'P1 VTT';
+		$base{'x2270'}->{'p0_vccp'} = 'P0 VCCp';
+		$base{'x2270'}->{'p1_vccp'} = 'P1 VCCp';
 		
 		# Sun x4150
 		$base{'x4150'}->{'mb_t_amb0'} = 'MB Sensor 0';
@@ -417,8 +552,101 @@ if ( defined($ARGV[0]) )
 		$base{'ibmhsxx'}->{'planar3_3v'} = '+3.3V';
 		$base{'ibmhsxx'}->{'planar5v'} = '+5V';
 		$base{'ibmhsxx'}->{'planarvbat'} = 'VBAT';
+		# IBM iDataplex DX320 extents
+		$base{'ibmhsxx'}->{'cpu1vcore'} = 'CPU1 Vcore';
+		$base{'ibmhsxx'}->{'cpu2vcore'} = 'CPU2 Vcore';
 
-
+		# Fujitsu-Siemens TX120
+		$base{'tx120'}->{'12v'} = '12V';
+		$base{'tx120'}->{'15v'} = '1.5V';
+		$base{'tx120'}->{'18v'} = '1.8V';
+		$base{'tx120'}->{'33v'} = '3.3V';
+		$base{'tx120'}->{'5v'} = '5V';
+		$base{'tx120'}->{'dash12v'} = '-12V';
+		$base{'tx120'}->{'stdby33v'} = '3.3VSTBY';
+		$base{'tx120'}->{'vtt'} = 'VTT';
+		$base{'tx120'}->{'battery3v'} = '3VBAT';
+		$base{'tx120'}->{'fanpsu'} = 'Fan PSU';
+		$base{'tx120'}->{'fan1sys'} = 'Fan Sys 1';
+		$base{'tx120'}->{'fan2sys'} = 'Fan Sys 2';
+		$base{'tx120'}->{'fancpu'} = 'Fan CPU';
+		$base{'tx120'}->{'ambient'} = 'Ambient';
+		$base{'tx120'}->{'systemboard'} = 'System board';
+		$base{'tx120'}->{'cpu'} = 'CPU';
+		
+		# Dell DCS XS23-sc
+		$base{'xs23'}->{'systemfan'} = 'System fan';
+		$base{'xs23'}->{'cpu0'} = 'CPU 0';
+		$base{'xs23'}->{'cpu1'} = 'CPU 1';
+		$base{'xs23'}->{'midplane'} = 'Midplane';
+		$base{'xs23'}->{'p12v'} = 'Planar 12V';
+		$base{'xs23'}->{'p15v'} = 'Planar 1.5V';
+		$base{'xs23'}->{'p18v'} = 'Planar 1.8V';
+		$base{'xs23'}->{'p33v'} = 'Planar 3.3V';
+		$base{'xs23'}->{'p5v'} = 'Planar 5V';
+		$base{'xs23'}->{'vtt'} = 'Vtt';
+		$base{'xs23'}->{'vcc33vaux'} = 'Vcc 3.3V AUX';
+		
+		# Supermicro X8DT6 / X8DTT-F via Winbond Hermon BMC
+		$base{'hermon'}->{'fan1'} = 'Fan 1';
+		$base{'hermon'}->{'fan2'} = 'Fan 2';
+		$base{'hermon'}->{'fan3'} = 'Fan 3';
+		$base{'hermon'}->{'fan4'} = 'Fan 4';
+		$base{'hermon'}->{'fan5'} = 'Fan 5';
+		$base{'hermon'}->{'fan6'} = 'Fan 6';
+		$base{'hermon'}->{'fan7'} = 'Fan 7';
+		$base{'hermon'}->{'fan8'} = 'Fan 8';
+		$base{'hermon'}->{'system'} = 'System';
+		$base{'hermon'}->{'cpu1temp'} = 'CPU1 temp';
+		$base{'hermon'}->{'cpu2temp'} = 'CPU2 temp';
+		$base{'hermon'}->{'12v'} = '+12V';
+		$base{'hermon'}->{'15v'} = '+1.5V';
+		$base{'hermon'}->{'33v'} = '+3.3V';
+		$base{'hermon'}->{'33vsb'} = '+3.3VSB';
+		$base{'hermon'}->{'5v'} = '+5V';
+		$base{'hermon'}->{'vbat'} = 'VBAT';
+		$base{'hermon'}->{'cpu1dimm'} = 'CPU1 DIMM';
+		$base{'hermon'}->{'cpu2dimm'} = 'CPU2 DIMM';
+		$base{'hermon'}->{'cpu1vcore'} = 'CPU1 Vcore';
+		$base{'hermon'}->{'cpu2vcore'} = 'CPU2 Vcore';
+		
+		# Most of these are similar on the Supermicro X* boards
+		$base{'aocipmi20e'} = $base{'hermon'};
+		$base{'aocipmi20e'}->{'dash12v'} = '-12V';
+		$base{'aocipmi20e'}->{'5vsb'} = '+5VSB';
+		$base{'aocipmi20e'}->{'fan7_cpu1'} = 'Fan7 / CPU1';
+		$base{'aocipmi20e'}->{'fan8_cpu2'} = 'Fan8 / CPU2';
+		$base{'aocipmi20e'}->{'sys'} = 'System';
+		
+		# Asus K8N-LR / HP DL145G2
+		$base{'asmb2'}->{'cpufan1'} = 'CPU Fan 1';
+		$base{'asmb2'}->{'cpufan2'} = 'CPU Fan 2';
+		$base{'asmb2'}->{'frontfan1'} = 'Front Fan 1';
+		$base{'asmb2'}->{'frontfan2'} = 'Front Fan 2';
+		$base{'asmb2'}->{'rearfan1'} = 'Rear Fan 1';
+		$base{'asmb2'}->{'rearfan2'} = 'Rear Fan 2';
+		$base{'asmb2'}->{'cpu1thermal'} = 'CPU1';
+		$base{'asmb2'}->{'systemthermal'} = 'System';
+		$base{'asmb2'}->{'25vor18v'} = '+2.5V / +1.8V';
+		$base{'asmb2'}->{'bat_cmos'} = 'VBAT';
+		$base{'asmb2'}->{'cpuvcore1'} = 'CPU1 Vcore';
+		$base{'asmb2'}->{'system12v'} = '+12V';
+		$base{'asmb2'}->{'system15v'} = '+1.5V';
+		$base{'asmb2'}->{'system5v'} = '+5V';
+		$base{'asmb2'}->{'system3v'} = '+3V';
+		$base{'asmb2'}->{'system5vsb'} = '+5VSTBY';
+		
+		# Dell M610 blade
+		$base{'m610'}->{'ambienttemp'} = 'Ambient temp';
+		$base{'m610'}->{'temp'} = 'Blade temp';
+		
+		# hpasmcli / Proliant DL385G1
+		$base{'hpasmcli'}->{'cpu-1'} = 'CPU 1';
+		$base{'hpasmcli'}->{'cpu-2'} = 'CPU 2';
+		$base{'hpasmcli'}->{'i_o_zone'} = 'I/O zone';
+		$base{'hpasmcli'}->{'power_supply_bay'} = 'PSU bay';
+		$base{'hpasmcli'}->{'processor_zone'} = 'CPU zone';
+		
 		# Machine config, run through the file/output
 		my $label; my $tmp;
 		foreach my $line ( @ipmioutput )
@@ -432,10 +660,19 @@ if ( defined($ARGV[0]) )
 				if ( $machine eq 'x346' ) { $line =~ /(.*) Tach.*/; $label = $1; }
 				if ( $machine eq 'shg2' ) { $line =~ s/(.*)\s+\|.*RPM.*\|\s+ok/$1/; $label = $1; }
 				if ( $machine eq 'x2250' ) { $line =~ /(.*)\/TACH.*RPM.*/; $label = $1; }
+				if ( $machine eq 'x2270' ) { $line =~ /(.*)\/TACH.*RPM.*/; $label = $1; }
 				if ( $machine eq 'x4150' ) { $line =~ /(.*)\/TACH.*RPM.*/; $label = $1; }
 				if ( $machine eq 'pe2650' ) { $line =~ /(.*) RPM\s+\|.*RPM.*/; $label = $1; }
 				if ( $machine eq 'ibmx3xx0' ) { $line =~ /(.*) Tach.*/; $label = $1; }
+				if ( $machine eq 'tx120' ) { $line =~ /(.*)\s+\|.*RPM.*\|\s+ok/; $label = $1; }
+				if ( $machine eq 'xs23' ) { $line =~ /(.*)\s+\|.*RPM.*\|\s+ok/; $label = $1; }
+				if ( $machine eq 'hermon' ) { $line =~ /(.*)\s+\|.*RPM.*\|\s+ok/; $label = $1; }
+				if ( $machine eq 'aocipmi20e' ) { $line =~ /(.*)\s+\|.*RPM.*\|\s+ok/; $label = $1; }
+				if ( $machine eq 'asmb2' ) { $line =~ /(.*)\s+\|.*RPM.*\|\s+ok/; $label = $1; }
 				
+			}
+			elsif ( $sensor eq 'fan' && $line =~ /\#\d+\s+\S+\s+Yes.*\%/ ) {
+				if ( $machine eq 'hpasmcli' ) { $line =~ /\#(\d+)\s+(.*)\s+Yes.*\%.*/; $label = "$2_$1"; }
 			}
 			
 			if ( $sensor eq 'temp' && $line =~ /.*degree.*ok/ )
@@ -444,14 +681,25 @@ if ( defined($ARGV[0]) )
 				if ( $machine eq 'v20z' ) { $line =~ /(.*)temp.*/; $label = $1; }
 				if ( $machine eq 'x2100') { $line =~ s/(.*)\s+\|.*deg.*/\L$1/; $label = $line; }
 				if ( $machine eq 'x346' ) { $line =~ /(.*) Temp.*/; $label = $1; }
+				if ( $machine eq 'ibmls4x' ) { $line =~ /(.*) TEMP.*/; $label = $1; }
 				if ( $machine eq 'shg2' ) { $line =~ /(.*)\s+\|.*deg.*/; $label = $1; }
 				if ( $machine eq 'x2250' ) { $line =~ /MB\/T\_(.*)\s+\|.*deg.*/; $label = $1; }
+				if ( $machine eq 'x2270' ) { $line =~ /MB\/T\_(.*)\s+\|.*deg.*/; $label = $1; }
 				if ( $machine eq 'x4150' ) { $line =~ /(.*)\s+\|.*deg.*/; $label = $1; }
 				if ( $machine eq 'vb1205' ) { $line =~ /(.*)\s+\|.*deg.*/; $label = $1; }
 				if ( $machine eq 'pe2650' ) { $line =~ /(.*) Temp.*/; $label = $1; }
 				if ( $machine eq 'ibmx3xx0' ) { $line =~ /(.*) Temp.*/; $label = $1; }
 				if ( $machine eq 'ibmlsxx' ) { $line =~ /(.*) TEMP.*/; $label = $1; }
-				
+				if ( $machine eq 'tx120' ) { $line =~ /(.*)\ \|.*deg.*/; $label = $1; }
+				if ( $machine eq 'xs23' ) { $line =~ /(.*)\ Temp\s+|.*deg.*/; $label = $1; }
+				if ( $machine eq 'hermon' ) { $line =~ /(.*)\ Temp\s+|.*deg.*/; $label = $1; }
+				if ( $machine eq 'aocipmi20e' ) { $line =~ /(.*)\ Temp\s+|.*deg.*/; $label = $1; }
+				if ( $machine eq 'asmb2' ) { $line =~ /(.*)\s+\|.*deg.*/; $label = $1; }
+				if ( $machine eq 'm610' ) { $line =~ /(.*)\s+\|.*deg.*/; $label = $1; }
+				if ( $machine eq 'proliantg5' ) { $line =~ /(.*)\s+\|.*deg.*/; $label = $1; }
+			}
+			elsif ( $sensor eq 'temp' && $line =~ /\d+C\/\d+F/ ) {
+				if ( $machine eq 'hpasmcli' ) { $line =~ /.*\s+(.*)\s+\d+C\/\d+F\s+\d+C\/\d+F/; $label = $1; }
 			}
 			
 			if ( $sensor eq 'volt' && $line =~ /.*Volts.*/ )
@@ -460,16 +708,21 @@ if ( defined($ARGV[0]) )
 				if ( $machine eq 'v20z' ) { $line =~ /(.*)\ \|.*Volts.*/; $label = $1; }
 				if ( $machine eq 'x2100') { $line =~ s/(.*)\s+\|.*Volts.*/\L$1/; $label = $line; }
 				if ( $machine eq 'x346' ) { $line =~ /(.*)\s+\|.*Volts.*/; $label = $1; }
+				if ( $machine eq 'ibmls4x' ) { $line =~ /(.*)\s+\|.*Volts.*/; $label = $1; }
 				if ( $machine eq 'shg2' ) { $line =~ /(.*)\s+\|.*Volts.*/; $label = $1; }
 				if ( $machine eq 'x2250' ) { $line =~ /MB\/V\_(.*)\s+\|.*Volts.*/; $label = $1; }
+				if ( $machine eq 'x2270' ) { $line =~ /MB\/(.*)\s+\|.*Volts.*/; $label = $1; }
 				if ( $machine eq 'x4150' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1;  }
 				if ( $machine eq 'vb1205' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1; $label =~ s/\./_/g; }
 				if ( $machine eq 'pe2650' ) { $line =~ /(.*) Volt\s+\|.*Volts.*/; $label = $1; }
 				if ( $machine eq 'ibmx3xx0' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1; }
 				if ( $machine eq 'ibmlsxx' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1; $label =~ s/\./_/g; }
 				if ( $machine eq 'ibmhsxx' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1; $label =~ s/\./_/g; }
-				
-				
+				if ( $machine eq 'tx120' ) { $line =~ /(.*)\ \|.*Volts.*/; $label = $1; }
+				if ( $machine eq 'xs23' ) { $line =~ /(.*)\s+\|.*Volts.*/; $label = $1; }
+				if ( $machine eq 'hermon' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1;  }
+				if ( $machine eq 'aocipmi20e' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1;  }
+				if ( $machine eq 'asmb2' ) { $line =~ /(.*)\s+\|\s+.*Volts.*/; $label = $1;  }
 			}
 			
 			if ( $label )
@@ -480,6 +733,12 @@ if ( defined($ARGV[0]) )
 				$label =~ s/\s+//g;
 				$label =~ s/(.*)/\L$1/;
 				$label =~ s/\//_/g;
+				$label =~ s/\#/_/g;
+				
+				# Random fixups
+				if ( $machine eq 'x2270' )	{ $label =~ s/v_//; }
+				if ( $machine eq 'x4x00' )	{ $label =~ s/^sysv\_/mbv\_/; }
+				if ( $machine eq 'tx120' )	{ $label =~ s/main//; }
 				
 				if ( $base{$machine}->{$label} )
 				{
@@ -513,25 +772,46 @@ foreach my $line ( @ipmioutput )
 		if ( $machine eq 'x346' ) { $line =~ /(.*) Tach\s+\| (\d+) RPM.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'shg2' ) { $line =~ /(.*)\s+\|\s+(.*) RPM.*\|.*ok/; $label = $1; $value = $2; }
 		if ( $machine eq 'x2250' ) { $line =~ /(.*)\/TACH\s+\|\s+(.*) RPM.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'x2270' ) { $line =~ /(.*)\/TACH\s+\|\s+(.*) RPM.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'x4150' ) { $line =~ /(.*)\/TACH\s+\|\s+(\S+) RPM.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'pe2650' ) { $line =~ /(.*) RPM\s+\|\s+(\S+) RPM.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'ibmx3xx0' ) { $line =~ /(.*) Tach\s+\|\s+(\S+) RPM.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'tx120' ) { $line =~ /(.*)\s+\|\s+(.*) RPM.*\|\s+ok/; $label = $1; $value = $2; }
+		if ( $machine eq 'xs23' ) { $line =~ /(.*)\s+\|\s+(.*) RPM.*\|\s+ok/; $label = $1; $value = $2; }
+		if ( $machine eq 'hermon' ) { $line =~ /(.*)\s+\|\s+(.*) RPM.*\|\s+ok/; $label = $1; $value = $2; }
+		if ( $machine eq 'aocipmi20e' ) { $line =~ /(.*)\s+\|\s+(.*) RPM.*\|\s+ok/; $label = $1; $value = $2; }
+		if ( $machine eq 'asmb2' ) { $line =~ /(.*)\s+\|\s+(.*) RPM.*\|\s+ok/; $label = $1; $value = $2; }
 	}
-	
+	elsif ( $sensor eq 'fan' && $line =~ /\#\d+\s+\S+\s+Yes.*\%/ ) {
+		if ( $machine eq 'hpasmcli' ) { $line =~ /\#(\d+)\s+(.*)\s+Yes\s+\w+\s+(\d+)\%.*/; $label = "$2_$1"; $value = $3; }
+	}
+                                                        	
 	if ( $sensor eq 'temp' && $line =~ /.*degree.*ok/ )
 	{
 		if ( $machine eq 'x4x00' ) { $line =~ /(.*)\s+\|\s+(\S+)\ deg.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'v20z' ) { $line =~ /(.*)temp\s+\|\s+(\S+)\ deg.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'x2100' ) { $line =~ s/(.*)\s+\|\s+(\d+) deg.*/\L$1/; $label = $line; $value = $2; }
 		if ( $machine eq 'x346' ) { $line =~ /(.*) Temp\s+\|\s+(\d+) deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'ibmls4x' ) { $line =~ /(.*) TEMP\s+\|\s+(\d+) deg.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'shg2' ) { $line =~ /(.*)\s+\|\s+(\d+) deg.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'x2250' ) { $line =~ /MB\/T\_(.*)\s+\|\s+(\d+) deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'x2270' ) { $line =~ /MB\/T\_(.*)\s+\|\s+(\d+) deg.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'x4150' ) { $line =~ /(.*)\s+\|\s+(\S+) deg.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'vb1205' ) { $line =~ /(.*)\s+\|\s+(\S+) deg.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'pe2650' ) { $line =~ /(.*) Temp\s+\|\s+(\S+) deg.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'ibmx3xx0' ) { $line =~ /(.*) Temp\s+\|\s+(\S+) deg.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'ibmlsxx' ) { $line =~ /(.*) TEMP\s+\|\s+(\S+) deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'tx120' ) { $line =~ /(.*)\s+\|\s+(\S+)\ deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'xs23' ) { $line =~ /(.*)\ Temp\s+\|\s+(\S+)\ deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'hermon' ) { $line =~ /(.*)\ Temp\s+\|\s+(\S+)\ deg.*/; $label = $1; $value = $2; }   
+		if ( $machine eq 'aocipmi20e' ) { $line =~ /(.*)\ Temp\s+\|\s+(\S+)\ deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'asmb2' ) { $line =~ /(.*)\s+\|\s+(\S+)\ deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'm610' ) { $line =~ /(.*)\s+\|\s+(\S+)\ deg.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'proliantg5' ) { $line =~ /(.*)\s+\|\s+(\S+)\ deg.*/; $label = $1; $value = $2; }
 	}
+	elsif ( $sensor eq 'temp' && $line =~ /\d+C\/\d+F/ ) {
+		if ( $machine eq 'hpasmcli' ) { $line =~ /.*\s+(.*)\s+(\d+)C\/\d+F\s+\d+C\/\d+F/; $label = $1; $value = $2; } 
+	}	                                                        
 	
 	if ( $sensor eq 'volt' && $line =~ /.*Volt.*ok/ )
 	{
@@ -539,15 +819,21 @@ foreach my $line ( @ipmioutput )
 		if ( $machine eq 'v20z' ) { $line =~ /(.*)\s+\|\s+(\S+)\ Volt.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'x2100' ) { $line =~ s/(.*)\s+\|\s+(\S+)\ Volt.*/\L$1/; $label = $line; $value = $2; }
 		if ( $machine eq 'x346' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'ibmls4x' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'shg2' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'x2250' ) { $line =~ /MB\/V\_(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'x2270' ) { $line =~ /MB\/(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'x4150' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'vb1205' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; $label =~ s/\./_/g; }
 		if ( $machine eq 'pe2650' ) { $line =~ /(.*) Volt\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'ibmx3xx0' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
 		if ( $machine eq 'ibmlsxx' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; $label =~ s/\./_/g; }
 		if ( $machine eq 'ibmhsxx' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; $label =~ s/\./_/g; }
-		
+		if ( $machine eq 'tx120' ) { $line =~ /(.*)\ \|\s+(\S+)\ Volt.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'xs23' ) { $line =~ /(.*)\ \|\s+(\S+)\ Volt.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'hermon' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'aocipmi20e' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
+		if ( $machine eq 'asmb2' ) { $line =~ /(.*)\s+\|\s+(\S+) Volts.*/; $label = $1; $value = $2; }
 	}
 
 	if ( $label )
@@ -558,6 +844,13 @@ foreach my $line ( @ipmioutput )
 		$label =~ s/\s+//g;
 		$label =~ s/(.*)/\L$1/;
 		$label =~ s/\//_/g;
+		$label =~ s/\#/_/g;
+		
+		# Random fixups
+		if ( $machine eq 'x2270' )	{ $label =~ s/v_//; }
+		if ( $machine eq 'x4x00' )	{ $label =~ s/^sysv\_/mbv\_/; }
+		if ( $machine eq 'tx120' )	{ $label =~ s/main//; }
+		
                                 		
 		$res{$label} = $value;
 	}
