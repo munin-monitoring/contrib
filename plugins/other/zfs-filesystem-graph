@@ -1,0 +1,93 @@
+#!/bin/sh
+#
+# Plugin to monitor a ZFS Filesystem
+#
+# Wildcard-plugin to monitor a zfs filesystems. 
+# To monitor a filesystem, link zfs_fs_<zpool>_<filesystem> to this file. E.g.
+#
+#    ln -s /usr/share/munin/node/plugins-auto/zfs_fs_ /etc/munin/node.d/zfs_fs_tank_foo
+# 
+# ...will monitor tank/foo fs.
+#
+# You can monitor zpool as well by a link on zfs_fs_<zpool>
+#
+# Parameters understood:
+#
+# 	config   (required)
+# 	autoconf (optional - used by munin-config)
+#
+# Magic markers - optional - used by installation scripts and
+# munin-config:
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+myname=`basename $0 | sed 's/^zfs_fs_//g' | sed -e 's/_/\//'`
+
+name="${name-\<$myname\>}"
+REGEX="${regex-\<$name\>}"
+
+if [ "$1" = "autoconf" ]; then
+    # Makes little sense to autoconf if you can't suggest
+    echo no
+    exit 0
+fi
+
+if [ "$1" = "suggest" ]; then
+	exit 0
+fi
+
+usedbydataset=`zfs get -p usedbydataset $myname | grep $myname | awk '{print $3}'`
+usedbysnapshots=`zfs get -p usedbysnapshots $myname | grep $myname | awk '{print $3}'`
+available=`zfs get -p available $myname | grep $myname | awk '{print $3}'`
+usedbychildren=`zfs get -p usedbychildren $myname | grep $myname | awk '{print $3}'`
+quota=`zfs get -p quota $myname | grep $myname | awk '{print $3}'`
+total=$((usedbydataset+usedbysnapshots+available+usedbychildren))
+
+
+if [ "$1" = "config" ]; then
+
+	echo "graph_title zfs $myname"
+	echo 'graph_order usedbydataset usedbysnapshots usedbychildren available total quota'
+	echo "graph_args --base 1024 -r -l 0 --vertical-label Bytes --upper-limit $total"
+	echo 'graph_info This graph shows how is used a zfs filesystems.'
+	echo 'graph_category Zfs'
+	echo 'graph_period second'
+	echo 'usedbydataset.label Used'
+	echo 'usedbydataset.draw AREA'
+	echo 'usedbydataset.info Used space by Dataset'
+	echo 'usedbydataset.colour FF0000'
+	echo 'usedbysnapshots.label Snapshots'
+	echo 'usedbysnapshots.draw STACK'
+	echo 'usedbysnapshots.info Used space by snapshot'
+	echo 'usedbysnapshots.colour 0000FF'
+	echo 'usedbychildren.label Children'
+	echo 'usedbychildren.draw STACK'
+	echo 'usedbychildren.info Used space by children'
+	echo 'usedbychildren.colour FFCC33'
+	echo 'available.label Available'
+	echo 'available.draw STACK'
+	echo 'available.info Free space'
+	echo 'available.colour 00FF00'
+	echo 'total.label Total'
+	echo 'total.draw LINE1'
+	echo 'total.info Total'
+	echo 'total.colour 000000'
+	echo 'quota.label Quota'
+	echo 'quota.draw LINE1'
+	echo 'quota.info Quota'
+	echo 'quota.colour 555555'
+	exit 0
+fi
+
+
+
+echo "usedbydataset.value $usedbydataset"
+echo "usedbysnapshots.value $usedbysnapshots"
+echo "usedbychildren.value $usedbychildren"
+echo "available.value $available"
+echo "total.value $total"
+echo "quota.value $quota"
+
+
+exit 0
