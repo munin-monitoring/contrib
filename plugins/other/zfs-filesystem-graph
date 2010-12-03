@@ -22,7 +22,7 @@
 #%# family=auto
 #%# capabilities=autoconf
 
-myname=`basename $0 | sed 's/^zfs_fs_//g' | sed -e 's/_/\//'`
+myname=`basename $0 | sed 's/^zfs_fs_//g' | sed -e 's/_/\//g'`
 
 name="${name-\<$myname\>}"
 REGEX="${regex-\<$name\>}"
@@ -38,33 +38,38 @@ if [ "$1" = "suggest" ]; then
 fi
 
 usedbydataset=`zfs get -p usedbydataset $myname | grep $myname | awk '{print $3}'`
-usedbysnapshots=`zfs get -p usedbysnapshots $myname | grep $myname | awk '{print $3}'`
-available=`zfs get -p available $myname | grep $myname | awk '{print $3}'`
 usedbychildren=`zfs get -p usedbychildren $myname | grep $myname | awk '{print $3}'`
+usedbysnapshots=`zfs get -p usedbysnapshots $myname | grep $myname | awk '{print $3}'`
+usedbyrefreservation=`zfs get -p usedbyrefreservation $myname | grep $myname | awk '{print $3}'`
+available=`zfs get -p available $myname | grep $myname | awk '{print $3}'`
 quota=`zfs get -p quota $myname | grep $myname | awk '{print $3}'`
-total=$((usedbydataset+usedbysnapshots+available+usedbychildren))
+total=$((usedbydataset+usedbysnapshots+available+usedbychildren+usedbyrefreservation))
 
 
 if [ "$1" = "config" ]; then
 
 	echo "graph_title zfs $myname"
-	echo 'graph_order usedbydataset usedbysnapshots usedbychildren available total quota'
+	echo 'graph_order usedbydataset usedbychildren usedbysnapshots usedbyrefreservation available total quota'
 	echo "graph_args --base 1024 -r -l 0 --vertical-label Bytes --upper-limit $total"
 	echo 'graph_info This graph shows how is used a zfs filesystems.'
 	echo 'graph_category Zfs'
 	echo 'graph_period second'
-	echo 'usedbydataset.label Used'
+	echo 'usedbydataset.label UsedByDataset'
 	echo 'usedbydataset.draw AREA'
 	echo 'usedbydataset.info Used space by Dataset'
 	echo 'usedbydataset.colour FF0000'
-	echo 'usedbysnapshots.label Snapshots'
-	echo 'usedbysnapshots.draw STACK'
-	echo 'usedbysnapshots.info Used space by snapshot'
-	echo 'usedbysnapshots.colour 0000FF'
-	echo 'usedbychildren.label Children'
+	echo 'usedbychildren.label UsedByChildren'
 	echo 'usedbychildren.draw STACK'
 	echo 'usedbychildren.info Used space by children'
 	echo 'usedbychildren.colour FFCC33'
+	echo 'usedbysnapshots.label UsedBySnapshots'
+	echo 'usedbysnapshots.draw STACK'
+	echo 'usedbysnapshots.info Used space by snapshot'
+	echo 'usedbysnapshots.colour 0000FF'
+	echo 'usedbyrefreservation.label Usedbyrefreservation'
+	echo 'usedbyrefreservation.draw STACK'
+	echo 'usedbyrefreservation.info Used space by Ref Reservation'
+	echo 'usedbyrefreservation.colour 33CCFF'
 	echo 'available.label Available'
 	echo 'available.draw STACK'
 	echo 'available.info Free space'
@@ -85,6 +90,7 @@ fi
 echo "usedbydataset.value $usedbydataset"
 echo "usedbysnapshots.value $usedbysnapshots"
 echo "usedbychildren.value $usedbychildren"
+echo "usedbyrefreservation.value $usedbyrefreservation"
 echo "available.value $available"
 echo "total.value $total"
 echo "quota.value $quota"
