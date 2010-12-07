@@ -1,9 +1,13 @@
 #!/usr/bin/perl -w
+# -*- perl -*-
 
 # Plugin to monitor offsets to multiple NTP peers.
 # NB currently only works for IPv4 peers
 #
 # (c)2008 Chris Hastie: chris (at) oak (hyphen) wood (dot) co (dot) uk
+#
+# Updated to version 1.1 by;
+# (c)2010 Uffe Norberg: uffe (dot) norberg (at) gmail (dot) com
 #
 # Parameters understood:
 #
@@ -37,14 +41,18 @@
 # v1.0.0    2008-07-21        Chris Hastie
 # initial release 
 #
+# v1.1.0    2010-12-07	      Uffe Norberg
+# - Changed default statedir to /var/lib/munin/plugin-state (Debian default)
+# - Changed config output to make rrdtool draw finer lines in graph
+# - Changed config output so that rrdtool draws milli- and microseconds correctly
 #
 #
 # Magic markers - optional - used by installation scripts and
 # munin-node-configure:
-#
+
 #%# family=contrib
 #%# capabilities=autoconf
-#
+
 
 use strict;
 use Socket;
@@ -52,7 +60,7 @@ use Socket;
 my $NTPQ = $ENV{ntpq} || "ntpq";
 my $COMMAND    =      "$NTPQ -np";
 
-my $statedir = $ENV{statedir} || '/usr/local/var/munin/plugin-state';
+my $statedir = $ENV{statedir} || '/var/lib/munin/plugin-state';
 my $statefile = "$statedir/ntp_peers.state";
 
 # autoconf
@@ -107,9 +115,9 @@ close(SERVICE);
 # config
 if ($ARGV[0] and $ARGV[0] eq 'config') {
   print "graph_title NTP peer offsets\n";
-  print "graph_args --base 1000\n";
-  print "graph_vlabel ms\n";
-  print "graph_category ntp\n";
+  print "graph_args --base 1000 --vertical-label seconds --lower-limit 0\n";
+#  print "graph_vlabel ms\n";
+  print "graph_category time\n";
   print "graph_info Offset (in ms) to the server's NTP peers\n";
   print "graph_order ";
   foreach my $key (sort by_name keys %peers) {
@@ -118,6 +126,8 @@ if ($ARGV[0] and $ARGV[0] eq 'config') {
   print "\n";
   foreach my $peer (keys %peers) {
     print &sanitize_field($peers{$peer}{'name'}) . ".label " . $peers{$peer}{'name'} . "\n";
+    print &sanitize_field($peers{$peer}{'name'}) . ".draw " . "LINE" . "\n";
+    print &sanitize_field($peers{$peer}{'name'}) . ".cdef " . &sanitize_field($peers{$peer}{'name'}) . ",1000,/" . "\n";
   }
   exit 0;
 }
