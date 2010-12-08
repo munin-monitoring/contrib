@@ -1,0 +1,40 @@
+#!/bin/bash
+#%# family=contrib
+
+case $1 in
+        config)
+                cat <<'EOM'
+graph_title SA-Learn Magic
+graph_vlabel Count
+graph_args --base 1000 -l 0
+graph_category Mail
+spam.label Num Spam
+spam.type GAUGE
+ham.label Num Ham
+ham.type GAUGE
+tokens.label Num Tokens
+tokens.type GAUGE
+EOM
+                exit 0;;
+esac
+
+## Print values
+BayesDir=${BayesDir:-/var/lib/MailScanner}
+
+sa-learn --dbpath $BayesDir --dump magic 2>/dev/null | while read line
+do
+        case "$line" in
+                *nspam*)
+                        echo -n "spam.value "
+                        echo $line | awk '{print $3}'
+                        ;;
+                *nham*)
+                        echo -n "ham.value "
+                        echo $line | awk '{print $3}'
+                        ;;
+                *ntokens*)
+                        echo -n "tokens.value "
+                        echo $line | awk '{print $3}'
+                        ;;
+        esac
+done
