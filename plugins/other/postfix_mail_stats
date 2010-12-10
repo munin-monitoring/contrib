@@ -1,9 +1,11 @@
-#!/usr/local/bin/bash
+#!/bin/bash
 #
 # Made by Boudewijn Ector, for Boudewijn Ector IT.
 # Comments can be sent to (boudewijn<AT>boudewijnector'dot'NL)
 # Loosely based on http://munin.projects.linpro.no/attachment/wiki/PluginCat/postfix_messages_hourly.txt
 # Script to show postfix stuff
+#
+# Modified by Paul Saunders <darac+munin@darac.org.uk>, 10 Dec 2010
 #
 # Parameters understood:
 #
@@ -18,12 +20,16 @@
 #%# capabilities=autoconf
 
 
-LOGFILE=/var/log/maillog
+LOGFILE=${logfile:-/var/log/maillog}	# Allow user to specify logfile through env.logfile
 DATE=`date '+%b %e %H'`
 MAXLABEL=20
 
 if [ "$1" = "autoconf" ]; then
-        echo yes
+	if [[ -r $LOGFILE ]]; then
+	        echo yes
+	else
+		echo no
+	fi
         exit 0
 fi
 
@@ -43,12 +49,12 @@ if [ "$1" = "config" ]; then
 fi
 
 echo -en "recieved.value "
-echo $(grep "status=sent (delivered to maildir)" $LOGFILE | grep "$DATE" | wc -l)
+echo $(grep "status=sent (delivered" $LOGFILE | grep "$DATE" | wc -l)
 echo -n
 echo -en "sent.value "
 echo $(grep "status=sent (250" $LOGFILE | grep "$DATE" | wc -l)
 echo -en "rejecthelo.value "
-echo $(grep "Helocommand rejected: need fully-qualified hostname" $LOGFILE | grep "$DATE" | wc -l)
+echo $(grep "Helo command rejected: need fully-qualified hostname" $LOGFILE | grep "$DATE" | wc -l)
 echo -en "rejectsenderdomain.value "
 echo $(grep "Sender address rejected: Domain not found" $LOGFILE | grep "$DATE" | wc -l)
 
