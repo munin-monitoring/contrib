@@ -1,0 +1,74 @@
+#!/usr/bin/gawk -f
+# Denon x311 volume-plugin for munin
+# Copyright (C) 2010 Kristian Lyngstol
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+# This plugin asks a Denon (?) receiver over "telnet" what volume it's
+# running at and parses the result. It's tested with Denon AVR 4311, but I
+# suppose it works with the 3311 too, possibly more. It uses 192.168.0.60
+# by default - because I'm lazy.
+
+### Magic markers
+# #%# family=manual
+# #%# capabilities=
+#
+# Even if we _could_ do autoconf on ENVIRON["ip"], it's hazardous as you
+# have little control over timeouts and risk hanging around annoying the
+# user.
+
+BEGIN {
+	if (ARGV[1] == "config") {
+		print "graph_title Denon AVR-4311 Volume"
+		print "graph_category funkytown"
+		print "volume.label Volume"
+		print "volume.type GAUGE"
+		exit 0
+	}
+	if (ENVIRON["ip"] == "") {
+		ip="denon.kristian.int"
+	} else {
+		ip=ENVIRON["ip"]
+	}
+	Service="/inet/tcp/0/" ip "/23"
+
+	# The AVR-4311 uses just a \r as line/record separator (annoying as
+	# heck).
+	RS="\r"
+
+	# MV? asks for volume. Returned in MVXXZ - the z is optional
+	print "MV?\r" |&Service
+	Service |& getline
+	close(Service)
+	gsub("^MV","")
+
+	# 445 == 44.5. 44 = 44. So only divide by ten if more than 2
+	# characters were returned. Note that it also returns 005 for 0.5
+	if (length >2) {
+		n=$0/10
+	} else {
+		n=$0
+	}
+
+	# 99 is "0" and 99.5 is "0.5" (somewhat audible). I shift
+	# everything by 1 because I prefer my lists to start at 0, not
+	# -1....
+	if (n==99 || n == 99.5) {
+		n-=99
+	} else {
+		n+=1
+	}
+	printf "volume.value %0.1f\n",n
+}
