@@ -12,7 +12,7 @@
 # Configuration parameters for /etc/munin/plugin-conf.d/munin-node
 #
 # [ipmi_therm]
-#   user 	 - User that has permissions to run the omreport binary
+#   user 	 - User that has permissions to run ipmi-sensors
 #   env.category sensors
 #
 # Parameters:
@@ -22,7 +22,7 @@
 #
 # Author: Alexx Roche <munin-ipmi-plugin@alexx.net>
 # Built on the work of Justin Shepherd <galstrom21@gmail.com>
-# Revision: 1.0  2010/01/28
+# Revision: 1.2  2010/10/15
 #
 #%# family=auto
 #%# capabilities=autoconf
@@ -50,8 +50,9 @@ if ($ARGV[0] && $ARGV[0] eq "autoconf"){
         my @result = `$cmd`;
         my (%val, $index);
 	$index=0;
+	my $count=0;
 	#Four of these seem to be unlabled, I'm going to guess that they are the CPU(s) and HDD(s)
-	my @unknown = ('HDD0','HDD1','CPU0','CPU1');
+	my @unknown = ('CPU0','CPU1','HDD0','HDD1');
         foreach my $line (@result) {
                 $line =~ s/\s+/ /g;
                 $line =~ s/\s$//g;
@@ -61,16 +62,19 @@ if ($ARGV[0] && $ARGV[0] eq "autoconf"){
                 if($field=~m/^(Temp|Ambient|Planar|Riser)/) {
 		    my $f=$1;
 		    if($f eq 'Temp'){
-			$f = $unknown[$index];
+			$f = $unknown[$count];
+			$count++;
 		    }
                     my @data = split / /, $value;
 		    $data[2]=~s/^\(//;
 		    $data[2]=~s/\)$//;
 		    if($f){
 		    	my($warn,$crit) = split/\//, $data[2];
+			unless($warn=~m/\d+/){ $warn = 0; }
+			unless($crit=~m/\d+/){ $crit = 200; }
                     	$val{$index}{'Probe Name'} = "$f";
                     	$val{$index}{'Reading'} = "$data[0]";
-                    	$val{$index}{'Warning Threshold'} = "$warn";
+                    	$val{$index}{'Warning Threshold'} = ($crit - $warn);
                     	$val{$index}{'Critical Threshold'} = "$crit";
 		  	$index++;
 		    }
