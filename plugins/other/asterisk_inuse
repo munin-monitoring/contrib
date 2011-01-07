@@ -1,0 +1,52 @@
+#!/bin/sh
+#
+# add this into munin/plugin-conf.d/plugins.conf:
+# 
+# [asterisk_inuse]
+# user root
+#
+
+if [ "$1" = "autoconf" ]; then
+    if [ -x /usr/local/sbin/asterisk ]; then
+        /usr/local/sbin/asterisk -rx 'sip show inuse' > /dev/null
+        if [ $? = "0" ]; then
+                echo yes
+                exit 0
+        else
+                    echo no
+                    exit 1
+            fi
+    else
+        echo no
+        exit 1
+    fi
+fi
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title Line use'
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_vlabel line use and connected users states'
+	echo 'graph_noscale true'
+	echo 'graph_info will be info'
+        echo 'graph_category asterisk'
+        echo 'inuse.label inuse'
+        echo 'inuse.type GAUGE'
+	echo 'inuse.info sip show inuse'
+	echo 'connected.label connected'
+        echo 'connected.type GAUGE'
+        echo 'connected.info sip show peers'
+	echo 'connected.warning 10:300'
+	echo 'connected.critical 1:500'
+        exit 0
+fi
+
+INUSE=`/usr/local/sbin/asterisk -rx 'sip show inuse' | grep -v "0/0" | grep -v " 0 " | grep -v " name" | wc -l`
+CONN=`/usr/local/sbin/asterisk -rx 'sip show peers' | grep OK | wc -l`
+
+if [ "$INUSE" -ge "1" ]; then
+	echo "inuse.value"$INUSE
+else
+	echo "inuse.value 0"
+fi
+
+echo "connected.value"$CONN
