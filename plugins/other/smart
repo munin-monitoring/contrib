@@ -1,0 +1,78 @@
+#!/usr/bin/perl
+#
+# Plugin to monitor all S.M.A.R.T. capable disks
+# author: paulv@dds.nl / paulv@bikkel.org
+# licence : public domain
+#
+# Usage: copy or link into /etc/munin/plugins/ as smart_[device]  ( smart_sg0 for example)
+# Run as root
+#
+# Parameters:
+#
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#
+#%# family=manual
+#%# capabilities=autoconf
+#
+
+use strict;
+
+my $device           = "/dev/$1" if ( $0 =~ /[\w_-]+_(\w+\d+)$/ );
+my $smartctl         = 'smartctl';
+my $smartctl_param   = ' --attributes ';
+my %attr;
+
+if ( $ARGV[0] and $ARGV[0] eq "autoconf" ) {
+
+       print "yes\n";
+       exit 0;
+}
+
+open(SMART,"$smartctl $smartctl_param $device |") || die $!;
+
+while(<SMART>) {
+       chop;
+       if ( m/\s*(\d+)\s+([\w_-]+)\s+(\d+x.+)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\w_-]+)\s+(\w+)\s+([\w_-]+)\s+(\d+)/ ) {
+               my $key      = $1 . '_' . $2;
+               my $rawvalue = $10;
+
+               $key = "170_Reserved_Block_Count"  if $key eq "170_Unknown_Attribute";
+               $key = "171_Program_Fail_Count"    if $key eq "171_Unknown_Attribute";
+               $key = "172_Erase_Fail_Count"      if $key eq "172_Unknown_Attribute";
+               $key = "173_Wear_Leveling_Count"   if $key eq "173_Unknown_Attribute";
+               $key = "174_Unexpected_Pwr_Loss"   if $key eq "174_Unknown_Attribute";
+               $key = "189_High_Fly_Writes"       if $key eq "189_Unknown_Attribute";
+               $key = "202_TA_Increase_Count"     if $key eq "202_Unknown_Attribute";
+               $key = "206_Flying_Height"         if $key eq "206_Unknown_Attribute";
+
+               $attr{$key} = $rawvalue;
+       }
+}
+
+
+if ( $ARGV[0] and $ARGV[0] eq "config" )
+{
+
+   print "graph_title SMART values for $device\n";
+   print "graph_args --base 1000 -l 0\n";
+   print "graph_category disk\n";
+   print "graph_vlabel value\n";
+   print "graph_scale  no\n";
+   print "graph_total  Total\n";
+   foreach my $i (keys %attr)
+   {
+           print "$i.label smartattribute $i\n";
+           print "$i.draw LINE2\n";
+           print "$i.min 0\n";
+   }
+   exit 0;
+}
+
+foreach my $k (keys %attr) {
+       print $k . ".value " . $attr{$k} . "\n";
+}
+# end
