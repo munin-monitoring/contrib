@@ -1,24 +1,72 @@
 #!/usr/bin/php
 <?php
-
 /*
-Plugin to monitor users on a Mumble server (a.k.a. murmur).
-Use ICE to to query murmur.
+: << =cut
 
-Origional Author: Thomas Leveil
-Contributors: none
-Version: 1.0
+=head1 NAME
+
+murmur_ice_users
+
+=head1 DESCRIPTION
+
+This plugin monitors users on a Mumble server (a.k.a. murmur).
+It uses PHP and ICE to to query murmur. On debian, you can install mumble-server-web
+to get the dependencies installed and set up.
+
+
+=head1 CONFIGURATION
 
 You can specify a different ip:port in the munin-node config file as follow:
 
-[murmur_ice_users]
-env.host 127.0.0.1
-env.port 6502
+    [murmur_ice_users]
+    env.host 127.0.0.1
+    env.port 6502
 
 
-#%# family=contrib
-#%# capabilities=autoconf
+=head1 AUTHOR
+
+Thomas Léveil
+
+=head1 LICENSE
+
+Permission to use, copy, and modify this software with or without fee
+is hereby granted, provided that this entire notice is included in
+all source code copies of any software which is or includes a copy or
+modification of this software.
+
+THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR
+IMPLIED WARRANTY. IN PARTICULAR, NONE OF THE AUTHORS MAKES ANY
+REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE
+MERCHANTABILITY OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR
+PURPOSE.
+
+=head1 CONTRIBUTE
+
+find this plugin on github at http://github.com/VolatileMesh/munin-plugins
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=autoconf
+
+=head1 VERSION
+
+    1.1
+
+=head1 CHANGELOG
+
+=head2 1.0 - 2009/05/04
+
+initial release
+
+=head2 1.1 - 2011/01/13
+
+fix to make it work with murmur v1.2.2
+
+    
+=cut
 */
+
 
 $host = "127.0.0.1";
 $port = "6502";
@@ -26,6 +74,9 @@ $port = "6502";
 if (isset($_ENV['host'])) $host = $_ENV['host'];
 if (isset($_ENV['port'])) $port = $_ENV['port'];
 
+if (count($argv)==1) {
+    do_count();
+} 
 
 switch ($argv[1]) 
 {
@@ -97,7 +148,9 @@ function do_count()
 			$maxusers = $s->getConf('users');
 			if (!$maxusers) $maxusers = $AdefaultConf['users'];
 			$totalMaxUsers += intval($maxusers);
-
+            
+            $tree = $s->getTree();
+            //print_r($tree);
 			$connectedUsers = countConnectedUsers($s->getTree());			
 			$totalConnectedUsers += $connectedUsers;
 		}
@@ -116,7 +169,7 @@ function do_count()
 
 function countConnectedUsers($channelTree) 
 {
-	$count = intval($channelTree->players);
+	$count = intval(count($channelTree->users));
 	
 	if (isset($channelTree->children))
 	{
