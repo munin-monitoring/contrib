@@ -1,0 +1,89 @@
+#!/usr/bin/php
+<?php
+global $argc, $argv;
+
+/**************************************************************************
+	Test de bande passante multi sites, test un site à la fois
+	v1.2 - tanguy.pruvot on gmail.com
+***************************************************************************/
+$cache_file = '/var/lib/munin/speedtest.cache';
+$grenouille_csv = '/usr/local/pygrenouille/logs/download.csv';
+
+$mire = array(
+"free" => "http://test-debit.free.fr/16384.rnd",
+"gaoland" => "http://mire.ipadsl.net/speedtest.php",
+"bouygues" => "http://speedtest.lafibre.info/speedtest/random2000x2000.jpg?x=".date('U'),
+"bbox" => "http://speed.degrouptest.com/ookla/speedtest/random1500x1500.jpg?x=".date('U')
+);
+
+// CONFIG ------------------------------------------------------------------
+if ($argc > 1 && $argv[1]=='config'){
+
+echo "graph_category network
+graph_title Speed test
+graph_args --base 1024
+grenouille.label grenouille
+grenouille.draw LINE2
+";
+
+$order="";
+foreach ($mire as $label => $url) {
+	echo "$label.label $label\n";
+	echo "$label.draw LINE2\n";
+	$order .= " $label";
+}
+echo "graph_order grenouille ".trim($order)."\n";
+exit;
+
+}
+
+// CACHE & GRENOUILLE  -----------------------------------------------------
+$cache = @ unserialize(file_get_contents($cache_file));
+if (empty($cache))
+  $cache = array('item'=>0);
+
+
+if (is_file($grenouille_csv) ) {
+$grenouille = explode("\n",trim(file_get_contents($grenouille_csv)));
+$grenouille = end($grenouille);
+$last_data = explode(";",$grenouille);
+//$date = $last_data[0]; $time =  $last_data[1];
+//$t = strptime($date.' '.$time,'%d/%m/%Y %H:%M:%S');
+//$time = mktime($t['tm_hour'],$t['tm_min'],$t['tm_sec'], $t['tm_mon'],$t['tm_mday'],1900 + $t['tm_year']);
+//if ((date('U') - date('U',$time)) < 180) {
+	$cache['grenouille'] = @ floatval($last_data[2])*1000.0;
+//}
+}
+$output = "grenouille.value ".round($cache['grenouille'])."\n";
+
+// SPEED TEST --------------------------------------------------------------
+
+$item = 0;
+foreach ($mire as $label => $url) {
+    $cache[$label] = (int) @ $cache[$label];
+    if ($item == $cache['item']) {
+	$before = microtime(true);
+	$data = file_get_contents($url);
+	$data = file_get_contents($url);
+	$after = microtime(true);
+	$len = strlen($data) * 2;
+
+	if (($after - $before) > 0)
+		$cache[$label] = $len / ($after - $before);
+	else
+		$cache[$label] = 0;
+    }
+    $item++;
+
+    $output .= "$label.value ".round($cache[$label])."\n";
+}
+echo $output;
+
+$cache['item'] = ($cache['item'] + 1) % count($mire);
+
+//save cache
+@file_put_contents($cache_file,serialize($cache));
+@chmod ($cache_file, 0666);
+@chown($cache_file,'munin');
+
+?>
