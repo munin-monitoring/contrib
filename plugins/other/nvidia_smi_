@@ -8,6 +8,11 @@
 # config (required)
 # autoconf (optional - used by munin-config)
 #
+# Version 1.1 
+#   Now works with NVidia >=270.18 Driver
+# Version 1.0
+#   Initial Release. Nvidia 260.xx Driver
+#
 # Magic markers (optional - used by munin-config and installation
 # scripts):
 #%# family=auto
@@ -31,9 +36,9 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf" ) {
     exit 0;
   }
   
-  my $text = `$nvidia_smi -a 2>/dev/null | grep GPU`;
+  my $text = `$nvidia_smi -L 2>/dev/null | grep GPU`;
   if ($?) {
-    print "no (No GPUs found. Check '$nvidia_smi -a' output)\n";
+    print "no (No GPUs found. Check '$nvidia_smi -L' output)\n";
     exit 0;
   }
 
@@ -45,7 +50,7 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf" ) {
 ## Munin suggest method.
 if (defined $ARGV[0] and $ARGV[0] eq 'suggest') {
 # FIXME: SHould be done in pure-perl
-  my $gpus = `$nvidia_smi -a | egrep ^GPU | sed -e "s/ //g" | sed -e "s/://g" | tr [:upper:] [:lower:]`;
+  my $gpus = `$nvidia_smi -L | egrep ^GPU | cut -f1 -d ':' | sed -e "s/ //g" | sed -e "s/://g" | tr [:upper:] [:lower:]`;
   print $gpus if defined $gpus; #FIXME
   exit 0;
 }
@@ -53,17 +58,16 @@ if (defined $ARGV[0] and $ARGV[0] eq 'suggest') {
 $0 =~ /nvidia_smi_gpu(.+)*$/;
 my $gpu_id = $1;
 exit 2 unless defined $gpu_id;
-
-# Get XML with sensor values for GPU with particular ID
-my $data = `$nvidia_smi -g $gpu_id -x` or die "Could not run $nvidia_smi: $!\n";
+# Get XML with sensor values for the GPU with particular ID
+# Need 2>/dev/null to filter out nvmlSystemGetPersistenceMode useless error message.
+my $data = `$nvidia_smi -q -g $gpu_id -x 2>/dev/null` or die "Could not run $nvidia_smi: $!\n";
 
 # Parse XML into easy accessable hash-tree
 my $ref = XMLin($data);
 my %gpu = (); # Will contain values cleaned form percent and Celsius signs
 
-if ( exists $ref->{gpu}->{temp} ){
-   $ref->{gpu}->{temp} =~ /^(.+) C$/;
-   $gpu{temp} = $1;
+if ( exists $ref->{gpu}->{temperature}->{gpu_temp} ){
+   $gpu{temp} = $ref->{gpu}->{temperature}->{gpu_temp};
 }
 
 if ( exists $ref->{gpu}->{fan_speed} ){
@@ -81,11 +85,13 @@ if ( exists $ref->{gpu}->{utilization}->{memory_util} ){
    $gpu{mem} = $1;
 }
 
-$gpu{model}  = $ref->{gpu}->{prod_name} if exists $ref->{gpu}->{prod_name};
+$gpu{model}  = $ref->{gpu}->{product_name} if exists $ref->{gpu}->{product_name};
 $gpu{driver} = $ref->{driver_version}   if exists $ref->{driver_version};
+$gpu{busid}  = $ref->{gpu}->{pci}->{pci_bus_id} if exists $ref->{gpu}->{pci}->{pci_bus_id};
 
 my $card_model = $gpu{model}      || "<undetermined>";
 my $driver_version = $gpu{driver} || "<undetermined>";
+my $busid   = $gpu{busid} || "<unknown>";
 
 ## Munin config method.
 if (exists $ARGV[0] and $ARGV[0] eq "config") {
@@ -94,7 +100,7 @@ if (exists $ARGV[0] and $ARGV[0] eq "config") {
   print "graph_args --upper-limit 100 -l 0\n";
   print "graph_category sensors\n";
   print "graph_vlabel % or C\n";
-  print "graph_info This graph shows information about your $card_model graphics card running driver version $driver_version.\n";
+  print "graph_info This graph shows information about your $card_model graphics card running driver version $driver_version and sitting on busID $busid.\n";
 
    if (exists $gpu{temp}) {
      print "gpu_temp.label GPU Temperature (C)\n";
