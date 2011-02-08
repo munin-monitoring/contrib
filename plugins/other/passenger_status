@@ -1,0 +1,55 @@
+#!/usr/bin/env ruby
+ 
+def output_config
+  puts <<-END
+graph_category passenger
+graph_title status
+graph_vlabel count
+graph_info This graph shows how much passenger process are working, available and how much queries are waiting.
+max.label max processes
+max.draw AREA
+max.info Maximum processes allowed to run simultaneously.
+sessions.label queued requests
+sessions.draw LINE2
+sessions.info Requests queued, waiting to be processed.
+running.label running processes
+running.draw LINE1
+running.info The number of application instances that are currently alive.
+active.label active processes
+active.draw LINE1
+active.info The number of application instances that are currently processing requests.
+waiting.label waiting requests
+waiting.draw LINE2
+waiting.info Requests waiting to be queued.
+END
+  exit 0
+end
+ 
+def output_values
+  status = `sudo passenger-status`
+  unless $?.success?
+    $stderr.puts "failed executing passenger-status"
+    exit 1
+  end
+  status =~ /max\s+=\s+(\d+)/
+  puts "max.value #{$1}"
+ 
+  status =~ /count\s+=\s+(\d+)/
+  puts "running.value #{$1}"
+ 
+  status =~ /active\s+=\s+(\d+)/
+  puts "active.value #{$1}"
+ 
+  status =~ /Waiting on global queue:\s+(\d+)/
+  puts "waiting.value #{$1}"
+
+  total_sessions = 0
+  status.scan(/Sessions: (\d+)/).flatten.each { |count| total_sessions += count.to_i }
+  puts "sessions.value #{total_sessions}"
+end
+ 
+if ARGV[0] == "config"
+  output_config
+else
+  output_values
+end
