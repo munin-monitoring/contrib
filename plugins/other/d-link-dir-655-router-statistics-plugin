@@ -93,6 +93,13 @@ def output
   end
   puts "dhcp_clients.value " + j.to_s
 
+  puts "multigraph uptime"
+  # get uptime of connection
+  clients_xml = agent.get("#{router_path}/wan_connection_status.xml").body
+  doc = Nokogiri::XML(clients_xml.to_s)
+  uptime = doc.children.search('wan_interface_up_time_0')[0].text
+  puts "uptime.value " + sprintf( "%.2f", (Float(uptime)/86400) )
+
   # graph overall interface packets transferred per interval
   puts "multigraph if_packets"
   for i in [ "LAN", "WAN", "WLAN" ] do
@@ -137,11 +144,11 @@ def config
   puts 'graph_order LAN_recv LAN_send WAN_recv WAN_send WLAN_recv WLAN_send'
   puts 'graph_vlabel packets in (-) / out (+) per ${graph_period}'
   for i in [ "LAN", "WAN", "WLAN" ] do
-    puts "#{i}_recv.type COUNTER"
+    puts "#{i}_recv.type DERIVE"
     puts "#{i}_recv.graph no"
     puts "#{i}_recv.min 0"
     puts "#{i}_send.label #{i}"
-    puts "#{i}_send.type COUNTER"
+    puts "#{i}_send.type DERIVE"
     puts "#{i}_send.negative #{i}_recv"
     puts "#{i}_send.min 0"
   end
@@ -152,11 +159,11 @@ def config
   puts 'graph_order LAN_recv LAN_send WAN_recv WAN_send WLAN_recv WLAN_send'
   puts 'graph_vlabel packets / ${graph_period}'
   for i in [ "LAN", "WAN", "WLAN" ] do
-    puts "#{i}_recv.type COUNTER"
+    puts "#{i}_recv.type DERIVE"
     puts "#{i}_recv.graph no"
     puts "#{i}_recv.min 0"
     puts "#{i}_send.label #{i}"
-    puts "#{i}_send.type COUNTER"
+    puts "#{i}_send.type DERIVE"
     puts "#{i}_send.negative #{i}_recv"
     puts "#{i}_send.min 0"
   end
@@ -168,16 +175,16 @@ def config
   puts 'graph_vlabel packets / ${graph_period}'
   for i in [ "LAN", "WAN", "WLAN" ] do
     puts "#{i}_coll.label #{i} collisions"
-    puts "#{i}_coll.type COUNTER"
+    puts "#{i}_coll.type DERIVE"
     puts "#{i}_coll.min 0"
     puts "#{i}_err.label #{i} errors"
-    puts "#{i}_err.type COUNTER"
+    puts "#{i}_err.type DERIVE"
     puts "#{i}_err.min 0"
   end
 
   puts "multigraph clients"
   puts "graph_title D-Link DIR-655 client information"
-  puts "graph_category network"
+  puts "graph_category system"
   puts "graph_order dhcp_clients wifi_assoc"
   puts "graph_vlabel number of clients"
   puts "dhcp_clients.label DHCP clients"
@@ -187,6 +194,13 @@ def config
   puts "wifi_assoc.type GAUGE"
   puts "wifi_assoc.min 0"
 
+  puts "multigraph uptime"
+  puts "graph_title Uptime"
+  puts 'graph_vlabel uptime in days'
+  puts 'graph_category system'
+  puts 'uptime.label uptime'
+  puts 'uptime.draw AREA'
+
   for i in [ "LAN", "WAN", "WLAN" ] do
     puts "multigraph if_packets.#{i}"
     puts "graph_title D-Link DIR-655 #{i} traffic"
@@ -194,11 +208,11 @@ def config
     puts 'graph_order recv send'
     puts 'graph_vlabel packets in (-) / out (+) per ${graph_period}'
     puts 'recv.label received'
-    puts 'recv.type COUNTER'
+    puts 'recv.type DERIVE'
     puts 'recv.graph no'
     puts 'recv.min 0'
     puts 'send.label packets/sec'
-    puts 'send.type COUNTER'
+    puts 'send.type DERIVE'
     puts 'send.negative recv'
     puts 'send.min 0'
   
@@ -208,11 +222,11 @@ def config
     puts 'graph_order recv send'
     puts 'graph_vlabel packets / ${graph_period}'
     puts 'recv.label RX packets dropped'
-    puts 'recv.type COUNTER'
+    puts 'recv.type DERIVE'
     puts 'recv.graph no'
     puts 'recv.min 0'
     puts 'send.label TX packets dropped'
-    puts 'send.type COUNTER'
+    puts 'send.type DERIVE'
     puts 'send.negative recv'
     puts 'send.min 0'
   
@@ -222,10 +236,10 @@ def config
     puts 'graph_order coll err'
     puts 'graph_vlabel packets / ${graph_period}'
     puts 'coll.label collisions'
-    puts 'coll.type COUNTER'
+    puts 'coll.type DERIVE'
     puts 'coll.min 0'
     puts 'err.label errors'
-    puts 'err.type COUNTER'
+    puts 'err.type DERIVE'
     puts 'err.min 0'
   end
 end
