@@ -1,0 +1,181 @@
+#!/usr/bin/python
+# 
+# Copyright (C) Rodolphe Franceschi
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+# 
+# 
+# This plugin monitors a SOLR server configured for multicore by automaticaly
+# getting core names from SOLR default page.
+# 
+# Tested on SOLR 1.4.0
+# 
+# Parameters:
+# 	config   (required)
+# 	autoconf (optional - used by munin-config)
+#
+# For the full list of options, refer to PLUGINOPTIONSLIST variable
+# 
+# Example of symlink creation on Debian Lenny
+#   ln -s /usr/share/munin/plugins/solrmulticore_ /etc/munin/plugins/solrmulticore_avgRequestsPerSecond
+#  
+# Magic markers (Used by munin-config and some installation scripts.
+# Optional):
+#%# family=auto
+#%# capabilities=autoconf
+
+import sys, os 
+import urllib2
+import HTMLParser, urllib
+
+try:
+    from xml.etree import cElementTree as ET
+except ImportError:
+    try:
+        import cElementTree as ET
+    except ImportError:
+        sys.exit(1)
+
+
+## GLOBALS
+SOLR_PORT = 8983
+SOLR_HOST = "localhost"
+PLUGINOPTIONSLIST = {
+  "avgRequestsPerSecond" : { 'xmlpath': '/solr-info/QUERYHANDLER/entry', 'xmlparententryname': 'org.apache.solr.handler.StandardRequestHandler', 'label': 'Average requests per second' },
+  "avgTimePerRequest" : { 'xmlpath': '/solr-info/QUERYHANDLER/entry', 'xmlparententryname': 'org.apache.solr.handler.StandardRequestHandler', 'label': 'Average time per request' },
+  "errors" : { 'xmlpath': '/solr-info/QUERYHANDLER/entry', 'xmlparententryname': 'org.apache.solr.handler.StandardRequestHandler', 'label': 'Number of errors' },
+  "timeouts" : { 'xmlpath': '/solr-info/QUERYHANDLER/entry', 'xmlparententryname': 'org.apache.solr.handler.StandardRequestHandler', 'label': 'Number of timeouts' },
+  "requests" : { 'xmlpath': '/solr-info/QUERYHANDLER/entry', 'xmlparententryname': 'org.apache.solr.handler.StandardRequestHandler', 'label': 'Total number of requests' },
+  "numDocs" : { 'xmlpath': '/solr-info/CORE/entry', 'xmlparententryname': 'searcher', 'label': 'Number of documents' },
+#  "" : { 'xmlpath': '/solr-info/QUERYHANDLER/entry', 'xmlparententryname': 'org.apache.solr.handler.StandardRequestHandler' },
+}
+
+# Automatic extraction of core names from SOLR default page if empty array
+SOLR_CORES = []
+# If you do not want automatic gathering, feel free to put your array manually
+#SOLR_CORES = [ "core0", "core1" ]
+
+
+## FUNCTIONS
+def getSolrCoreNameList():
+    url = "http://%s:%s/solr/" % (SOLR_HOST, SOLR_PORT)
+    class linkParser(HTMLParser.HTMLParser):
+        def __init__(self):
+            HTMLParser.HTMLParser.__init__(self)
+            self.links = []
+        def handle_starttag(self, tag, attrs):
+            if tag=='a':
+                self.links.append(dict(attrs)['href'])
+
+    htmlSource = urllib.urlopen(url).read(200000)
+    p = linkParser()
+    p.feed(htmlSource)
+
+    # Remove link to . (First one !)
+    p.links.pop(0)
+
+    dealcores = [ ]
+
+    for link in p.links:
+        dealcores.append ( link.split("/")[0] )
+
+    return dealcores
+
+
+
+def parseArgs():
+    "Parses the name of the file "
+    parts = sys.argv[0].split("_")
+
+    params = { }
+    params['valueName'] = parts[1]
+    
+    # Automatic / Manual Mode for core names
+    if (len(SOLR_CORES) == 0):
+        params['cores'] = getSolrCoreNameList()
+    else:
+        params['cores'] = SOLR_CORES
+
+    params['cores'].sort()
+
+    return params
+
+# For multicore / Solr 1.3, URL is like that
+def fetchUrl(core, xmlPath):
+    URL="http://%s:%d/solr/%s/admin/stats.jsp"
+
+    URLFULL = URL % (SOLR_HOST, SOLR_PORT, core)
+    response = urllib2.urlopen(URLFULL)
+    return parseXmlResponse(response, xmlPath)
+
+def parseXmlResponse(response, xmlPath):
+    root = ET.parse(response)
+    queues = root.findall(xmlPath)
+    return queues
+
+#def fetchFile():
+#    f = open("/tmp/stats.jsp.html")
+#    return parseXmlResponse(f)
+
+def getEntry(entries, entryName):
+    for entry in entries:
+        name = entry.findtext("name").strip()
+        if (name != entryName):
+            continue
+        return entry.find("stats")
+
+def getValue(entry, valueName):
+    for stat in entry:
+        if stat.get('name') == valueName:
+            return stat.text
+    #print "Could not find %s for entry" % valueName
+    return 0
+
+
+
+
+## MAIN
+if len(sys.argv) > 1:
+    if sys.argv[1]== "autoconf":
+        # check connection
+        sys.exit(0)
+    elif sys.argv[1] == "config":
+        params = parseArgs()
+
+        # Extracting Generic graph datas
+        print 'graph_title %s' % ( PLUGINOPTIONSLIST[params['valueName']]['label'] )
+        print "graph_args --base 1000";
+        print 'graph_vlabel Size %s' % params['valueName']
+        print 'graph_category Solr'
+        print 'graph_info Info for cores: %s' % ( ",".join(params['cores']) )
+
+        # Iterations for core datas
+        for core in params['cores']:
+            #print core, params['valueName']
+            print "%s.label %s" % (core, core)
+            print "%s.type GAUGE" % (core)
+            print "%s.min 0" % (core)
+        sys.exit(0)
+
+
+params = parseArgs()
+for core in params['cores']:
+    #print core, params['valueName']
+    queues = fetchUrl(core, PLUGINOPTIONSLIST[params['valueName']]['xmlpath']) 
+    searcher = getEntry(queues,  PLUGINOPTIONSLIST[params['valueName']]['xmlparententryname'])
+    value = getValue(searcher, params['valueName']).strip()
+    print "%s.value %s" % (core, value)
+
+sys.exit(0)
