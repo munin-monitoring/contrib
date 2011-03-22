@@ -5,6 +5,7 @@
 # Run 'perldoc boinc_projs' for full man page
 #
 # Author:  Palo M. <palo.gm@gmail.com>
+# Modified by: Paul Saunders <darac+munin@darac.org.uk>
 # License: GPLv3 <http://www.gnu.org/licenses/gpl-3.0.txt>
 #
 #
@@ -23,6 +24,9 @@
 #
 # $Log$
 #
+# Revision 1.1  2011/03/22  Paul Saunders
+#   Update for BOINC 6.12
+#   Add colours from http://boinc.netsoft-online.com/e107_plugins/forum/forum_viewtopic.php?3
 # Revision 1.0  2009/09/13  Palo M.
 #   Add documentation and license information
 #   Ready to publish on Munin Exchange
@@ -65,7 +69,7 @@ if (defined $PASSWORD) {
   $BOINCCMD .= " --passwd $PASSWORD";
 }
 if (defined $BOINCDIR) {
-  chdir $BOINCDIR;
+  chdir $BOINCDIR || die "Could not chdir to $BOINCDIR";
 }
 
 #########################################################################
@@ -83,7 +87,7 @@ if ($simpleGuiInfo ne "") {
   @section1 = split /=+ [A-z]+ =+\n/, $sections[1];
   $prj_status = $section1[0];
 
-  @sections = split /=+ Results =+\n/, $simpleGuiInfo;
+  @sections = split /=+ (?:Results|Tasks) =+\n/, $simpleGuiInfo;
   @section1 = split /=+ [A-z]+ =+\n/, $sections[1];
   $results = $section1[0];
 }
@@ -152,6 +156,63 @@ for my $rslt_info (@rsltInfos) {
 # 5. Display output
 #
 
+# Project Colours from http://boinc.netsoft-online.com/e107_plugins/forum/forum_viewtopic.php?3
+sub rgb($$$){
+   return sprintf ('%02x%02x%02x', shift, shift, shift);
+}
+my %project_colour = (
+    'climatepredition.net' => rgb(0,139,69),
+    'Predictor@Home' => rgb(135,206,235),
+    'SETI@home' => rgb(65,105,225),
+    'Einstein@Home' => rgb(255,165,0),
+    'Rosetta@home' => rgb(238,130,238),
+    'PrimeGrid' => rgb(205,197,191),
+    'LHC@home' => rgb(255,127,80),
+    'World Community Grid' => rgb(250,128,114),
+    'BURP' => rgb(0,255,127),
+    'SZTAKI Desktop Grid' => rgb(205,79,57),
+    'uFluids' => rgb(0,0,0),
+    'SIMAP' => rgb(143,188,143),
+    'Folding@Home' =>rgb(153,50,204),
+    'MalariaControl' => rgb(30,144,255),
+    'The Lattice Project' => rgb(0,100,0),
+    'Pirates@Home' => rgb(127,255,0),
+    'BBC Climate Change Experiment' => rgb(205,173,0),
+    'Leiden Classical' => rgb(140,34,34),
+    'SETI@home Beta' => rgb(152,245,255),
+    'RALPH@Home' => rgb(250,240,230),
+    'QMC@HOME' => rgb(144,238,144),
+    'XtremLab' => rgb(130,130,130),
+    'HashClash' => rgb(255,105,180),
+    'cpdn seasonal' => rgb(255,255,255),
+    'Chess960@Home Alpha' => rgb(165,42,42),
+    'vtu@home' => rgb(255,0,0),
+    'LHC@home alpha' => rgb(205,133,63),
+    'TANPAKU' => rgb(189,183,107),
+    'other' => rgb(255,193,37),
+    'Rectilinear Crossing Number' => rgb(83,134,139),
+    'Nano-Hive@Home' => rgb(193,205,193),
+    'Spinhenge@home' => rgb(255,240,245),
+    'RieselSieve' => rgb(205,183,158),
+    'Project Neuron' => rgb(139,58,98),
+    'RenderFarm@Home' => rgb(210,105,30),
+    'Docking@Home' => rgb(178,223,238),
+    'proteins@home' => rgb(0,0,255),
+    'DepSpid' => rgb(139,90,43),
+    'ABC@home' => rgb(222,184,135),
+    'BOINC alpha test' => rgb(245,245,220),
+    'WEP-M+2' => rgb(0,250,154),
+    'Zivis Superordenador Ciudadano' => rgb(255,239,219),
+    'SciLINC' => rgb(240,248,255),
+    'APS@Home' => rgb(205,91,69),
+    'PS3GRID' => rgb(0,139,139),
+    'Superlink@Technion' => rgb(202,255,112),
+    'BRaTS@Home' => rgb(255,106,106),
+    'Cosmology@Home' => rgb(240,230,140),
+    'SHA 1 Collision Search' => rgb(255,250,205),
+);
+
+
 if ( (defined $ARGV[0]) && ($ARGV[0] eq "config") ) {
 #
 # 5.a) Display config
@@ -170,11 +231,17 @@ if ( (defined $ARGV[0]) && ($ARGV[0] eq "config") ) {
   # Not nice, but fast:
   my $prj1 = shift @projects;
   print "$projects{$prj1}->{prj_var}.label $projects{$prj1}->{prj_name}\n";
+  if (exists $project_colour{$projects{$prj1}->{prj_name}}){
+  	print "$projects{$prj1}->{prj_var}.colour $project_colour{$projects{$prj1}->{prj_name}}\n";
+  }
   print "$projects{$prj1}->{prj_var}.draw AREA\n";
   print "$projects{$prj1}->{prj_var}.type GAUGE\n";
 
   for my $prjN (@projects) {
     print "$projects{$prjN}->{prj_var}.label $projects{$prjN}->{prj_name}\n";
+    if (exists $project_colour{$projects{$prjN}->{prj_name}}){
+  	print "$projects{$prjN}->{prj_var}.colour $project_colour{$projects{$prjN}->{prj_name}}\n";
+    }
     print "$projects{$prjN}->{prj_var}.draw STACK\n";
     print "$projects{$prjN}->{prj_var}.type GAUGE\n";
   }
