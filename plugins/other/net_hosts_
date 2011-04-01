@@ -1,0 +1,35 @@
+#!/bin/sh
+# munin plugin to show number of online network hosts on a subnet (needs fping)
+# link with subnet name as suffix like _192.168.1
+# (c) 2011 jon@jon.bpa.nu
+#%# family=auto
+#%# capabilities=autoconf
+
+SUBNET=`echo $0 | cut -d'_' -f3`
+TIMEOUT=50 # ms
+RETRIES=0
+
+case $1 in
+	config)
+	cat <<CFG
+graph_title hosts on network
+graph_vlabel hosts
+graph_category network
+hosts.label hosts
+CFG
+	exit 0;;
+	autoconf)
+	fping -h 2>/dev/null
+	if [ $? -eq 127 ]; then
+		echo "no (fping not present)"
+		exit 1
+	fi
+	echo yes
+	exit 0;;
+esac
+
+if [ $SUBNET != "" ]; then
+	echo "hosts.value `fping -t $TIMEOUT -r $RETRIES -ga \"$SUBNET.0/24\" 2>/dev/null | wc -l`"
+else
+	echo "could not get subnet name ($SUBNET)"
+fi
