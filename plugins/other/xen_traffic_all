@@ -2,6 +2,10 @@
 # Author: mario manno <projects@manno.name>
 # Description: measure traffic for all xen hosts
 #
+# Changelog:
+# Also handle domUs with named network interfaces.
+# Ward Vandewege (ward@gnu.org), 2011-04-20
+#
 #%# family=auto
 #%# capabilities=autoconf
 
@@ -28,7 +32,7 @@ if [ "$1" = "config" ]; then
     echo 'graph_category xen'
     DOMAINS=$(xm list | awk '{print $1}' | egrep -v "^(Name|Domain-0)")
     for dom in $DOMAINS; do
-        name=$( echo $dom | sed -e's/-/_/g' )
+        name=$( echo $dom | tr .- __ )
         #echo $name"UP.label $name"
         #echo $name"DOWN.label $name"
         
@@ -46,9 +50,12 @@ fi
 
 DOMAINS=$(xm list | awk '{print $1}' | egrep -v "^(Name|Domain-0)")
 for dom in $DOMAINS; do
-    dev=$( xm network-list $dom |\
-        egrep "^[0-9]+" | sed 's@^.*vif/\([0-9]*\)/\([0-9]*\).*$@vif\1.\2@')
-    name=$( echo $dom | sed -e's/-/_/g' ) 
+		dev=$( xm list $dom --long | awk '/vifname / { print $2 }' | sed 's/)//' )
+		if [ "$dev" == "" ]; then
+	    dev=$( xm network-list $dom |\
+	        egrep "^[0-9]+" | sed 's@^.*vif/\([0-9]*\)/\([0-9]*\).*$@vif\1.\2@')
+		fi
+    name=$( echo $dom | tr .- __ ) 
     #awk -v name="$name" -v interface="$dev" -F'[: \t]+' \
     #'{ sub(/^ */,""); if ($1 == interface) \
     #print name"DOWN.value "$2"\n"name"UP.value "$10; }' /proc/net/dev
