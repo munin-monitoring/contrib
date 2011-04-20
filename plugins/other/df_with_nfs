@@ -8,6 +8,9 @@
 # 	autoconf (optional - used by munin-config)
 #
 # $Log$
+# Revision 1.5.2.5  2011/04/20 14:25:07  ward
+# Exclude tmpfs partitions from 'config'.
+#
 # Revision 1.5.2.4  2005/03/12 21:35:07  jimmyo
 # Correct history loss in linux/{df,df_inode}.
 #
@@ -74,7 +77,7 @@ if [ "$1" = "config" ]; then
 	echo 'graph_vlabel %'
 	echo 'graph_category disk'
 	echo 'graph_info This graph shows disk usage on the machine.'
-	df -T -P -x none -x unknown -x udf -x iso9660 -x romfs -x ramfs | sed 1d | grep -v "//" | sort  | cut -d: -f2 | while read i; do
+	df -T -P -l -x none -x unknown -x udf -x iso9660 -x romfs -x ramfs -x tmpfs | sed 1d | grep -v "//" | sort | while read i; do
 		name=`clean_name $i`
 		echo -n "$name.label "
 		echo $i | awk "{ 
@@ -91,7 +94,7 @@ if [ "$1" = "config" ]; then
 	exit 0
 fi
 
-df -T -P -x none -x unknown -x udf -x iso9660 -x romfs -x ramfs -x tmpfs | sed 1d | cut -d: -f2 | grep -v "//" | while read i; do
+df -T -P -l -x none -x unknown -x udf -x iso9660 -x romfs -x ramfs -x proc -x sysfs -x tmpfs -x udev | sed 1d | grep -v "//" | while read i; do
 	name=`clean_name $i`
 	echo -n "$name.value "
 	echo $i | awk '{ print $6 }' | cut -f1 -d%
