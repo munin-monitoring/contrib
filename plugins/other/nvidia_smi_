@@ -1,143 +1,160 @@
-#!/usr/bin/perl -w
-# -*- perl -*-
-#
-# Script to monitor NVIDIA Graphics Card.
-#
-# Parameters understood:
-#
-# config (required)
-# autoconf (optional - used by munin-config)
-#
-# Version 1.1 
-#   Now works with NVidia >=270.18 Driver
-# Version 1.0
-#   Initial Release. Nvidia 260.xx Driver
-#
-# Magic markers (optional - used by munin-config and installation
-# scripts):
-#%# family=auto
-#%# capabilities=autoconf suggest
+#!/bin/bash
+#written by Matthew Ritchie
+#Monitor GPU statistics for single or muliple GPU boards
+EXEC=/usr/bin/nvidia-smi
 
-use strict;
-use XML::Simple;
+if [ ! -f ${EXEC} ]
+then
+        echo "${EXEC} does not exist!  Bailing."
+fi
 
-my $nvidia_smi = $ENV{nvidia_smi} || "/usr/bin/nvidia-smi";
+DRIVER_VERSION=`sed -n 1p /proc/driver/nvidia/version | awk '{print $8}' | awk -F. '{print $1}'`
+GPU_TOTAL=`${EXEC} -a | egrep ^GPU | sed -e "s/ //g" | sed -e "s/://g" | tr [:upper:] [:lower:]|wc -l`
+GPUSTART=0
 
+FUNCT_270() {
+for i in `${EXEC} -a | egrep ^GPU | sed -e "s/ //g" | sed -e "s/://g" | tr [:upper:] [:lower:]`
+do
+	NORMAL=1
+        GPU_ID=${i}
+        GPU_PROD=`${EXEC} -g ${GPUSTART} -q |grep "Product Name" |awk -F: '{print $2}'`
+        GPU_DRV=`${EXEC} -g 0 -q |grep "Driver Version" | awk '{print $4}'`
+        GPU_TEMP=`${EXEC} -g ${GPUSTART} -q |grep -A 1 "Temperature" |sed -n 2p |awk '{print $3}'i`
+        GPU_FANSPEED=`${EXEC} -g ${GPUSTART} -q |grep "Fan Speed" | awk '{print $4}' | awk -F% '{print $1}'`
+        GPU_UTIL=`${EXEC} -g ${GPUSTART} -q |grep -A 1 "Utilization" |sed -n 2p |awk '{print $3}'`
+        GPU_MEM_UTIL=`${EXEC} -g ${GPUSTART} -q |grep -A 2 "Utilization" | sed -n 3p |awk '{print $3}'`
+        if [ "$1" = "autoconf" ]
+        then
+                if [ "$GPU_TEMP" != "" ]
+                then
+                        echo yes
+                        exit 0
+                else
+                        echo no
+                        exit 1
+                fi
+        fi
+        if [ "$1" = "config" ]
+        then
+                echo "graph_title ${GPU_PROD}"
+                echo "graph_args --upper-limit 120 -l 0"
+                echo "graph_vlabel Percent or Degrees C"
+                echo "graph_category NVIDIA"
+                echo "graph_info This graph shows information about your ${GPU_PROD} graphics card ${GPUSTART} running driver version ${GPU_DRV}"
+                echo "GPU_UTIL_${GPUSTART}.label NVidia GPU utilization for GPU${GPUSTART}"
+                echo "GPU_FANSPEED_${GPUSTART}.label NVidia fan speed for GPU${GPUSTART}"
+                echo "GPU_MEM_UTIL_${GPUSTART}.label NVidia memory utilization for GPU${GPUSTART}"
+                echo "GPU_TEMP_${GPUSTART}.label NVidia temperature for GPU${GPUSTART}"
+		NORMAL=0
+		if [ ${GPU_TOTAL} == 1 ]
+		then
+			exit 0
+		fi
+        fi
+if [ ${NORMAL} == 1 ]
+then
+        echo "GPU_TEMP_${GPUSTART}.value ${GPU_TEMP}"
+        echo "GPU_FANSPEED_${GPUSTART}.value ${GPU_FANSPEED}"
+        echo "GPU_UTIL_${GPUSTART}.value ${GPU_UTIL}"
+        echo "GPU_MEM_UTIL_${GPUSTART}.value ${GPU_MEM_UTIL}"
+fi
+        GPUSTART=$((GPUSTART + 1))
+	GPU_TOTAL=$((GPU_TOTAL - 1))
+done
+}
 
-## Munin autoconf method.
-if (exists $ARGV[0] and $ARGV[0] eq "autoconf" ) {
-  if (! (-e $nvidia_smi)){
-     printf "no (file $nvidia_smi does not exists)\n";
-     exit 0;
-  }
-  # Now see if "nvidia-smi" can run
-  if (! (-x $nvidia_smi)){
-    printf "no (file $nvidia_smi exists, but not executable)\n";
-    exit 0;
-  }
-  
-  my $text = `$nvidia_smi -L 2>/dev/null | grep GPU`;
-  if ($?) {
-    print "no (No GPUs found. Check '$nvidia_smi -L' output)\n";
-    exit 0;
-  }
+FUNCT_260() {
+for i in `${EXEC} -a | egrep ^GPU | sed -e "s/ //g" | sed -e "s/://g" | tr [:upper:] [:lower:]`
+do
+        NORMAL=1
+        GPU_ID=${i}
+        GPU_PROD=`${EXEC} -g ${GPUSTART} -q | grep "Product Name" |awk -F: '{print $2}'`
+        GPU_DRV=`${EXEC} -g 0 -q | grep "Driver Version" | awk '{print $4}'`
+        GPU_TEMP=`${EXEC} -g ${GPUSTART} -q | grep "Temperature" | awk '{print $3}'`
+        GPU_FANSPEED=`${EXEC} -g ${GPUSTART} -q | grep "Fan Speed" | awk '{print $4}' | awk -F% '{print $1}'`
+        GPU_UTIL=`${EXEC} -g ${GPUSTART} -q | grep "Utilization" | awk '{print $3}' | awk -F% '{print $1}'`
+        GPU_MEM_UTIL=`${EXEC} -g ${GPUSTART} -q | grep "Utilization" | awk '{print $3}' | awk -F% '{print $1}'`
+        if [ "$1" = "autoconf" ]
+        then
+                if [ "$GPU_TEMP" != "" ]
+                then
+                        echo yes
+                        exit 0
+                else
+                        echo no
+                        exit 1
+                fi
+        fi
+        if [ "$1" = "config" ]
+        then
+                echo "graph_title ${GPU_PROD}"
+                echo "graph_args --upper-limit 120 -l 0"
+                echo "graph_vlabel Percent or Degrees C"
+                echo "graph_category NVIDIA"
+                echo "graph_info This graph shows information about your ${GPU_PROD} graphics card ${GPUSTART} running driver version ${GPU_DRV}"
+                echo "GPU_UTIL_${GPUSTART}.label NVidia GPU utilization for GPU${GPUSTART}"
+                echo "GPU_FANSPEED_${GPUSTART}.label NVidia fan speed for GPU${GPUSTART}"
+                echo "GPU_MEM_UTIL_${GPUSTART}.label NVidia memory utilization for GPU${GPUSTART}"
+                echo "GPU_TEMP_${GPUSTART}.label NVidia temperature for GPU${GPUSTART}"
+                NORMAL=0
+                if [ ${GPU_TOTAL} == 1 ]
+                then
+                        exit 0
+                fi
+        fi
+if [ ${NORMAL} == 1 ]
+then
+        echo "GPU_TEMP_${GPUSTART}.value ${GPU_TEMP}"
+        echo "GPU_FANSPEED_${GPUSTART}.value ${GPU_FANSPEED}"
+        echo "GPU_UTIL_${GPUSTART}.value ${GPU_UTIL}"
+        echo "GPU_MEM_UTIL_${GPUSTART}.value ${GPU_MEM_UTIL}"
+fi
+        GPUSTART=$((GPUSTART + 1))
+        GPU_TOTAL=$((GPU_TOTAL - 1))
+done
+}
 
-    print "yes\n";
-    exit 0;
+FUNCT_195() {
+for i in `${EXEC} -a | egrep ^GPU | sed -e "s/ //g" | sed -e "s/://g" | tr [:upper:] [:lower:]`
+do
+        NORMAL=1
+        GPU_ID=${i}
+        GPU_PROD=`${EXEC} -g ${GPUSTART} -q | grep "Product Name" |awk -F: '{print $2}'`
+        GPU_DRV=`sed -n 1p /proc/driver/nvidia/version | awk '{print $8}'`
+        GPU_TEMP=`${EXEC} -g ${GPUSTART} -q | grep "Temperature" | awk '{print $3}'`
+        if [ "$1" = "autoconf" ]
+        then
+                if [ "$GPU_TEMP" != "" ]
+                then
+                        echo yes
+                        exit 0
+                else
+                        echo no
+                        exit 1
+                fi
+        fi
+        if [ "$1" = "config" ]
+        then
+                echo "graph_title ${GPU_PROD}"
+                echo "graph_args --upper-limit 120 -l 0"
+                echo "graph_vlabel Degrees C"
+                echo "graph_category NVIDIA"
+                echo "graph_info This graph shows information about your ${GPU_PROD} graphics card ${GPUSTART} running driver version ${GPU_DRV}"
+                echo "GPU_TEMP_${GPUSTART}.label NVidia temperature for GPU${GPUSTART}"
+                NORMAL=0
+                if [ ${GPU_TOTAL} == 1 ]
+                then
+                        exit 0
+                fi
+        fi
+if [ ${NORMAL} == 1 ]
+then
+        echo "GPU_TEMP_${GPUSTART}.value ${GPU_TEMP}"
+fi
+        GPUSTART=$((GPUSTART + 1))
+        GPU_TOTAL=$((GPU_TOTAL - 1))
+done
 }
 
 
-## Munin suggest method.
-if (defined $ARGV[0] and $ARGV[0] eq 'suggest') {
-# FIXME: SHould be done in pure-perl
-  my $gpus = `$nvidia_smi -L | egrep ^GPU | cut -f1 -d ':' | sed -e "s/ //g" | sed -e "s/://g" | tr [:upper:] [:lower:]`;
-  print $gpus if defined $gpus; #FIXME
-  exit 0;
-}
-
-$0 =~ /nvidia_smi_gpu(.+)*$/;
-my $gpu_id = $1;
-exit 2 unless defined $gpu_id;
-# Get XML with sensor values for the GPU with particular ID
-# Need 2>/dev/null to filter out nvmlSystemGetPersistenceMode useless error message.
-my $data = `$nvidia_smi -q -g $gpu_id -x 2>/dev/null` or die "Could not run $nvidia_smi: $!\n";
-
-# Parse XML into easy accessable hash-tree
-my $ref = XMLin($data);
-my %gpu = (); # Will contain values cleaned form percent and Celsius signs
-
-if ( exists $ref->{gpu}->{temperature}->{gpu_temp} ){
-   $gpu{temp} = $ref->{gpu}->{temperature}->{gpu_temp};
-}
-
-if ( exists $ref->{gpu}->{fan_speed} ){
-   $ref->{gpu}->{fan_speed} =~ /^(.+)\%$/;
-   $gpu{fan} = $1;
-}
-
-if ( exists $ref->{gpu}->{utilization}->{gpu_util} ){
-   $ref->{gpu}->{utilization}->{gpu_util} =~ /^(.+)\%$/;
-   $gpu{util} = $1;
-}
-
-if ( exists $ref->{gpu}->{utilization}->{memory_util} ){
-   $ref->{gpu}->{utilization}->{memory_util} =~ /^(.+)\%$/;
-   $gpu{mem} = $1;
-}
-
-$gpu{model}  = $ref->{gpu}->{product_name} if exists $ref->{gpu}->{product_name};
-$gpu{driver} = $ref->{driver_version}   if exists $ref->{driver_version};
-$gpu{busid}  = $ref->{gpu}->{pci}->{pci_bus_id} if exists $ref->{gpu}->{pci}->{pci_bus_id};
-
-my $card_model = $gpu{model}      || "<undetermined>";
-my $driver_version = $gpu{driver} || "<undetermined>";
-my $busid   = $gpu{busid} || "<unknown>";
-
-## Munin config method.
-if (exists $ARGV[0] and $ARGV[0] eq "config") {
-  print "graph_title $card_model sensors\n";
-  print "graph_args --base 1000\n";
-  print "graph_args --upper-limit 100 -l 0\n";
-  print "graph_category sensors\n";
-  print "graph_vlabel % or C\n";
-  print "graph_info This graph shows information about your $card_model graphics card running driver version $driver_version and sitting on busID $busid.\n";
-
-   if (exists $gpu{temp}) {
-     print "gpu_temp.label GPU Temperature (C)\n";
-     print "gpu_temp.info  GPU temperature sensor\n";
-     print "gpu_temp.draw LINE2\n";
-     print "gpu_temp.warning :80\n";
-     print "gpu_temp.critical :100\n";
-   }
-
-   if (exists $gpu{mem}) {
-     print "gpu_mem.label Memory consumption (%)\n";
-     print "gpu_mem.info  How much of on-board memory is used\n";
-     print "gpu_mem.draw LINE2\n";
-     print "gpu_mem.warning :85\n";
-     print "gpu_mem.critical :95\n";
-  }
-
-   if (exists $gpu{util}) {
-     print "gpu_util.label GPU Utilization (%)\n";
-     print "gpu_util.info  How much computational resourses are used\n";
-     print "gpu_util.draw LINE2\n";
-   }
-
-   if (exists $gpu{fan}) {
-     print "gpu_fan.label Fan Speed (%)\n";
-     print "gpu_fan.info  Fan RPM in precent of maximum\n";
-     print "gpu_fan.draw LINE2\n";
-     print "gpu_fan.warning :80\n";
-     print "gpu_fan.critical :95\n";
-   }
-
-  exit 0;
-}
-
-
-print "gpu_temp.value ",$gpu{temp},"\n" if exists $gpu{temp};
-print "gpu_mem.value ", $gpu{mem}, "\n" if exists $gpu{mem};
-print "gpu_util.value ",$gpu{util},"\n" if exists $gpu{util};
-print "gpu_fan.value ", $gpu{fan}, "\n" if exists $gpu{fan};
-
+FUNCT_${DRIVER_VERSION} $1
