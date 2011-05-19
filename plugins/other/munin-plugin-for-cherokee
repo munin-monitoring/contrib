@@ -1,0 +1,117 @@
+#!/usr/bin/env python
+
+# Munin Plugin for Cherokee in Python
+# Based on the work of Mateusz Pawlowski: http://www.mobygeek.net/projects/files/cherokee__type_.rb
+# Coded by the not-python-programmer Jose Luis Salas <<josacar at gmail dot com>>  ;)
+
+#%# family=contrib
+# Cherokee has to have $host/about enabled with server info set to normal
+# Or you can change the variables below as you wish
+# Handling arguments
+#
+# cherokee_host_type_data Shows data transferred
+# cherokee_host_type_rate Shows data rate transfer
+# cherokee_host_type_mod Shows Modules
+# cherokee_host_type_conn Shows connections
+
+# USAGE:
+# cp /home/user/cherokee__type_.py /usr/share/munin/plugins/cherokee__type_
+# chmod +x /usr/share/munin/plugins/cherokee__type_
+# ln -s /usr/share/munin/plugins/cherokee__type_ cherokee_host_type_data
+# ln -s /usr/share/munin/plugins/cherokee__type_ cherokee_localhost_type_data
+# ln -s /usr/share/munin/plugins/cherokee__type_ cherokee_localhost_type_conn
+# ln -s /usr/share/munin/plugins/cherokee__type_ cherokee_localhost_type_mod
+# ln -s /usr/share/munin/plugins/cherokee__type_ cherokee_localhost_type_rate
+
+
+import urllib
+import os
+import sys
+import re
+
+about_location = "/about/info/py"
+
+host = os.getenv('host');
+type = 'data';
+
+host="localhost"
+
+match = re.match('^(?:|.*\/)cherokee_([^_]+)_type_(.+)$', sys.argv[0])
+if match:
+	host=match.group(1)
+	type=match.group(2)
+	if re.match('^([^:]+):(\d+)$', host):
+		host=match.group(1)
+		type=match.group(2)
+
+#print "HOST: " + host + " TYPE: " + type
+
+def output_values(response):
+	if type == "mod" :
+		section = response["modules"]
+		for key in section:
+			print key + '.value ' + str(section[key])
+	elif type == "data" :
+		section = response["traffic"]
+		print "sent.value " + str(section["tx"])
+		print "received.value " + str(section["rx"])
+	elif type == "rate" :
+		section = response["traffic"]
+		print "sent.value " + str(section["tx"])
+		print "received.value " + str(section["rx"])
+	elif type == "conn" :
+		section = response["connections"]
+		for key in section:
+			print key + '.value ' + str(section[key])
+
+
+def get_data():
+	raw_data = urllib.urlopen( "http://%s%s" % (host,about_location)).read()
+#	print "DEBUG: " + raw_data
+	return eval(raw_data)
+
+def munin_values(res):
+	output_values(res)
+
+def munin_config(response):
+	print "graph_category cherokee"
+	if type == "rate":
+		print "graph_title Cherokee Data Transfer Rate"
+		print "graph_vlabel Bits sent(+) / received(-) per ${graph_period}"
+		print "graph_args --base 1000"
+		print "graph_info"
+		print "received.label Received"
+		print "received.graph no"
+		print "received.type COUNTER"
+		print "received.cdef received,8,*"
+		print "sent.label bps"
+		print "sent.type COUNTER"
+		print "sent.negative received"
+		print "sent.cdef sent,8,*"
+	elif type == "conn":
+		print "graph_title Cherokee Connections"
+		print "graph_vlabel Connections"
+		#print "graph_args --base 1000 --logarithmic"
+		print "graph_args --base 1000"
+		section = response["connections"]
+		for key in section:
+			print key.strip() + '.label ' + key.capitalize()
+			print key + '.draw AREASTACK'
+	elif type == "data":
+		print "graph_title Cherokee Data Transferred"
+		print "graph_vlabel Bytes"
+		print "sent.label Sent"
+		print "received.label Received"
+	elif type == "mod":
+		print "graph_title Cherokee Loaded Modules"
+		print "graph_vlabel Modules"
+		print "graph_args --base 1000 --lower-limit 0"
+		section = response["modules"]
+		for key in section:
+			print key + '.label ' + key.capitalize()
+			print key + '.draw AREASTACK'
+	
+if len(sys.argv) > 1 and sys.argv[1] == "config":
+	munin_config(get_data())
+else:
+	munin_values(get_data())
