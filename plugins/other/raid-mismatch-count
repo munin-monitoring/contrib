@@ -1,0 +1,59 @@
+﻿#!/bin/sh
+# Detect and display Linux sw-raid mismatch count
+# Copyright (C) 2011 Rory Jaffe <rsjaffe@gmail.com>
+# derived from md_sync_speed by Kristian Lyngstøl
+# Copyright (C) 2010 Kristian Lyngstøl <kristian@bohemians.org>
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#####
+# 
+# Magic Markers:
+# #%# family=auto
+# #%# capabilities=autoconf
+
+
+targets=`ls /sys/devices/virtual/block/*/md/mismatch_cnt | cut -d/ -f6`
+returnval=$?
+
+if [ "x$1" = "xautoconf" ]; then
+	if [ -z "$targets" ]; then
+		echo "no (no md devices found under /sys/devices/virtual/block/*/md/mismatch_cnt)"
+		exit 1;
+	elif [ "x$returnval" != "x0" ]; then
+		echo "no (discovery of md devices failed strangely)"
+		exit 1;
+	else
+		echo "yes"
+		exit 0
+	fi
+fi
+
+if [ "x$1" = "xconfig" ]; then
+	cat << __EOF__
+graph_title Software-raid mismatch count
+graph_args -l 0
+graph_info Display mismatch count of software raid devices
+graph_category disk
+graph_vlabel Count
+__EOF__
+	for target in $targets; do
+		echo "$target.label $target"
+	done
+	exit
+fi
+
+for target in $targets; do
+	echo $target.value $(cat /sys/devices/virtual/block/$target/md/sync_completed)
+done
