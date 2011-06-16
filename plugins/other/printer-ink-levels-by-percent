@@ -1,0 +1,107 @@
+#!/bin/bash
+#
+#This plugin assumes that the printer returns remaining ink level in percent.
+#
+#To configure this plugin, create a symlink in the /etc/munin/plugins directory to the code with the printer's location after the underscore.
+#For example, if the printer is at 192.168.0.241, the link should read printerink_192.168.0.241
+#
+#If you are interested in printers that return units other than percent,
+#the following can be used to get the units used in the SNMP replies.
+#units=($(snmpwalk -Ov -Oq -c $community -v $version $printerlocation 1.3.6.1.2.1.43.11.1.1.7))
+#
+#For interpretation of the numeric value returned, the following are the standard codes:
+#realunitvalues=( [1]="other" [2]="unknown" [3]="inches/10,000" [4]="microns" [7]="impressions" [8]="sheets" [11]="hours" [12]="ounces/1,000" [13]="g/10" [14]="fluid ounces/100" [15]="ml/10" [16]="feet" [17]="meters" [18]="items" [19]="percent" )
+#
+#Note that HP L7555 returns 15 for units but shows remaining ink in percent
+#
+#Requires package snmp
+#
+#    Copyright 2011 Rory Jaffe <rsjaffe@gmail.com>
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+#%# family=contrib
+#%# capabilities=
+#
+printerlocation=${0##*printerink_}
+
+#Set variable if not set in environment.
+: ${community:=public}
+: ${version:=1}
+
+#Check for command line arguments.
+#
+#While this program includes snmp autoconfig code, I have been having trouble getting it to properly identify
+#the printer, so the "magic markers" are not included for autoconf. If you are able to make this work, please
+#contact me and I will update this.
+#
+case $1 in
+snmpconf) #autoconfigure for snmp
+	echo 'require 1.3.6.1.2.1.43.11.1.1.6.1.1'
+	echo 'require 1.3.6.1.2.1.43.11.1.1.9.1.1 \d'
+	exit 0;;
+config  ) 
+	#abort if location not included in link
+	if [ "" =  "$printerlocation" ]
+	then
+	        echo "Error: symlink with printer location needed for use (e.g., printerink_192.168.0.52)" >&2
+	        exit 1
+	fi
+IFS='
+'
+	labels=($(snmpwalk -Ov -Oq -c $community -v $version $printerlocation 1.3.6.1.2.1.43.11.1.1.6 | tr -d '"'))
+	for (( i = 0 ; i < ${#labels[@]} ; i++ ))
+	do
+		echo color$i.label ${labels[$i]}
+                case ${labels[$i]} in # try to get line color to match ink color note that colour is rrggbb from http://www.procato.com/rgb+index/
+                        black*) echo color$i.colour 000000;;
+                        blue*) echo color$i.colour 0000FF;;
+                        cyan*) echo color$i.colour 00FFFF;;
+                        green*) echo color$i.colour 00FF00;;
+	                   light\ black*) echo color$i.colour 555555;;
+                        light\ blue*) echo color$i.colour 8A8AE7;;
+                        light\ cyan*) echo color$i.colour 8AE7E7;;
+                        light\ green*) echo color$i.colour 8AE78A;;
+                        light\ magenta*) echo color$i.colour E78AE7;;
+                        light\ orange*) echo color$i.colour E7B98A;;
+                        light\ red*) echo color$i.colour E78A8A;;
+                        light\ yellow*) echo color$i.colour E7E78A;;
+                        magenta*) echo color$i.colour FF00FF;;
+                        orange*) echo color$i.colour FFA500;;
+                        red*) echo color$i.colour FF0000;;
+                        yellow*) echo color$i.colour FFFF00;;
+               esac
+	done
+#uncomment this to show printer as separate 'location' in munin report, and add to munin.conf the host with the ip address of the node that is running this plugin (e.g., 127.0.0.1)
+#	echo host_name printer 
+	echo graph_vlabel Percent
+	echo graph_category print
+	echo graph_args --base 1000 -l 0 -u 100 -r
+	echo graph_scale no
+	echo graph_title Printer Ink Levels $(snmpget -Ov -Oq -c $community -v $version $printerlocation 1.3.6.1.2.1.1.5.0 | tr -d '"')
+	exit 0;;
+esac
+
+#do the real work--find the levels and print them out
+#abort if location not included in link
+if [ "" =  "$printerlocation" ]
+then
+        echo "Error: symlink with printer location needed for use (e.g., printerink_192.168.0.52)" >&2
+        exit 1
+fi
+
+levels=($(snmpwalk -Ov -Oq -c $community -v $version $printerlocation 1.3.6.1.2.1.43.11.1.1.9))
+for (( i = 0 ; i < ${#levels[@]} ; i++ ))
+do
+	echo color$i.value ${levels[$i]}
+done
