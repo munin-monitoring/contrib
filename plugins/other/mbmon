@@ -1,0 +1,61 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+
+#
+# Author: Slaven Rezic
+#
+# Copyright (C) 2011 Slaven Rezic. All rights reserved.
+# This program is free software; you can redistribute it and/or
+# modify it under the same terms as Perl itself.
+#
+# Mail: slaven@rezic.de
+# WWW:  http://www.rezic.de/eserte/
+#
+
+use strict;
+
+my $mbmon = "/usr/local/bin/mbmon";
+
+if ($ARGV[0] eq 'autoconf') {
+    if (-x $mbmon) {
+	print "yes\n";
+	exit 0;
+    } else {
+	print "no\n";
+	exit 1;
+    }
+} elsif ($ARGV[0] eq 'config') {
+    print <<EOF;
+graph_title CPU temperature
+graph_order temp0 temp1 temp2
+graph_args --base 1000 -l 0
+graph_category sensors
+graph_vlabel temp in °C
+temp0.label Temperature0
+temp1.label Temperature1
+temp2.label Temperature2
+EOF
+
+## more info from mbmon
+# fan0 
+# fan1 
+# fan2 
+# vc0  
+# vc1  
+# v33  
+# v50p 
+# V12P 
+# V12N 
+# V50N 
+
+} else {
+    my(@res) = `$mbmon -r -c 1`;
+    chomp @res;
+    for my $line (@res) {
+	my($k,$v) = split /\s*:\s*/, $line, 2;
+	$k = lc $k;
+	if ($k =~ m{^temp[012]$}) {
+	    print "$k.value $v\n";
+	}
+    }
+}
