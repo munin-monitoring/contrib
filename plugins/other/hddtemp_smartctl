@@ -1,4 +1,4 @@
-#!/usr/local/bin/perl -w
+﻿#!/usr/local/bin/perl -w
 # -*- perl -*-
 
 =head1 NAME
@@ -14,7 +14,7 @@ the harddrive devices.
 The following environment variables are used
 
  smartctl  - path to smartctl executable
- drives	   - List drives to monitor. E.g. "env.drives hda hdc".
+ drives    - List drives to monitor. E.g. "env.drives hda hdc".
  type_$dev - device type for one drive, e.g. "env.type_sda 3ware,0"
              or more typically "env.type_sda ata" if sda is a SATA disk.
  args_$dev - additional arguments to smartctl for one drive,
@@ -102,11 +102,11 @@ if (!$smartctl) {
    # Still not found? Check obvious places
     my @dirs = split(':',$ENV{PATH});
     push (@dirs, qw(/usr/bin /usr/sbin /usr/local/bin /usr/local/sbin) );
-    
+
     until ($smartctl or @dirs == 0) {
-	my $dir = shift @dirs;
-	my $path = $dir.'/smartctl';
-	$smartctl = $path if -x $path;
+        my $dir = shift @dirs;
+        my $path = $dir.'/smartctl';
+        $smartctl = $path if -x $path;
     }
 } elsif (! -x $smartctl) {
     # If it is set, verify it
@@ -139,7 +139,7 @@ if ($^O eq 'linux') {
   # without probing them.
 } elsif ($^O eq 'freebsd') {
   opendir(DEV, '/dev');
-  @drives = grep /^ada*[0-9]+$/, readdir DEV;
+  @drives = grep /^ad[0-9]+$/, readdir DEV;
   closedir(DEV);
 } elsif ($^O eq 'solaris') {
   @drives = map { s@.*/@@ ; $_ } glob '/dev/rdsk/c*t*d*s2';
@@ -175,7 +175,7 @@ if (defined $ARGV[0]) {
   } elsif ($ARGV[0] eq 'config') {
     print "graph_title HDD temperature\n";
     print "graph_args --base 1000 -l 0\n";
-    print "graph_vlabel temp in �C\n";
+    print "graph_vlabel temp in ╟C\n";
     print "graph_category sensors\n";
     print "graph_info This graph shows the temperature in degrees Celsius of the hard drives in the machine.\n";
     print "$_.label $_\n" foreach @drives;
@@ -191,9 +191,9 @@ foreach my $drive (@drives) {
   # isn't supported (hdparm isn't available on all platforms).
   if (!$use_nocheck && $hdparm && $fulldev =~ /\/dev\/[sh]d?/) {
     if (`$hdparm -C $fulldev 2>/dev/null` =~ /standby/) {
-	warn "[DEBUG] Drive $fulldev is in standby mode, not checking\n"
-	    if $DEBUG;
-	next;
+        warn "[DEBUG] Drive $fulldev is in standby mode, not checking\n"
+            if $DEBUG;
+        next;
     }
   }
 
@@ -213,6 +213,9 @@ foreach my $drive (@drives) {
     my @F = split /\s+/, $1;
     print "$drive.value $F[9]\n";
   } elsif ($output =~ /^(231 Temperature_Celsius.*)/m) {
+    my @F = split ' ', $1;
+    print "$drive.value $F[9]\n";
+  } elsif ($output =~ /^(190 Airflow_Temperature_Cel.*)/m) {
     my @F = split ' ', $1;
     print "$drive.value $F[9]\n";
   } else {
@@ -244,4 +247,3 @@ sub command_for_drive_device {
     $cmd .= $fulldev;
 
 }
-
