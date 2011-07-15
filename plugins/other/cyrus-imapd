@@ -1,6 +1,8 @@
 #!/bin/sh
-
-# Copyright (C) 2009 Andreas Thienemann <andreas@bawue.net>
+#
+# $Id: cyrus-imapd 18 2011-07-15 09:14:04Z ixs $
+#
+# Copyright (C) 2009-2011 Andreas Thienemann <andreas@bawue.net>
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Library General Public License as published by
@@ -16,21 +18,54 @@
 # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 #
 
-# 
-# Plugin to monitor the load on a cyrus imapd server
-#
-# Usage: Link or copy into the munin-node plugin directory
-#
-# Installation node: Should most likely run as root:
-# [cyrus-imapd]
-# user root
-#
-#
-# Magic markers (optional - only used by munin-config and some
-# installation scripts):
-#
-#%# family=contrib
-#%# capabilities=autoconf
+: <<=cut
+
+=head1 NAME
+
+cyrus-imapd - Munin plugin to monitor the load on a cyrus imapd server
+
+=head1 CONFIGURATION
+
+The user running this plugin needs read and write access to the
+cyrus-imapd proc directory.  You will need to add the following to the 
+munin-node/plugin configuration:
+
+  [cyrus-imapd]
+  user root
+
+=head1 INTERPRETATION
+
+This plugin should be pretty self explanatory.
+
+It displays the following three datapoints:
+
+    - Total number of open connections (both in authenticated and
+      non-authenticated state)
+    - Number of authenticated sessions
+    - Number of unique users
+
+=head1 MAGIC MARKERS
+
+  #%# family=contrib
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+  $Revision: 18 $
+
+=head1 BUGS
+
+None known. If you find any, please put in a ticket at <https://trac.bawue.org/munin/newticket>.
+
+=head1 AUTHOR
+
+Andreas Thienemann <andreas@bawue.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
 
 # IMAP Configuration Directory
 CONFIGDIR=$(awk -F : '/^configdirectory:/ { gsub(/ /, "", $2); print $2 }' /etc/imapd.conf 2> /dev/null)
@@ -40,13 +75,13 @@ if [ "$1" = "autoconf" ]; then
 	if [ "x${CONFIGDIR}x" != "xx" ] && [ -d ${PROCDIR} ]; then
 		echo yes
 	else
-		echo no
+		echo "no (no cyrus-imapd procdir found)"
 	fi
 	exit 0
 fi
 
 # Check if we actually got some sensible data
-if [ "x${CONFIGDIR}x" == "xx" ]; then
+if [ "x${CONFIGDIR}x" = "xx" ]; then
 	exit 1
 fi
 
@@ -60,7 +95,7 @@ if [ "$1" = "config" ]; then
 	echo 'graph_scale no'
 	echo 'graph_category cyrus'
 	echo 'graph_info Current connections to the imap server. <a href="http://trac.bawue.org/">bawue.net e.V. Trac repository</a>.'
-	echo 'graph_oder connections authenticated_users unique_users'
+	echo 'graph_order connections authenticated_users unique_users'
 	echo 'connections.label Connections'
 	echo 'connections.info Number of connections to the imap server.'
 	echo 'authenticated_users.label Authenticated Users'
@@ -73,15 +108,21 @@ if [ "$1" = "config" ]; then
 	exit 0
 fi
 
-# Print the number of connections to the imap server
-echo -n "connections.value "
-ls ${PROCDIR} | wc -l
+cons=$(ls ${PROCDIR} | wc -l)
 
-# Read the proc files and get the logged in users
-echo -n "authenticated_users.value "
-awk '{ split(substr($0, match($0, "]")+1), a); if (a[1] != "") print a[1] }' ${PROCDIR}/* | wc -l
+if [ $cons -gt 0 ]; then
+	# Print the number of connections to the imap server
+	echo "connections.value $cons"
 
-# Read the proc files and get the number of unique users
-echo -n "unique_users.value "
-awk '{ split(substr($0, match($0, "]")+1), a); if (a[1] != "") print a[1] }' ${PROCDIR}/* | sort -u | wc -l
+	# Read the proc files and get the logged in users
+	echo -n "authenticated_users.value "
+	awk '{ split(substr($0, match($0, "]")+1), a); if (a[1] != "") print a[1] }' ${PROCDIR}/* | wc -l
 
+	# Read the proc files and get the number of unique users
+	echo -n "unique_users.value "
+	awk '{ split(substr($0, match($0, "]")+1), a); if (a[1] != "") print a[1] }' ${PROCDIR}/* | sort -u | wc -l
+else
+	echo "connections.value 0"
+	echo "authenticated_users.value 0"
+	echo "unique_users.value 0"
+fi
