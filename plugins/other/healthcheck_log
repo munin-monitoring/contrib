@@ -1,83 +1,79 @@
 #!/bin/bash
 #
 #healthcheck on munin
-#check site speed.
-#egrep contents string
-# ... and alert.
+#egrep system log and alert.
 #
 #programed by rti (hiroyuki fujie) super.rti@gmail.com @super_rti
 #LICENSE: NYSL (public domain)
+#
 #
 #config file
 #      /etc/munin/plugin-conf.d/munin-node
 #
 #example minimum config
 #---------------------------------------------------
-#[healthcheck_url]
-#env.url_1  http://127.0.0.1/
+#[healthcheck_log]
+#user root
+#env.log_1  /var/log/messages
 #---------------------------------------------------
 #
-#chcek two site 
+#check two log
 #---------------------------------------------------
-#[healthcheck_url]
-#env.url_1  http://127.0.0.1/
-#env.url_2  http://www.google.com/
+#[healthcheck_log]
+#user root
+#env.log_1  /var/log/messages
+#env.log_2  /var/log/syslog
 #---------------------------------------------------
 #
-#chcek three site 
+#check two three
 #---------------------------------------------------
-#[healthcheck_url]
-#env.url_1  http://127.0.0.1/
-#env.url_2  http://www.google.com/
-#env.url_3  http://www.yahoo.com/
+#[healthcheck_log]
+#user root
+#env.log_1  /var/log/messages
+#env.log_2  /var/log/syslog
+#env.log_3  /var/log/dmesg
 #---------------------------------------------------
 #
 #set name
 #---------------------------------------------------
-#[healthcheck_url]
-#env.url_1  http://127.0.0.1/
-#env.name_1 homhom
+#[healthcheck_log]
+#user root
+#env.log_1  /var/log/messages
+#env.name_1 my_server_messages
 #---------------------------------------------------
 #
-#check over proxy
+#set egrep string
 #---------------------------------------------------
-#[healthcheck_url]
-#env.url_1  http://127.0.0.1/
-#env.proxy_1 127.0.0.1:8080
-#---------------------------------------------------
-#
-#set slow speed(second)
-#---------------------------------------------------
-#[healthcheck_url]
-#env.url_1  http://127.0.0.1/
-#env.slowspeed_1 30
+#[healthcheck_log]
+#user root
+#env.log_1  /var/log/messages
+#env.grep_1 alert|warning
 #---------------------------------------------------
 #
-#grep string
+#set egrep string
 #---------------------------------------------------
-#[healthcheck_url]
-#env.url_1  http://127.0.0.1/
-#env.grep_1 saysaya
+#[healthcheck_log]
+#user root
+#env.log_1  /var/log/messages
+#env.grep_1 alert|warning
 #---------------------------------------------------
 #
 #full option
 #/etc/munin/plugin-conf.d/munin-node
 #---------------------------------------------------
-#[healthcheck_url]
-#env.url_1  http://127.0.0.1/          #check url
-#env.grep_1 apache                     #check egrep string
-#env.name_1 127.0.0.1                  #set line name. default by url domain
-#env.proxy_1 127.0.0.1:8080            #over proxy
-#env.slowspeed_1 30                    #slow time on alert
+#[healthcheck_log]
+#user root                          #log file is read only root user.
+#env.log_1  /var/log/messages       #target log filename
+#env.grep_1 critical|error          #egrep string.
+                                    #defualt by critical|error|warning|crash|fatal|kernel
 #---------------------------------------------------
 #
-#
+
 
 #edakari speed up.
-CHECKMAX=`env | grep url_ | wc -l`
+CHECKMAX=`env | grep log_ | wc -l`
 let CHECKMAX="$CHECKMAX + 1"
-
-CURL=/usr/bin/curl
+MINUTE_BY_GREP_RANGE=10
 
 if [ "$1" = "autoconf" ]; then
     if [ $CHECKMAX -le 1 ]; then
@@ -89,89 +85,77 @@ if [ "$1" = "autoconf" ]; then
 fi
 
 if [ "$1" = "config" ]; then
-    echo 'graph_title site speed (second)'
-    echo "graph_args --base 1000 -l 0 --vertical-label second"
+    echo 'graph_title log grep (match count)'
+    echo "graph_args --base 1000 -l 0 --vertical-label match_count"
     echo 'graph_scale no'
-    echo 'graph_vlabel second'
+    echo 'graph_vlabel match_count'
     echo 'graph_category healthcheck'
-    echo 'graph_info This graph shows the site speed'
+    echo 'graph_info This graph shows the bad event count on log'
 
     for(( I = 1; I < $CHECKMAX; ++I ))
     do
-         eval url=\$url_${I}
+         eval log=\$log_${I}
          eval name=\$name_${I}
-         eval slowspeed=\$slowspeed_${I}
-         if [ "x${url}" = "x" ]; then
+         eval grep=\$grep_${I}
+         if [ "x${log}" = "x" ]; then
               continue
          fi
          if [ "x${name}" = "x" ]; then
-             #default name by domain
-             name=`echo $url | sed 's#\.#_#g' | sed -e 's/[^/]*\/\/\([^@]*@\)\?\([^:/]*\).*/\2/'`
+             name=`echo $log | sed 's#[/|\.]#_#g'`
          fi
-         if [ "x${slowspeed}" = "x" ]; then
-             slowspeed=10
+         if [ "x${name}" = "x" ]; then
+             grep="critical|error|crash|fatal|kernel"
          fi
-         let slowspeed15="slowspeed * 3 / 2" #slowspeed * 1.5
 
          echo "$name.label $name"
-         echo "$name.info $url"
+         echo "$name.info egrep $grep $log | wc -l"
          echo "$name.draw LINE2"
-         echo "$name.min -10"
-         echo "$name.max ${slowspeed15}"
-         echo "$name.critical 0:${slowspeed}"
+         echo "$name.min 0"
+         echo "$name.max 20"
+         echo "$name.critical 0:0"
     done
 
     exit 0
 fi
 
+NOWTIME=`date --date "$MINUTE_BY_GREP_RANGE minute ago" +%s`
+
 for(( I = 1; I < $CHECKMAX; ++I ))
 do
-     eval url=\$url_${I}
-     eval grep=\$htmlgrep_${I}
-     eval name=\$name_${I}
-     eval proxy=\$proxy_${I}
-     eval slowspeed=\$slowspeed_${I}
-
-     if [ "x${url}" = "x" ]; then
-        continue
-     fi
-     if [ "x${name}" = "x" ]; then
-        #default name by domain
-        name=`echo $url | sed 's#\.#_#g' | sed -e 's/[^/]*\/\/\([^@]*@\)\?\([^:/]*\).*/\2/'`
-     fi
-
-     PROXY_CMD=""
-     if [ "x${proxy}" != "x" ]; then
-        PROXY_CMD=" --proxy ${proxy} "
-     fi
-     if [ "x${slowspeed}" = "x" ]; then
-        slowspeed=10
-     fi
-     let timeout="${slowspeed} + 1"
-
-     START=`date +%s`
-     HTML_RESULT=`$CURL "${url}" -s --connect-timeout ${timeout} ${PROXY_CMD}`
-     CURLEXITCODE=$?
-     END=`date +%s`
-
-     GREPEXITCODE=0
-     if [ "x${grep}" != "x" ]; then
-         echo $HTML_RESULT | egrep -i "${grep}" > /dev/null
-         GREPEXITCODE=$?
-     fi
-
-     if [ $CURLEXITCODE -ne 0 ]; then
-         echo "$name.value -10"
-         echo "$name.extinfo curl return $CURLEXITCODE"
+    eval log=\$log_${I}
+    eval name=\$name_${I}
+    eval grep=\$grep_${I}
+    if [ "x${log}" = "x" ]; then
          continue
-     fi
+    fi
+    if [ "x${name}" = "x" ]; then
+         name=`echo $log | sed 's#[/|\.]#_#g'`
+    fi
+    if [ "x${grep}" = "x" ]; then
+         grep="critical|error|crash|fatal|kernel"
+    fi
 
-     if [ $GREPEXITCODE -ne 0 ]; then
-         echo "$name.value -9"
-         echo "$name.extinfo can not found $grep regex strings"
-         continue
-     fi
+    COUNT=0
+    MESSAGE=
+    IFS=$'\n'
+    MATCHLINES=(`egrep -i "$grep" "$log"`)
+    for(( N = ${#MATCHLINES[@]} - 1; N >= 0 ; --N ))
+    do
+         LINE=${MATCHLINES[$N]}
+         DATESTRING=`echo $LINE | awk '{ printf("%s %s %s",$1,$2,$3)}'`
+         LOGTIME=`date --date "$DATESTRING" +%s`
+         if [ $LOGTIME -lt $NOWTIME ]; then
+               break
+         fi
+         let COUNT="$COUNT + 1"
+         MESSAGE="$MESSAGE$LINE //@LINE@// "
+    done
 
-     let SPEED="$END - $START"
-     echo "$name.value $SPEED"
+
+    if [ $COUNT -eq 0 ]; then
+        echo "${name}.value 0"
+    else
+        echo "${name}.value ${COUNT}"
+        echo "${name}.extinfo ${MESSAGE}"
+    fi
 done
