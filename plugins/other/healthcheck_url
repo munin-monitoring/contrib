@@ -57,7 +57,14 @@
 #---------------------------------------------------
 #[healthcheck_url]
 #env.url_1  http://127.0.0.1/
-#env.grep_1 saysaya
+#env.htmlgrep_1 saysaya
+#---------------------------------------------------
+#
+#check html contents byte size.
+#---------------------------------------------------
+#[healthcheck_url]
+#env.url_1  http://127.0.0.1/
+#env.htmlsize_1 50000                  #check 50000 bytes over.
 #---------------------------------------------------
 #
 #full option
@@ -65,10 +72,11 @@
 #---------------------------------------------------
 #[healthcheck_url]
 #env.url_1  http://127.0.0.1/          #check url
-#env.grep_1 apache                     #check egrep string
+#env.htmlgrep_1 apache                 #check egrep string
 #env.name_1 127.0.0.1                  #set line name. default by url domain
 #env.proxy_1 127.0.0.1:8080            #over proxy
 #env.slowspeed_1 30                    #slow time on alert
+#env.htmlsize_1 50000                  #check 50000 bytes over.
 #---------------------------------------------------
 #
 #
@@ -128,6 +136,7 @@ for(( I = 1; I < $CHECKMAX; ++I ))
 do
      eval url=\$url_${I}
      eval grep=\$htmlgrep_${I}
+     eval size=\$htmlsize_${I}
      eval name=\$name_${I}
      eval proxy=\$proxy_${I}
      eval slowspeed=\$slowspeed_${I}
@@ -154,23 +163,32 @@ do
      CURLEXITCODE=$?
      END=`date +%s`
 
-     GREPEXITCODE=0
-     if [ "x${grep}" != "x" ]; then
-         echo $HTML_RESULT | egrep -i "${grep}" > /dev/null
-         GREPEXITCODE=$?
-     fi
-
      if [ $CURLEXITCODE -ne 0 ]; then
          echo "$name.value -10"
          echo "$name.extinfo curl return $CURLEXITCODE"
          continue
      fi
 
-     if [ $GREPEXITCODE -ne 0 ]; then
-         echo "$name.value -9"
-         echo "$name.extinfo can not found $grep regex strings"
-         continue
+     GREPEXITCODE=0
+     if [ "x${grep}" != "x" ]; then
+         echo $HTML_RESULT | egrep -i "${grep}" > /dev/null
+         GREPEXITCODE=$?
+         if [ $GREPEXITCODE -ne 0 ]; then
+             echo "$name.value -9"
+             echo "$name.extinfo can not found $grep regex strings"
+             continue
+         fi
      fi
+
+
+     if [ "x${size}" != "x" ]; then
+         if [ ${#HTML_RESULT} -lt ${size} ]; then
+             echo "$name.value -8"
+             echo "$name.extinfo html size ${#HTML_RESULT} is smaller than ${size}"
+             continue
+         fi
+     fi
+
 
      let SPEED="$END - $START"
      echo "$name.value $SPEED"
