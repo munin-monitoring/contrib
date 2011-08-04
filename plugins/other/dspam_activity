@@ -13,7 +13,7 @@ Any system running a recent (3.8.0 or higher) DSPAM install.
 
 =head1 CONFIGURATION
 
-The plugin uses the contents of the SystemLog produced by DSPAM.
+The plugin uses the contents of the SystemLog or UserLog produced by DSPAM.
 
 The following environment variables are used by this plugin:
 
@@ -57,7 +57,7 @@ single character in parentheses is the DSPAM internal name for the classificatio
 
 =head1 AUTHOR
 
-Copyright 2010 Tom Hendrikx <tom@whyscream.net>
+Copyright 2010-2011 Tom Hendrikx <tom@whyscream.net>
 
 =head1 LICENSE
 
@@ -85,7 +85,7 @@ None known. Please report to author when you think you found something.
 
 =head1 VERSION
 
-$Id: dspam_activity 84 2010-10-08 21:23:23Z tomhendr $
+$Id: dspam_activity 139 2011-08-04 20:03:22Z tomhendr $
 
 =head1 MAGIC MARKERS
 
@@ -101,9 +101,9 @@ $Id: dspam_activity 84 2010-10-08 21:23:23Z tomhendr $
 # include munin plugin helper
 . $MUNIN_LIBDIR/plugins/plugin.sh
 
-#######################################
-# Some generic file locking functions #
-#######################################
+##########################
+# Some generic functions #
+##########################
 
 #
 # debug $message
@@ -133,8 +133,8 @@ get_activity_description() {
 		S) short=Spam long="Messages received and classified as spam" ;;
 		W) short=Auto-whitelisted long="Messages received and auto-whitelisted" ;;
 		V) short=Virus long="Messages received and classified as virus by Clamav" ;;
-		O) short=Blocklisted ;;
-		A) short="Blacklisted (RBL)" ;;
+		O) short=Blocklisted long="Messages received but not classified because the sender domain is on to the user blocklist" ;;
+		A) short="Blacklisted (RBL)" long="Message received and classified as spam because the sender ip is listed on the RBL" ;;
 		M) short="Retrained as spam" long="Messages classified as innocent, but retrained by user as spam" ;;
 		F) short="Retrained as innocent" long="Messages classified as spam, but retrained by the user as innocent" ;;
 		N) short=Inoculation long="Messages trained as spam trough inoculation" ;;
@@ -212,7 +212,9 @@ print_fetch() {
 			local old_IFS=$IFS
 			IFS="	" # tab-separator in $logfile
 			while read ts activity from signature subject x recipient info msgid; do
-				if [ $ts -gt $old_ts ]; then
+				if ! [ $ts -gt 0 2> /dev/null ]; then
+					debug skipped entry with non-numeric timestamp: $ts
+				elif [ $ts -gt $old_ts ]; then
 					debug processing entry with timestamp $ts, activity=$activity, subject=$subject, msgid=$msgid
 					case $activity in
 						I) aI=$((aI + 1)) ;;
@@ -254,7 +256,7 @@ print_fetch() {
 		fi
 	else
 		debug could not read timestamp from statefile
-		exit 75 # EX_TEMPFAIL
+		# no exit here, we need the next operation to write a timestamp in the statefile
 	fi
 
 	# update statefile with current timestamp
@@ -271,7 +273,7 @@ print_fetch() {
 #####################
 
 # show env settings
-debug dspam_throughput plugin started, pid=$$
+debug dspam_activity plugin started, pid=$$
 debug settings:
 debug - logfile is set to: $logfile
 debug - statefile is set to: $statefile
