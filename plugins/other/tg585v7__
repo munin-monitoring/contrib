@@ -1,0 +1,285 @@
+#!/usr/bin/perl
+# -*- cperl -*-
+
+=head1 NAME
+
+TG585v7_ - Munin plugin to monitor the stats of a Thomson TG585 v7.
+
+=head1 APPLICABLE SYSTEMS
+
+Any system with access to a Thomson TG585 v7 ADSL router.
+Requires perl and WWW::Mechanize.
+
+=head1 CONFIGURATION
+
+The plugin needs HTML access to the router. If you can get to http://YOUR_ROUTER/,
+and are greeting with a page titled "THOMSON TG585 v7", then you can probably use this plugin. 
+
+This is a wildcard plugin, so you will need to create symlinks to this plugin (or create copies if your filesystem doesn't support linking). Links should be of the form:
+
+  TG585v7_<hostname of router>_<mode>
+
+where "<mode>" is one of "bandwidth", "power", "errors" or "uptime" (thus you probably want 4 symlinks in total.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 BUGS
+
+Please report bugs to L<darac+munin@darac.org.uk>.
+
+=head1 AUTHOR
+
+Unknown
+
+=head1 LICENSE
+
+GPL
+
+=cut
+
+use strict;
+use warnings;
+
+use lib $ENV{'MUNIN_LIBDIR'};
+use Munin::Plugin;
+
+my $ret;
+if ( !eval "require WWW::Mechanize;" ) {
+	$ret = "Could not load WWW::Mechanize";
+}
+
+my $USER = $ENV{user};
+my $PASS = $ENV{pass};
+our @name_fields = split /_/, $0;
+if (scalar @name_fields == 3){
+	if ($name_fields[1] eq '' or $name_fields[2] eq ''){
+		print "Misconfigured symlink. See Documentation\n";
+		exit 1;
+	}
+} else {
+	print "Misconfigured symlink. See Documentation\n";
+	exit 1;
+}
+my $host = $name_fields[1];
+my $mode = $name_fields[2];
+
+
+if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
+	if ($ret) {
+		print "no ($ret)\n";
+		exit 1;
+	}
+	print "yes\n";
+	exit 0;
+}
+
+if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
+	if ($ret) {
+		print $ret;
+		exit 1;
+	}
+	print "host_name $host\n" unless $host eq 'localhost';
+	if ($mode eq 'bandwidth'){
+		print <<EOF;
+graph_vlabel kbps down (-) / up (+)
+graph_category Network
+graph_title ADSL Bandwidth
+graph_info Sync rates for your ADSL line on $host
+down.label Bandwidth
+down.type GAUGE
+down.graph no
+down.min 0
+up.label Bandwidth
+up.type GAUGE
+up.negative down
+up.min 0
+up.info This is your ADSL sync rate. Actual throughput is likely to be lower.
+EOF
+	} elsif ($mode eq 'power') {
+		print <<EOF;
+graph_vlabel dB down (-) / up (+)
+graph_category Network
+graph_title ADSL Strength
+graph_info Signal Strengths for your ADSL line on $host
+downout.label Output Power
+downout.type GAUGE
+downout.graph no
+upout.label Output Power
+upout.type GAUGE
+upout.negative downout
+downline.label Line Atten.
+downline.type GAUGE
+downline.graph no
+upline.label Line Atten.
+upline.type GAUGE
+upline.negative downline
+downsn.label SN Margin
+downsn.type GAUGE
+downsn.graph no
+upsn.label SN Margin
+upsn.type GAUGE
+upsn.negative downsn
+EOF
+	} elsif ($mode eq 'errors'){
+		print <<EOF;
+graph_vlabel # errors down (-) / up (+) per \${graph_period}
+graph_category Network
+graph_title ADSL Errors
+graph_info Errors on your ADSL line on $host
+downFEC.label FEC Errors
+downFEC.type COUNTER
+downFEC.graph no
+upFEC.label FEC Errors
+upFEC.type COUNTER
+upFEC.negative downFEC
+downCRC.label CRC Errors
+downCRC.type COUNTER
+downCRC.graph no
+upCRC.label CRC Errors
+upCRC.type COUNTER
+upCRC.negative downCRC
+downHEC.label HEC Errors
+downHEC.type COUNTER
+downHEC.graph no
+upHEC.label HEC Errors
+upHEC.type COUNTER
+upHEC.negative downHEC
+EOF
+	} elsif ($mode eq 'uptime'){
+		print <<EOF;
+graph_vlabel uptime in days
+graph_category System
+graph_title Uptime
+graph_info Uptime for your ADSL line and Router on $host
+Box.label Router
+Box.type GAUGE
+DSL.label DSL
+DSL.type GAUGE
+iNet.label Internet
+iNet.type GAUGE
+EOF
+	} else {
+		print "Don't know how to graph $mode\n";
+		exit 1;
+	}
+	exit 0;
+}
+
+sub Uptime2Days {
+	my $uptime = shift;
+	if ($uptime =~ m{(\d+) days?, (\d+):(\d+):(\d+)}i){
+		return int($1) + (int($2)/24) + (int($3)/1440) + (int($4)/86400);
+	} else {
+		return 'U';
+	}
+}
+
+# Fetch
+my $mech = WWW::Mechanize->new();
+$mech->credentials($USER, $PASS);
+if ($mode eq 'bandwidth' or $mode eq 'power' or $mode eq 'errors'){
+	$mech->get("http://$host/cgi/b/dsl/dt/?be=0&l0=1&l1=0");
+} elsif ($mode eq 'uptime'){
+	$mech->get("http://$host/cgi/b/bb/?be=0&l0=2&l1=-1");
+}
+if ($mech->success()){
+	my $page = $mech->content;
+	if ($mode eq 'bandwidth'){
+		$page =~ m{Bandwidth \(Up/Down\).*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+		my $upBW = $1;
+		my $downBW = $2;
+		$upBW =~ s/,//;
+		$downBW =~ s/,//;
+		print "down.value $downBW\n";
+		print "up.value $upBW\n";
+	} elsif ($mode eq 'power'){
+		$page =~ m{Output Power.*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+		my $upOUT = $1;
+		my $downOUT = $2;
+		$upOUT =~ s/,//;
+		$downOUT =~ s/,//;
+		
+		$page =~ m{Line Attenuation.*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+		my $upLINE = $1;
+		my $downLINE = $2;
+		$upLINE =~ s/,//;
+		$downLINE =~ s/,//;
+		
+		$page =~ m{SN Margin.*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+		my $upSN = $1;
+		my $downSN = $2;
+		$upSN =~ s/,//;
+		$downSN =~ s/,//;
+		print "downout.value $downOUT\n";
+		print "upout.value $upOUT\n";
+		print "downline.value $downLINE\n";
+		print "upline.value $upLINE\n";
+		print "downsn.value $downSN\n";
+		print "upsn.value $upSN\n";
+	} elsif ($mode eq 'errors'){
+		$page =~ m{FEC Errors.*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+		my $upFEC = $1;
+		my $downFEC = $2;
+		$upFEC =~ s/,//;
+		$downFEC =~ s/,//;
+
+		$page =~ m{CRC Errors.*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+		my $upCRC = $1;
+		my $downCRC = $2;
+		$upCRC =~ s/,//;
+		$downCRC =~ s/,//;
+
+		$page =~ m{HEC Errors.*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+		my $upHEC = $1;
+		my $downHEC = $2;
+		$upHEC =~ s/,//;
+		$downHEC =~ s/,//;
+
+		print "downFEC.value $downFEC\n";
+		print "upFEC.value $upFEC\n";
+		print "downCRC.value $downCRC\n";
+		print "upCRC.value $upCRC\n";
+		print "downHEC.value $downHEC\n";
+		print "upHEC.value $upHEC\n";
+	} elsif ($mode eq 'uptime'){
+		my ($DSLRaw, $DSLUp, $iNetRaw, $iNetUp, $BoxRaw, $BoxUp);
+		if ($page =~ m{Uptime:.*<td[^>]+>(.*)</td>}g){
+			$DSLRaw = $1;
+			$DSLUp = Uptime2Days($DSLRaw);
+		} else {
+			$DSLUp = 'U';
+		}
+		if ($page =~ m{Uptime:.*<td[^>]+>(.*)</td>}g){
+			$iNetRaw = $1;
+			$iNetUp = Uptime2Days($iNetRaw);
+		} else {
+			$iNetUp = 'U';
+		}
+
+
+		$mech->get("http://$host/cgi/b/cfg/ov/?be=0&l0=1&l1=1");
+		$page = $mech->content;
+		if ($page =~ m{Time Since Power-on:.*<td[^>]+>(.*)</td>}){
+			$BoxRaw = $1;
+			$BoxUp = Uptime2Days($BoxRaw);
+		} else {
+			$BoxUp = 'U';
+		}
+
+		print "Box.value $BoxUp\n";
+		print "Box.extinfo $BoxRaw\n";
+		print "DSL.value $DSLUp\n";
+		print "DSL.extinfo $DSLRaw\n";
+		print "iNet.value $iNetUp\n";
+		print "iNet.extinfo $iNetRaw\n";
+	} else {
+		print "Don't know how to graph $mode\n";
+		exit 1;
+	}
+	exit 0;
+}
+
+
