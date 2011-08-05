@@ -1,0 +1,64 @@
+#!/bin/bash
+# probably will run with sh
+
+# Plugin to monitor traffic rate to specific host.
+#
+# Requirements:
+#       - tcpdump
+#       - should be run as root or any other user for tcpdump
+#
+# Parameters supported:
+#
+#       config
+#
+# Configurable variables
+#
+#       type            - monitor type. Available values: packets, bytes. Defaults to packets because it's faster
+#       hostname        - mandatory. Hostname (ip) to monitor connections to. Actually just a part of tcpdump expr
+#
+# Revision 0.1  2011/08/06 Artem Sheremet
+
+if [ -z "$type" ]; then
+        type=packets
+fi
+
+if [ -z "$hostname" ]; then
+        echo "Configuration problem"
+        exit 1
+fi
+
+if [ "$1" = "config" ]; then
+        echo "graph_title Number of $type to and from $hostname"
+        if [ "$type" == "bytes" ]; then
+                echo "graph_args --base 1024"
+        fi
+        echo "graph_category network"
+        echo "graph_vlabel $type per second"
+        echo "graph_info This plugin shows number of $type within $hostname through the tcp protocol using tcpdump"
+        echo "$type.label $type within $hostname"
+        exit 0
+fi
+
+TMP_DIR=/tmp/host_traffic_${hostname}_${type}
+
+if [ ! -f $TMP_DIR ]; then
+        mkdir -p $TMP_DIR
+fi
+
+if [ -f $TMP_DIR/pid ]; then
+        if [ "$type" == "packets" ]; then
+                echo packets.value $[`wc -l $TMP_DIR/data | cut -d' ' -f1`/300]
+        fi
+
+        kill -TERM `cat $TMP_DIR/pid`
+
+        if [ "$type" == "bytes" ]; then
+                gawk -Ftcp '
+BEGIN { total = "U"; } # U = Unknown.
+      { total = total + $2; }
+END   { print "bytes.value", total/300; }' $TMP_DIR/data
+        fi
+fi
+
+tcpdump -n -q -t host $hostname >$TMP_DIR/data 2>/dev/null &
+echo $! > $TMP_DIR/pid
