@@ -6,11 +6,15 @@
 # DOES NOT WORK on OSX, Solaris or BSD.
 # only linux, because this script relies on proc filesystem
 # 
-# Author: 
+# Original author: 
 #   Frederico de Souza Araujo - fred.the.master@gmail.com
 #   http://www.frederico-araujo.com
 #
-# Based on:
+# Usurper:
+#   Adam Michel - elfurbe@furbism.com
+#   http://www.furbism.com
+#
+# Originally based on:
 #   thin_process_memory - 
 #       A munin plugin to monitor memory size of 
 #       each individual thin process
@@ -38,10 +42,9 @@ module Munin
     
     def run
       pids = get_pids()
-      port_list = Hash.new
-      pids.sort.each do |pid, port|
+      pids.sort.each do |pid|
         res = (get_threads(pid).to_i)
-        puts "thin_#{port}.value #{res}"
+        puts "thin_#{pid}.value #{res}"
       end
     end
     
@@ -64,14 +67,7 @@ module Munin
     #   look for listening tcp applications 
     #   that match the name thin
     def get_pids
-      pids_ports = []
       pids = `pgrep thin`.split
-      pids.each do |t|
-        port = `lsof -p #{t} | grep LISTEN`.split[8]
-        port = port.split(":")[1]
-        pids_ports << [t,port]
-      end
-      pids_ports
     end
 
     def autoconf
@@ -91,11 +87,11 @@ when "config"
   puts "graph_args -l 0"
   puts "graph_scale yes"
   puts "graph_info Tracks how many threads per thin processes"
-  mpm.get_pids.sort.each do |pid,port|
-    puts "thin_#{port}.label thin_#{port}"
-    puts "thin_#{port}.info Threads per Thin process"
-    puts "thin_#{port}.type GAUGE"
-    puts "thin_#{port}.min 0"
+  mpm.get_pids.sort.each do |pid|
+    puts "thin_#{pid}.label thin_#{pid}"
+    puts "thin_#{pid}.info Threads per Thin process"
+    puts "thin_#{pid}.type GAUGE"
+    puts "thin_#{pid}.min 0"
   end
 when "autoconf"
   if mpm.autoconf
