@@ -1,12 +1,19 @@
 #!/usr/bin/env ruby
-# thin_memory - A munin plugin for Linux to monitor memory size of
-#                  each individual thin process
-# I havent tested on OSX or Solaris. Works great on Linux (gentoo)
-# Author: 
+# thin_memory - A munin plugin for Linux to monitor memory size of each individual thin process
+#
+# For Linux ONLY !
+# DOES NOT WORK on OSX, Solaris or BSD.
+# only linux, because this script relies on proc filesystem
+# 
+# Original author: 
 #   Frederico de Souza Araujo - fred.the.master@gmail.com
 #   http://www.frederico-araujo.com
 #
-# Based on:
+# Usurper:
+#   Adam Michel - elfurbe@furbism.com
+#   http://www.furbism.com
+#
+# Originally based on:
 #   thin_process_memory - 
 #       A munin plugin to monitor memory size of 
 #       each individual thin process
@@ -35,10 +42,9 @@ module Munin
     # run main method
     def run
       pids = get_pids()
-      port_list = Hash.new
-      pids.sort.each do |pid, port|
+      pids.sort.each do |pid|
         rss = (pid_rss(pid).to_i)/1024
-        puts "thin_#{port}.value #{rss}"
+        puts "thin_#{pid}.value #{rss}"
       end
     end
     
@@ -54,16 +60,7 @@ module Munin
     
     # fetch all pids that match thin
     def get_pids
-      pids_ports = []
       pids = `pgrep thin`.split
-      pids.each do |t|
-        # only works for linux i'm affraid
-        # using lsof (list open files) 
-        port = `lsof -p #{t} | grep LISTEN`.split[8]
-        port = port.split(":")[1]
-        pids_ports << [t,port]
-      end
-      pids_ports
     end
 
     def autoconf
@@ -83,11 +80,11 @@ when "config"
   puts "graph_args --base 1024 -l 0"
   puts "graph_scale yes"
   puts "graph_info Tracks the size of individual thin processes"
-  mpm.get_pids.sort.each do |pid,port|
-    puts "thin_#{port}.label thin_#{port}"
-    puts "thin_#{port}.info Process memory"
-    puts "thin_#{port}.type GAUGE"
-    puts "thin_#{port}.min 0"
+  mpm.get_pids.sort.each do |pid|
+    puts "thin_#{pid}.label thin_#{pid}"
+    puts "thin_#{pid}.info Process memory"
+    puts "thin_#{pid}.type GAUGE"
+    puts "thin_#{pid}.min 0"
   end
 when "autoconf"
   if mpm.autoconf
