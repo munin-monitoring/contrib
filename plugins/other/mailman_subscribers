@@ -37,7 +37,7 @@
 #%# capabilities=autoconf
 
 use strict;
-my ($list,$desc,%lists);
+my ($list,$desc,%lists,$label);
 
 my $list_lists = "/usr/sbin/list_lists";
 (-x $list_lists) || die "Can't exec $list_lists\n";
@@ -64,7 +64,9 @@ if ($ARGV[0] and $ARGV[0] eq "config" ){
   
     my $num =0;
     while (($list,$desc) = each(%lists)) {
-	print("$list.label $list\n");
+	$label=$list;
+	$list=clean_name($list);
+	print("$list.label $label\n");
 	print("$list.info $desc\n");
 	($num > 0) ? print("$list.draw STACK\n") : print("$list.draw AREA\n");
 	$num++;
@@ -81,5 +83,15 @@ while (($list,$desc) = each(%lists)) {
     }
     close(LL);
 
+    $list=clean_name($list);
     print("$list.value $num\n");
+}
+
+sub clean_name
+{
+    # http://munin-monitoring.org/wiki/notes_on_datasource_names
+    my $list = shift(@_);
+    $list=~s/^[^A-Za-z_]/_/;
+    $list=~s/[^A-Za-z0-9_]/_/g;
+    return $list;
 }
