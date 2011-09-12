@@ -1,0 +1,29 @@
+#!/bin/sh
+#Plugin to monitor the number of healthy and sick backends
+#
+#
+
+ADMINSERVER=127.0.0.1
+ADMINPORT=2000
+
+if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+        echo 'graph_title Number of Healthy Backends'
+        echo 'graph_vlabel number of backends'
+        echo 'graph_category varnish'
+        echo 'graph_info This graph shows the number of healthy backends in the system.'
+        echo 'healthy.label Healthy'
+        echo 'healthy.warning 2:'
+        echo 'healthy.critical 1:'
+        echo 'sick.label Sick'
+        exit 0
+fi
+healthyServers=`varnishadm -T ${ADMINSERVER}:${ADMINPORT} debug.health 2>&1 | grep 'is Healthy' | wc -l`
+sickServers=`varnishadm -T ${ADMINSERVER}:${ADMINPORT} debug.health 2>&1 | grep 'is sick' | wc -l`
+echo "healthy.value ${healthyServers}"
+echo "sick.value ${sickServers}"
