@@ -8,6 +8,9 @@
 # Created:
 #    5th of november 2007
 #
+# Modified:
+#    22th of September 2011 by Nozomu Kaneko <nozom.kaneko@gmail.com>
+#
 # Usage:
 #    Place in /etc/munin/plugins/ (or link it there using ln -s)
 #
@@ -24,6 +27,8 @@
 dbserver='localhost'
 dbuser='postgres'
 
+modes="AccessExclusive AccessShare Exclusive RowExclusive RowShare Share ShareRowExclusive ShareUpdateExclusive"
+
 if [ "$1" = "config" ]; then
    echo 'graph_args --lower-limit 0'
    echo 'graph_category Postgresql'
@@ -31,27 +36,26 @@ if [ "$1" = "config" ]; then
    echo 'graph_scale no'
    echo 'graph_title PostgreSQL Active Locks'
    echo 'graph_vlabel Number of active locks'
-   echo 'AccessExclusive.label AccessExclusive'
-   echo 'AccessExclusive.info Access Exclusive Lock.'
-   echo 'AccessShare.label AccessShare'
-   echo 'AccessShare.info Access Share Lock.'
-   echo 'Exclusive.label Exclusive'
-   echo 'Exclusive.info Exclusive Lock.'
-   echo 'RowExclusive.label RowExclusive'
-   echo 'RowExclusive.info Row Exclusive Lock.'
-   echo 'RowShare.label RowShare'
-   echo 'RowShare.info Row Share Lock.'
-   echo 'Share.label Share'
-   echo 'Share.info Share Lock.'
-   echo 'ShareRowExclusive.label ShareRowExclusive'
-   echo 'ShareRowExclusive.info Share Row Exclusive Lock.'
-   echo 'ShareUpdateExclusive.label ShareUpdateExclusive'
-   echo 'ShareUpdateExclusive.info Share Update Exclusive Lock.'
+   for mode in $modes; do
+     echo $mode.label $mode
+     echo $mode.info `echo $mode | perl -pe 's/(.)([A-Z])/$1 $2/g'` Lock.
+   done
    exit 0
 fi
 
-psql -h ${dbserver} -U ${dbuser} -tc "SELECT trim(mode, 'Lock'), COUNT(*) FROM pg_locks GROUP BY mode ORDER BY 1;" | while read name sep num
+for mode in $modes; do
+   eval ${mode}=0
+done
+
+eval $(psql -h ${dbserver} -U ${dbuser} template1 -tc "SELECT trim(mode, 'Lock'), COUNT(*) FROM pg_locks GROUP BY mode ORDER BY 1;" | while read name sep num
 do
    test -z "${name}" && continue
-   echo ${name}'.value '${num}
+   echo ${name}=${num}
+done)
+
+echo AccessShare = $AccessShare
+
+for mode in $modes; do
+   echo $mode $(eval echo \$$mode)
 done
+
