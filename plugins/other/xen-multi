@@ -74,6 +74,7 @@ GPLv2
 =cut
 
 use strict;
+use Munin::Plugin;
 
 # autoconf - quite simple
 if ($ARGV[0] eq "autoconf") {
@@ -116,38 +117,31 @@ sub trim_label {
 }
 
 # Global variables
-my (%domains,@xentop,$domain,$munindomain,$cpusec,$cpupercent,$memk,$mempercent,$maxmemk,$maxmempercent,$nettxk,$netrxk,$vbdrd,$vbdwr);
+my (%domains,$domain,$munindomain,$cpusecs,$memk,$nettxk,$netrxk,$vbdrd,$vbdwr);
 
-# We run xentop with two iterations (the first one always returns 0 for CPU %)
-open (XENTOP,"xentop -b -f -i2 |") or die "Could not execute xentop, $!";
-
-# We parse the output backwards to process only the last iteration
-@xentop = reverse(<XENTOP>); close(XENTOP);
+open (XENTOP,"xentop -b -f -i1 |") or die "Could not execute xentop, $!";
 
 # Now we build a hash of hashes to store information
-foreach (@xentop) {
+while (<XENTOP>) {
   # Some cleaning first
   s/^\s+//; chomp;
-  # We stop processing at the headers
-  if (/^NAME/) { last; } else {
+  # Skip the headers
+  next if /^NAME/;
 
-    # We define only what we need
-    ($domain,undef,undef,$cpupercent,$memk,undef,undef,undef,undef,undef,$nettxk,$netrxk,undef,undef,$vbdrd,$vbdwr,undef,undef,undef) = split(/\s+/);
+  # We define only what we need
+  ($domain,undef,$cpusecs,undef,$memk,undef,undef,undef,undef,undef,$nettxk,$netrxk,undef,undef,$vbdrd,$vbdwr,undef,undef,undef) = split(/\s+/);
 
-    # We have to store the domain name in a separate variable
-    # in which we replace - and . by _
-    $domains{$domain}{'munindomain'} = $domain;
-    $domains{$domain}{'munindomain'} =~ s/[-.]/_/g;
+  # We have to store the sanitised domain name in a separate variable
+  $domains{$domain}{'munindomain'} = clean_fieldname($domain);
 
-    # We need the remaining data only for a normal run
-    if ($ARGV[0] eq "") {
-      $domains{$domain}{'cpupercent'} = $cpupercent;
-      $domains{$domain}{'mem'} = $memk;
-      $domains{$domain}{'nettx'} = $nettxk;
-      $domains{$domain}{'netrx'} = $netrxk;
-      $domains{$domain}{'vbdrd'} = $vbdrd;
-      $domains{$domain}{'vbdwr'} = $vbdwr;
-    }
+  # We need the remaining data only for a normal run
+  if ($ARGV[0] eq "") {
+    $domains{$domain}{'cpusecs'} = $cpusecs;
+    $domains{$domain}{'mem'} = $memk;
+    $domains{$domain}{'nettx'} = $nettxk;
+    $domains{$domain}{'netrx'} = $netrxk;
+    $domains{$domain}{'vbdrd'} = $vbdrd;
+    $domains{$domain}{'vbdwr'} = $vbdwr;
   }
 }
 
@@ -157,16 +151,18 @@ foreach (@xentop) {
 #
 
 if ($ARGV[0] eq "config") {
-  print "multigraph xen_cpu\n";
-  print "graph_title Xen domains CPU usage\n";
-  print "graph_args --base 1000 -l 0 --upper-limit 100\n";
+  print "multigraph xen_cpu_time\n";
+  print "graph_title Xen domains CPU time\n";
+  print "graph_args --base 1000 -l 0\n";
   print "graph_vlabel %\n";
   print "graph_scale no\n";
   print "graph_category xen\n";
-  print "graph_info This graph shows CPU usage for each Xen domain.\n";
+  print "graph_info This graph shows CPU time for each Xen domain.\n";
   for $domain (sort(keys(%domains))) {
-    print "$domains{$domain}{'munindomain'}_cpu.label ".trim_label('pos',$domain)."\n";
-    print "$domains{$domain}{'munindomain'}_cpu.draw AREASTACK\n";
+    print "$domains{$domain}{'munindomain'}_cpu_time.label ".trim_label('pos',$domain)."\n";
+    print "$domains{$domain}{'munindomain'}_cpu_time.type COUNTER\n";
+    print "$domains{$domain}{'munindomain'}_cpu_time.cdef $domains{$domain}{'munindomain'}_cpu_time,100,*\n";
+    print "$domains{$domain}{'munindomain'}_cpu_time.draw AREASTACK\n";
   }
 
   print "\nmultigraph xen_mem\n";
@@ -223,9 +219,9 @@ if ($ARGV[0] eq "config") {
 # Normal run
 #
 
-print "multigraph xen_cpu\n";
+print "multigraph xen_cpu_time\n";
 for $domain (sort(keys(%domains))) {
-  print "$domains{$domain}{'munindomain'}_cpu.value $domains{$domain}{'cpupercent'}\n";
+  print "$domains{$domain}{'munindomain'}_cpu_time.value $domains{$domain}{'cpusecs'}\n";
 }
 
 print "\nmultigraph xen_mem\n";
