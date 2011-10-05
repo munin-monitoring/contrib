@@ -1,160 +1,122 @@
-#!/bin/bash
-#written by Matthew Ritchie
-#Monitor GPU statistics for single or muliple GPU boards
-EXEC=/usr/bin/nvidia-smi
+#!/usr/bin/perl
 
-if [ ! -f ${EXEC} ]
-then
-        echo "${EXEC} does not exist!  Bailing."
-fi
+#
+# Copyright and BSD license
+#
+# Copyright (c) 2011 NVIDIA Corporation
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms are permitted
+# provided that the above copyright notice and this paragraph are
+# duplicated in all such forms and that any documentation,
+# advertising materials, and other materials related to such
+# distribution and use acknowledge that the software was developed
+# by NVIDIA Corporation.  The name of the NVIDIA Corporation may not be
+# used to endorse or promote products derived from this software
+# without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
+# WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+#
 
-DRIVER_VERSION=`sed -n 1p /proc/driver/nvidia/version | awk '{print $8}' | awk -F. '{print $1}'`
-GPU_TOTAL=`${EXEC} -a | egrep ^GPU | sed -e "s/ //g" | sed -e "s/://g" | tr [:upper:] [:lower:]|wc -l`
-GPUSTART=0
+#
+# This script collects GPU information for use as a munin plugin
+# Inspired by Matthew Ritchie and Vadim Bulakh's nvidia_smi_ plugin
+#
 
-FUNCT_270() {
-for i in `${EXEC} -a | egrep ^GPU | sed -e "s/ //g" | sed -e "s/://g" | tr [:upper:] [:lower:]`
-do
-	NORMAL=1
-        GPU_ID=${i}
-        GPU_PROD=`${EXEC} -g ${GPUSTART} -q |grep "Product Name" |awk -F: '{print $2}'`
-        GPU_DRV=`${EXEC} -g 0 -q |grep "Driver Version" | awk '{print $4}'`
-        GPU_TEMP=`${EXEC} -g ${GPUSTART} -q |grep -A 1 "Temperature" |sed -n 2p |awk '{print $3}'i`
-        GPU_FANSPEED=`${EXEC} -g ${GPUSTART} -q |grep "Fan Speed" | awk '{print $4}' | awk -F% '{print $1}'`
-        GPU_UTIL=`${EXEC} -g ${GPUSTART} -q |grep -A 1 "Utilization" |sed -n 2p |awk '{print $3}'`
-        GPU_MEM_UTIL=`${EXEC} -g ${GPUSTART} -q |grep -A 2 "Utilization" | sed -n 3p |awk '{print $3}'`
-        if [ "$1" = "autoconf" ]
-        then
-                if [ "$GPU_TEMP" != "" ]
-                then
-                        echo yes
-                        exit 0
-                else
-                        echo no
-                        exit 1
-                fi
-        fi
-        if [ "$1" = "config" ]
-        then
-                echo "graph_title ${GPU_PROD}"
-                echo "graph_args --upper-limit 120 -l 0"
-                echo "graph_vlabel Percent or Degrees C"
-                echo "graph_category NVIDIA"
-                echo "graph_info This graph shows information about your ${GPU_PROD} graphics card ${GPUSTART} running driver version ${GPU_DRV}"
-                echo "GPU_UTIL_${GPUSTART}.label NVidia GPU utilization for GPU${GPUSTART}"
-                echo "GPU_FANSPEED_${GPUSTART}.label NVidia fan speed for GPU${GPUSTART}"
-                echo "GPU_MEM_UTIL_${GPUSTART}.label NVidia memory utilization for GPU${GPUSTART}"
-                echo "GPU_TEMP_${GPUSTART}.label NVidia temperature for GPU${GPUSTART}"
-		NORMAL=0
-		if [ ${GPU_TOTAL} == 1 ]
-		then
-			exit 0
-		fi
-        fi
-if [ ${NORMAL} == 1 ]
-then
-        echo "GPU_TEMP_${GPUSTART}.value ${GPU_TEMP}"
-        echo "GPU_FANSPEED_${GPUSTART}.value ${GPU_FANSPEED}"
-        echo "GPU_UTIL_${GPUSTART}.value ${GPU_UTIL}"
-        echo "GPU_MEM_UTIL_${GPUSTART}.value ${GPU_MEM_UTIL}"
-fi
-        GPUSTART=$((GPUSTART + 1))
-	GPU_TOTAL=$((GPU_TOTAL - 1))
-done
+#
+# This requires the NVML bindings and NVIDIA driver >= R270
+# $ sudo cpan install nvidia::ml
+# http://search.cpan.org/~nvbinding/nvidia-ml-pl/lib/nvidia/ml.pm
+#
+
+use strict;
+use nvidia::ml qw(:all);
+
+my $runType = "normal";
+my @runTypes = qw( normal config autoconf );
+if ($#ARGV + 1 == 1)
+{
+    if (grep $_ eq $ARGV[0], @runTypes) 
+    {
+        $runType = $ARGV[0];
+    }
+    else
+    {
+        print "Invalid arguement: $ARGV[0].\n";
+        print "Valid arguements: @runTypes.\n";
+        exit(1);
+    }
 }
 
-FUNCT_260() {
-for i in `${EXEC} -a | egrep ^GPU | sed -e "s/ //g" | sed -e "s/://g" | tr [:upper:] [:lower:]`
-do
-        NORMAL=1
-        GPU_ID=${i}
-        GPU_PROD=`${EXEC} -g ${GPUSTART} -q | grep "Product Name" |awk -F: '{print $2}'`
-        GPU_DRV=`${EXEC} -g 0 -q | grep "Driver Version" | awk '{print $4}'`
-        GPU_TEMP=`${EXEC} -g ${GPUSTART} -q | grep "Temperature" | awk '{print $3}'`
-        GPU_FANSPEED=`${EXEC} -g ${GPUSTART} -q | grep "Fan Speed" | awk '{print $4}' | awk -F% '{print $1}'`
-        GPU_UTIL=`${EXEC} -g ${GPUSTART} -q | grep "Utilization" | awk '{print $3}' | awk -F% '{print $1}'`
-        GPU_MEM_UTIL=`${EXEC} -g ${GPUSTART} -q | grep "Utilization" | awk '{print $3}' | awk -F% '{print $1}'`
-        if [ "$1" = "autoconf" ]
-        then
-                if [ "$GPU_TEMP" != "" ]
-                then
-                        echo yes
-                        exit 0
-                else
-                        echo no
-                        exit 1
-                fi
-        fi
-        if [ "$1" = "config" ]
-        then
-                echo "graph_title ${GPU_PROD}"
-                echo "graph_args --upper-limit 120 -l 0"
-                echo "graph_vlabel Percent or Degrees C"
-                echo "graph_category NVIDIA"
-                echo "graph_info This graph shows information about your ${GPU_PROD} graphics card ${GPUSTART} running driver version ${GPU_DRV}"
-                echo "GPU_UTIL_${GPUSTART}.label NVidia GPU utilization for GPU${GPUSTART}"
-                echo "GPU_FANSPEED_${GPUSTART}.label NVidia fan speed for GPU${GPUSTART}"
-                echo "GPU_MEM_UTIL_${GPUSTART}.label NVidia memory utilization for GPU${GPUSTART}"
-                echo "GPU_TEMP_${GPUSTART}.label NVidia temperature for GPU${GPUSTART}"
-                NORMAL=0
-                if [ ${GPU_TOTAL} == 1 ]
-                then
-                        exit 0
-                fi
-        fi
-if [ ${NORMAL} == 1 ]
-then
-        echo "GPU_TEMP_${GPUSTART}.value ${GPU_TEMP}"
-        echo "GPU_FANSPEED_${GPUSTART}.value ${GPU_FANSPEED}"
-        echo "GPU_UTIL_${GPUSTART}.value ${GPU_UTIL}"
-        echo "GPU_MEM_UTIL_${GPUSTART}.value ${GPU_MEM_UTIL}"
-fi
-        GPUSTART=$((GPUSTART + 1))
-        GPU_TOTAL=$((GPU_TOTAL - 1))
-done
+my $ret = nvmlInit();
+exit(1) unless $ret == $NVML_SUCCESS;
+
+($ret, my $gpuCount) = nvmlDeviceGetCount();
+exit(1) unless $ret == $NVML_SUCCESS;
+
+($ret, my $driverVersion) = nvmlSystemGetDriverVersion();
+$driverVersion = "Unknown" if $ret != $NVML_SUCCESS;
+
+for (my $i = 0; $i < $gpuCount; $i++)
+{
+    ($ret, my $handle) = nvmlDeviceGetHandleByIndex($i);
+    next if $ret != $NVML_SUCCESS;
+    
+    ($ret, my $pciInfo) = nvmlDeviceGetPciInfo($handle);
+    my $gpuName = $pciInfo->{'busId'} if $ret == $NVML_SUCCESS;
+    
+    if ($runType eq "config")
+    {
+        # only print the graph information once
+        if ($i == 0)
+        {
+            print "graph_title GPU\n";
+            print "graph_args --upper-limit 120 -l 0\n";
+            print "graph_vlabel Percent or Degrees C\n";
+            print "graph_category GPU Metrics\n";
+            print "graph_info Information for NVIDIA GPUs using driver version $driverVersion\n";
+        }
+        
+        # metrics are collected for all the GPUs to a single graph
+        print "GPU_UTIL_$i.label GPU$i - $gpuName : GPU utilization\n";
+        print "GPU_FANSPEED_$i.label GPU$i - $gpuName : fan speed\n";
+        print "GPU_MEM_UTIL_$i.label GPU$i - $gpuName : GPU memory utilization\n";
+        print "GPU_TEMP_$i.label GPU$i - $gpuName : GPU temperature\n";
+    }
+    elsif ($runType eq "autoconf")
+    {
+        print "yes\n";
+        exit(0);
+    }
+    else
+    {
+        ($ret, my $gpuTemp) = nvmlDeviceGetTemperature($handle,
+                                                       $NVML_TEMPERATURE_GPU);
+        $gpuTemp = "N/A" if $ret != $NVML_SUCCESS;
+
+        ($ret, my $gpuFanSpeed) = nvmlDeviceGetFanSpeed($handle);
+        $gpuFanSpeed = "N/A" if $ret != $NVML_SUCCESS;
+
+        ($ret, my $utilRates) = nvmlDeviceGetUtilizationRates($handle);
+        my $gpuUtil;
+        my $memUtil;
+        if ($ret == $NVML_SUCCESS)
+        {
+            $gpuUtil = $utilRates->{'gpu'};
+            $memUtil = $utilRates->{'memory'};
+        }
+        else
+        {
+            $gpuUtil = "N/A";
+            $memUtil = "N/A";
+        }
+
+        print "GPU_TEMP_$i.value $gpuTemp\n";
+        print "GPU_FANSPEED_$i.value $gpuFanSpeed\n";
+        print "GPU_UTIL_$i.value $gpuUtil\n";
+        print "GPU_MEM_UTIL_$i.value $memUtil\n";
+    }
 }
 
-FUNCT_195() {
-for i in `${EXEC} -a | egrep ^GPU | sed -e "s/ //g" | sed -e "s/://g" | tr [:upper:] [:lower:]`
-do
-        NORMAL=1
-        GPU_ID=${i}
-        GPU_PROD=`${EXEC} -g ${GPUSTART} -q | grep "Product Name" |awk -F: '{print $2}'`
-        GPU_DRV=`sed -n 1p /proc/driver/nvidia/version | awk '{print $8}'`
-        GPU_TEMP=`${EXEC} -g ${GPUSTART} -q | grep "Temperature" | awk '{print $3}'`
-        if [ "$1" = "autoconf" ]
-        then
-                if [ "$GPU_TEMP" != "" ]
-                then
-                        echo yes
-                        exit 0
-                else
-                        echo no
-                        exit 1
-                fi
-        fi
-        if [ "$1" = "config" ]
-        then
-                echo "graph_title ${GPU_PROD}"
-                echo "graph_args --upper-limit 120 -l 0"
-                echo "graph_vlabel Degrees C"
-                echo "graph_category NVIDIA"
-                echo "graph_info This graph shows information about your ${GPU_PROD} graphics card ${GPUSTART} running driver version ${GPU_DRV}"
-                echo "GPU_TEMP_${GPUSTART}.label NVidia temperature for GPU${GPUSTART}"
-                NORMAL=0
-                if [ ${GPU_TOTAL} == 1 ]
-                then
-                        exit 0
-                fi
-        fi
-if [ ${NORMAL} == 1 ]
-then
-        echo "GPU_TEMP_${GPUSTART}.value ${GPU_TEMP}"
-fi
-        GPUSTART=$((GPUSTART + 1))
-        GPU_TOTAL=$((GPU_TOTAL - 1))
-done
-}
-
-
-FUNCT_${DRIVER_VERSION} $1
