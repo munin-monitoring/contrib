@@ -1,0 +1,78 @@
+#!/bin/sh
+#
+# Plugin to monitor CPU usage, for a selected set of processes. Tested on Linux.
+#
+# Author: Stefan Osterlitz
+# Based on work of Erik Cederstrand
+#
+# Usage: Place in /usr/local/etc/munin/plugins/ (or link it there  using ln -s)
+#        Add this to your /ur/local/etc/munin/plugin-conf.d/plugins.conf:
+
+#       [process_*]
+#       env.procs httpd java
+#
+#    httpd and java being a list of the processes to monitor. You may use regex expressions for grep, but watch their conversion to field names.
+#		 ps options may vary.
+
+#
+# Parameters understood:
+#
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+#
+
+#%# family=auto
+#%# capabilities=autoconf
+
+
+
+if [ "$1" = "autoconf" ] ; then 
+    if [ -n "$procs" ] ; then
+        echo "yes"
+    else
+        echo "\$procs not defined."
+    fi
+    exit
+fi
+
+for proc in $procs; do
+    cproc=${proc//[^A-Za-z0-9_]/_}
+    cprocs+=" $cproc"
+done;
+
+if [ "$1" = "config" ] ; then
+    echo "graph_args --base 1000 -r --lower-limit 0";
+    echo "graph_title Process count";
+    echo "graph_category processes";
+    echo "graph_info This graph shows process count, for monitored processes.";
+        echo 'graph_vlabel number of processes'
+        echo 'graph_scale no'
+        echo 'graph_period second'
+		    echo "graph_order $cprocs"
+    
+    for proc in $procs; do  
+		cproc=${proc//[^A-Za-z0-9_]/_}
+        echo "${cproc}.label $proc"
+        echo "${cproc}.info CPU used by process $proc"
+     done ;
+    
+    exit
+fi
+
+for proc in $procs ; do {
+	cproc=${proc//[^A-Za-z0-9_]/_}
+	ps axo '%mem,comm,command' | grep -v grep | grep "$proc" | LC_ALL=us_US awk '
+	BEGIN { 
+	SUM=0 
+	}
+        { 
+        SUM+=1
+        COMM=$2
+        }
+        END {
+        print "'${cproc}'.value "SUM
+        }
+        '
+}
+
+done;
