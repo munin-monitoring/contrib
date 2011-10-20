@@ -19,6 +19,7 @@
 # 
 # v1.0 02/10/2011
 # v1.1 20/10/2011 - Prints OSError.strerror in verbose mode, uses rsplit instead of split for parsing femon output
+# v1.2 21/20/2011 - Uses subprocess.Popen instead of subprocess.check_output for compatibility with older python versions
 #
 # Copyright (c) 2011 Nicolas Knotzer.
 #
@@ -49,7 +50,7 @@ statefiledir='/var/lib/munin/plugin-state'
 
 import os, sys, string, subprocess
 from math import log
-plugin_version="1.1"
+plugin_version="1.2"
 
 def verboselog(s):
     global plugin_name
@@ -115,8 +116,9 @@ def print_dvb_adapter_values(dvb_adapter) :
     try :
         
         verboselog('Reading values from '+dvb_adapter[0])
-        femon_output=subprocess.check_output([os.getenv('femonpath','/usr/bin/femon'), '-H', '-c 1', '-a '+dvb_adapter[0].replace('adapter','')])
-        verboselog(femon_output)
+        mypipe = subprocess.Popen([os.getenv('femonpath','/usr/bin/femon'), '-H', '-c 1', '-a '+dvb_adapter[0].replace('adapter','')], stdout=subprocess.PIPE)
+        femon_output = mypipe.communicate()[0]        
+	verboselog(femon_output)
     except OSError, e:
         verboselog('Cannot access femon values! Check user rights or proper femon installation.')
         verboselog('Error: '+e.strerror)
@@ -259,7 +261,7 @@ B<munin-node-configure> use this to build the service links for this wildcard-pl
 
 =head1 VERSION
 
-Version 1.1
+Version 1.2
 
 =head1 BUGS
 
