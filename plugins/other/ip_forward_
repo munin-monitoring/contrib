@@ -1,0 +1,74 @@
+#!/bin/sh
+#
+# Wildcard-plugin to monitor forward traffic for network inretfaces through iptables. To monitor an
+# interface, link if_forward_<interface> to this file. E.g.
+#
+#    ln -s /usr/share/node/node/plugins-auto/if_forward_ /etc/munin/node.d/if_forward_eth0
+#
+# ...will monitor forwarded traffic trough eth0.
+#
+# Aditionally, you need these iptables rules as the first rules (they don't do anything, just make packet counts)
+#
+#    iptables -A FORWARD -i eth0
+#    iptables -A FORWARD -o eth0
+#
+# Furthermore, this plugin needs to be run as root for iptables to work
+#
+# This plugin is based on the if_ and ip_ plugin.
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+
+IF=`basename $0 | sed 's/^if_forward_//g'`
+
+if [ "$1" = "autoconf" ]; then
+	if [ -r /proc/net/dev ]; then
+		iptables-save -c >/dev/null 2>/dev/null
+		if [ $? -gt 0 ]; then
+			echo "no (could not run iptables-save as user `whoami`)"
+			exit 1
+		else
+			echo yes
+			exit 0
+		fi
+	else
+		echo "no (/proc/net/dev not found)"
+		exit 1
+	fi
+fi
+
+if [ "$1" = "suggest" ]; then
+	if [ -r /proc/net/dev ]; then
+		egrep '^ *(eth|wlan|ath|ra)[0-9]+:' /proc/net/dev | cut -f1 -d: | sed 's/ //g'
+		exit 0
+	else
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+
+        echo "graph_order out in"
+        echo "graph_title $IF forwarded traffic"
+        echo 'graph_args --base 1000'
+        echo 'graph_vlabel bits per ${graph_period}'
+	echo 'graph_category network'
+	echo "graph_info This graph shows only FORWARD traffic that pass trough the interface."
+        echo 'out.label sent'
+        echo 'out.type DERIVE'
+        echo 'out.min 0'
+        echo 'out.cdef out,8,*'
+        echo 'in.label received'
+        echo 'in.type DERIVE'
+        echo 'in.min 0'
+        echo 'in.cdef in,8,*' 
+        exit 0
+fi;
+
+iptables-save -c | grep $IF | grep i | cut -f2 -d':' | cut -f1 -d']' | awk "{ print \"in.value \" \$0 }"
+iptables-save -c | grep $IF | grep o | cut -f2 -d':' | cut -f1 -d']' | awk "{ print \"out.value \" \$0 }"
+

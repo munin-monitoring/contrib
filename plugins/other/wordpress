@@ -2,7 +2,8 @@
 # wordpress-munin plugin
 # 
 # Author Andre Darafarin
-# Version 0.1 05 Oct 2010
+# Improvements by Chris Bair
+# Version 0.2 15 Feb 2011
 #
 #
 : <<=cut
@@ -45,56 +46,48 @@ Add file plugin-conf.d/wordpress and fill like this
 
 =head1 VERSION
 
-0.1, Oct 05 2010
+0.2 15 Feb 2011
 
 =head1 AUTHOR
 
 Andre Darafarin, happypork.com
 =cut
 
-case $1 in
-   config)
-        cat <<'EOM'
-graph_title Wordpress average
-graph_order posts comments pingbacks users
-graph_vlabel Wordpress
-graph_info Some Statistics of Wordpress
-posts.label Posts
-posts.draw LINE3
-comments.label Comments
-pingbacks.label Pingbacks
-users.label Users
-EOM
-        exit 0;;
-esac
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title Wordpress average'
+	echo 'graph_order posts comments pingbacks users'
+	echo 'graph_vlabel Wordpress'
+	echo 'graph_info Some Statistics of Wordpress'
+	echo 'posts.label Posts'
+	echo 'posts.draw LINE3'
+	echo 'comments.label Comments'
+	echo 'pingbacks.label Pingbacks'
+	echo 'users.label Users'
+        exit 0
+fi
+
+POSTS=0
+COMMENTS=0
+PINGBACKS=0
+USERS=0
 
 # DBNAME=${logfile:-/var/log/syslog}
 
-POSTS=`mysql -h$DB_HOST  -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --execute="SELECT COUNT(*) FROM wp_posts WHERE post_status = 'publish' AND post_password = '' AND post_type = 'post';"`
-SHORTPOSTS="${POSTS:9}"
+POSTS=`mysql -h$DB_HOST  -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --column-names=0 -s --execute="SELECT COUNT(*) FROM wp_posts WHERE post_status = 'publish' AND post_password = '' AND post_type = 'post';"`
 
-COMMENTS=`mysql -h$DB_HOST -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --execute="SELECT COUNT(*) FROM wp_comments WHERE comment_approved = '1' AND comment_type = '';"`
-SHORTCOMMENTS="${COMMENTS:9}"
+COMMENTS=`mysql -h$DB_HOST -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --column-names=0 -s --execute="SELECT COUNT(*) FROM wp_comments WHERE comment_approved = '1' AND comment_type = '';"`
 
-PINGBACKS=`mysql -h$DB_HOST -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --execute="SELECT COUNT(*) FROM wp_comments WHERE comment_approved = '1' AND comment_type = 'pingback';"`
-SHORTPINGBACKS="${PINGBACKS:9}"
+PINGBACKS=`mysql -h$DB_HOST -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --column-names=0 -s --execute="SELECT COUNT(*) FROM wp_comments WHERE comment_approved = '1' AND comment_type = 'pingback';"`
 
-USERS=`mysql -h$DB_HOST -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --execute="SELECT COUNT(*) FROM wp_users ;"`
-SHORTUSERS="${USERS:9}"
+USERS=`mysql -h$DB_HOST -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --column-names=0 -s --execute="SELECT COUNT(*) FROM wp_users ;"`
 
 
 #AUSGABE BEREICH
-echo -n "posts.value $SHORTPOSTS
-"
-
-echo -n  "comments.value $SHORTCOMMENTS   
-"
-
-echo -n "pingbacks.value $SHORTPINGBACKS 
-"
-
-echo -n "users.value $SHORTUSERS
-"
+echo "posts.value $POSTS"
+echo "comments.value $COMMENTS"
+echo "pingbacks.value $PINGBACKS"
+echo "users.value $USERS"
 
 
 
