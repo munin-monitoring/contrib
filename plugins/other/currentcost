@@ -37,17 +37,18 @@ Time::Local
 
 This configuration section shows the defaults of the plugin:
 
-        [currentcost]
-        env.device		/dev/ttyUSB0
-        env.baud		2400
-        env.tick		6
-        env.currency		£
-        env.rate1		13.9
-        env.rate1qty		900
-        env.rate2		8.2
-        env.nightrate		0
-        env.nighthours		23:30-06:30
-        env.standingcharge	0.0
+    [currentcost]
+    env.device          /dev/ttyUSB0
+    env.baud            2400
+    env.tick            6
+    env.currency        £
+    env.rate1           13.9
+    nenv.rate1qty       900
+    env.rate2           8.2
+    env.nightrate       0
+    env.nighthours      23:30-06:30
+    env.standingcharge  0.0
+    env.metertype       CC128
 
 The configuration can be broken down into the following subsections:
 
@@ -101,12 +102,16 @@ The time period for which C<env.nightrate> applies. This should be of the form C
 
 The standing charge in hundreths of a C<env.currency> per month. If you do not have a standing charge, set this to 0.
 
+=item env.metertype
+
+The type of the meter. Currently "CC128" and "CC02" are supported.
+
 =back
 
 =head1 MAGIC MARKERS
 
- #%# family=manual contrib
- #%# capabilities=multigraph
+ #%# family=auto contrib
+ #%# capabilities=multigraph autoconf
 
 =head1 AUTHOR
 
@@ -118,24 +123,25 @@ use strict;
 use warnings;
 use utf8;
 use Munin::Plugin;
-use Data::Dump qw{pp};
 
 need_multigraph();
 
-my $device_node = $ENV{device} || "/dev/ttyUSB0";
-my $baud_rate   = $ENV{baud}   || "2400";           # or 9600 or 57600
-my $tick_rate   = $ENV{tick}   || "6";
-
+my $device_node    = $ENV{device}         || "/dev/ttyUSB0";
+my $baud_rate      = $ENV{baud}           || "2400";    # or 9600 or 57600
+my $tick_rate      = $ENV{tick}           || "6";
 # Tick_Rate is how long to consider data valid for (in seconds)
 
 # Costs
-my $currency  = $ENV{currency}  || "£";       # £ or €
-my $rate1     = $ENV{rate1}     || "13.9";    # in pence/cents
-my $rate1qty  = $ENV{rate1qty}  || "900";     # in kWh, 0 to use fixed rate2
-my $rate2     = $ENV{rate2}     || "8.2";     # in pence/cents
-my $nightrate = $ENV{nightrate} || "0";       # 0 = disabled
-my $nighthours = $ENV{nighthours} || "23:30-06:30";
-my $standingcharge = $ENV{standingcharge} || "0.0";    # pence/cents per month
+my $currency       = $ENV{currency}       || "£";       # £ or €
+my $rate1          = $ENV{rate1}          || "13.9";    # in pence/cents
+my $rate1qty       = $ENV{rate1qty}       || "900";     # in kWh, 0 to use fixed rate2
+my $rate2          = $ENV{rate2}          || "8.2";     # in pence/cents
+my $nightrate      = $ENV{nightrate}      || "0";       # 0 = disabled
+my $nighthours     = $ENV{nighthours}     || "23:30-06:30";
+my $standingcharge = $ENV{standingcharge} || "0.0";     # pence/cents per month
+my $metertype      = $ENV{metertype}      || "CC128";   # or "CC02"
+
+my $MUNIN_DEBUG    = $ENV{MUNIN_DEBUG}    || 0;         # Set by munin-run
 
 my $ret;
 if ( !eval "require XML::Simple;" ) {
@@ -168,6 +174,10 @@ sub save_data {
     if ( !@lastread
         or time >= Time::Local::timelocal(@lastread) + ($tick_rate) )
     {
+        print "# Saving Data (Data is "
+          . ( time - Time::Local::timelocal(@lastread) )
+          . " seconds old)\n"
+          if $MUNIN_DEBUG;
         @lastread = localtime(time);
 
         my @save_vector;
@@ -198,12 +208,27 @@ sub load_data {
     {
 
         # Data is stale
+        print "# Data is stale ("
+          . ( time - Time::Local::timelocal(@lastread) )
+          . " seconds). Re-reading device\n"
+          if $MUNIN_DEBUG;
+
         eval {
 
             # Fetch the XML
-            my @temparray = collect_cc128_data( $device_node, $baud_rate );
+            my @temparray;
+            if ( $metertype eq "CC128" ) {
+                @temparray = collect_cc128_data( $device_node, $baud_rate );
+            }
+            elsif ( $metertype eq "CC02" ) {
+                @temparray = collect_cc02_data( $device_node, $baud_rate );
+            }
+            else {
+                die "Unknown meter type $metertype.";
+            }
 
-       # Read the time so we know whether to reset daily/monthly/yearly counters
+            # Read the time so we know whether to reset
+            #  daily/monthly/yearly counters
             my @now = localtime(time);
             my %is_new;
             $is_new{daily}   = ( $now[3] != $lastread[3] ) ? 1 : 0;
@@ -222,6 +247,8 @@ sub load_data {
                             if ( $is_new{$period} ) {
 
                                 # Start of a new period, reset the counter
+                                print "# Start of a new $period period." .
+							          " Resetting counter\n" if $MUNIN_DEBUG;
                                 $temparray[$i]->{data}[$j]->{$period} = 0;
                             }
                             else {
@@ -266,9 +293,11 @@ sub is_night_rate {
     if (   $now_time >= $start_time
         or $now_time <= $stop_time )
     {
+        print "# Night rate is ACTIVE\n" if $MUNIN_DEBUG;
         return 1;
     }
     else {
+        print "# Night rate is enabled, but NOT active\n" if $MUNIN_DEBUG;
         return 0;
     }
 }
@@ -279,34 +308,34 @@ The device will periodically output a string of XML. The string will be all on o
 
 =head2 Classic format
 
-Note: I can't find an official spec for this format so, for now, this plugin doesn't support it.
+As per L<http://cumbers.wordpress.com/2008/05/07/breakdown-of-currentcost-xml-output/>:
 
  <msg>
     <date>
-        <dsb>00014</dsb> 
-        <hr>14</hr> 
+        <dsb>00014</dsb>        days since birth
+        <hr>14</hr>             the time
         <min>07</min> 
         <sec>07</sec> 
     </date>
     <src>
-        <name>CC02</name> 
-        <id>03280</id> 
-        <type>1</type> 
-        <sver>0.07</sver> 
+        <name>CC02</name>       name of this device
+        <id>03280</id>          communication channel for device
+        <type>1</type>          hardware version of the device
+        <sver>0.07</sver>       software version
     </src>
     <ch1>
-        <watts>00080</watts> 
+        <watts>00080</watts>    value from the first channel clamp
     </ch1>
     <ch2>
-        <watts>00000</watts> 
+        <watts>00000</watts>    value from the second channel clamp
     </ch2>
     <ch3>
-        <watts>00000</watts> 
+        <watts>00000</watts>    value from the third channel clamp
     </ch3>
-    <tmpr>28.8</tmpr> 
+    <tmpr>28.8</tmpr>           current temperature (degrees celsius)
     <hist>
         <hrs>
-            <h02>000.0</h02> 
+            <h02>000.0</h02>    total Kwh used in 2 hour blocks
             <h04>000.1</h04> 
             <h06>000.1</h06> 
             <h08>000.0</h08> 
@@ -321,7 +350,7 @@ Note: I can't find an official spec for this format so, for now, this plugin doe
             <h26>000.0</h26> 
         </hrs>
         <days>
-            <d01>0000</d01> 
+            <d01>0000</d01>     total Kwh used per day(s)
             <d02>0000</d02> 
             <d03>0000</d03> 
             <d04>0000</d04> 
@@ -354,7 +383,7 @@ Note: I can't find an official spec for this format so, for now, this plugin doe
             <d31>0000</d31> 
         </days>
         <mths>
-            <m01>0000</m01> 
+            <m01>0000</m01>     total Kwh used per month(s)
             <m02>0000</m02> 
             <m03>0000</m03> 
             <m04>0000</m04> 
@@ -368,7 +397,7 @@ Note: I can't find an official spec for this format so, for now, this plugin doe
             <m12>0000</m12> 
         </mths>
         <yrs>
-            <y1>0000000</y1> 
+            <y1>0000000</y1>    total Kwh used per year(s)
             <y2>0000000</y2> 
             <y3>0000000</y3> 
             <y4>0000000</y4> 
@@ -419,21 +448,74 @@ sub collect_cc128_data {
     my %seen_sensors;
 
     while (<$ttydev>) {
+        print "# Read from device: $_\n" if $MUNIN_DEBUG;
         if (m{(<msg>.*</msg>)}) {
             my $xmlref = XML::Simple::XMLin( $1, KeepRoot => 1 );
 
             my $sensor = $xmlref->{msg}->{sensor};
+            print "# Parsing Sensor $sensor\n" if $MUNIN_DEBUG;
             next unless defined $sensor;
             if ( defined $seen_sensors{$sensor} ) {
 
                 # We've seen this sensor before.
                 # Time to stop reading data
+                print "# Hello again, Sensor $sensor\n" if $MUNIN_DEBUG;
                 last;
             }
             $seen_sensors{$sensor} = 1;
 
             my $temphash;
             $temphash->{sensor} = $sensor;
+            $temphash->{temp}   = $xmlref->{msg}->{tmpr};
+            my @temparr;
+            foreach my $key ( keys %{ $xmlref->{msg} } ) {
+                if ( $key =~ /ch(\d+)/ ) {
+                    my $channel = $1;
+                    my $unit = ( keys %{ $xmlref->{msg}->{"ch$channel"} } )[0];
+                    my $val  = $xmlref->{msg}->{"ch$channel"}->{$unit};
+                    print "# Channel $channel, Unit $unit, Value $val\n"
+                      if $MUNIN_DEBUG;
+                    push @temparr,
+                      {
+                        "channel" => $channel,
+                        "unit"    => $unit,
+                        "value"   => $val
+                      };
+                }
+            }
+            $temphash->{data} = \@temparr;
+
+            push @cc_data_arr, $temphash;
+        }
+    }
+    close($ttydev);
+
+    return @cc_data_arr;
+}
+
+sub collect_cc02_data {
+    # Function supplied by David Edmondson <dme@dme.org>
+
+    # Read data from the serial port
+    my ( $port, $baud ) = @_;
+
+    my $tty = Device::SerialPort->new($port) || die "Can't open $port: $!";
+    $tty->baudrate($baud)   || die "Can't set serial baudrate";
+    $tty->parity("none")    || die "Can't set serial parity";
+    $tty->databits(8)       || die "Can't set serial databits";
+    $tty->handshake("none") || die "Can't set serial handshake";
+    $tty->write_settings    || die "Can't set serial parameters";
+
+    open( my $ttydev, "<", $port ) || die "Can't open $port: $?";
+
+    my @cc_data_arr;
+
+    while (<$ttydev>) {
+        if (m{(<msg>.*</msg>)}) {
+            my $xmlref = XML::Simple::XMLin( $1, KeepRoot => 1 );
+
+            my $temphash;
+            $temphash->{sensor} = 0;    # Only one sensor.
             $temphash->{temp}   = $xmlref->{msg}->{tmpr};
             my @temparr;
             foreach my $key ( keys %{ $xmlref->{msg} } ) {
@@ -452,6 +534,8 @@ sub collect_cc128_data {
             $temphash->{data} = \@temparr;
 
             push @cc_data_arr, $temphash;
+
+            last;
         }
     }
     close($ttydev);
@@ -475,7 +559,7 @@ if ( defined $ARGV[0] and $ARGV[0] eq 'config' ) {
             }
             elsif ( $unit != $key->{unit} ) {
                 print STDERR
-"Conflicting units ($unit and $key->{unit}) on sensor $datum->{sensor}";
+"# Conflicting units ($unit and $key->{unit}) on sensor $datum->{sensor}";
             }
         }
 
@@ -512,9 +596,10 @@ ${fieldname}_n.type GAUGE
 ${fieldname}_n.min 0
 ${fieldname}_t.cdef ${fieldname}_n,UN,${fieldname},${fieldname},IF,3600,TRENDNAN
 EOF
-                } else {
-		    print "${fieldname}_t.cdef ${fieldname},3600,TRENDNAN\n";
-		}
+                }
+                else {
+                    print "${fieldname}_t.cdef ${fieldname},3600,TRENDNAN\n";
+                }
             }
 
             # Output the Root cumulative graph
@@ -542,7 +627,7 @@ ${fieldname}_d.min 0
 EOF
             }
             print "\n$confstr";
-            print <<EOF; 
+            print <<EOF;
 fudge.label (fudge)
 fudge.type GAUGE
 fudge.graph yes
