@@ -45,7 +45,7 @@ Warnings are sent if your estimated allowance drops below 25% of your cap and if
 
 =head1 AUTHOR
 
-Paul Saunders L<darac@darac.org.uk>
+Paul Saunders L<darac+munin@darac.org.uk>
 
 =cut
 
@@ -55,13 +55,15 @@ use warnings;
 use lib $ENV{'MUNIN_LIBDIR'};
 use Munin::Plugin;
 use Data::Dump qw(pp);
+use Time::Local;
 
 my $ret = undef;
 
 # Load modules like so
 if ( !eval "require zenus;" ) {
     $ret =
-      "Could not load zenus. Get it from http://www.rachaelandtom.info/zenus";
+      "Could not load zenus. Get it from http://www.rachaelandtom.info/zenus\n";
+    $ret .= "(BTW, \@INC is: " . join( ', ', @INC ) . ")\n";
 }
 
 my $USER = $ENV{user};
@@ -178,24 +180,30 @@ if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
         print $ret;
         exit 1;
     }
-    my $data = load_data();
-    my $cap  = sprintf( "%.3f", $data->{avail} );
-    my $warn = sprintf( "%.3f", $cap * 0.25 );
-    my $crit = sprintf( "%.3f", $cap * 0.1 );
+    my $data    = load_data();
+    my $cap     = sprintf( "%.3f", $data->{avail} );
+    my $warn    = sprintf( "%.3f", $cap * 0.25 );
+    my $crit    = sprintf( "%.3f", $cap * 0.1 );
+    my $datestr = scalar( localtime($lastread) );
     print <<EOF;
 graph_args --base 1000
-graph_vlabel GBytes
+graph_vlabel GBytes out (-) / in (+)
 graph_category Network
 graph_title Zen Broadband Usage
 graph_info Usage of your Zen Broadband account: $data->{name}
-download.label Downloaded
-download.type GAUGE
-download.info Amount of data downloaded (Limit is $cap GB)
-download.draw AREA
 upload.label Uploaded
 upload.type GAUGE
 upload.info Amount of data uploaded (No upper limit)
 upload.draw AREA
+upload.graph no
+upload.colour 00CC00EE
+download.label Transfer
+download.type GAUGE
+download.info Amount of data downloaded (Limit is $cap GB)
+download.draw AREA
+download.extinfo Last Read was $datestr
+download.negative upload
+download.colour 00CC00EE
 allowance.label Allowance
 allowance.type GAUGE
 allowance.info Amount of data you are allowed to download this month
@@ -214,7 +222,7 @@ overrate.info Rate at which you're downloading beyond the sustainable rate
 overrate.draw LINE1
 overrate.min 0
 overrate.warning 0:
-graph_order download upload allowance remaining overrate
+#graph_order download upload allowance remaining overrate
 EOF
 
     save_data($data);
