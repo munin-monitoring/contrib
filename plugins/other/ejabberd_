@@ -39,8 +39,11 @@
 #%# family=auto
 #%# capabilities=autoconf suggest
 
+shopt -s extglob
+
 EJCTL=$(which ejabberdctl)
 EJVER=$($EJCTL status | awk '/^ejabberd / {print $2}')
+MUNIN_DEBUG=${MUNIN_DEBUG:-0}
 
 if [ "$1" == "autoconf" ]; then
         if [ -x $EJCTL > /dev/null ]; then
@@ -103,7 +106,7 @@ if [ -z "$vhosts" ]; then
 fi
 
 # get ejabberd PID
-if [[ ${EJVER%\.[0-9]} == 2.1 ]]; then
+if [[ ${EJVER%\.+([0-9]|[0-9][0-9])} == 2.1 ]]; then
     EJPID=$(cat /var/run/ejabberd/ejabberd.pid)
 else
     EJPID=$(ps -ef | awk '/\/bin\/beam.smp/ && !/awk/ {print $2}')
@@ -198,7 +201,7 @@ if [ "$1" = "config" ]; then
     exit 0
 fi
 
-if [[ ${EJVER%\.[0-9]} == 2.1 ]]; then
+if [[ ${EJVER%\.+([0-9]|[0-9][0-9])} == 2.1 ]]; then
     if [ "$MODE" == "users" ]; then
         for host in $vhosts; do
             formathost=$(echo $host | tr '.' '_')
@@ -238,7 +241,7 @@ if [[ ${EJVER%\.[0-9]} == 2.1 ]]; then
         echo "s2s_connections_out.value $($EJCTL outgoing_s2s_number)"
         echo "s2s_connections_in.value $($EJCTL incoming_s2s_number)"
     fi
-elif [[ ${EJVER%\.[0-9]} == 2.0 ]]; then
+elif [[ ${EJVER%\.+([0-9]|[0-9][0-9])} == 2.0 ]]; then
     if [ "$MODE" == "users" ]; then
         for host in $vhosts; do
             formathost=$(echo $host | tr '.' '_')
@@ -278,6 +281,8 @@ elif [[ ${EJVER%\.[0-9]} == 2.0 ]]; then
         echo "s2s_connections_out.value $($EJCTL outgoing-s2s-number)"
         echo "s2s_connections_in.value $($EJCTL incoming-s2s-number)"
     fi
+else
+   echo "# Unknown Ejabberd Version: $EJVER -> '${EJVER%\.+([0-9]|[0-9][0-9])}'"
 fi
 
 if [ "$MODE" == "memory" ]; then
