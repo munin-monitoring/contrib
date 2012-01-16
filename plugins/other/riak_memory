@@ -1,8 +1,19 @@
 #!/usr/bin/python
 
 
+# This is monitoring plugin for riak Developer's website: http://wiki.basho.com/Riak.html
+# sample config in /etc/munin/plugin-conf.d/riak
+#
+# [riak_*]
+# RIAK_URL=http://127.0.0.1:8091/stats
+# any questions to fygrave at o0o dot nu
+#
+# This plugin monitors memory allocation on each node.
+#
+
 import urllib2
 import sys
+import os
 
 try:
     import json
@@ -13,7 +24,7 @@ except ImportError:
 names = ["memory_total","memory_processes","memory_processes_used","memory_system","memory_atom","memory_atom_used","memory_binary","memory_code","memory_ets"]
 
 def getServerStatus():
-    raw = urllib2.urlopen( "http://127.0.0.1:8091/stats" ).read()
+    raw = urllib2.urlopen( os.environ.get('RIAK_URL', "http://127.0.0.1:8097/stats") ).read()
     return json.loads( raw )
 
 
@@ -31,9 +42,7 @@ def doConfig():
 
     for name in names:
         print name + ".label " + name
-        print name + ".min 0"
         print name + ".type GAUGE"
-        print name + ".max 500000"
         print name + "draw LINE1"
 
 
