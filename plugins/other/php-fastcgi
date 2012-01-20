@@ -6,9 +6,9 @@
 # php_fcgi --- Munin plugin for determining the memory usage and
 #              number of PHP FastCGI processes.
 
-# Copyright (C) 2010 António P. P. Almeida <appa@perusio.net>
+# Copyright (C) 2010 Antonio P. P. Almeida <appa@perusio.net>
 
-# Author: António P. P. Almeida <appa@perusio.net>
+# Author: Antonio P. P. Almeida <appa@perusio.net>
 
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -51,13 +51,21 @@ Any host running PHP FastCGI.
 
 1.0
 
+=head1 CONFIGURATION
+
+This shows the default configuration of this plugin.  You can override
+the process name of php-fcgi.
+
+  [php-fcgi]
+      env.pname php5-cgi
+
 =head1 BUGS
 
 None known
 
 =head1 AUTHOR
 
-António Almeida <appa@perusio.net>
+Antonio Almeida <appa@perusio.net>
 
 =head1 REPOSITORY
 
@@ -71,6 +79,11 @@ MIT
 
 ## Support for rounding functions.
 use POSIX;
+
+## Environment defined variables.
+## The default process name if different set it in the environment.
+
+my $PROCESS_NAME = exists $ENV{'pname'} ? $ENV{'pname'} : "php5-cgi";
 
 ## Munin config method.
 if (exists $ARGV[0] and $ARGV[0] eq "config") {
@@ -86,7 +99,7 @@ if (exists $ARGV[0] and $ARGV[0] eq "config") {
 
   exit 0;
 } else {
-  my ($pp, $pm) = eval(`ps u -p \$(pidof php-cgi) | awk 'NR > 1 {pm += \$5} END {print "("NR-1","pm/1024")"}'`);
+  my ($pp, $pm) = eval(`ps u -p \$(pidof $PROCESS_NAME) | awk 'NR > 1 {pm += \$5} END {print "("NR-1","pm/1024")"}'`);
   printf("php_cgi_ram.value %d\n", ceil($pm));
   print "php_cgi_processes.value $pp\n";
 }
