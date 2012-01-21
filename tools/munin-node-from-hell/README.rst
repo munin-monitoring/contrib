@@ -10,8 +10,8 @@ stuff we do at http://hostedmunin.com/ . Use it as you feel fit :)
 Current features controlled via config file:
 
 * Respond slowly or never to queries.
-* Have plugins that always are in warning or alarm.
-* Extensive number of plugins.
+* Have plugins that always are in warning or critical.
+* Extensive number of plugins runnint at once.
 * Run on multiple ports at the same time, to test huge amounts of clients.
 
 
