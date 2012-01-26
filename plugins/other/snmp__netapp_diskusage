@@ -1,0 +1,236 @@
+#!/usr/bin/perl
+# -*- perl -*-
+
+use strict;
+use warnings;
+use Munin::Plugin;
+use Munin::Plugin::SNMP;
+use vars qw($DEBUG);
+use Switch;
+need_multigraph();
+
+$DEBUG = $ENV{'MUNIN_DEBUG'};
+
+my %volbytes = (
+    df64TotalKBytes    => 'df64TotalKBytes',
+    df64UsedKBytes     => 'df64UsedKBytes',
+    df64SisSavedKBytes => 'df64SisSavedKBytes',
+);
+my %snapbytes = (
+    df64TotalKBytes => 'df64SnapShotTotalKBytes',
+    df64UsedKBytes  => 'df64SnapShotUsedKBytes',
+);
+
+my %config = (
+    df64TotalKBytes             => 'VolumeSize',
+    df64UsedKBytes              => 'Used',
+    df64SisSavedKBytes          => 'SisSaved',
+    df64SnapShotTotalKBytes     => 'SnapShotReserve',
+    df64SnapShotUsedKBytes      => 'SnapShotUsed',
+    df64TotalAndSnapTotalKBytes => 'Total',
+);
+
+if (defined $ARGV[0] and $ARGV[0] eq 'snmpconf') {
+    print "require 1.3.6.1.4.1.789.1.5.4.1.1. [0-9]\n";
+    exit 0;
+}
+
+my $snmpinfo;
+
+sub do_collect {
+    my $session = Munin::Plugin::SNMP->session();
+
+    $snmpinfo = $session->get_hash(
+     -baseoid => '1.3.6.1.4.1.789.1.5.4.1',
+      -cols    => {
+         1  => 'dfIndex',
+	 2  => 'dfFileSys',
+	29  => 'df64TotalKBytes',
+	30  => 'df64UsedKBytes',
+	31  => 'df64AvailKBytes',
+	33  => 'df64SisSavedKBytes',
+        },
+    );
+}
+
+sub do_config_aggr {
+    my ($host) = @_;
+
+    print "multigraph diskusage\n";
+    print "graph_title $host disk usage\n";
+    print "graph_args --base 1024 --lower-limit 0\n";
+    print "graph_vlabel bytes\n";
+    print "graph_category disk\n";
+    print "graph_info This graph shows the disk usage on NetApp host $host\n";
+    print "graph_order df64UsedKBytes df64SnapShotUsedKBytes df64SisSavedKBytes df64TotalKBytes df64SnapShotTotalKBytes df64TotalAndSnapTotalKBytes\n";
+
+    foreach my $k (sort keys %config) {
+        print "$k.info Diskusage of $config{$k}.\n";
+        print "$k.label $config{$k}\n";
+        print "$k.min 0\n";
+
+	switch ($k) {
+            case "df64TotalKBytes"  { 
+                print "$k.draw LINE3\n";
+            }
+            case "df64SnapShotTotalKBytes"  { 
+                print "$k.draw LINE0\n";
+            }
+            case "df64TotalAndSnapTotalKBytes"  { 
+                print "$k.draw LINE3\n";
+            }
+            else {
+                print "$k.draw AREASTACK\n";
+            }
+        }
+
+        print "$k.type GAUGE\n";
+        print "$k.cdef $k,1024,*\n"
+    }
+}
+
+sub do_config_vol {
+    my ($host,$version,$vol) = @_;
+    my $alias;
+    my $extrainfo = '';
+
+    ($alias = $snmpinfo->{$vol}->{dfFileSys}) =~ s/(\/vol\/)(.*?)\//$2/;
+
+    print "multigraph diskusage.$vol\n";
+    print "graph_title $host disk usage on $alias\n";
+    print "graph_args --base 1024 --lower-limit 0\n";
+    print "graph_vlabel bytes\n";
+    print "graph_category disk\n";
+    print "graph_info This graph shows the disk usage for $alias on NetApp host $host\n";
+    print "graph_order df64UsedKBytes df64SnapShotUsedKBytes df64SisSavedKBytes df64TotalKBytes df64SnapShotTotalKBytes df64TotalAndSnapTotalKBytes \n";
+
+    foreach my $k (sort keys %config ) {
+        print "$k.info $config{$k} of Volume $alias.\n";
+        print "$k.label $config{$k}\n";
+        print "$k.min 0\n";
+
+	switch ($k) {
+            case "df64TotalKBytes"  { 
+                print "$k.draw LINE3\n";
+            }
+            case "df64SnapShotTotalKBytes"  { 
+                print "$k.draw LINE0\n";
+            }
+            case "df64TotalAndSnapTotalKBytes"  { 
+                print "$k.draw LINE3\n";
+            }
+            else {
+                print "$k.draw AREASTACK\n";
+            }
+        }
+
+        print "$k.type GAUGE\n";
+        print "$k.cdef $k,1024,*\n"
+    }
+}
+
+
+sub do_fetch_aggr {
+#aggr is $vol=1
+    my $vol = 1;
+    my $volsnap = 2;
+    my $sum = 0;
+    my $v = 'U';
+
+    print "multigraph diskusage\n";
+
+    foreach my $k (keys %snapbytes) {
+
+        if ( $k eq "df64TotalKBytes" ) {
+            $sum += $snmpinfo->{$volsnap}->{$k};
+            $v = $snmpinfo->{$volsnap}->{$k};
+        } else {
+            $v = $snmpinfo->{$volsnap}->{$k};
+        }
+        print "$snapbytes{$k}.value $v\n";
+    }
+
+    foreach my $k (keys %volbytes) {
+
+        if ( $k eq "df64TotalKBytes" ) {
+            $sum += $snmpinfo->{$vol}->{$k};
+            $v = $snmpinfo->{$vol}->{$k};
+            print "df64TotalAndSnapTotalKBytes.value $sum\n";
+        } else {
+            $v = $snmpinfo->{$vol}->{$k};
+        }
+        print "$volbytes{$k}.value $v\n";
+    }
+}
+
+sub do_fetch_vol {
+    
+    my ($vol) = @_;
+    my $sum = 0;
+    my $index = 'U';
+    my $v = 'U';
+
+    $index = $snmpinfo->{$vol}->{dfIndex};
+    print "multigraph diskusage.$vol\n";
+
+    foreach my $k (keys %snapbytes) {
+        if ( $k eq "df64TotalKBytes" ) {
+            $sum += $snmpinfo->{$index+1}->{$k};
+            $v = $snmpinfo->{$index+1}->{$k};
+        } else {
+            $v = $snmpinfo->{$index+1}->{$k};
+        }
+        print "$snapbytes{$k}.value $v\n";
+    }
+
+    foreach my $k (keys %volbytes) {
+
+        if ( $k eq "df64TotalKBytes" ) {
+            $sum += $snmpinfo->{$vol}->{$k};
+            $v = $snmpinfo->{$vol}->{$k};
+            print "df64TotalAndSnapTotalKBytes.value $sum\n";
+        } else {
+            $v = $snmpinfo->{$vol}->{$k};
+        }
+        print "$volbytes{$k}.value $v\n";
+    }
+}
+
+sub do_config {
+
+    $volbytes{'df64SnapShotUsedKBytes'} = 'df64SnapShotUsedKBytes';
+
+    my ($host,undef,$version) = Munin::Plugin::SNMP->config_session();
+
+    print "host_name $host\n" unless $host eq 'localhost';
+
+    foreach my $vol (sort {$a <=> $b} keys %{$snmpinfo}) {
+        if ( $vol % 2 && $vol !=1 ) {
+            do_config_vol($host,$version,$vol);
+        }
+    }
+    do_config_aggr($host);
+}
+
+sub do_fetch {
+
+    foreach my $vol (sort  keys %{$snmpinfo}) {
+        if ( $vol % 2 && $vol != 1 ) {
+            do_fetch_vol($vol);
+       }
+    }
+    do_fetch_aggr();
+}
+
+do_collect();
+
+if ($ARGV[0] and $ARGV[0] eq "config") {
+    do_config();
+    exit 0;
+}
+
+do_fetch();
+
+exit 0;
+
+__END__
