@@ -6,14 +6,27 @@ Wildcard plugin to monitor Apache Tomcat connectors and/or JBoss' JVM.
 To use this plugin:
 1. Set site, username and password variables before you do anything else.
 2. Run plugin with suggest argument to get all the available options.
-3. Copy plugin to munin plugions folder and make it executable.
-3. Create symbolic links based on output from step 2. Examples:
+3. Copy plugin to munin plugins folder and make it executable.
+4. Create symbolic links based on output from step 2. Examples:
     tomcat_jvm - monitor JVM usage
     tomcat_ajp-127.0.0.1-8009 - monitor ajp connector
     tomcat_http-127.0.0.1-8080 - monitor http connector
-4. Check links by running them.
-5. Restart munin-node.
-6. Enjoy graphs.
+5. Check links by running them.
+6. Restart munin-node.
+7. Enjoy graphs.
+
+Munin's muni-node-configure can be used to do steps 2, 3 and 4 for you.
+
+Example of using munin-node configuration to configure the plugin:
+
+[tomcat_jvm]
+    env.site http://127.0.0.1:8080/status?XML=true
+    env.username admin
+    env.password admin
+
+Magic markers
+#%# capabilities=autoconf suggest
+#%# family=auto
 '''
 
 import urllib2
@@ -25,6 +38,16 @@ import sys, os, re
 site = 'http://127.0.0.1:8080/status?XML=true'
 username = 'admin'
 password = 'admin'
+
+# Or do it with the environment variables in munin-node configuration.
+if os.environ.has_key('site'):
+    site = os.environ['site']
+
+if os.environ.has_key('username'):
+    username = os.environ['username']
+
+if os.environ.has_key('password'):
+    password = os.environ['password']
 
 # Timeout for urlopen.
 required_version = (2, 6)
@@ -54,12 +77,11 @@ def site_auth():
     request = urllib2.Request(url=site, headers={"Authorization": "Basic %s" % enc_string})
     try:
         if current_version >= required_version:
-            return urllib2.urlopen(request, timeout=5).read()
+            return (0, urllib2.urlopen(request, timeout=5).read())
         else:
-            return urllib2.urlopen(request).read()
+            return (0, urllib2.urlopen(request).read())
     except:
-        print "Failed to access %s ... please check the configuration." % (site)
-        sys.exit(1)
+        return (-1, "Failed to access %s" % site)
 
 def jvm_data(data):
     document = data.documentElement
@@ -117,16 +139,24 @@ def configure():
             print "%s.info %s %s count" % (attr, ctx, attr)
 
 if __name__ == "__main__":
-    data = xml.dom.minidom.parseString(site_auth())
+    status, data = site_auth()
     if len(sys.argv) == 2 and sys.argv[1] == 'config':
         configure()
         sys.exit(0)
 
-    if len(sys.argv) == 2 and sys.argv[1] == 'suggest':
-        suggest(data)
+    elif len(sys.argv) == 2 and sys.argv[1] == 'suggest':
+        suggest(xml.dom.minidom.parseString(data))
         sys.exit(0)
 
-    if ctx == 'jvm':
-        jvm_data(data)
+    elif len(sys.argv) == 2 and sys.argv[1] == 'autoconf':
+        if status == 0:
+            print "yes"
+        else:
+            print "no (%s)" % data
+        sys.exit(0)
+
     else:
-        connector_data(data, ctx)
+        if ctx == 'jvm':
+            jvm_data(xml.dom.minidom.parseString(data))
+        else:
+            connector_data(xml.dom.minidom.parseString(data), ctx)
