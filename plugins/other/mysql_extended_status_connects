@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# mysql_extended_status --- Mysql extended connect
+# Copyright © 2010 Sebastien Gross <seb•ɑƬ•chezwam•ɖɵʈ•org>
+# Last changed: 2012-01-27 18:16:18
+
+# This program is free software. It comes without any warranty, to
+# the extent permitted by applicable law. You can redistribute it
+# and/or modify it under the terms of the Do What The Fuck You Want
+# To Public License, Version 2, as published by Sam Hocevar. See
+# http://sam.zoy.org/wtfpl/COPYING for more details.
+
+VERSION="1.0"
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+MYSQLOPTS="$mysqlopts"
+MYSQLADMIN=${mysqladmin:-mysqladmin}
+
+if [ "$1" = "autoconf" ]; then
+        $MYSQLADMIN --version 2>/dev/null >/dev/null
+        if [ $? -eq 0 ]
+        then
+                $MYSQLADMIN $MYSQLOPTS status 2>/dev/null >/dev/null
+                if [ $? -eq 0 ]
+                then
+                        echo yes
+                        exit 0
+                else
+                        echo "no (could not connect to mysql)"
+                fi
+        else
+                echo "no (mysqladmin not found)"
+        fi
+        exit 1
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title MySQL extended connects'
+	echo 'graph_vlabel extended connects'
+	echo 'graph_category mysql'
+	echo 'Connections.label mysql Connections'
+	echo 'Connections.type DERIVE'
+	echo 'Connections.draw AREA'
+	echo 'Aborted_clients.label mysql Aborted_clients'
+	echo 'Aborted_clients.type DERIVE'
+	echo 'Aborded_clients.draw STACK'
+	echo 'Aborted_connects.label mysql Aborted_connects'
+	echo 'Aborted_connects.type DERIVE'
+	echo 'Aborded_connects.draw STACK'
+	echo 'graph_args --base 1000'
+	exit 0
+fi
+
+$MYSQLADMIN $MYSQLOPTS extended-status | awk '{
+ if($2~/Aborted_clients|Aborted_connects|Connections/){
+    print $2".value", $4
+  }
+}'
+
