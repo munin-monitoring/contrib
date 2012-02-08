@@ -1,0 +1,223 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+
+use strict;
+use warnings;
+use Munin::Plugin;
+#use Data::Dumper;
+
+need_multigraph();
+
+my $filesystems;
+my $zpool;
+
+my $properties = {
+  available           =>  "Read-only property that identifies the amount of disk"
+                         ." space available to a file system and all its children,"
+                         ." assuming no other activity in the pool. Because disk"
+                         ." space is shared within a pool, available space can be"
+                         ." limited by various factors including physical pool size,"
+                         ." quotas, reservations, and other datasets within the"
+                         ." pool.",
+
+  quota               =>  "Limits the amount of disk space a file system and its"
+                         ." descendents can consume. This property enforces a"
+                         ." hard limit on the amount of disk space used, including"
+                         ." all space consumed by descendents, such as file systems"
+                         ." and snapshots. Setting a quota on a descendent of a file"
+                         ." system that already has a quota does not override the"
+                         ." ancestor's quota, but rather imposes an additional"
+                         ." limit. Quotas cannot be set on volumes, as the volsize"
+                         ." property acts as an implicit quota.",
+
+  referenced          =>  "Read-only property that identifies the amount of data"
+                         ." accessible by a dataset, which might or might not be"
+                         ." shared with other datasets in the pool."
+                         ." When a snapshot or clone is created, it initially"
+                         ." references the same amount of disk space as the file"
+                         ." system or snapshot it was created from, because its"
+                         ." contents are identical.",
+
+  refquota            =>  "Sets the amount of disk space that a dataset can"
+                         ." consume. This property enforces a hard limit on the"
+                         ." amount of space used. This hard limit does not include"
+                         ." disk space used by descendents, such as snapshots and"
+                         ." clones.",
+
+  refreservation      =>  "Sets the minimum amount of disk space that is"
+                         ." guaranteed to a dataset, not including descendents,"
+                         ." such as snapshots and clones. When the amount of disk"
+                         ." space used is below this value, the dataset is treated as if"
+                         ." it were taking up the amount of space specified by"
+                         ." refreservation. The refreservation reservation is"
+                         ." accounted for in the parent dataset's disk space used,"
+                         ." and counts against the parent dataset's quotas and"
+                         ." reservations."
+                         ." If refreservation is set, a snapshot is only allowed if"
+                         ." enough free pool space is available outside of this"
+                         ." reservation to accommodate the current number of"
+                         ." referenced bytes in the dataset.",
+
+  reservation         => "Sets the minimum amount of disk space guaranteed to"
+                         ." a file system and its descendents. When the amount of"
+                         ." disk space used is below this value, the file system is"
+                         ." treated as if it were using the amount of space specified"
+                         ." by its reservation. Reservations are accounted for in the"
+                         ." parent file system's disk space used, and count against"
+                         ." the parent file system's quotas and reservations.",
+
+  type                =>  "Read-only property that identifies the dataset type as"
+                         ." filesystem (file system or clone), volume, or"
+                	     ." snapshot.",
+
+  used                =>  "Read-only property that identifies the amount of disk"
+                         ." space consumed by a dataset and all its descendents.",
+
+  usedbychildren      =>  "Read-only property that identifies the amount of disk"
+                         ." space that is used by children of this dataset, which"
+                         ." would be freed if all the dataset's children were"
+                         ." destroyed. The property abbreviation is usedchild.",
+
+  usedbydataset       =>  "Read-only property that identifies the amount of disk"
+                         ." space that is used by a dataset itself, which would be"
+                         ." freed if the dataset was destroyed, after first destroying"
+                         ." any snapshots and removing any refreservation"
+                         ." reservations. The property abbreviation is usedds.",
+
+  usedbyrefreservation=>  "Read-only property that identifies the amount of disk"
+                         ." space that is used by a refreservation set on a dataset,"
+                         ." which would be freed if the refreservation was"
+                         ." removed.",
+
+  usedbysnapshots     =>  "Read-only property that identifies the amount of disk"
+                         ." space that is consumed by snapshots of a dataset. In"
+                         ." particular, it is the amount of disk space that would be"
+                         ." freed if all of this dataset's snapshots were destroyed."
+                         ." Note that this value is not simply the sum of the"
+                         ." snapshots' used properties, because space can be"
+                         ." shared by multiple snapshots.",
+  volsize             =>  "For volumes, specifies the logical size of the volume.",
+};
+
+my @order = (
+"usedbydataset",
+"usedbysnapshots",
+"usedbyrefreservation",
+"usedbychildren",
+"available",
+"quota",
+"refquota",
+"referenced",
+"reservation",
+"refreservation",
+"used",
+"volsize",
+);
+
+if ($0 =~ /zfs_usage_(.+)*$/) {
+    $zpool = $1;
+}
+die ("Can't run without a symlinked name\n") if $0 =~ /zfs_usage_$/;
+
+sub do_collect {
+
+    my $fslist;
+    $fslist=(`zfs list -H -r -o name $zpool`);
+
+    my $fsget;
+    my @params = join(',',( keys %{$properties} ));
+
+    $fsget="zfs get -H -p @params";
+
+    foreach my $fsname (split(/\n/,$fslist)) {
+	    foreach my $line (split(/\n/, `$fsget $fsname` )) {
+	        my ($name, $key, $value, undef ) = (split(/\t/,$line));
+            ($name =~ s/\//_/g);
+            $filesystems->{$name}->{$key}=$value;
+        }
+    }
+}
+
+
+sub do_config_fs {
+    my ($fs) = @_;
+    my $fs_slash = ($fs);
+    ($fs_slash =~ s/_/\//g);
+
+    if ( $fs ne $zpool ) {
+        print "multigraph zfs_usage.$fs\n";
+        print "graph_title ZFS usage for $filesystems->{$fs}->{type} $fs_slash\n";
+        print "graph_info This graph shows used bytes of $filesystems->{$fs}->{type} $fs_slash\n";
+    } else {
+        print "multigraph zfs_usage\n";
+        print "graph_title ZFS usage for zpool $zpool\n";
+        print "graph_info This graph shows used bytes of zpool $zpool\n";
+    }
+    print "graph_args --base 1024 --lower-limit 0 --rigid\n";    
+    print "graph_vlabel bytes \n";
+    print "graph_category filesystem\n";
+    print "graph_order @order\n";
+    
+    foreach my $key ( keys %{$filesystems->{$fs}}) {
+        if ( $key ne "type" ) {
+            if ( $filesystems->{$fs}->{type} eq "volume" && $key =~ /quota/ ) {
+            } elsif ($filesystems->{$fs}->{type} eq "filesystem" && $key eq "volsize") {
+            } else {
+                print "$key.label $key\n";
+                print "$key.min 0\n";
+                print "$key.type GAUGE\n";
+                print "$key.info $properties->{$key}\n";
+                if ( $key =~ /quota|referenced|^(ref)*reservation|^used$|volsize/ ) {
+                    print "$key.draw LINE3\n";
+                } else {
+                    print "$key.draw AREASTACK\n";
+                }
+            }
+        }
+    }
+}
+
+
+sub do_fetch_fs {
+    my ($fs) = @_;
+
+    if ( $fs ne $zpool ) {
+        print "multigraph zfs_usage.$fs\n";
+    } else {
+        print "multigraph zfs_usage\n";
+    }
+
+    foreach my $key ( keys %{$filesystems->{$fs}}) {
+        if ( $key ne "type" ) {
+            if ( $filesystems->{$fs}->{type} eq "volume" && $key =~ /quota/ ) {
+            } elsif ($filesystems->{$fs}->{type} eq "filesystem" && $key eq "volsize") {
+            } else {
+                print "$key.value $filesystems->{$fs}->{$key}\n";
+            }
+        }
+    }
+}
+
+sub do_config {
+
+    foreach my $fs ( sort keys %{$filesystems}) {
+        do_config_fs($fs);
+    }
+}
+
+
+sub do_fetch {
+
+    foreach my $fs ( sort keys %{$filesystems}) {
+        do_fetch_fs($fs);
+    }
+}
+
+do_collect();
+
+if ($ARGV[0] and $ARGV[0] eq "config") {
+    do_config();
+    exit 0;
+}
+
+do_fetch();
