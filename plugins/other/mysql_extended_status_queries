@@ -1,0 +1,85 @@
+#!/bin/bash
+
+# mysql_extended_status --- Mysql extended status 
+# Copyright © 2010 Sebastien Gross <seb•ɑƬ•chezwam•ɖɵʈ•org>
+# Last changed: 2012-01-27 18:16:40
+
+# This program is free software. It comes without any warranty, to
+# the extent permitted by applicable law. You can redistribute it
+# and/or modify it under the terms of the Do What The Fuck You Want
+# To Public License, Version 2, as published by Sam Hocevar. See
+# http://sam.zoy.org/wtfpl/COPYING for more details.
+
+VERSION="1.0"
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+MYSQLOPTS="$mysqlopts"
+MYSQLADMIN=${mysqladmin:-mysqladmin}
+
+if [ "$1" = "autoconf" ]; then
+        $MYSQLADMIN --version 2>/dev/null >/dev/null
+        if [ $? -eq 0 ]
+        then
+                $MYSQLADMIN $MYSQLOPTS status 2>/dev/null >/dev/null
+                if [ $? -eq 0 ]
+                then
+                        echo yes
+                        exit 0
+                else
+                        echo "no (could not connect to mysql)"
+                fi
+        else
+                echo "no (mysqladmin not found)"
+        fi
+        exit 1
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title MySQL extended queries'
+	echo 'graph_vlabel extended queries'
+	echo 'graph_category mysql'
+
+
+	echo 'Com_delete.label mysql Com_delete/s'
+	echo 'Com_delete.type DERIVE'
+	echo 'Com_delete.draw AREA'
+
+	echo 'Com_delete_multi.label mysql Com_delete_multi/s'
+	echo 'Com_delete_multi.type DERIVE'
+	echo 'Com_delete_multi.draw STACK'
+
+	echo 'Com_insert.label mysql Com_insert/s'
+	echo 'Com_insert.type DERIVE'
+	echo 'Com_insert.draw STACK'
+	echo 'Com_insert_select.label mysql Com_insert_select/s'
+	echo 'Com_insert_select.type DERIVE'
+	echo 'Com_insert_select.draw STACK'
+
+
+	echo 'Com_update.label mysql Com_update/s'
+	echo 'Com_update.type DERIVE'
+	echo 'Com_update.draw STACK'
+
+	echo 'Com_update_multi.label mysql Com_update_multi/s'
+	echo 'Com_update_multi.type DERIVE'
+	echo 'Com_update_multi.draw STACK'
+
+	echo 'Queries.label mysql Queries/s'
+	echo 'Queries.type DERIVE'
+	echo 'Queries.draw LINE2'
+	echo 'Questions.label mysql Questions/s'
+	echo 'Questions.type DERIVE'
+	echo 'Questions.draw LINE2'
+
+	echo 'graph_args --base 1000'
+	exit 0
+fi
+
+$MYSQLADMIN $MYSQLOPTS extended-status | awk '{
+ if($2~/Queries|Questions|Com_delete|Com_update|Com_insert/){
+    print $2".value", $4
+  }
+}'
+

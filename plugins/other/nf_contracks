@@ -1,0 +1,127 @@
+#!/bin/bash
+
+# nf_contracks --- netfilter conntrack.
+# Copyright © 2010 Sebastien Gross <seb•ɑƬ•chezwam•ɖɵʈ•org>
+# Last changed: 2012-01-27 18:18:48
+
+# This program is free software. It comes without any warranty, to
+# the extent permitted by applicable law. You can redistribute it
+# and/or modify it under the terms of the Do What The Fuck You Want
+# To Public License, Version 2, as published by Sam Hocevar. See
+# http://sam.zoy.org/wtfpl/COPYING for more details.
+
+VERSION="1.0"
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title Netfilter conntrack'
+	echo 'graph_vlabel Connections'
+	echo 'graph_category network'
+#echo 'acct.label acct'
+#echo 'acct.type GAUGE'
+#echo 'acct.draw AREA'
+	echo 'buckets.label buckets'
+	echo 'buckets.type GAUGE'
+	echo 'buckets.draw AREA'
+#echo 'checksum.label checksum'
+#echo 'checksum.type GAUGE'
+#echo 'checksum.draw STACK'
+	echo 'count.label count'
+	echo 'count.type GAUGE'
+	echo 'count.draw STACK'
+#echo 'events.label events'
+#echo 'events.type GAUGE'
+#echo 'events.draw STACK'
+#echo 'events_retry_timeout.label events_retry_timeout'
+#echo 'events_retry_timeout.type GAUGE'
+#echo 'events_retry_timeout.draw STACK'
+#echo 'expect_max.label expect_max'
+#echo 'expect_max.type GAUGE'
+#echo 'expect_max.draw STACK'
+#echo 'generic_timeout.label generic_timeout'
+#echo 'generic_timeout.type GAUGE'
+#echo 'generic_timeout.draw STACK'
+#echo 'icmp_timeout.label icmp_timeout'
+#echo 'icmp_timeout.type GAUGE'
+#echo 'icmp_timeout.draw STACK'
+#echo 'log_invalid.label log_invalid'
+#echo 'log_invalid.type GAUGE'
+#echo 'log_invalid.draw STACK'
+#echo 'tcp_be_liberal.label tcp_be_liberal'
+#echo 'tcp_be_liberal.type GAUGE'
+#echo 'tcp_be_liberal.draw STACK'
+#echo 'tcp_loose.label tcp_loose'
+#echo 'tcp_loose.type GAUGE'
+#echo 'tcp_loose.draw STACK'
+#echo 'tcp_max_retrans.label tcp_max_retrans'
+#echo 'tcp_max_retrans.type GAUGE'
+#echo 'tcp_max_retrans.draw STACK'
+#echo 'tcp_timeout_close.label tcp_timeout_close'
+#echo 'tcp_timeout_close.type GAUGE'
+#echo 'tcp_timeout_close.draw STACK'
+#echo 'tcp_timeout_close_wait.label tcp_timeout_close_wait'
+#echo 'tcp_timeout_close_wait.type GAUGE'
+#echo 'tcp_timeout_close_wait.draw STACK'
+#echo 'tcp_timeout_established.label tcp_timeout_established'
+#echo 'tcp_timeout_established.type GAUGE'
+#echo 'tcp_timeout_established.draw LINE1'
+#echo 'tcp_timeout_fin_wait.label tcp_timeout_fin_wait'
+#echo 'tcp_timeout_fin_wait.type GAUGE'
+#echo 'tcp_timeout_fin_wait.draw STACK'
+#echo 'tcp_timeout_last_ack.label tcp_timeout_last_ack'
+#echo 'tcp_timeout_last_ack.type GAUGE'
+#echo 'tcp_timeout_last_ack.draw STACK'
+#echo 'tcp_timeout_max_retrans.label tcp_timeout_max_retrans'
+#echo 'tcp_timeout_max_retrans.type GAUGE'
+#echo 'tcp_timeout_max_retrans.draw STACK'
+#echo 'tcp_timeout_syn_recv.label tcp_timeout_syn_recv'
+#echo 'tcp_timeout_syn_recv.type GAUGE'
+#echo 'tcp_timeout_syn_recv.draw STACK'
+#echo 'tcp_timeout_syn_sent.label tcp_timeout_syn_sent'
+#echo 'tcp_timeout_syn_sent.type GAUGE'
+#echo 'tcp_timeout_syn_sent.draw STACK'
+#echo 'tcp_timeout_time_wait.label tcp_timeout_time_wait'
+#echo 'tcp_timeout_time_wait.type GAUGE'
+#echo 'tcp_timeout_time_wait.draw STACK'
+#echo 'tcp_timeout_unacknowledged.label tcp_timeout_unacknowledged'
+#echo 'tcp_timeout_unacknowledged.type GAUGE'
+#echo 'tcp_timeout_unacknowledged.draw STACK'
+#echo 'udp_timeout.label udp_timeout'
+#echo 'udp_timeout.type GAUGE'
+#echo 'udp_timeout.draw STACK'
+#echo 'udp_timeout_stream.label udp_timeout_stream'
+#echo 'udp_timeout_stream.type GAUGE'
+#echo 'udp_timeout_stream.draw STACK'
+	echo 'max.label max'
+	echo 'max.type GAUGE'
+	echo 'max.draw LINE2'
+	echo 'tracked.label tracked'
+	echo 'tracked.type GAUGE'
+	echo 'tracked.draw LINE'
+
+	echo 'tracked_tcp.label tracked tcp'
+	echo 'tracked_tcp.type GAUGE'
+	echo 'tracked_tcp.draw LINE'
+	echo 'tracked_udp.label tracked udp'
+	echo 'tracked_udp.type GAUGE'
+	echo 'tracked_udp.draw LINE'
+	echo 'graph_args --base 1000'
+	exit 0
+fi
+
+udp=$(grep -c -F udp /proc/net/nf_conntrack)
+tcp=$(grep -c -F tcp /proc/net/nf_conntrack)
+all=$(($tcp + $udp))
+
+cat <<EOF
+tracked.value $all
+tracked_udp.value $udp
+tracked_tcp.value $tcp
+EOF
+
+cd /proc/sys/net/netfilter/
+grep . nf_conntrack_{count,max,buckets} | sed 's/nf_conntrack_//; s/:/.value /'
+
