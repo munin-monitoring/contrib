@@ -10,8 +10,8 @@ stuff we do at http://hostedmunin.com/ . Use it as you feel fit :)
 Current features controlled via config file:
 
 * Respond slowly or never to queries.
-* Have plugins that always are in warning or alarm.
-* Extensive number of plugins.
+* Have plugins that always are in warning or critical.
+* Extensive number of plugins running at once.
 * Run on multiple ports at the same time, to test huge amounts of clients.
 
 
@@ -21,8 +21,8 @@ Usage
 munin-node-from-hell takes two arguments; the mode and which config file to
 use. Mode is either --run or --muninconf.
 
-This software is meant to run as an ordinary unix user, please don't run
-it as root without some thought.
+This software is meant to run as an ordinary Unix user, please don't run
+it as root.
 
 You probably want:
 
