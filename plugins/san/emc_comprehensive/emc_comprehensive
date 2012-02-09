@@ -1,0 +1,325 @@
+#! /usr/bin/perl
+
+use strict;
+use warnings;
+
+use IO::File;
+use Data::Dumper;
+use POSIX qw(strftime);
+
+$ENV{LANG} = "C";
+
+my $spool_fetch_epoch = (shift || 0);
+
+# Don't reply for too old $spool_fetch_epoch)
+# Max 7 days
+$spool_fetch_epoch = time - 3600 * 24 * 7 if $spool_fetch_epoch < time - 3600 * 24 * 7;
+
+my $max_epoch = ($ENV{MAX_EPOCH} || 0);
+my %fieldset;
+
+my @files = sort glob($ENV{FILES} || "*.tsv*");
+FILE: for my $file (@files) {
+	my $values = {};
+	my $nb_epochs = 0; my $first_epoch;
+
+	# Read file
+	{
+		# Skipping if the file is too old
+		# (more that one day older than asked)
+		next if file_mtime($file) < $spool_fetch_epoch - (3600 *24);
+
+		print STDERR "opening $file\n" if $ENV{DEBUG};
+		my $fh = new IO::File( ($file =~ m/\.gz$/) ? "gunzip < $file |" : $file);
+		next unless $fh;
+
+		$_ = <$fh>; chomp;
+		my @headers = split(/\t/);
+
+		# Ignore 3 first fields (Object Name, Epoch & Owner Array Name)
+		shift @headers; shift @headers; shift @headers;
+
+		my $nb_headers = $#headers;
+		LINE: while(<$fh>) {
+			chomp;
+			my @row = split(/\t/, $_);
+			my $object_name = shift @row;
+			my $epoch = shift @row;
+			my $owner_array_name = shift @row;
+			
+			# Ignore if too old
+			next if ($epoch <= $spool_fetch_epoch);
+
+			# Don't do too much work : 4h each time is enough
+			$first_epoch ||= $epoch;
+			next if $epoch > $first_epoch + 60 * 60 * 4;
+			
+
+			# Store Values
+			for (my $idx = 0; $idx < $nb_headers; $idx ++) {
+				my $value = $row[$idx];
+				my $field_name = $headers[$idx];
+
+				# Ignore empty values
+				next unless (defined $value && $value ne "");
+
+				# Ignore non numeric values
+				next unless $value =~ m/^[0-9.]+$/;
+
+				# Ignore Optimal/NonOptimal valuse
+				next unless ($fieldset{$field_name} || $field_name !~ /[oO]ptimal/);
+				$fieldset{$field_name} = 1 unless $fieldset{$field_name};
+
+				if ($ENV{DEBUG}) {
+					no warnings;
+					print "object_name:$object_name, field_name:$field_name, epoch:$epoch, value:$value\n";
+				}
+
+
+				$values->{$object_name}->{$field_name} .= "$epoch:$value ";
+				$nb_epochs ++;
+			}
+		}
+	}
+
+	# Don't emit anything if the file didn't contain any useful value
+	next unless $nb_epochs;
+
+	# Restitution MultiGraph
+		print <<EOF
+multigraph san
+graph_title Vue globale
+graph_order \
+	cpu_sp_a=san.cpu.sp_a \
+	cpu_sp_b=san.cpu.sp_b 
+EOF
+		;
+	# CPU
+	my @object_names = keys %$values;
+	gen_multigraph( 
+		$values, 
+		"cpu",
+		[  grep { /^SP / } @object_names ],
+	);
+
+	# DISK
+	gen_multigraph( 
+		$values,
+		"disk",
+		[  grep { /^Bus \d+/ } @object_names ],
+	);
+
+	# Port
+	gen_multigraph( 
+		$values,
+		"port",
+		[  grep { /^Port / } @object_names ],
+		#sub { return $1 if shift =~ m/^(Port \w+)/ },
+	);
+
+	# Pool
+	gen_multigraph( 
+		$values,
+		"pool",
+		[  grep { /^Pool / } @object_names ],
+	);
+
+	# LUN Global
+		print <<EOF
+multigraph san.lun
+graph_title Luns Global
+graph_order \
+	cpu_sp_a=san.cpu.sp_a \
+	cpu_sp_b=san.cpu.sp_b 
+EOF
+;
+	# LUN Per Host
+	my %host_seen;
+	my @hosts = grep { $_ ne "" } grep { ! $host_seen{$_}++ } 
+			map { $1 if /^\w+ \[\d+; (\w+)/ } @object_names;
+	for my $host (@hosts) {
+		my $host_field = $host;
+		$host_field =~ tr/./_/;
+		gen_multigraph( 
+			$values,
+			"lun.$host_field",
+			[  grep { /^\w+ \[\d+; $host/ } @object_names ],
+			sub { return $1 if shift =~ m/^(\w+) / },
+			sub { return $1 if shift =~ m/^(\w+) / },
+		);
+	}
+
+	# Never send more than 1 file
+	last;
+}
+
+sub gen_multigraph 
+{
+	my ($values, $category, $object_names, $convert_to_label, $convert_to_field) = @_;
+
+	# convert_to_label() reverts to identity if not defined
+	$convert_to_label ||= sub { return $_[0]; };
+	# convert_to_field() reverts to convert_to_label() if not defined
+	$convert_to_field ||= $convert_to_label;
+
+#	print Dumper($object_names);
+	# Global Graph
+	print <<EOF
+multigraph san.$category
+graph_title $category Global
+graph_order \
+	cpu_sp_a=san.cpu.sp_a \
+	cpu_sp_b=san.cpu.sp_b 
+EOF
+;
+
+	my @fields = keys %{ $values->{$object_names->[0]} };
+	for my $field (@fields) {
+		my $graph_name = hash_field_name($field);
+		print "multigraph san.$category.$graph_name\n";
+		print "graph_title $field\n";
+
+		for my $object_name (@$object_names) {
+			my $label = &$convert_to_label($object_name);
+			my $field_name = hash_field_name(&$convert_to_field($object_name));
+			print "$field_name.label $label\n";
+			print "$field_name.info $object_name\n";
+			for my $value (split(/ /, $values->{$object_name}->{$field})) {
+				print $field_name , ".value " , $value , "\n";
+			}
+		}
+	}
+}
+
+sub hash_field_name 
+{
+	my $name = shift;
+	$name = lc($name);
+	$name =~ s/[^a-z0-9]+/_/g;
+	$name =~ s/^_//;
+	$name =~ s/_$//;
+	return $name;
+}
+
+sub trim
+{
+	my $line = shift;
+	$line =~ s/^ +//;
+	$line =~ s/ +$//;
+	return $line;
+}
+
+sub file_mtime
+{
+	my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size, $atime,$mtime,$ctime,$blksize,$blocks) = stat(shift);
+	return $mtime;	
+}
+
+__DATA__
+
+sb
+
+
+multigraph san.cpu
+graph_title Usage CPU
+cpu_sp_a.value $epoch:$cpu_sp_a
+cpu_sp_b.value $epoch:$cpu_sp_b
+multigraph san.resptime
+graph_title Response Time
+resp_time_a.value $epoch:$resp_time_a
+resp_time_b.value $epoch:$resp_time_b
+multigraph san.iops
+graph_title IOPS
+read_io_a.value $epoch:$read_io_a
+write_io_a.value $epoch:$write_io_a
+read_io_b.value $epoch:$read_io_b
+write_io_b.value $epoch:$write_io_b
+multigraph san.io
+graph_title IO
+read_mb_a.value $epoch:$read_mb_a
+write_mb_a.value $epoch:$write_mb_a
+read_mb_b.value $epoch:$read_mb_b
+write_mb_b.value $epoch:$write_mb_b
+multigraph san.cache
+graph_title Cache
+cache_mb_flush_a.value $epoch:$cache_mb_flush_a
+write_cache_mb_flush_a.value $epoch:$write_cache_mb_flush_a
+cache_mb_flush_b.value $epoch:$cache_mb_flush_b
+write_cache_mb_flush_b.value $epoch:$write_cache_mb_flush_b
+EOF
+;
+	}
+}
+
+print ".\n";
+
+my %MONTHS = get_months();
+sub convert_to_epoch 
+{
+	# converts "05/12/2011 03:57" to EPOCH
+	my ($date, $time) = split(/ /);
+	my ($mday, $mon, $year) = split(/\//, $date);
+	my ($hour, $min, $sec) = split(/:/, $time);
+	$sec ||= 0;
+
+	use Time::Local;
+	$mon = $MONTHS{lc($mon)} unless $mon =~ m/\d+/;
+	my $epoch = timelocal($sec,$min,$hour,$mday,$mon-1,$year);
+	return $epoch;
+}
+
+sub get_months {
+	return (
+		"jan" => 0,
+		"fev" => 1,
+		"mar" => 2,
+		"apr" => 3,
+		"may" => 4,
+		"jun" => 5,
+		"jul" => 6,
+		"aug" => 7,
+		"sep" => 8,
+		"oct" => 9,
+		"nov" => 10,
+		"dec" => 11,
+	);
+}
+
+sub trim {
+	shift;
+	s/^\s+//;
+	s/\s+$//;
+	return $_;
+}
+
+__DATA__
+
+05/12/2011 03:57
+
+
+	print <<EOF
+multigraph san
+graph_title Vue globale
+graph_order \
+	cpu_sp_a=san.cpu.cpu_sp_a \
+	cpu_sp_b=san.cpu.cpu_sp_b 
+multigraph san.cpu
+graph_title Utilization (%)
+cpu_sp_a.label Utilization (%) for SP A
+cpu_sp_b.label Utilization (%) for SP B
+cpu_sp_a.value $values->{"SP A"}->{"Utilization (%)"}
+cpu_sp_b.value $values->{"SP B"}->{"Utilization (%)"}
+multigraph san.bw
+graph_title Total Bandwidth (MB/s)
+iops_a.label Total Throughput (IO/s) for SP A
+iops_b.label Total Throughput (IO/s) for SP B
+iops_a.value $values->{"SP A"}->{"Total Throughput (IO/s)"}
+iops_b.value $values->{"SP B"}->{"Total Throughput (IO/s)"}
+multigraph san.iops
+graph_title Total Throughput (IO/s)
+iops_a.label Total Throughput (IO/s) for SP A
+iops_b.label Total Throughput (IO/s) for SP B
+iops_a.value $values->{"SP A"}->{"Total Throughput (IO/s)"}
+iops_b.value $values->{"SP B"}->{"Total Throughput (IO/s)"}
+EOF
+;
