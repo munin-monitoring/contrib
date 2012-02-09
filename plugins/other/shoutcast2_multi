@@ -17,6 +17,10 @@
  port = port we need to connect to in order to get to admin.cgi
  pass = password to use to authenticate as admin user
 
+=head1 AUTHOR
+
+ Matt West < https://github.com/mhwest13 >
+
 =head1 License
 
  GPLv2
@@ -139,8 +143,20 @@ main();
 
 exit;
 
+=head1 Subroutines
+
+ The following is a description of what each subroutine is for and does
+
+=head2 main
+
+ This subroutine is our main routine should we not be calling up autoconf
+ or config. Ultimately this routine will print out the values for each graph
+ and graph data point we are tracking.
+
+=cut
+
 sub main {
-	my ($returnBit,$adminRef) = fetch_admin_data($ua,$host,$port);
+	my ($returnBit,$adminRef) = fetch_admin_data();
 	if ($returnBit == 0) {
 		exit;
 	}
@@ -168,6 +184,16 @@ sub main {
 	return;
 }
 
+=head2 print_active_data
+
+ Thie subroutine prints out the active graph values for each stream and ultimately for
+ the entire shoutcast service. Should 1 Stream be active, but 5 streams available,
+ the global graph should show the state as active for the service, but clicking into
+ that graph, should give you a stream level view of which stream was in use during
+ what time periods.
+
+=cut
+
 sub print_active_data {
 	my ($sidDataRef) = (@_);
 	my $globalActive = 0;
@@ -186,6 +212,15 @@ sub print_active_data {
 	}
 	return;
 }
+
+=head2 print_listener_data
+
+ This subroutine prints out the listener graph values for each stream and ultimately
+ adds all of the current users together to show that against the maxserver count in 
+ the global graph. Clicking on the global graph will reveal a bit more information
+ about the users on a stream by stream basis.
+
+=cut
 
 sub print_listener_data {
 	my ($maxListeners,$sidDataRef) = (@_);
@@ -210,8 +245,18 @@ sub print_listener_data {
 	return;
 }
 
+=head2 config
+
+ The config subroutine can be seen as the main config routine, which
+ will call up to your shoutcast server to figure out how many streams
+ you have running, and then print out the appropriate multigraph info.
+ Ultimately this subroutine will call two more routines to print out
+ the graph args / configuration information.
+
+=cut
+
 sub config {
-	my ($returnBit,$adminRef) = fetch_admin_data($ua,$host,$port);
+	my ($returnBit,$adminRef) = fetch_admin_data();
 	if ($returnBit == 0) {
 		# $adminRef returned a string, we'll just print it out.
 		print "no (error response: $adminRef)\n";
@@ -240,6 +285,15 @@ sub config {
 	print_listener_config($sidDataRef);
 	return;	
 }
+
+=head2 print_active_config
+
+ This subroutine prints out the graph information for our active graphs.
+ It prints the sub-multigraphs first based on stream id, and finally the
+ root active graph. Its not suggested that you mess with this routine
+ unless you fully understand what its doing and how munin graph_args work.
+
+=cut
 
 sub print_active_config {
 	my ($sidDataRef) = (@_);
@@ -276,6 +330,15 @@ sub print_active_config {
 	return;
 }
 
+=head2 print_listener_config
+
+ This subroutine prints out the graph information for our listeners graphs.
+ It prints the sub-multigraphs first based on stream id, and finally the
+ root listeners graph. Its not suggested that you mess with this routine
+ unless you fully understand what its doing and how munin graph_args work.
+
+=cut
+
 sub print_listener_config {
 	my ($sidDataRef) = (@_);
 	foreach my $sid (sort keys %{$sidDataRef}) {
@@ -311,8 +374,17 @@ sub print_listener_config {
 	return;
 }
 
+=head2 check_autoconf
+
+ This subroutine is called up when we intercept autoconf specified in ARGV[0]
+ If we are able to connect to the shoutcast service as admin and fetch the main
+ admin stats page, we will return ok, otherwise we will return no and the error
+ response we got from LWP::UserAgent.
+
+=cut
+
 sub check_autoconf {
-	my ($returnBit,$adminRef) = fetch_admin_data($ua,$host,$port);
+	my ($returnBit,$adminRef) = fetch_admin_data();
 	if ($returnBit == 0) {
 		# $adminRef returned a string, we'll just print it out.
 		print "no (error response: $adminRef)\n";
@@ -321,6 +393,15 @@ sub check_autoconf {
 	}
 	return;
 }
+
+=head2 fetch_sid_data
+
+ This subroutine is called up to fetch information on a per stream mentality.
+ If we are able to connect to the shoutcast service and get the stats we will
+ return 1 and a hashref of the de-coded xml information, otherwise we return 0
+ so that we know that we have failed and can handle it gracefully.
+
+=cut
 
 sub fetch_sid_data {
 	my ($sid) = (@_);
@@ -333,6 +414,16 @@ sub fetch_sid_data {
 		return (0, $response->status_line);
 	}
 }
+
+=head2 fetch_admin_data
+
+ This subroutine is called up to fetch information from the admin page to get stream ids.
+ This subroutine is also used to test that we can connect to the shoutcast service
+ and if not we can fail gracefully. If we are able to connect to the shoutcast service
+ and get the stats we will return 1 and a hashref of the de-coded xml information,
+ otherwise we return 0 so that we know that we have failed and can handle it gracefully.
+
+=cut
 
 sub fetch_admin_data {
 	my $url = 'http://'.$host.':'.$port.'/admin.cgi?sid=1&mode=viewxml&page=6';
