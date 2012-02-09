@@ -32,6 +32,7 @@ use strict;
 use warnings;
 use LWP::UserAgent;
 use XML::Simple;
+use Data::Dumper;
 use Munin::Plugin;
 
 need_multigraph();
@@ -146,12 +147,22 @@ sub main {
 	}
 	my $streamConfigRef = $adminRef->{STREAMCONFIGS}->{STREAMCONFIG};
 	my $sidDataRef;
-	foreach my $sid (keys %{$streamConfigRef}) {
+	if ($adminRef->{STREAMCONFIGS}->{TOTALCONFIGS} == 1) {
+		my $sid = $streamConfigRef->{id};
 		my ($return,$tmpSidRef) = fetch_sid_data($sid);
 		if ($return == 0) {
-			next;
+			# Only one stream, and we didn't get a good response.
+			exit;
 		}
 		$sidDataRef->{$sid} = $tmpSidRef;
+	} else {
+		foreach my $sid (keys %{$streamConfigRef}) {
+			my ($return,$tmpSidRef) = fetch_sid_data($sid);
+			if ($return == 0) {
+				next;
+			}
+			$sidDataRef->{$sid} = $tmpSidRef;
+		}
 	}
 	print_active_data($sidDataRef);
 	print_listener_data($adminRef->{STREAMCONFIGS}->{SERVERMAXLISTENERS}, $sidDataRef);
@@ -209,12 +220,22 @@ sub config {
 	}
 	my $streamConfigRef = $adminRef->{STREAMCONFIGS}->{STREAMCONFIG};
 	my $sidDataRef;
-	foreach my $sid (keys %{$streamConfigRef}) {
+	if ($adminRef->{STREAMCONFIGS}->{TOTALCONFIGS} == 1) {
+		my $sid = $streamConfigRef->{id};
 		my ($return,$tmpSidRef) = fetch_sid_data($sid);
 		if ($return == 0) {
-			next;
+			# Only one stream, and we didn't get a good response.
+			exit;
 		}
 		$sidDataRef->{$sid} = $tmpSidRef;
+	} else {
+		foreach my $sid (keys %{$streamConfigRef}) {
+			my ($return,$tmpSidRef) = fetch_sid_data($sid);
+			if ($return == 0) {
+				next;
+			}
+			$sidDataRef->{$sid} = $tmpSidRef;
+		}
 	}
 	print_active_config($sidDataRef);
 	print_listener_config($sidDataRef);
@@ -244,7 +265,7 @@ sub print_active_config {
 	print "graph_title ".$graphsRef->{active}->{config}->{title}."\n";
 	print "graph_args ".$graphsRef->{active}->{config}->{args}."\n";
 	print "graph_vlabel ".$graphsRef->{active}->{config}->{vlabel}."\n";
-	print "graph_category".$graphsRef->{active}->{config}->{category}."\n";
+	print "graph_category ".$graphsRef->{active}->{config}->{category}."\n";
 	print "graph_info ".$graphsRef->{active}->{config}->{info}."\n";
 	# Print the Data Value Info
 	foreach my $dsrc (@{$graphsRef->{active}->{datasrc}}) {
@@ -279,7 +300,7 @@ sub print_listener_config {
 	print "graph_title ".$graphsRef->{listeners}->{config}->{title}."\n";
 	print "graph_args ".$graphsRef->{listeners}->{config}->{args}."\n";
 	print "graph_vlabel ".$graphsRef->{listeners}->{config}->{vlabel}."\n";
-	print "graph_category".$graphsRef->{listeners}->{config}->{category}."\n";
+	print "graph_category ".$graphsRef->{listeners}->{config}->{category}."\n";
 	print "graph_info ".$graphsRef->{listeners}->{config}->{info}."\n";
 	# Print the Data Value Info
 	foreach my $dsrc (@{$graphsRef->{listeners}->{datasrc}}) {
