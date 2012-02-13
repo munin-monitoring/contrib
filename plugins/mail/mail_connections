@@ -1,0 +1,48 @@
+#!/bin/sh
+#
+# Plugin to count the open connections for smtp, pop3 and imap
+#
+# Magic markers - optional - used by installation scripts and
+# munin-config:
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+PORTS="25 smtp SMTP
+	110 pop3 POP3
+	143 imap IMAP
+	465 ssmtp SMTP-SSL
+	587 submission SMTP (submission)
+	993 imaps IMAP-SSL
+	995 pop3s POP3-SSL"
+
+if [ "$1" = "autoconf" ]; then
+	ports=$(echo "$PORTS" | cut -f 1 -d " ")
+	for port in $ports; do
+		netstat -ln | grep -q ":$port " && echo "yes" && exit 0
+	 done
+	# no open connections for typical mail ports found
+        echo "no (no listeners for smtp/pop3/imap ports found)"
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+	cat <<EOT
+graph_title Open mail server connections
+graph_args --base 1000 -l 0 
+graph_vlabel connections per second
+graph_category Mail
+EOT
+	echo "$PORTS" | while read port field label; do
+		echo "${field}.label $label"
+		echo "${field}.type DERIVE"
+		echo "${field}.min 0"
+	 done
+	exit 0
+fi
+
+echo "$PORTS" | while read port field label; do
+	echo -n "${field}.value "
+	netstat -n | grep ":$port " | wc -l
+ done
+

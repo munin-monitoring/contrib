@@ -6,9 +6,16 @@ use warnings;
 
 use Cache::Memcached;
 
+$0 =~ /memcached_requests_(\d+_\d+_\d+_\d+)_(\d+)$/;
+my ($ip, $port) = ($1, $2);
+$ip =~ s/_/./g;
+my $address = "$ip:$port";
+
+my $title = $ENV{title} || $address;
+
 my $cmd = shift || '';
 if ($cmd eq 'config') {
-	print "graph_title Memcached requests\n";
+	print "graph_title Memcached requests -- $title\n";
 	print "graph_args --base 1000 -l 0\n";
 	print "graph_vlabel requests\n";
 	print "graph_category memcached\n";
@@ -25,11 +32,6 @@ if ($cmd eq 'config') {
 	print "sets.draw STACK\n";
 	exit 0;
 }
-
-$0 =~ /memcached_requests_(\d+_\d+_\d+_\d+)_(\d+)$/;
-my ($ip, $port) = ($1, $2);
-$ip =~ s/_/./g;
-my $address = "$ip:$port";
 
 my $memd = new Cache::Memcached { 'servers' => [$address] };
 my $memstats = $memd->stats(['misc']);

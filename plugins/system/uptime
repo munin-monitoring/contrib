@@ -1,0 +1,50 @@
+#!/bin/sh
+#
+# Plugin to get system uptime and kernel age
+#
+# Magic markers - optional - used by installation scripts and
+# munin-config:
+#
+#%# family=manual
+#%# capabilities=autoconf
+
+if [ "$1" = "autoconf" ]; then
+        echo "yes"
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+        cat <<EOT
+graph_title Uptime
+graph_args --base 1000 -l 0
+graph_vlabel days
+graph_category System
+compile.label kernel age
+compile.type GAUGE
+compile.min 0
+compile.max 1000
+compile.draw AREA
+uptime.label uptime
+uptime.type GAUGE
+uptime.min 0
+uptime.max 1000
+uptime.draw AREA
+EOT
+        exit 0
+fi
+
+LANG=C
+(
+  /bin/date -j +'%s'
+  /bin/date -jf '%a %b %d %T %Z %Y' \
+    "`/sbin/sysctl kern.version | /usr/bin/sed -Ee '2,9d;s/^kern.version: [^:]+: //'`" +'%s'
+  /sbin/sysctl kern.boottime | /usr/bin/sed -Ee 's/.* sec = ([0-9+].*)\,.*/\1/'
+) | /usr/bin/awk '
+BEGIN {
+  getline; now=$0;
+  getline; compile=$0
+  getline; boot=$0;
+  printf "compile.value %.3f\n", (now-compile)/86400
+  printf "uptime.value %.3f\n", (now-boot)/86400
+}'

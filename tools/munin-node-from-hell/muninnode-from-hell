@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# .- coding: utf-8 -.
 #
 # Artificial munin node that behaves in all the ways you would like
 # ordinary nodes _not_ to behave.
@@ -84,25 +85,90 @@ class tarpit(MuninPlugin):
 modules["tarpit"] = tarpit()
 
 class always_warning(MuninPlugin):
+    conftext = """graph_title Always in LEVEL
+graph_vlabel Level
+graph_scale no
+graph_info A simple graph that is always in LEVEL
+graph_category always_LEVEL
+generic.label Level
+generic.info Level usually above warning level
+generic.warning 5
+generic.critical 10"""
+
     def fetch(self, conf):
         return "generic.value 10"
 
     def config(self, conf):
-        return """graph_title Always in warning
-graph_vlabel Level
-graph_scale no
-graph_info A simple graph that is always in warning or alarm
-graph_category active_notification
-generic.label Level
-generic.info Level usually above warning level
-generic.warn 5
-generic.crit 10"""
+        return self.conftext.replace("LEVEL","warning")
 modules["always_warning"] = always_warning()
 
-class always_alarm(always_warning):
+class always_critical(always_warning):
     def fetch(self, conf):
         return "generic.value 20"
-modules["always_alarm"] = always_alarm()
+
+    def config(self, conf):
+        return self.conftext.replace("LEVEL","critical")
+modules["always_critical"] = always_critical()
+
+class graph_area(MuninPlugin):
+    "A plugin that uses STACK and AREA. From proc_pri. Use: testing the grapher"
+    def fetch(self, conf):
+        return """high.value 3
+low.value 2
+locked.value 1"""
+
+    def config(self, conf):
+        return """graph_title AREA and STACK
+graph_order low high locked
+graph_category graphtest
+graph_info This graph shows nuber of processes at each priority
+graph_args --base 1000 -l 0
+graph_vlabel Number of processes
+high.label high priority
+high.draw STACK
+high.info The number of high-priority processes (tasks)
+low.label low priority
+low.draw AREA
+low.info The number of low-priority processes (tasks)
+locked.label locked in memory
+locked.draw STACK
+locked.info The number of processes that have pages locked into memory (for real-time and custom IO)
+"""
+modules["graph_area"] = graph_area()
+
+class utf8_graphcat(MuninPlugin):
+    "A plugin with a graph category which has UTF-8 in it"
+    def fetch(self, conf):
+        load = open("/proc/loadavg", "r").read()
+        load, rest = load.split(" ", 1)
+        load = float(load)
+        return "apples.value %.2f" % load
+
+    def config(self, conf):
+        return """graph_title Example UTF-8 graph
+graph_vlabel apples
+graph_category foo™
+apples.label apples
+graph_info Apples eaten
+apples.info Apples eaten"""
+modules["utf8_graphcat"] = utf8_graphcat()
+
+class utf8_graphname(MuninPlugin):
+    "A plugin with a UTF-8 name"
+    def fetch(self, conf):
+        load = open("/proc/loadavg", "r").read()
+        load, rest = load.split(" ", 1)
+        load = float(load)
+        return "apples.value %.2f" % load
+
+    def config(self, conf):
+        return """graph_title Example UTF-8 graph
+graph_vlabel apples
+graph_category system
+apples.label apples
+graph_info Apples eaten
+apples.info Apples eaten"""
+modules["utf8_™graphname"] = utf8_graphname()
 
 
 class ArgumentTCPserver(SocketServer.ThreadingTCPServer):
@@ -122,7 +188,7 @@ class MuninHandler(SocketServer.StreamRequestHandler):
     """
 
     def handle(self):
-        print "%s: Connection from %s:%s. server args is %s" \
+        if self.server.args.get("verbose"): print "%s: Connection from %s:%s. server args is %s" \
             % (self.server.args["name"], self.client_address[0], self.client_address[1], self.server.args)
         # slow path
         hostname = self.server.args["name"]
@@ -198,15 +264,19 @@ def start_servers(instances):
 
 
 def usage():
-    print "Usage: %s [--run] [--muninconf] <configfile>" % sys.argv[0]
+    print "Usage: %s [--run] [--verbose] [--muninconf] <configfile>" % sys.argv[0]
 
 def main():
     if len(sys.argv) <= 2:
         usage()
         sys.exit(1)
 
+    verbose = False
+    if "--verbose" in sys.argv:
+        verbose = True
+
     config = ConfigParser.RawConfigParser()
-    config.read(sys.argv[2])
+    config.read(sys.argv[-1])
 
     instancekeys = [ key for key in config.sections() if key.startswith("instance:") ]
     servers = {}
@@ -260,6 +330,8 @@ def main():
                 instanceconfig[k] = v
 
             instanceconfig["plugins"] = plugins
+            if "--verbose" in sys.argv:
+                instanceconfig["verbose"] = True
 
             instanceconfig["name"] = "%s-%s" % (instancename, portinstance)
             instanceconfig["expanded_port"] = portinstance
@@ -275,6 +347,7 @@ def main():
 
 
     if "--run" in sys.argv:
+        if verbose: print "Starting up.."
         servers = start_servers(instances)
 
         try:

@@ -1,0 +1,52 @@
+#!/usr/bin/perl
+use strict;
+
+my $magic = `echo -e "show name;message\nprint type: nsr device" |nsradmin -i -`;
+#                        name: /dev/nst0;
+#                     message: "writing at 57 MB/s, 4063 GB";
+#
+#                        name: /dev/nst1;
+#                     message: "reading, data ";
+
+my %hash = ();
+
+while ($magic =~ m! name: (\S+?);\s+message: "(.+?)";!sg) {
+  my ($dev,$mess) = ($1,$2);
+  $hash{$dev} ||= {};
+  $mess =~ m!writing at (\d+) (.?B)/s!;
+  if ($2 eq 'B') {
+    $hash{$dev}->{writing} = $1+0;
+  }
+  elsif ($2 eq 'KB') {
+    $hash{$dev}->{writing} = $1*1024;
+  }
+  elsif ($2 eq 'MB') {
+    $hash{$dev}->{writing} = $1*1024*1024;
+  }
+  elsif ($2 eq 'GB') {
+    $hash{$dev}->{writing} = $1*1024*1024*1024;
+  }
+}
+
+if ($ARGV[0] eq "config") {
+  print <<_EOM;
+graph_title NSR Device write speed (bytes/s)
+graph_args -l 0 --base 1000
+graph_vlabel bytes/s
+graph_category Networker
+graph_info Shows how much writing each device is doing.
+_EOM
+  foreach my $d (sort keys %hash) {
+    my ($l) = ($d =~ m!([A-Za-z0-9]+)$!);
+    print "$l.label $d\n"
+    # print $l.warning ??\n";
+    # print "$l.critical ??\n";
+  }
+}
+else {
+  foreach my $d (sort keys %hash) {
+    my ($l) = ($d =~ m!([A-Za-z0-9]+)$!);
+    print "$l.value ".$hash{$d}->{writing}."\n";
+  }
+}
+
