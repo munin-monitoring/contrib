@@ -44,6 +44,62 @@ import json
 DEBUG = False
 
 
+def main():
+    # getinfo variable is read from command name - probably the sym-link name.
+    request_var = sys.argv[0].split('_')[1] or 'balance'
+    request_labels = {'balance': ('Wallet Balance', 'BTC'),
+                      'blocks': ('Block Number', 'Blocks', 160000),
+                      'connections': ('Peer Connections', 'Connections'),
+                      'difficulty': ('Current Difficulty', 'Difficulty', 1000000),
+                      'errors': ("Errors", 'Errors',)
+                      }
+    labels = request_labels[request_var]
+
+    if len(sys.argv) > 1 and sys.argv[1] == 'suggest':
+        for var_name in request_labels.keys():
+            print var_name
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == 'config':
+        print 'graph_category bitcoin'
+        print 'graph_title Bitcoin %s' % labels[0]
+        print 'graph_vlabel %s' % labels[1]
+        print '%s.label %s' % (request_var, request_var)
+        if len(labels) >= 3:
+            print "graph_args --lower-limit %d" % labels[2]
+        return
+
+    # Munin should send connection options via environment vars
+    bitcoin_options = get_env_options('rpcconnect', 'rpcport', 'rpcuser', 'rpcpassword')
+    bitcoin_options.rpcconnect = bitcoin_options.get('rpcconnect', '127.0.0.1')
+    bitcoin_options.rpcport = bitcoin_options.get('rpcport', '8332')
+
+    if bitcoin_options.get('rpcuser') is None:
+        conf_file = os.path.join(os.path.expanduser('~/.bitcoin'), 'bitcoin.conf')
+        bitcoin_options = parse_conf(conf_file)
+
+    bitcoin_options.require('rpcuser', 'rpcpassword')
+
+    bitcoin = ServiceProxy('http://%s:%s' % (bitcoin_options.rpcconnect,
+                                             bitcoin_options.rpcport),
+                           username=bitcoin_options.rpcuser,
+                           password=bitcoin_options.rpcpassword)
+
+    (info, error) = bitcoin.getinfo()
+    if error:
+        if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+            print 'no'
+            return
+        else:
+            raise ValueError("Could not connect to Bitcoin server.")
+
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print 'yes'
+        return
+
+    print "%s.value %s" % (request_var, info[request_var])
+
+
 def parse_conf(filename):
     """ Bitcoin config file parser. """
 
@@ -90,61 +146,6 @@ class Options(dict):
             raise ValueError("Missing required setting%s: %s." %
                              ('s' if len(missing) > 1 else '',
                               ', '.join(missing)))
-
-
-def main():
-    # Info variable is read from command name - probably the sym-link name.
-    request_var = sys.argv[0].split('_')[1] or 'balance'
-    request_labels = {'balance': ('Wallet Ballance', 'BTC'),
-                      'blocks': ('Block Number', 'Blocks'),
-                      'connections': ('Peer Connections', 'Connections'),
-                      'difficulty': ('Current Difficulty', 'Difficulty'),
-                      'errors': ("Errors", 'Errors',)
-                      }
-    labels = request_labels[request_var]
-
-    if len(sys.argv) > 1 and sys.argv[1] == 'suggest':
-        for var_name in request_labels.keys():
-            print var_name
-        return
-
-    if len(sys.argv) > 1 and sys.argv[1] == 'config':
-        print """graph_title Bitcoin %s
-graph_category bitcoin
-graph_vlabel %s
-%s.label %s
-""" % (labels[0], labels[1], request_var, request_var)
-        return
-
-    # Munin should send connection options via environment vars
-    bitcoin_options = get_env_options('rpcconnect', 'rpcport', 'rpcuser', 'rpcpassword')
-    bitcoin_options.rpcconnect = bitcoin_options.get('rpcconnect', '127.0.0.1')
-    bitcoin_options.rpcport = bitcoin_options.get('rpcport', '8332')
-
-    if bitcoin_options.get('rpcuser') is None:
-        conf_file = os.path.join(os.path.expanduser('~/.bitcoin'), 'bitcoin.conf')
-        bitcoin_options = parse_conf(conf_file)
-
-    bitcoin_options.require('rpcuser', 'rpcpassword')
-
-    bitcoin = ServiceProxy('http://%s:%s' % (bitcoin_options.rpcconnect,
-                                             bitcoin_options.rpcport),
-                           username=bitcoin_options.rpcuser,
-                           password=bitcoin_options.rpcpassword)
-
-    (info, error) = bitcoin.getinfo()
-    if error:
-        if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
-            print 'no'
-            return
-        else:
-            raise ValueError("Could not connect to Bitcoin server.")
-
-    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
-        print 'yes'
-        return
-
-    print "%s.value %s" % (request_var, info[request_var])
 
 
 class ServiceProxy(object):
