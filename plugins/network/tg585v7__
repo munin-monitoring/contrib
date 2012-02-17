@@ -13,7 +13,7 @@ Requires perl and either WWW::Mechanize or Net::Telnet.
 =head1 CONFIGURATION
 
 The plugin needs HTML access to the router. If you can get to http://YOUR_ROUTER/,
-and are greeting with a page titled "THOMSON TG585 v7", then you can probably use this plugin.
+and are greeting with a page titled "THOMSON TG585 v7", then you can probably use this plugin. 
 
 This is a wildcard plugin, so you will need to create symlinks to this plugin (or create copies if your filesystem doesn't support linking). Links should be of the form:
 
@@ -1112,25 +1112,45 @@ else {
 
     sub TelnetError {
         my $errmsg = shift;
-        my @parts;
-        if ( $mode eq 'bandwidth' ) {
-            @parts = qw(down up);
-        }
-        elsif ( $mode eq 'power' ) {
-            @parts = qw(downout upout downline upline downsn upsn);
-        }
-        elsif ( $mode eq 'uptime' ) {
-            @parts = qw(Box DSL iNet);
-        }
-        elsif ( $mode eq 'errors' ) {
-            @parts = qw(downFEC upFEC downCRC upCRC downHEC upHEC);
-        }
-        foreach (@parts) {
+        my %parts  = (
+            'atm' => [qw(RXCells RxErrors RxOctets TxCells TxErrors TxOctets)],
+            'bandwidth' => [qw(down downrate up uprate)],
+            'conntrack' =>
+              [qw(Active closing expected halfopen ICMP idle loose mcast non TCP TCPclosing TCPestablished TCPopen UDP)],
+            'dhcpclient' =>
+              [qw(ACKs Corrupted DECLINEs DISCOVERs failures INFORMs NAKs OFFERs Other RELEASEs REPLIES REQUESTs)],
+            'dhcprelay' =>
+              [qw(badc bogusg bogusr clientp corrupta missinga missingc packets serverp)],
+            'dhcpserver' =>
+              [qw(ACKs BOOTP Corrupted DECLINE DISCOVER dropped failures INFORM NAKs OFFERs Other RELEASE REQUEST)],
+            'dns' =>
+              [qw(corrupted discard external forwarded negative resolved spoofed spurious unknown)],
+            'errors' => [qw(downCRC downFEC downHEC upCRC upFEC upHEC)],
+            'firewall' =>
+              [qw(DroppedForward DroppedInput DroppedOutput ParsedForward ParsedInput ParsedOutput)],
+            'ids' => [qw(Active Collisions New Recycled Searches)],
+            'igmphost' =>
+              [qw(badchecksum badqueries badttl failing invalidmembership norouter receivedforour reportsreceived reportstransmitted toolong toosmall v1membershipq v2membershipq v3membershipq v3membershipr)],
+            'igmpproxy' =>
+              [qw(badchecksum badleavereports badqueries badreports badttl election igmpleavereports mrdadvertise mrdbad mrdsolicits mrdterminate noroute queriesfail toolong tooshort v1queriesr v1queriess v1reportsr v2queriesr v2queriess v2reportsr v3queriesr v3queriess v3reportsr)],
+            'power' => [qw(downline downout downsn upline upout upsn)],
+            'protoicmp' =>
+              [qw(echor echorepr echoreps echos errorsr errorss maskr maskrepr maskreps masks paramr params quenchr quenchs redirectr redirects timeexceedr timeexceeds timestampr timestamprepr timestampreps timestamps unreachabler unreachables)],
+            'protoip' =>
+              [qw(droppedfrags forwarded fragerrs fragged fragments fwderrors herrors hostdrop hostfwd hostrec noroute reassembled reserrors totfrags)],
+            'prototcp' =>
+              [qw(accepts attempts drops errors established received retransmitted transmitted)],
+            'protoudp' => [qw(dropped errors received transmitted)],
+            'uptime'   => [qw(Box DSL iNet)]
+        );
+
+        foreach ( @{$parts{$mode}} ) {
             print "$_.value U\n";
             print "$_.extinfo $errmsg\n";
         }
         print "# Sending \"exit\"\n" if $MUNIN_DEBUG;
         if ( defined $telnet ) {
+            $telnet->errmode('return');
             $telnet->print('exit');
             $telnet->close;
         }
@@ -1141,7 +1161,8 @@ else {
     $telnet = new Net::Telnet(
         Host    => $host,
         Prompt  => '/{.*}.*=>$/',
-        ErrMode => \&TelnetError
+        ErrMode => \&TelnetError,
+        Timeout => 10
     );
 
     print "# Logging in...\n" if $MUNIN_DEBUG;
