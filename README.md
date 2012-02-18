@@ -5,7 +5,9 @@
 **This is usually where you want to begin your journey.**
 
 Here you'll find all the plugins coming from http://exchange.munin-monitoring.org/. 
-It as evolved since then, but 
+That web site is for the time being disabled, new updates are done here.
+
+If a dedicated website comes back alive, its plugin backend will be this git repo.
 
 ## contrib/templates/ -  3rd-party templates
 
