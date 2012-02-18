@@ -25,3 +25,9 @@ Here, you can put just any kind of tool. Please use this directory instead of a 
 It makes things way more easy to search for others.
 
 And, it serves as an incubator of SVN `trunk/contrib` :-)
+
+## Notes to contributors
+
+We like to have ''elementary'' commits (a good rationale is : one per Changelog entry), as it is much easier to manage for reviewing. Debugging is also usually easier that way.
+
+So please **don't** be afraid to make as many commits as needed.
