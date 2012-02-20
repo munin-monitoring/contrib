@@ -1,0 +1,113 @@
+#!/usr/bin/env python
+"""
+  gunicorn_status - A munin plugin for Linux to monitor gunicorn processes
+
+  Copyright (C) 2012 Azavea, Inc.
+  Author: Andrew Jennings
+
+  Like Munin, this plugin is licensed under the GNU GPL v2 license
+  http://www.opensource.org/licenses/GPL-2.0
+
+  If you've put your gunicorn pid somewhere other than the 
+  default /var/run/gunicorn.pid, you can add a section like
+  this to your munin-node's plugin configuration:
+ 
+  [gunicorn_*]
+  env.gunicorn_pid_path [path to your gunicorn pid]
+
+  This plugin supports the following munin configuration parameters:
+  #%# family=auto contrib
+  #%# capabilities=autoconf
+
+"""
+
+import sys, os
+from subprocess import check_output
+from time import sleep
+
+# set path to your gunicorn pid
+try:
+    GUNICORN_PID_PATH = os.environ['gunicorn_pid_path']
+except:
+    GUNICORN_PID_PATH = "/var/run/gunicorn.pid"
+
+class GunicornStatus():
+    master_pid = ''
+    """
+    The gunicorn master process pid, as a string
+    """
+
+    worker_pids = ''
+    """
+    The list of gunicorn processes as strings
+    """
+
+    def __init__(self):
+        try:
+            self._get_master_pid()
+            self._get_worker_pids(self.master_pid)
+        except:
+            sys.exit("Couldn't read gunicorn pid")
+
+    def print_total_workers(self):
+        print ('total_workers.value %d' % self._worker_count())
+
+    def print_idle_workers(self):
+        print ('idle_workers.value %d' % self._idle_worker_count())
+
+
+    def _get_master_pid(self):
+        master_pid_file = open(GUNICORN_PID_PATH)
+        self.master_pid = master_pid_file.read().rstrip()
+        master_pid_file.close()    
+
+    def _get_worker_pids(self, master_pid):
+        children = check_output(
+            ['ps', '--ppid', master_pid, '-o', 'pid', '--no-headers'])
+        self.worker_pids = [pid.strip() for pid in children.splitlines()]
+
+    def _worker_count(self):
+        return len(self.worker_pids)
+
+    def _idle_worker_count(self):
+        idle_workers = 0
+        for pid in self.worker_pids:
+            before = self._cpu_time(pid)
+            sleep(0.50)
+            after = self._cpu_time(pid)
+            if before == after:
+                idle_workers += 1
+        return idle_workers
+
+    def _cpu_time(self, pid):
+        proc_info = open('/proc/%s/stat' % pid).read()
+        proc_info = [field.rstrip() for field in proc_info.split()]
+        user_time = int(proc_info[13].rstrip())
+        kernel_time = int(proc_info[14].rstrip())
+        return user_time + kernel_time
+
+def print_config():
+    print "graph_title Gunicorn - Status"
+    print "graph_args -l 0"
+    print "graph_vlabel Number of workers"
+    print "graph_category gunicorn"
+    print "total_workers.label Total Workers"
+    print "idle_workers.label Idle Workers"
+
+if __name__ == "__main__":
+    if len(sys.argv) == 2 and sys.argv[1] == 'config':
+        print_config()
+    elif len(sys.argv) == 2 and sys.argv[1] == 'autoconf':
+        try:
+            open(GUNICORN_PID_PATH).close()
+            print "yes"
+        except:
+            print "no"
+    # Some docs say it'll be called with fetch, some say no arg at all
+    elif len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] == 'fetch'):
+        status = GunicornStatus()
+        try:
+            status.print_total_workers()
+            status.print_idle_workers()
+        except:
+            sys.exit("Couldn't retrieve gunicorn status")

@@ -1,0 +1,98 @@
+#!/usr/bin/env python
+"""
+  gunicorn_status - A munin plugin for Linux to monitor the memory
+  usage of gunicorn processes
+
+  Copyright (C) 2012 Azavea, Inc.
+  Author: Andrew Jennings
+
+  Like Munin, this plugin is licensed under the GNU GPL v2 license
+  http://www.opensource.org/licenses/GPL-2.0
+
+  If you've put your gunicorn pid somewhere other than the 
+  default /var/run/gunicorn.pid, you can add a section like
+  this to your munin-node's plugin configuration:
+ 
+  [gunicorn_*]
+  env.gunicorn_pid_path [path to your gunicorn pid]
+
+  This plugin supports the following munin configuration parameters:
+  #%# family=auto contrib
+  #%# capabilities=autoconf
+
+"""
+
+import sys, os
+from subprocess import check_output
+
+# set path to your gunicorn pid
+try:
+    GUNICORN_PID_PATH = os.environ['gunicorn_pid_path']
+except:
+    GUNICORN_PID_PATH = "/var/run/gunicorn.pid"
+
+
+class GunicornMemoryStatus():
+    master_pid = ''
+    """
+    The Gunicorn master process pid, as a string
+    """
+
+    def __init__(self):
+        try:
+            self._get_master_pid()
+        except:
+            raise Exception("Couldn't read gunicorn pid information")
+
+
+    def print_total_memory(self):
+        print ('total_memory.value %d' % self._get_total_memory())
+
+
+    def _get_master_pid(self):
+        master_pid_file = open(GUNICORN_PID_PATH)
+        self.master_pid = master_pid_file.read().rstrip()
+        master_pid_file.close()    
+        return True
+
+    def _get_total_memory(self):
+        master = self._get_master_memory()
+        total = master +self. _get_worker_memory()
+        total_in_mb = total / 1024
+        return total_in_mb
+        
+    def _get_master_memory(self):
+        master = int(check_output(
+            ['ps', '--pid', self.master_pid, '-o', 'rss', '--no-headers']))
+        return master
+
+    def _get_worker_memory(self):
+        worker_processes = check_output(
+            ['ps', '--ppid', self.master_pid, '-o', 'rss', '--no-headers'])
+        process_memory_usage = [int(rss) for rss in worker_processes.splitlines()]
+        worker_memory_usage = sum(process_memory_usage)
+        return worker_memory_usage
+
+def print_config():
+    print "graph_title Gunicorn - Memory Usage"
+    print "graph_args --base 1024 -l 0"
+    print "graph_vlabel Megabytes"
+    print "graph_category gunicorn"
+    print "total_memory.label Total Memory"
+
+if __name__ == "__main__":
+    if len(sys.argv) == 2 and sys.argv[1] == 'config':
+        print_config()
+    elif len(sys.argv) == 2 and sys.argv[1] == 'autoconf':
+        try:
+            open(GUNICORN_PID_PATH).close()
+            print "yes"
+        except:
+            print "no"
+    # Some docs say it'll be called with fetch, some say no arg at all
+    elif len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] == 'fetch'):
+        try:
+            status = GunicornMemoryStatus()
+            status.print_total_memory()
+        except:
+            sys.exit("Couldn't retrieve gunicorn memory usage information")
