@@ -37,36 +37,43 @@
 
 import os
 import sys
+import time
 import re
 import urllib2
 import json
+
 
 DEBUG = False
 
 
 def main():
     # getinfo variable is read from command name - probably the sym-link name.
-    request_var = sys.argv[0].split('_')[1] or 'balance'
+    request_var = sys.argv[0].split('_', 1)[1] or 'balance'
+    command = sys.argv[1] if len(sys.argv) > 1 else None
     request_labels = {'balance': ('Wallet Balance', 'BTC'),
-                      'blocks': ('Block Number', 'Blocks', 160000),
                       'connections': ('Peer Connections', 'Connections'),
-                      'difficulty': ('Current Difficulty', 'Difficulty', 1000000),
-                      'errors': ("Errors", 'Errors',)
+                      'fees': ("Tip Offered", "BTC"),
+                      'transactions': ("Transactions", "Transactions",
+                                       ('confirmed', 'waiting')),
+                      'block_age': ("Last Block Age", "Seconds"),
                       }
     labels = request_labels[request_var]
+    if len(labels) < 3:
+        line_labels = [request_var]
+    else:
+        line_labels = labels[2]
 
-    if len(sys.argv) > 1 and sys.argv[1] == 'suggest':
+    if command == 'suggest':
         for var_name in request_labels.keys():
             print var_name
         return
 
-    if len(sys.argv) > 1 and sys.argv[1] == 'config':
+    if command == 'config':
         print 'graph_category bitcoin'
         print 'graph_title Bitcoin %s' % labels[0]
         print 'graph_vlabel %s' % labels[1]
-        print '%s.label %s' % (request_var, request_var)
-        if len(labels) >= 3:
-            print "graph_args --lower-limit %d" % labels[2]
+        for label in line_labels:
+            print '%s.label %s' % (label, label)
         return
 
     # Munin should send connection options via environment vars
@@ -86,18 +93,34 @@ def main():
                            password=bitcoin_options.rpcpassword)
 
     (info, error) = bitcoin.getinfo()
+
     if error:
-        if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        if command == 'autoconf':
             print 'no'
             return
         else:
+            # TODO: Better way to report errors to Munin-node.
             raise ValueError("Could not connect to Bitcoin server.")
 
-    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+    if request_var in ('transactions', 'block_age'):
+        block_info = get_json_url('http://blockchain.info/block-height/%d?format=json' %
+                                  info['blocks'])
+        last_block = block_info['blocks'][0]
+        info['block_age'] = int(time.time()) - last_block['time']
+        info['confirmed'] = len(last_block['tx'])
+
+    if request_var in ('fees', 'transactions'):
+        (memory_pool, error) = bitcoin.getmemorypool()
+        if memory_pool:
+            info['fees'] = float(memory_pool['coinbasevalue']) / 1e8 - 50.0
+            info['waiting'] = len(memory_pool['transactions'])
+
+    if command == 'autoconf':
         print 'yes'
         return
 
-    print "%s.value %s" % (request_var, info[request_var])
+    for label in line_labels:
+        print "%s.value %s" % (label, info[label])
 
 
 def parse_conf(filename):
@@ -206,6 +229,13 @@ class Proxy(object):
             return (None, e.message)
         # TODO: Check that id matches?
         return (data['result'], data['error'])
+
+
+def get_json_url(url):
+    request = urllib2.Request(url)
+    body = urllib2.urlopen(request).read()
+    data = json.loads(body)
+    return data
 
 
 if __name__ == "__main__":
