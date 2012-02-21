@@ -23,6 +23,14 @@ Example of using munin-node configuration to configure the plugin:
     env.site http://127.0.0.1:8080/status?XML=true
     env.username admin
     env.password admin
+    env.url_timeout 5
+    timeout 10
+
+url_timeout - timeout for urllib2
+timeout - plugin timeout
+
+Plugin must return before timeout value runs out, otherwise bye, bye
+graphs.
 
 Magic markers
 #%# capabilities=autoconf suggest
@@ -36,12 +44,16 @@ import sys, os, re
 
 # Configure me ...
 site = 'http://127.0.0.1:8080/status?XML=true'
+url_timeout = 5
 username = 'admin'
 password = 'admin'
 
 # Or do it with the environment variables in munin-node configuration.
 if os.environ.has_key('site'):
     site = os.environ['site']
+
+if os.environ.has_key('url_timeout'):
+    url_timeout = os.environ['url_timeout']
 
 if os.environ.has_key('username'):
     username = os.environ['username']
@@ -77,8 +89,10 @@ def site_auth():
     request = urllib2.Request(url=site, headers={"Authorization": "Basic %s" % enc_string})
     try:
         if current_version >= required_version:
-            return (0, urllib2.urlopen(request, timeout=5).read())
+            return (0, urllib2.urlopen(request, timeout=url_timeout).read())
         else:
+            import socket
+            socket.setdefaulttimeout(url_timeout)
             return (0, urllib2.urlopen(request).read())
     except:
         return (-1, "Failed to access %s" % site)
@@ -157,6 +171,14 @@ if __name__ == "__main__":
 
     else:
         if ctx == 'jvm':
-            jvm_data(xml.dom.minidom.parseString(data))
+            if status == -1:
+                for attr in jvm_attrs:
+                    print "%s.value 0" % (attr)
+            else:
+                jvm_data(xml.dom.minidom.parseString(data))
         else:
-            connector_data(xml.dom.minidom.parseString(data), ctx)
+            if status == -1:
+                    for attr in connector_attrs:
+                        print "%s.value 0" % (attr)
+            else:
+                connector_data(xml.dom.minidom.parseString(data), ctx)
