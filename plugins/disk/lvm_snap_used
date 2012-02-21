@@ -1,0 +1,44 @@
+#!/bin/bash
+#
+# Plugin to monitor the % of allocated area of a LVM snapshot
+#
+# Parameters:
+# 	
+# 	config
+# 	autoconf
+#
+# Configuration variables
+#    no config variables
+#
+#%# family=auto
+#%# capabilities=autoconf
+# 
+# 2011/05/20 - pmoranga - initial version
+#
+# 2012/01/27 - Sébastien Gross
+#            - Fix lvdisplay path
+
+lvdisplay=$(which lvdisplay)
+
+if [ "$1" = "autoconf" ]; then
+    if test -n "${lvdisplay}"; then
+        echo yes
+        exit 0
+    fi
+    echo "no lvdisplay found"
+    exit 1
+fi
+
+
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title Allocated space for snapshot' 
+	echo 'graph_vlabel %'
+	echo 'graph_category disk'
+	echo 'graph_args --base 100'
+         ${lvdisplay} -C | awk '$3 ~ /^s/{print $1".label "$1" snapshot of "$5} '
+	exit 0
+fi
+
+
+${lvdisplay} -C | awk '$3 ~ /^s/{print $1".value",int($6)} '

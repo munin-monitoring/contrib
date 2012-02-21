@@ -1,0 +1,38 @@
+#!/usr/local/bin/bash
+
+if [ "$1" = "config" ]; then
+    echo "graph_title Available Updates"
+    echo "graph_args --base 1000 -l 0"
+    echo "graph_vlabel upgradeable packages/ports "
+    echo "pkg.label binary packages"
+    echo "ports.label ports"
+    exit 0
+fi
+
+if [ "$1" = "autoconf" ]; then
+    echo "yes"
+    exit 0
+fi
+
+updates="$(freebsd-update fetch | \
+grep -v 'Looking up update.FreeBSD.org mirrors' | \
+grep -v 'Fetching metadata signature' | \
+grep -v 'Fetching metadata index' | \
+grep -v 'Inspecting system' | \
+grep -v 'Preparing to download files' | \
+grep -v -e '^$' | \
+grep -v 'The following files will be added' | \
+grep -v 'No updates needed' | \
+grep -v 'The following files will be updated' | wc -l | sed -e 's/ //g' )"
+
+updates="$(echo -n "${updates}")"
+
+echo "pkg.value $updates"
+
+
+updates="$(portversion | grep '<' | wc -l | sed -e 's/ //g')"
+updates="$(echo -n "${updates}")"
+
+echo "ports.value $updates"
+
+exit 0

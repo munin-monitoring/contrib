@@ -1,0 +1,284 @@
+#!/usr/bin/perl
+# -*- perl -*-
+
+=head1 NAME
+
+bandwidth_ - Wildcard-plugin to monitor total network traffic and
+             predict 30 day bandwidth usage
+
+=head1 CONFIGURATION
+
+This is a wildcard plugin.  To monitor an interface, link
+bandwidth_<interface> to this file.  E.g.
+
+	ln -s /usr/share/munin/node/plugins-auto/bandwidth_ \
+        /etc/munin/node.d/bandwidth_eth0
+
+...will monitor eth0
+
+Most likely usage is to monitor an interface connected to your ISP.
+
+The suggest option will try and determine if you have any interfaces with a 
+public IP and if so it will suggest monitoring those interfaces.  If all
+IP addresses are private the setup will have to be done manually.  Suggest
+does not handle IPv6 addresses.
+
+=head1 USAGE
+
+Any device found in /proc/net/dev can be monitored.  Examples include ipsec*,
+eth*, irda* and lo.
+
+Please note that aliases cannot be monitored with this plugin.
+
+=head1 VERSION
+
+$Id: bandwidth_,v 1.35 2012/01/23 20:04:33 root Exp $
+
+=head1 AUTHOR
+
+Sean Whitney
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=autoconf suggest
+
+=head1 BUGS
+
+I know that bandwidth is bits and base10 as opposed to bytes and base2.
+However the purpose of this plugin it to monitor your monthly bandwidth
+consumption to make sure you don't go over your ISP's peak.  ISP's seem
+to be interested in expressing peaks in bytes....
+
+=cut
+
+use strict;
+use Storable qw(store retrieve);
+use Switch;
+
+my $interface;
+my $history;
+my $counter_input;
+my $counter_output;
+my $input;
+my $output;
+my $uptime;
+my $oldest_ts;
+my $input_30days;
+my $output_30days;
+my $perf_ref = {};
+my $count30  = 2592000;      # The number of seconds in 30 days
+my $unix_ts  = time;
+my $rollover = 4294967295;
+
+eval { init(); };
+
+sub autoconf {
+    $0 =~ /bandwidth_(.+)*$/;
+    $interface = $1;
+    exit 2 unless defined $interface;
+    $history = "/var/lib/munin/plugin-state/bandwidth_$interface.state";
+}
+
+sub bit32or64 {
+    if ( $input > $rollover || $output > $rollover ) {
+        $rollover = 18446744073709551615;
+    }
+}
+
+sub retrieve_history {
+    return (undef) unless ( -r $history );
+    my $store = retrieve($history);
+    while ( my ( $key, $value ) = each(%$store) ) {
+        if ( $unix_ts - $key < $count30 ) {
+            $perf_ref->{$key} = $value;
+        }
+        if ( $key =~ /last/ ) {
+            $perf_ref->{$key} = $value;
+        }
+
+    }
+}
+
+sub suggest {
+
+    # This only works if one of your interfaces has a public IP,
+    # Otherwise it will fail and you will have to set it manually
+    # Multiple public IP addresses can be detected.  It won't
+    # Detect IPv6 addresses.
+    my $locate   = readpipe("locate -b '\\ifconfig'");
+    my @ifconfig = readpipe($locate);
+    my @old;
+    my $net = "/proc/net/dev";
+    my @interfaces;
+    -f $net || die "Unable to read $net: $!";
+    open( DEV, "<", $net ) || die "Unable to read $net: $!";
+
+    while (<DEV>) {
+        chomp;
+        split;
+        /Inter|face/ and next;
+        split /:/;
+        push( @interfaces, $_[0] );
+    }
+    close(DEV);
+
+    foreach (@ifconfig) {
+        if (/inet addr:([\d.]+)/) {
+            $1
+                =~ /^(127\.\d+|10\.\d+|172\.(1[6-9]|2\d|3[0-1])|192\.168)(\.\d+){2}$/
+                and next;
+            exists $interfaces[ $old[0] ] and print "$old[0]\n";
+        }
+        @old = split;
+        chomp @old;
+    }
+    exit 0;
+}
+
+sub store_history {
+
+    # Store the current values to the new old times
+    $perf_ref->{$unix_ts} = {
+        input  => $input,
+        output => $output,
+    };
+    $perf_ref->{last} = {
+        counter_input  => $counter_input,
+        counter_output => $counter_output,
+        uptime         => $uptime,
+    };
+    store( $perf_ref, $history ) || die "Unable to store $history: $!";
+}
+
+sub arg {
+    defined( $ARGV[0] ) or return;
+    switch ( $ARGV[0] ) {
+        case 'autoconf' { print "yes\n"; exit 0; }
+        case 'config'   { print_config(); }
+        case 'suggest'  { suggest(); }
+    }
+}
+
+sub print_config {
+    print <<EOM;
+graph_title Monthly Bandwidth average
+graph_vlabel Bytes (per sec)
+average.label current 30 day average bytes/sec
+monthly.label monthly project based on 30 day average
+30dayusage.label monthly usage
+average.info Your average network rate based (up to) the last 30 days of data
+monthly.info Your projected monthly network rate based on your average network rate
+30dayusage.info Your usage for the last 30 days.
+graph_category network
+graph_args  --base 1024 -l 0
+graph_info This graph show your current average bandwidth usage and projected 30 day average based on your last 30 day usage.
+average.warning 103563
+monthly.warning 268435456000
+30dayusage.warning 268435456000
+EOM
+    exit 0;
+}
+
+sub read_traffic {
+    open( my $rx, "<", "/sys/class/net/$interface/statistics/rx_bytes" ) 
+         || die "Unable to read: $!";
+    $counter_input = <$rx>;
+    chomp $counter_input;
+    close($rx);
+    open(my $tx , "<", "/sys/class/net/$interface/statistics/tx_bytes" ) 
+         || die "Unable to read: $!";
+        $counter_output = <$tx>;
+	chomp $counter_output;
+    close(DEV);
+}
+
+sub uptime {
+    my $puptime = "/proc/uptime";
+    open( TIME, "<", $puptime ) || die "Unable to read $puptime: $!";
+    while (<TIME>) {
+        split;
+        $uptime = @_[0];
+    }
+    close(TIME);
+    chomp $uptime;
+}
+
+sub update_stats {
+
+    # First determine if this has ever run before.  If not set initial values
+    # to 0.
+    if ( defined $perf_ref->{last}->{uptime} ) {
+
+        # Compute the new totals, caused by reboot.  As uptime is measures in
+        # 64-bit jiffies, the chance of a counter rollover is remote
+        if ( $perf_ref->{last}->{uptime} > $uptime ) {
+            $input  = $counter_input;
+            $output = $counter_output;
+
+        }
+        else {
+            if ( $perf_ref->{last}->{counter_input} > $counter_input ) {
+                $input =
+                      $counter_input 
+                    + $rollover
+                    - $perf_ref->{last}->{counter_input};
+            }
+            else {
+                $input = $counter_input - $perf_ref->{last}->{counter_input};
+            }
+            if ( $perf_ref->{last}->{counter_output} > $counter_output ) {
+                $output =
+                      $counter_output 
+                    + $rollover
+                    - $perf_ref->{last}->{counter_output};
+            }
+            else {
+                $output =
+                    $counter_output - $perf_ref->{last}->{counter_output};
+            }
+        }
+    }
+    else {
+        $input  = 0;
+        $output = 0;
+    }
+}
+
+sub sum_old {
+    $oldest_ts = $unix_ts;
+    while ( my ( $key, $value ) = each(%$perf_ref) ) {
+        $key =~ /last/ and next;
+        $input_30days  += $perf_ref->{$key}->{'input'};
+        $output_30days += $perf_ref->{$key}->{'output'};
+        $key < $oldest_ts and $oldest_ts = $key
+    }
+    $input_30days  += $input;
+    $output_30days += $output;
+}
+
+sub munin_output {
+    my $period    = $unix_ts - $oldest_ts;
+    my $total30   = $input_30days + $output_30days;
+    my $average30 = $total30 / $period;
+    print "average.value  $average30\n";
+    print "monthly.value " . $average30 * $count30 . "\n";
+    print "30dayusage.value  $total30\n";
+}
+
+sub init {
+    arg();
+    autoconf();
+    retrieve_history();
+    read_traffic();
+    bit32or64();
+    uptime();
+    update_stats();
+    sum_old();
+    munin_output();
+    store_history();
+}

@@ -1,0 +1,56 @@
+#!/usr/bin/python
+
+
+# This is monitoring plugin for riak Developer's website: http://wiki.basho.com/Riak.html
+# sample config in /etc/munin/plugin-conf.d/riak
+#
+# [riak_*]
+# env.RIAK_URL http://127.0.0.1:8091/stats
+# any questions to fygrave at o0o dot nu
+#
+# This plugin monitors memory allocation on each node.
+#
+
+import urllib2
+import sys
+import os
+
+try:
+    import json
+except ImportError:
+    import simplejson as json
+
+
+names = ["memory_total","memory_processes","memory_processes_used","memory_system","memory_atom","memory_atom_used","memory_binary","memory_code","memory_ets"]
+
+def getServerStatus():
+    raw = urllib2.urlopen( os.environ.get('RIAK_URL', "http://127.0.0.1:8097/stats") ).read()
+    return json.loads( raw )
+
+
+
+def doData():
+    for name in names:
+        print name + ".value " + str( getServerStatus()[name] )
+
+def doConfig():
+
+    print "graph_title Riak memory"
+    print "graph_args --base 1000 -l 0"
+    print "graph_vlabel memory"
+    print "graph_category Riak"
+
+    for name in names:
+        print name + ".label " + name
+        print name + ".type GAUGE"
+        print name + "draw LINE1"
+
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "config":
+        doConfig()
+    else:
+        doData()
+
+

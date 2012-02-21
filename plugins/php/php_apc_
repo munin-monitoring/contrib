@@ -1,0 +1,114 @@
+#!/bin/sh
+#################################################################
+#
+# Script to monitor apc usage
+# 
+#################################################################
+#
+# Parameters understood: config, autoconf and suggest
+#
+#################################################################
+#
+# Configuration section
+#
+# URL to the script to check apc status
+URL=""
+#URL="http://localhost/php_apc.php";
+#
+#  php file included in package
+#
+#################################################################
+#
+# Changelog:
+#  - First Release, Enjoy.
+#
+#################################################################
+#################################################################
+# Settigs required for autoconf
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+WGET=`which wget`;
+WGET_FLAGS="-Yoff"; # refer to wget manual, you may set extra parameters like disable proxy
+act=`basename $0 | sed 's/^php_apc_//g'`
+
+if [ "$1" = "autoconf" ]; then
+	[ -z "$URL" ] && echo "no (edit URL config in header file !)" && exit 1
+	[ -n "$URL" ] && echo "yes" && exit 0
+fi
+
+if [ "$1" = "suggest" ]; then
+	echo "memory"
+	echo "hits"
+	echo "percents"
+	exit 0
+fi
+
+if [ "$1" = "config" ] && [ "$act" = "memory" ]; then
+
+cat <<'EOM'
+graph_title APC Memory usage
+graph_args -l 0 --base 1024
+graph_vlabel Memory usage
+graph_category apache
+graph_order mem_used mem_avail
+graph_total Total
+mem_avail.label Memory available
+mem_avail.draw STACK
+mem_avail.min 0
+mem_used.label Memory Used
+mem_used.draw AREA
+mem_used.min 0
+EOM
+
+exit 0
+fi
+
+if [ "$1" = "config" ] && [ "$act" = "hits" ]; then
+
+cat <<'EOM'
+graph_title APC Hits
+graph_args -l 0
+graph_vlabel Cache hits
+graph_category apache
+graph_total Total
+num_misses.label Missed
+num_misses.draw AREA
+num_misses.min 0
+num_hits.label Hits
+num_hits.draw STACK
+num_hits.min 0
+EOM
+
+exit 0
+fi
+
+if [ "$1" = "config" ] && [ "$act" = "percents" ]; then
+
+cat <<'EOM'
+graph_title APC Percents
+graph_args -l 0 --upper-limit 100
+graph_vlabel Cache Percents %
+graph_category apache
+hits.label hits
+hits.draw AREA
+hits.min 0
+misses.label misses
+misses.draw STACK
+misses.min 0
+misses.warning 50
+memory.label Memory
+memory.draw LINE
+memory.warning 95
+memory.critical 98
+EOM
+
+exit 0
+fi
+
+#################################################################
+# run the sript
+
+[ -x $WGET ] &&	$WGET -q $WGET_FLAGS "$URL?act=$act" -O - && exit 0
+
+exit 1

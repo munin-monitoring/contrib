@@ -1,0 +1,94 @@
+#!/usr/bin/perl
+# 
+# Copyright (c) 2008, Maxime Besson
+# Copyright (c) 2011, David Bernard
+# 
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#
+# 
+# Graph VE load averages on an OpenVZ server
+#
+# This plugin needs root privileges to call vzlist, so add this :
+#
+# [openvz_loadavg]
+# user root
+#
+# to your munin config (or use sudo)
+#
+# Changelog
+# version 0.1 - 2008 September 17
+# Maxime Besson <mabes@smile.fr>
+# - Script creation
+# version 0.2 - 2011 July 18
+# Bernard David <daber@smile.fr>
+# - Script improvements : multigraph
+
+use strict;
+my $arg=shift(@ARGV);
+
+# Various tests
+if ( ! -d "/proc/vz" ) {
+	print "This server does not seem to run OpenVZ\n";
+	exit(1);
+}
+
+if ( $> ne "0" ) {
+	print "Must run as root\n";
+	exit(1);
+}
+
+# Autoconfig
+if ( $arg eq "autoconf" ) {
+	print "yes\n";
+} elsif ( $arg eq "config" ) {
+        print "multigraph openvz_loadavg\n";
+        print "graph_title load average of VE\n";
+        print "graph_args --base 1000 -l 0 -N\n";
+        print "graph_scale no\n";
+        print "graph_vlabel load average\n";
+        print "graph_info Shows 5-minute load average per VE\n";
+        print "graph_category OpenVZ\n";
+
+	# Dynamic config
+	my @result=`/usr/sbin/vzlist -H -a -s veid -o veid,name`;
+	my $A=0; # draw an area only under the first line
+        
+	for (@result ) {
+		( my $veid,my $label ) = /^\s*(\d+)\s*([\w\-]+)\s*$/ ;
+		my $name = $label;
+                $name =~ s/\W/_/g;
+
+                print "$name.label $label\n";
+                print "$name.min 0\n";
+                if ($A==0) {
+                        print "$name.draw AREA\n";
+                        $A=1;
+                }else{
+                        print "$name.draw STACK\n";
+                }
+        }
+
+} else {
+        # Getting the values
+	my @result=`/usr/sbin/vzlist -H -s veid -o veid,name,laverage`;
+	my $A=0;
+
+	for (@result ) {
+		if (( my $veid,my $label, my $laverage ) = /^\s*(\d+)\s+([\w\-]+)\s+[\d\.]+\/([\d\.]+)\/[\d\.]+\s*$/) {
+			my $name = $label;
+			$name =~ s/\W/_/g;
+                        print "$name.value $laverage\n"
+                }
+        }
+
+}
