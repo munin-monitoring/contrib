@@ -1,0 +1,148 @@
+#!/usr/bin/env ruby
+require 'yaml'
+
+# ejabberd_scanlog revision 1 (Feb 2012)
+#
+# Scans ejabberd 2.1.x log for known error signatures and counts them
+#
+# Required privileges: read ejabberd log (user ejabberd or, in some cases, root)
+#
+# OS: Unix
+#
+# Configuration:
+# 	env.log: ejabberd log file (defaults to /var...)
+#
+# Author: Artem Sheremet <dot.doom@gmail.com>
+#
+
+LOG_FILE = ENV['log'] || '/var/log/ejabberd/ejabberd.log'
+CACHE_FILE = '/tmp/ejabberd_scanlog_cache' # cache file position
+
+DEFAULT_CACHE = { :start => 0 }
+
+debug_mode = ARGV.first == 'debug'
+
+begin
+	log_info = YAML.load IO.read(CACHE_FILE)
+rescue
+	log_info = DEFAULT_CACHE
+end
+
+if File.size(LOG_FILE) < log_info[:start]
+	# logrotate?
+	log_info = DEFAULT_CACHE
+end
+
+new_data = ''
+File.open(LOG_FILE, 'r') do |flog|
+	flog.seek(log_info[:start])
+	new_data = flog.read
+end
+
+LABELS = {
+	:wait_for =>                    'EJAB-1482 Crash when waiting for item',
+	:ejabberd_odbc_failure =>       'EJAB-1483 ODBC sup failure (wrong PID?)',
+	:ejabberd_odbc_failure_echo =>  'EJAB-1483 ODBC sup wrong PID failure echo',
+	:dns =>                         'DNS failure',
+	:database =>                    'Database unavailable/too slow',
+	:auth_error =>                  'The auth module returned an error',
+	:timeout =>                     'State machine terminated: timeout',
+	:mysql_shutdown =>              'MySQL disconnected',
+	:mysql_refused =>               'Connecting to MySQL: failed',
+	:hook_timeout =>                'Timeout while running a hook',
+	:sql_transactions_exceeded =>   'SQL transaction restarts exceeded',
+	:unexpected_info =>             'Unexpected info',
+	:other_sql_cmd_timeout =>       'Other sql_cmd timeout',
+	:UNKNOWN =>                     'Unknown error/warning'
+}
+def log_type(text)
+	if text.include? 'ejabberd_odbc_sup'
+		:ejabberd_odbc_failure
+	elsif text.include? "mod_pubsub_odbc,'-unsubscribe"
+		:ejabberd_odbc_failure_echo
+	elsif text.include? 'You should check your DNS configuration'
+		:dns
+	elsif text.include? 'Database was not available or too slow'
+		:database
+	elsif text.include? 'wait_for_'
+		:wait_for
+	elsif text.include?('State machine') and
+		text.include?('terminating') and
+		text.include?('Reason for') and
+		text.include?('timeout')
+		:timeout
+	elsif text.include?('The authentication module') and
+		text.include?('returned an error')
+		:auth_error
+	elsif text.include?('mysql') and text.include?('Received unknown signal, exiting')
+		:mysql_shutdown
+	elsif text.include?('mysql') and text.include?('Failed connecting to')
+		:mysql_refused
+	elsif text.include?('ejabberd_hooks') and text.include?('timeout')
+		:hook_timeout
+	elsif text.include?('SQL transaction restarts exceeded')
+		:sql_transactions_exceeded
+	elsif text.include?('nexpected info')
+		:unexpected_info
+	elsif text.include?('timeout') and text.include?('sql_cmd')
+		:other_sql_cmd_timeout
+	else
+		puts "Cannot parse text: #{text}" if debug_mode
+		:UNKNOWN
+	end
+end
+
+new_data.split("\n=").each { |report|
+	next if report.empty?
+	report =~ /\A(\w+) REPORT==== (.*) ===\n(.*)\z/m
+	type, time, text = $1, $2, $3
+	next unless type and time and text
+
+	log_info[type] = (log_info[type] || 0) + 1
+	if sub_type = log_type(text)
+		log_info[sub_type] = (log_info[sub_type] || 0) + 1
+	end
+}
+
+log_info[:start] += new_data.size
+File.open(CACHE_FILE, 'w') { |f| f.write log_info.to_yaml }
+
+if ARGV.first == 'config'
+	puts <<CONFIG
+graph_title Ejabberd Log
+graph_vtitle Report count
+graph_category ejabberd
+graph_args -l 0
+graph_order #{(LABELS.keys + log_info.keys.select { |k| k.is_a? String }.sort).join(' ')}
+CONFIG
+end
+
+first = true
+LABELS.each_pair { |type,label|
+	if ARGV.first == 'config'
+		puts "#{type}.label #{label}"
+		puts "#{type}.draw #{
+			if first
+				first = false
+				'AREA'
+			else
+				'STACK'
+			end
+		}"
+	else
+		puts "#{type}.value #{log_info[type] or 0}"
+	end
+}
+
+log_info.each_pair { |k,value|
+	unless k == :start
+		if k.is_a? String
+			if ARGV.first == 'config'
+				puts "#{k}.label #{k}"
+				puts "#{k}.draw LINE2"
+			else
+				puts "#{k}.value #{value}"
+			end
+		end
+	end
+}
