@@ -59,6 +59,8 @@ MAX_SIZE=`$SYS kstat.zfs.misc.arcstats.c_max`
 MIN_SIZE=`$SYS kstat.zfs.misc.arcstats.c_min`
 TARGET_SIZE=`$SYS kstat.zfs.misc.arcstats.c`
 
+L2_SIZE=`$SYS kstat.zfs.misc.arcstats.l2_size`
+L2_HDR_SIZE=`$SYS kstat.zfs.misc.arcstats.l2_hdr_size`
 
 #
 # Calculation macros
@@ -103,7 +105,6 @@ fi
 
 
 efficiency() {
-
         if [ "$1" = "config" ]; then
                 echo 'graph_title ZFS ARC Efficiency'
                 echo 'graph_args -u 100'
@@ -179,7 +180,6 @@ cachehitdtype() {
 }
 
 dmuprefetch() {
-
         if [ "$1" = "config" ]; then
                 echo 'graph_title ZFS DMU prefetch stats'
                 echo 'graph_args -u 100'
@@ -197,7 +197,6 @@ dmuprefetch() {
 }
 
 utilization() {
-
         if [ "$1" = "config" ]; then
                 echo 'graph_title ZFS ARC Size'
                 echo 'graph_args --base 1024 -l 0 --vertical-label Bytes --upper-limit '$MEMMAX
@@ -228,6 +227,25 @@ utilization() {
 	fi
 }
 
+l2utilization() {
+        if [ "$1" = "config" ]; then
+                echo 'graph_title ZFS L2ARC Size'
+                echo 'graph_args --base 1024 -r -l 0 --vertical-label Bytes'
+                echo 'graph_vlabel Size in MB'
+                echo 'graph_info This graph shows the L2ARC Size utilization'
+
+                echo 'size.label Size'
+                echo 'size.draw AREA'
+                echo 'hdr_size.label Header Size'
+                echo 'hdr_size.draw AREA'
+
+                exit 0
+        else
+                echo 'size.value ' $L2_SIZE
+                echo 'hdr_size.value ' $L2_HDR_SIZE
+        fi
+}
+
 [ "$1" = "config" ] && echo "graph_category zfs"
 
 case "$FUNCTION" in
@@ -246,4 +264,7 @@ case "$FUNCTION" in
         utilization)
                 utilization $1
                 ;;
+	l2utilization)
+		l2utilization $1
+		;;
 esac
