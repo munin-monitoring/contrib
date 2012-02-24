@@ -18,6 +18,8 @@
 #	cachehitdtype - Cache hit by data type
 #	dmuprefetch - DMU prefetch
 #	utilization - ARC size breakdown
+#	l2utilization - L2ARC size breakdown
+#	l2efficiency - L2ARC efficiency
 #
 #%# family=auto
 
@@ -59,6 +61,11 @@ MAX_SIZE=`$SYS kstat.zfs.misc.arcstats.c_max`
 MIN_SIZE=`$SYS kstat.zfs.misc.arcstats.c_min`
 TARGET_SIZE=`$SYS kstat.zfs.misc.arcstats.c`
 
+L2_SIZE=`$SYS kstat.zfs.misc.arcstats.l2_size`
+L2_HDR_SIZE=`$SYS kstat.zfs.misc.arcstats.l2_hdr_size`
+
+L2_HITS=`$SYS kstat.zfs.misc.arcstats.l2_hits`
+L2_MISSES=`$SYS kstat.zfs.misc.arcstats.l2_misses`
 
 #
 # Calculation macros
@@ -83,13 +90,13 @@ MOST_RECENTLY_USED_GHOST_PERC=`echo "scale=2 ; (100*$MRU_GHOST_HITS/$ARC_HITS)" 
 MOST_FREQUENTLY_USED_GHOST_PERC=`echo "scale=2 ; (100*$MFU_GHOST_HITS/$ARC_HITS)" | $BC`
 
 DEMAND_DATA_HIT_PERC=`echo "scale=2 ; (100*$DEMAND_DATA_HITS/$ARC_HITS)" | $BC`
-DEMAND_DATA_MISS_PERC=`echo "scale=2 ; (100*$DEMAND_DATA_MISSES/$ARC_HITS)" | $BC`
+DEMAND_DATA_MISS_PERC=`echo "scale=2 ; (100*$DEMAND_DATA_MISSES/$ARC_MISSES)" | $BC`
 PREFETCH_DATA_HIT_PERC=`echo "scale=2 ; (100*$PREFETCH_DATA_HITS/$ARC_HITS)" | $BC`
-PREFETCH_DATA_MISS_PERC=`echo "scale=2 ; (100*$PREFETCH_DATA_MISSES/$ARC_HITS)" | $BC`
+PREFETCH_DATA_MISS_PERC=`echo "scale=2 ; (100*$PREFETCH_DATA_MISSES/$ARC_MISSES)" | $BC`
 DEMAND_METADATA_HIT_PERC=`echo "scale=2 ; (100*$DEMAND_METADATA_HITS/$ARC_HITS)" | $BC`
-DEMAND_METADATA_MISS_PERC=`echo "scale=2 ; (100*$DEMAND_METADATA_MISSES/$ARC_HITS)" | $BC`
+DEMAND_METADATA_MISS_PERC=`echo "scale=2 ; (100*$DEMAND_METADATA_MISSES/$ARC_MISSES)" | $BC`
 PREFETCH_METADATA_HIT_PERC=`echo "scale=2 ; (100*$PREFETCH_METADATA_HITS/$ARC_HITS)" | $BC`
-PREFETCH_METADATA_MISSES_PERC=`echo "scale=2 ; (100*$PREFETCH_METADATA_MISSES/$ARC_HITS)" | $BC`
+PREFETCH_METADATA_MISSES_PERC=`echo "scale=2 ; (100*$PREFETCH_METADATA_MISSES/$ARC_MISSES)" | $BC`
 
 DMU_TOTAL=`echo "$DMU_HITS+$DMU_MISSES" | $BC`
 DMU_HITS_PERC=`echo "scale=2 ; (100*$DMU_HITS/$DMU_TOTAL)" | $BC`
@@ -101,18 +108,19 @@ else
 	MFU_SIZE=`echo "$TARGET_SIZE-$MRU_SIZE" | $BC`
 fi
 
+L2_ACCESSES_TOTAL=`echo "$L2_HITS+$L2_MISSES" | $BC`
+L2_HIT_RATIO_PERC=`echo "scale=2 ; (100*$L2_HITS/$L2_ACCESSES_TOTAL)" | $BC`
+L2_MISS_RATIO_PERC=`echo "scale=2 ; (100*$L2_MISSES/$L2_ACCESSES_TOTAL)" | $BC`
 
 efficiency() {
-
         if [ "$1" = "config" ]; then
                 echo 'graph_title ZFS ARC Efficiency'
                 echo 'graph_args -u 100'
                 echo 'graph_vlabel %'
-                echo 'graph_category ZFS'
                 echo 'graph_info This graph shows the ARC Efficiency'
 
-                echo 'hits.label Cache Hit Ratio'
-                echo 'misses.label Cache Miss Ratio'
+                echo 'hits.label Hit Ratio'
+                echo 'misses.label Miss Ratio'
                 echo 'actual_hits.label Actual Hit Ratio'
                 echo 'data_demand_efficiency.label Data Demand Efficiency'
                 echo 'data_prefetch_efficiency.label Data Prefetch Efficiency'
@@ -132,7 +140,6 @@ cachehitlist() {
                 echo 'graph_title ZFS ARC Efficiency: Cache hits by cache list'
                 echo 'graph_args -u 100'
                 echo 'graph_vlabel %'
-                echo 'graph_category ZFS'
                 echo 'graph_info This graph shows the ARC Efficiency'
 
                 echo 'cache_list_anon.label Anonymously Used'
@@ -156,7 +163,6 @@ cachehitdtype() {
                 echo 'graph_title ZFS ARC Efficiency: Cache hits by data type'
                 echo 'graph_args -u 100'
                 echo 'graph_vlabel %'
-                echo 'graph_category ZFS'
                 echo 'graph_info This graph shows the ARC Efficiency'
 
                 echo 'data_type_demand_hits.label Demand Data Hit Ratio'
@@ -182,16 +188,14 @@ cachehitdtype() {
 }
 
 dmuprefetch() {
-
         if [ "$1" = "config" ]; then
                 echo 'graph_title ZFS DMU prefetch stats'
                 echo 'graph_args -u 100'
                 echo 'graph_vlabel %'
-                echo 'graph_category ZFS'
                 echo 'graph_info This graph shows the DMU prefetch stats'
 
-		echo 'hits.label Hit percentage'
-		echo 'misses.label Miss percentage'
+		echo 'hits.label Hit Ratio'
+		echo 'misses.label Miss Ratio'
 
 		exit 0
 	else
@@ -201,12 +205,10 @@ dmuprefetch() {
 }
 
 utilization() {
-
         if [ "$1" = "config" ]; then
                 echo 'graph_title ZFS ARC Size'
                 echo 'graph_args --base 1024 -l 0 --vertical-label Bytes --upper-limit '$MEMMAX
                 echo 'graph_vlabel Size in MB'
-                echo 'graph_category ZFS'
                 echo 'graph_info This graph shows the ARC Size utilization'
 
                 echo 'max_size.label Maximum Size'
@@ -233,6 +235,41 @@ utilization() {
 	fi
 }
 
+l2utilization() {
+        if [ "$1" = "config" ]; then
+                echo 'graph_title ZFS L2ARC Size'
+                echo 'graph_args --base 1024 -r -l 0 --vertical-label Bytes'
+                echo 'graph_vlabel Size in MB'
+                echo 'graph_info This graph shows the L2ARC Size utilization'
+
+                echo 'size.label Size'
+                echo 'size.draw AREA'
+                echo 'hdr_size.label Header Size'
+                echo 'hdr_size.draw AREA'
+
+                exit 0
+        else
+                echo 'size.value ' $L2_SIZE
+                echo 'hdr_size.value ' $L2_HDR_SIZE
+        fi
+}
+
+l2efficiency() {
+	if [ "$1" = "config" ]; then
+		echo 'graph_title ZFS L2ARC Efficiency'
+                echo 'graph_args -u 100'
+                echo 'graph_vlabel %'
+                echo 'graph_info This graph shows the L2ARC Efficiency'
+
+		echo 'l2_hits.label Hit Ratio'
+		echo 'l2_misses.label Miss Ratio'
+	else
+		echo 'l2_hits.value ' $L2_HIT_RATIO_PERC
+		echo 'l2_misses.value ' $L2_MISS_RATIO_PERC
+	fi
+
+}
+
 [ "$1" = "config" ] && echo "graph_category zfs"
 
 case "$FUNCTION" in
@@ -251,4 +288,10 @@ case "$FUNCTION" in
         utilization)
                 utilization $1
                 ;;
+	l2utilization)
+		l2utilization $1
+		;;
+	l2efficiency)
+		l2efficiency $1
+		;;
 esac
