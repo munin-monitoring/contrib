@@ -1,0 +1,220 @@
+#!/bin/sh
+#
+# Revision 1.1  2012/02/26 03:43:27
+# Improved labels
+#
+# Revision 1.0  2012/02/25 21:31:16
+# Initial release
+#
+
+: <<=cut
+=head1 NAME
+
+imap_bandwidth - Munin plugin to measure the current bandwidth of one or more remote IMAP servers.
+
+=head1 APPLICABLE SYSTEMS
+
+Any Linux system with the package "isync" (or "mbsync") installed.
+
+=head1 CONFIGURATION
+
+This configuration section shows a usable example for two imap servers:
+   [imap_bandwidth]
+   env.imap_servers			internal=imap-internal.example.org external=imap.example.org
+   env.cert_file			/etc/munin-imap-cert.pem
+   env.username			foo_user
+   env.password			secret
+   env.transfer_volume_kbyte	100
+   env.use_ssl				yes
+
+
+Both "use_ssl" and "transfer_volume_kbyte" are optional and default to the above
+values.
+All other parameters are required.
+
+Generate the certificate file by running "mbsync-get-cert imap.example.org".
+
+"imap_servers" is a space-separated list of key=value combinations. "key" is
+used as a label in munin graphs. "value" is the full hostname or IP of the IMAP
+server. All IMAP servers need to share the same authentication database (i.e.
+accept the same username/password).
+
+Reduce the "transfer_volume_kbyte" parameter if you need to minimize traffic.
+
+Maybe you need to specify the "timeout" setting for this plugin if it takes
+longer than munin's default timeout.
+
+
+=head1 INTERPRETATION
+
+The plugin simply shows the average bandwidth during one IMAP upload and one
+IMAP download of a file containg random bytes.
+
+You need to be aware that this measurement obviously increases the load on
+your IMAP servers for the duration of the measurement.
+
+You also need to be aware of the safety implications imposed by storing
+sensitive information (username and password combinations) on your monitoring
+server in plaintext.
+
+=head1 VERSION
+
+Version 1.0
+
+=head1 BUGS
+
+None known
+
+Set the environment variable DEBUG=1 if you need to investigate problems.
+
+=head1 AUTHOR
+
+Lars Kruse <devel@sumpfralle.de>
+
+=head1 LICENSE
+
+GPLv3 or higher
+
+=cut
+
+
+set -eu
+
+#%# family=auto
+#%# capabilities=autoconf
+
+TRANSFER_SIZE=${transfer_volume_kbyte:-100}
+USE_SSL=${use_ssl:-yes}
+IMAP_USERNAME=${username}
+IMAP_PASSWORD=${password}
+CERT_FILE=${cert_file}
+
+# example value:
+#    internal=imap-internal.example.org external=imap.example.org
+SERVERS="$imap_servers"
+
+
+if test -n "${DEBUG:-}"; then
+	TRANSFER_SIZE=20
+	set -x
+fi
+
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+
+if [ "$1" = "autoconf" ]; then
+	if ( which mbsync >/dev/null 2>&1 ); then
+		echo yes
+		exit 0
+	else
+		echo "no (could not run \"mbsync\")"
+		exit 0
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title IMAP bandwidth'
+	echo 'graph_vlabel to (+) / from (-) server [bit/s]'
+	echo 'graph_category network'
+	for item in $SERVERS; do
+		key="$(echo "$item" | cut -f 1 -d =)"
+		clean_name="$(clean_fieldname "$key")"
+		echo "download_${clean_name}.graph no"
+		echo "download_${clean_name}.label download"
+		echo "upload_${clean_name}.label $key"
+		echo "upload_${clean_name}.negative download_${clean_name}"
+	 done
+	exit 0
+fi
+
+
+create_dummy_file() {
+	dd if=/dev/urandom "of=$DUMMY_FILENAME" bs=1K count=${TRANSFER_SIZE} 2>/dev/null
+}
+
+is_dummy_file_missing() {
+	test ! -e "$DUMMY_FILENAME"
+}
+
+remove_mail_files() {
+	get_mail_files | while read fname; do rm "$fname"; done
+}
+
+get_mail_files() {
+	find "$MAILDIR" -type f | grep -v "/\."
+}
+
+# run the synchronization
+run_sync() {
+	if test -n "${DEBUG:-}"; then
+		echo yes | mbsync --config "$SYNCRC" sync || true
+	else
+		echo yes | mbsync --config "$SYNCRC" sync >/dev/null 2>/dev/null || true
+	fi
+}
+
+# run the synchronization and determine the duration of this operation
+speed_sync() {
+	start=$(date +%s%N)
+	run_sync
+	end=$(date +%s%N)
+	# did we wrap a minute?
+	test "$end" -lt "$start" && end=$((end + 60 * 1000000000))
+	delay=$((end - start))
+	# use "bit" multiplier
+	echo "$((8 * TRANSFER_SIZE * 1024 * 1000000000 / delay))"
+}
+
+for item in $SERVERS; do
+	key="$(echo "$item" | cut -f 1 -d =)"
+	host="$(echo "$item" | cut -f 2- -d =)"
+	clean_name="$(clean_fieldname "$key")"
+	MAILDIR="$(mktemp -d)"
+	# this file needs to include a dot at the beginning - otherwise it gets cleaned up ...
+	SYNCRC="$MAILDIR/.mbsyncrc"
+	SYNC_STATE_FILE_PREFIX="$MAILDIR/.syncstate-"
+
+	cat - >"$SYNCRC" <<- EOF
+	SyncState	$SYNC_STATE_FILE_PREFIX
+	Expunge Both
+
+	MaildirStore local
+	Path	$MAILDIR
+	Inbox	$MAILDIR
+
+	IMAPStore remote
+	Host $host
+	UseIMAPS $USE_SSL
+	User $IMAP_USERNAME
+	Pass $IMAP_PASSWORD
+	CertificateFile $CERT_FILE
+
+	Channel sync
+	Master	:local:
+	Slave	:remote:
+EOF
+
+	mkdir "$MAILDIR/new" "$MAILDIR/tmp" "$MAILDIR/cur"
+	DUMMY_FILENAME="$MAILDIR/new/$(date +%N)"
+	# download all existing files
+	run_sync
+	# remove all local files -> to be purged remotely later
+	remove_mail_files
+	# create dummy file for upload
+	create_dummy_file "$MAILDIR"
+	output="upload_${clean_name}.value $(speed_sync)"
+	is_dummy_file_missing && echo "$output" || echo >&2 "upload failed"
+	# remove local file
+	remove_mail_files "$MAILDIR"
+	# persuade mbsync that we have never seen the dummy file ...
+	rm "$SYNC_STATE_FILE_PREFIX"*
+	output="download_${clean_name}.value $(speed_sync)"
+	get_mail_files | grep -q . && echo "$output" || echo >&2 "download failed"
+	# remove the new file from the imap server
+	remove_mail_files
+	run_sync
+	# clean up
+	rm -r "$MAILDIR"
+ done
+
