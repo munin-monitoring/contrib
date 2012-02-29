@@ -8,6 +8,10 @@
 # Contributions by:
 # - Stephane Enten <tuf@delyth.net>
 #
+# Please, note this is a fork from the original adapted to the default
+# Dovecot logging config in Debian Squeeze
+# - Alessandro Fazzi <alessandro.fazzi@welaika.com> 
+#
 # Parameters understood:
 #
 #	config		(required)
@@ -30,7 +34,7 @@
 ######################
 STAT_FILE=${STAT_FILE:-/var/lib/munin/plugin-state/plugin-dovecot.state}
 EXPR_BIN=/usr/bin/expr
-LOGFILE=${logfile:-/var/log/mail.log}
+LOGFILE=${logfile:-/var/log/dovecot.log}
 ######################
 
 if [ "$1" = "autoconf" ]; then
@@ -68,7 +72,7 @@ fi
 # Total Logins
 ######################
 echo -en "login_total.value "
-NEW_TOTAL=$(egrep '[dovecot]?.*Login' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
+NEW_TOTAL=$(egrep 'Login' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
 OLD_TOTAL=$(grep TOTAL $STAT_FILE | cut -f2 -d '=')
 TOTAL=$($EXPR_BIN $NEW_TOTAL - $OLD_TOTAL)
 if [ $TOTAL -gt 0 ]; then
@@ -80,8 +84,8 @@ echo -n
 ######################
 # Connected Users
 ######################
-DISCONNECTS=$(egrep '[dovecot]?.*Disconnected' $LOGFILE | sort | wc -l)
-CONNECTS=$(egrep '[dovecot]?.*Login' $LOGFILE | sort | wc -l)
+DISCONNECTS=$(egrep 'Disconnected' $LOGFILE | sort | wc -l)
+CONNECTS=$(egrep 'Login' $LOGFILE | sort | wc -l)
 DISCON=$($EXPR_BIN $CONNECTS - $DISCONNECTS)
 if [ $DISCON -lt 0 ]; then
 	DISCON=0
@@ -93,7 +97,7 @@ echo -n
 # TLS Logins
 ######################
 echo -en "login_tls.value "
-NEW_TLS=$(egrep '[dovecot]?.*Login.*TLS' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
+NEW_TLS=$(egrep 'Login.*TLS' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
 OLD_TLS=$(grep TLS $STAT_FILE | cut -f2 -d '=')
 TLS=$($EXPR_BIN $NEW_TLS - $OLD_TLS)
 if [ $TLS -gt 0 ]; then
@@ -106,7 +110,7 @@ echo -n
 # SSL Logins
 ######################
 echo -en "login_ssl.value "
-NEW_SSL=$(egrep '[dovecot]?.*Login.*SSL' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
+NEW_SSL=$(egrep 'Login.*SSL' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
 OLD_SSL=$(grep SSL $STAT_FILE | cut -f2 -d '=')
 SSL=$($EXPR_BIN $NEW_SSL - $OLD_SSL)
 if [ $SSL -gt 0 ]; then
@@ -119,7 +123,7 @@ echo -n
 # IMAP Logins
 ######################
 echo -en "login_imap.value "
-NEW_IMAP=$(egrep '[dovecot]?.*imap.*Login' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
+NEW_IMAP=$(egrep 'imap.*Login' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
 OLD_IMAP=$(grep IMAP $STAT_FILE | cut -f2 -d '=')
 IMAP=$($EXPR_BIN $NEW_IMAP - $OLD_IMAP)
 if [ $IMAP -gt 0 ]; then
@@ -132,7 +136,7 @@ echo -n
 # POP3 Logins
 ######################
 echo -en "login_pop3.value "
-NEW_POP3=$(egrep '[dovecot]?.*pop3.*Login' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
+NEW_POP3=$(egrep 'pop3.*Login' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
 OLD_POP3=$(grep POP3 $STAT_FILE | cut -f2 -d '=')
 POP3=$($EXPR_BIN $NEW_POP3 - $OLD_POP3)
 if [ $POP3 -gt 0 ]; then
