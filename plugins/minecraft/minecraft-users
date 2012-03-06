@@ -1,32 +1,36 @@
-#!/bin/sh
+#!/usr/local/bin/ruby
 # Config:
-# [minecraft_players
-# playerfile /etc/minecraft/players.txt
-# subtract true
+# [minecraft_users]
+# env.host awesomeserver.com
+# env.port 25566
 #
-# playerfile - location of player list file, for example from the OnlineUsers
-#	plugin
-# subtract - OnlineUsers has a header above the user list, set this to true
-#	to subtract 1 from the output to compensate
-case $1 in
-	config)
-		cat <<'EOM'
-graph_title Connected players
-graph_vlabel players
-players.label players
-graph_info Number of players connected to Minecraft
-graph_category Minecraft
-EOM
-	exit 0;;
-esac
 
-echo -n "players.value "
+require 'socket'
 
-count=`wc -l ${playerfile} | cut -d' ' -f1`
-if [ $subtract="true" ];
-then
-	echo -n "$(($count - 1))"
-else
-	echo $count
-fi
+if ARGV[0] == 'config'
+    puts "graph_title Connected players"
+    puts "graph_vlabel players"
+    puts "players.label players"
+    puts "graph_info Number of players connected to Minecraft"
+    puts "graph_category Minecraft"
+    exit
+end
 
+host = ENV['host']
+host = 'localhost' unless host
+
+port = ENV['port']
+port = '25566' unless port
+
+socket = TCPSocket.new(host, port)
+socket.puts "QUERY"
+
+response = socket.read
+response = response.split("\n")
+
+server_port = response[0].split(" ", 2)[1].to_i
+player_count = response[1].split(" ", 2)[1].to_i
+max_players = response[2].split(" ", 2)[1].to_i
+player_list = response[3].split(" ", 2)[1].chomp[1..-2]
+
+puts "players.value #{player_count}"
