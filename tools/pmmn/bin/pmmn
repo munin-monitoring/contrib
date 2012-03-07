@@ -54,6 +54,7 @@ while(my $line = <>) {
 		next;
 	} elsif ($cmd eq "nodes") {
 		print "$host\n";
+		print ".";
 		next;
 	} elsif ($cmd eq "quit") {
 		exit(0);
@@ -67,19 +68,19 @@ while(my $line = <>) {
 		}
 		closedir(PLUGIN_DIR);
 		next;
-	} elsif (-e $plugin_filename) {
-		my $arg_plugin;
-		if ($cmd eq "config") {
-			$arg_plugin = "config";
-		} elsif ($cmd eq "fetch") {
-			$arg_plugin = "";
-		} else {
-			# Ignore
+	} elsif ($cmd eq "config" || $cmd eq "alert" || $cmd eq "fetch") {
+		if (-d $plugin_filename || ! -x $plugin_filename) {
+			print "# Unknown plugin [$arg] for $cmd";
 			next;
 		}
+		my $arg_plugin = ($cmd eq "fetch") ? "" : $cmd;
 		system($plugin_filename, $arg_plugin);
 		print ".";
+		next;
 	}
+        
+	# Arriving here is not a good sign
+	print "# Unknown command. Try list, nodes, config, fetch, version, alert or quit";
 } continue {
 	#print " " x 4096;
 	print "\n";
