@@ -1,0 +1,88 @@
+#!/usr/bin/perl -w
+
+=head1 MAGIC MARKERS
+
+  #%# family=snmpauto
+  #%# capabilities=snmpconf
+
+=cut
+
+use strict;
+use Munin::Plugin;
+use Munin::Plugin::SNMP;
+
+my $DEBUG=$ENV{'MUNIN_DEBUG'};
+
+# This is the snmpwalk:
+# snAgentTempSensorDescr.1.1 = STRING: "Line module 1, sensor 1 temperature"
+# snAgentTempSensorDescr.1.2 = STRING: "Line module 1, sensor 2 temperature"
+# snAgentTempSensorDescr.1.3 = STRING: "Line module 1, sensor 3 temperature"
+# snAgentTempSensorDescr.1.4 = STRING: "Line module 1, sensor 4 temperature"
+# snAgentTempSensorDescr.2.1 = STRING: "Line module 2, sensor 1 temperature"
+# snAgentTempSensorDescr.2.2 = STRING: "Line module 2, sensor 2 temperature"
+# snAgentTempSensorDescr.2.3 = STRING: "Line module 2, sensor 3 temperature"
+# snAgentTempSensorDescr.2.4 = STRING: "Line module 2, sensor 4 temperature"
+# snAgentTempSensorDescr.3.1 = STRING: "Active management module temperature"
+# snAgentTempSensorDescr.3.2 = STRING: "Active management module temperature"
+# snAgentTempValue.1.1 = INTEGER: 100
+# snAgentTempValue.1.2 = INTEGER: 106
+# snAgentTempValue.1.3 = INTEGER: 82
+# snAgentTempValue.1.4 = INTEGER: 72
+# snAgentTempValue.2.1 = INTEGER: 74
+# snAgentTempValue.2.2 = INTEGER: 102
+# snAgentTempValue.2.3 = INTEGER: 70
+# snAgentTempValue.2.4 = INTEGER: 74
+# snAgentTempValue.3.1 = INTEGER: 78
+# snAgentTempValue.3.2 = INTEGER: 84
+
+my $brcdIp = '1.3.6.1.4.1.1991';
+my $snAgentTempTable = "$brcdIp.1.1.2.13.1";
+my $snAgentTempSensorDescr = "$snAgentTempTable.1.3";
+my $snAgentTempValue = "$snAgentTempTable.1.4";
+
+
+if (defined $ARGV[0] and $ARGV[0] eq "snmpconf") {
+    print "index   $snAgentTempTable.1.3.\n";
+    print "require $snAgentTempSensorDescr. [1-9]\n";
+    print "require $snAgentTempValue. [1-9]\n";
+    exit 0;
+}
+
+my $module = 0;
+
+if ($Munin::Plugin::me =~ /_module_(\d+)$/) {
+    $module = $1;
+} else {
+    die "Could not determine module number from ".$Munin::Plugin::me."\n";
+}
+
+my ($session,$error);
+
+$session = Munin::Plugin::SNMP->session(-translate => [ -nosuchinstance => undef ]);
+
+my $sensor = 1;
+if ($ARGV[0] and $ARGV[0] eq "config") {
+    my ($host,undef,$version) = Munin::Plugin::SNMP->config_session();
+
+    print "host_name $host\n" unless $host eq 'localhost';
+    print "graph_title Module $module
+graph_args --base 1000 --lower-limit 0
+graph_vlabel °C
+graph_category system
+graph_scale no\n";
+
+    my $descr = undef;
+    while (defined ($descr = $session->get_single("$snAgentTempSensorDescr.$module.$sensor"))) {
+        print "sensor$sensor.label $descr\n";
+        $sensor ++;
+    }
+    exit 0;
+}
+
+my $value = undef;
+while (defined ($value = $session->get_single("$snAgentTempValue.$module.$sensor"))) {
+    $value /= 2;
+    print "sensor$sensor.value $value\n";
+    $sensor++;
+}
+# vim:ft=perl

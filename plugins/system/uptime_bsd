@@ -1,0 +1,63 @@
+#!/usr/bin/env perl
+# -*- perl -*-
+# Plugin to monitor the system uptime
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use warnings;
+
+my %IN;
+
+my $sysctl = defined($ENV{sysctl}) ? $ENV{sysctl} : '/sbin/sysctl';
+my $ostype = `uname -s`;
+chomp ($ostype);
+
+if (defined($ARGV[0]) and ($ARGV[0] eq 'autoconf')) {
+        if ( -x $sysctl ) {
+                print "yes\n";
+        } else {
+                print "no (sysctl binary not found)\n";
+        };
+        exit;
+};
+
+if (defined($ARGV[0]) and ($ARGV[0] eq 'config')) {
+print <<EOT ;
+graph_title Uptime
+graph_args --base 1000 -l 0
+graph_vlabel days
+graph_category system
+compile.label Kernel age
+compile.type GAUGE
+compile.min 0
+compile.max 1000
+compile.draw AREA
+uptime.label Uptime
+uptime.type GAUGE
+uptime.min 0
+uptime.max 1000
+uptime.draw AREA
+EOT
+exit;
+}
+
+use Date::Parse;
+
+my $kern=`sysctl -n kern.version`;
+$kern=~ /:\s+(.*\S)\s+\w+\@/;
+#print "Compile: $1\n";
+$kern=str2time($1);
+
+my $boot=`sysctl -n kern.boottime`; # OpenBSD will return seconds from the epoch
+if ($ostype ne "OpenBSD") {
+        $boot=~ / sec = (\d+)/;
+        #print "Boot: $1\n";
+        $boot=$1;
+}
+
+my $now=time;
+
+print "compile.value ",($now-$kern)/60/60/24,"\n";
+print "uptime.value ",($now-$boot)/60/60/24,"\n";

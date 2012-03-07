@@ -1,0 +1,152 @@
+#! /bin/bash
+#
+# Munin Plugin
+# to count logins to your dovecot mailserver
+# 
+# Created by Dominik Schulz <lkml@ds.gauner.org>
+# http://developer.gauner.org/munin/
+# Contributions by:
+# - Stephane Enten <tuf@delyth.net>
+# 
+# Parameters understood:
+#
+#	config		(required)
+#	autoconf 	(optional - used by munin-config)
+# 
+# Config variables:
+#
+#       logfile      - Where to find the syslog file
+#
+# Add the following line to a file in /etc/munin/plugin-conf.d:
+# 	env.logfile /var/log/your/logfile.log
+#
+# Magic markers (optional - used by munin-config and installation scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+######################
+# Configuration
+######################
+STAT_FILE=${STAT_FILE:-/var/lib/munin/plugin-state/plugin-dovecot.state}
+EXPR_BIN=/usr/bin/expr
+LOGFILE=${logfile:-/var/log/mail.log}
+######################
+
+if [ "$1" = "autoconf" ]; then
+	echo yes
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title Dovcecot Logins'
+	echo 'graph_args --base 1000 -l 0'
+	echo 'graph_vlabel Login Counters'
+	echo 'login_total.label Total Logins'
+	echo 'login_tls.label TLS Logins'
+	echo 'login_ssl.label SSL Logins'
+	echo 'login_imap.label IMAP Logins'
+	echo 'login_pop3.label POP3 Logins'
+	echo 'connected.label Connected Users'
+	exit 0
+fi
+
+#############################
+# Initialization
+#############################
+if [ ! -r $STAT_FILE ]; then
+	echo "TOTAL=0" > $STAT_FILE
+	echo "TLS=0" >> $STAT_FILE
+	echo "SSL=0" >> $STAT_FILE
+	echo "IMAP=0" >> $STAT_FILE
+	echo "POP3=0" >> $STAT_FILE
+fi
+#############################
+
+
+######################
+# Total Logins
+######################
+echo -en "login_total.value "
+NEW_TOTAL=$(egrep '[dovecot]?.*Login' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
+OLD_TOTAL=$(grep TOTAL $STAT_FILE | cut -f2 -d '=')
+TOTAL=$($EXPR_BIN $NEW_TOTAL - $OLD_TOTAL)
+if [ $TOTAL -gt 0 ]; then
+	echo "$TOTAL"
+else
+	echo "0"
+fi
+echo -n
+######################
+# Connected Users
+######################
+DISCONNECTS=$(egrep '[dovecot]?.*Disconnected' $LOGFILE | sort | wc -l)
+CONNECTS=$(egrep '[dovecot]?.*Login' $LOGFILE | sort | wc -l)
+DISCON=$($EXPR_BIN $CONNECTS - $DISCONNECTS)
+if [ $DISCON -lt 0 ]; then
+	DISCON=0
+fi
+echo -en "connected.value "
+echo $DISCON
+echo -n
+######################
+# TLS Logins
+######################
+echo -en "login_tls.value "
+NEW_TLS=$(egrep '[dovecot]?.*Login.*TLS' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
+OLD_TLS=$(grep TLS $STAT_FILE | cut -f2 -d '=')
+TLS=$($EXPR_BIN $NEW_TLS - $OLD_TLS)
+if [ $TLS -gt 0 ]; then
+	echo "$TLS"
+else
+	echo "0"
+fi
+echo -n
+######################
+# SSL Logins
+######################
+echo -en "login_ssl.value "
+NEW_SSL=$(egrep '[dovecot]?.*Login.*SSL' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
+OLD_SSL=$(grep SSL $STAT_FILE | cut -f2 -d '=')
+SSL=$($EXPR_BIN $NEW_SSL - $OLD_SSL)
+if [ $SSL -gt 0 ]; then
+	echo "$SSL"
+else
+	echo "0"
+fi
+echo -n
+######################
+# IMAP Logins
+######################
+echo -en "login_imap.value "
+NEW_IMAP=$(egrep '[dovecot]?.*imap.*Login' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
+OLD_IMAP=$(grep IMAP $STAT_FILE | cut -f2 -d '=')
+IMAP=$($EXPR_BIN $NEW_IMAP - $OLD_IMAP)
+if [ $IMAP -gt 0 ]; then
+	echo "$IMAP"
+else
+	echo "0"
+fi
+echo -n
+######################
+# POP3 Logins
+######################
+echo -en "login_pop3.value "
+NEW_POP3=$(egrep '[dovecot]?.*pop3.*Login' $LOGFILE | grep "`date '+%b %e'`" | sort | wc -l)
+OLD_POP3=$(grep POP3 $STAT_FILE | cut -f2 -d '=')
+POP3=$($EXPR_BIN $NEW_POP3 - $OLD_POP3)
+if [ $POP3 -gt 0 ]; then
+	echo "$POP3"
+else
+	echo "0"
+fi
+echo -n
+######################
+# Save the new values
+######################
+echo "TOTAL=$NEW_TOTAL" > $STAT_FILE
+echo "TLS=$NEW_TLS" >> $STAT_FILE
+echo "SSL=$NEW_SSL" >> $STAT_FILE 
+echo "IMAP=$NEW_IMAP" >> $STAT_FILE
+echo "POP3=$NEW_POP3" >> $STAT_FILE
+

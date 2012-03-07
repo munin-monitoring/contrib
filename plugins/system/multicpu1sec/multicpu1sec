@@ -17,26 +17,19 @@ style="AREA"
 cpus=$(grep -c ^processor /proc/cpuinfo)
 
 run_watchdog()  {                 # should also trap kill and term signals 
-   while :; do
-      sleep ${watchdog:-600}
-      touch -d now-${timeout:-1200}sec $cache
-      [ $pidfile -nt $cache ] || break
-   done
-   [ -f $pidfile ] || exit        # may have been removed by terminating daemon
-   kill $(cat $pidfile)
-   rm -f $pidfile $cache
+   kill -0 $(cat $pidfile) 2> /dev/null || rm -f $pidfile
 }
 
 
 run_acquire()  {
    echo "$$" > $pidfile
-   $pluginfull watchdog &
    mpstat -P ALL $interval |
    awk -v cpus=$cpus '$2>=0&&$2<10 {print $2, systime(), (100-$11)/cpus}' >> $cache
    rm -f $pidfile $cache
 }
 
 run_daemon()  {
+   run_watchdog
    if [ -f $pidfile ]; then
       touch $pidfile
    else   
@@ -92,4 +85,3 @@ exit 0
 #    acquire which needs a different pid than watchdog, otherwise watchdog
 #    could/will kill itself when expiring before the watched process is killed.
 # not a POSIX feature.
- 

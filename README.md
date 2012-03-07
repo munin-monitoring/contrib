@@ -5,7 +5,9 @@
 **This is usually where you want to begin your journey.**
 
 Here you'll find all the plugins coming from http://exchange.munin-monitoring.org/. 
-It as evolved since then, but 
+That web site is for the time being disabled, new updates are done here.
+
+If a dedicated website comes back alive, its plugin backend will be this git repo.
 
 ## contrib/templates/ -  3rd-party templates
 
@@ -25,3 +27,9 @@ Here, you can put just any kind of tool. Please use this directory instead of a 
 It makes things way more easy to search for others.
 
 And, it serves as an incubator of SVN `trunk/contrib` :-)
+
+## Notes to contributors
+
+We like to have ''elementary'' commits (a good rationale is : one per Changelog entry), as it is much easier to manage for reviewing. Debugging is also usually easier that way.
+
+So please **don't** be afraid to make as many commits as needed.
