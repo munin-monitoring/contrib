@@ -19,6 +19,8 @@ my $port; # Default is stdin/stdout
 my $verbose;
 my $host;
 my $plugin_dir = "plugins";
+my $spoolfetch_dir;
+
 {
 	my $man = 0;
 	my $help = 0;
@@ -28,6 +30,8 @@ my $plugin_dir = "plugins";
 		'verbose|v' => \$verbose, 
 		'plugin-dir|d=s' => \$plugin_dir, 
 		'host|h=s' => \$host, 
+
+		'spoolfetch-dir|s=s' => \$spoolfetch_dir,
 
 		'help|?' => \$help, 
 		man => \$man,
@@ -78,12 +82,19 @@ while(my $line = <>) {
 		system($plugin_filename, $arg_plugin);
 		print ".";
 		next;
+	} elsif ($cmd eq "cap") {
+		print "cap ";
+		print "spool " if $spoolfetch_dir;
+		next;
+	} elsif ($cmd eq "spoolfetch" && $spoolfetch_dir) {
+		system("$spoolfetch_dir/spoolfetch_$host", $arg);
+		print ".";
+		next;
 	}
         
 	# Arriving here is not a good sign
 	print "# Unknown command. Try list, nodes, config, fetch, version, alert or quit";
 } continue {
-	#print " " x 4096;
 	print "\n";
 };
 
@@ -104,6 +115,8 @@ Options:
 	--verbose		Verbose mode
 	--plugin-dir		Plugin directory (default is current dir)
 	--host			Host name (default is /bin/hostname)
+
+	--spoolfetch-dir        Spoolfetch plugin dirs (default is disabled)
 
 	--help			brief help message
 	--man			full documentation
