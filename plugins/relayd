@@ -67,38 +67,38 @@ my @hosts = ();
 open(my $conf, "<", $configfile) or die "can't open $configfile: $!";
 my $content = join("", <$conf>);
 while ( $content =~ /table\s*<([^>]*)>\s*{([^}]*)}/g) {
-	my $hosts = $2;
-	$hosts =~ s/#.*$//mg; # comments
-	$hosts =~ s/^\s+//mg; # trim spaces before lines
-	print "table $1: $hosts\n" if defined $ENV{MUNIN_DEBUG};
-	push @hosts , split /\s+/, $hosts;
+        my $hosts = $2;
+        $hosts =~ s/#.*$//mg; # comments
+        $hosts =~ s/^\s+//mg; # trim spaces before lines
+        print "table $1: $hosts\n" if defined $ENV{MUNIN_DEBUG};
+        push @hosts , split /\s+/, $hosts;
 }
 
 if ($cmd eq 'config') {
-	print("multigraph relayd_avail\n");
-	print("graph_title Relayd host availability\n");
-	print("graph_args --lower-limit 0\n");
-	print("graph_vlabel % availability\n");
-	print("graph_category Load balancer\n");
-	print("graph_info Ratio of time when this host was up. This is provided by relayd itself (not averaged by this plugin)\n");
-	for my $host (@hosts) {
-		my $clean = clean_fieldname($host);
-		$clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
-		print("$clean.label $host\n");
-	}
-	print("multigraph relayd_incidents\n");
-	print("graph_title Relayd host incidents\n");
-	print("graph_args --lower-limit 0\n");
-	print("graph_vlabel down incidents\n");
-	print("graph_category Load balancer\n");
-	print("graph_info Number of times this host went down during \${graph_period}\n");
-	for my $host (@hosts) {
-		my $clean = clean_fieldname($host);
-		$clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
-		print("$clean.type ABSOLUTE\n");
-		print("$clean.label $host\n");
-	}
-	exit(0);
+        print("multigraph relayd_avail\n");
+        print("graph_title Relayd host availability\n");
+        print("graph_args --lower-limit 0\n");
+        print("graph_vlabel % availability\n");
+        print("graph_category Load balancer\n");
+        print("graph_info Ratio of time when this host was up. This is provided by relayd itself (not averaged by this plugin)\n");
+        for my $host (@hosts) {
+                my $clean = clean_fieldname($host);
+                $clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
+                print("$clean.label $host\n");
+        }
+        print("multigraph relayd_incidents\n");
+        print("graph_title Relayd host incidents\n");
+        print("graph_args --lower-limit 0\n");
+        print("graph_vlabel down incidents\n");
+        print("graph_category Load balancer\n");
+        print("graph_info Number of times this host went down during \${graph_period}\n");
+        for my $host (@hosts) {
+                my $clean = clean_fieldname($host);
+                $clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
+                print("$clean.type ABSOLUTE\n");
+                print("$clean.label $host\n");
+        }
+        exit(0);
 }
 
 # sample lines:
@@ -116,44 +116,44 @@ my (%avail, %down);
 open(my $log, "$logtail -f $logfile -o $offsetfile |") or die("cannot open $logfile: $!");
 #open(my $log, "tail -100 $logfile |") or die("cannot open $logfile: $!");
 while (<$log>) {
-	if (/host ([^,]*), check[^,]*, state [^>]* -> ([^,]*), availability ([0-9]+.[0-9]+)%/) {
-		my $host = clean_fieldname($1);
-		$host = clean_fieldname('host'.$1) unless ($host ne '_');
+        if (/host ([^,]*), check[^,]*, state [^>]* -> ([^,]*), availability ([0-9]+.[0-9]+)%/) {
+                my $host = clean_fieldname($1);
+                $host = clean_fieldname('host'.$1) unless ($host ne '_');
 
-		$down{$host} = 0 unless defined $down{$host};
-		$down{$host}++ if $2 eq 'down';
-		# yes, we overwrite previous value and take only the recent one. be sad.
-		$avail{$host} = $3;
-	}
+                $down{$host} = 0 unless defined $down{$host};
+                $down{$host}++ if $2 eq 'down';
+                # yes, we overwrite previous value and take only the recent one. be sad.
+                $avail{$host} = $3;
+        }
 }
 close($log) or warn "failed to close pipe: $!";
 
 # get missing availability values from relayctl, if necessary
 for my $host (@hosts) {
-	my $ran = 0;
- 	if (!defined $avail{$host} && !$ran) {
-		open(my $status, "relayctl show summary|") or die "can't open relayctl: $!";
-		while (<$status>) {
-			if (/([\w\.]+)\s+(\d+\.\d+)%/) {
-				print "found spare value: $2 for $1\n" if defined $ENV{MUNIN_DEBUG};
-				$avail{$1} = $2 unless defined($avail{$1});
-			}
-		}
-		close $status or die "can't close pipe: $!";
-		$ran = 1;
-	}
+        my $ran = 0;
+        if (!defined $avail{$host} && !$ran) {
+                open(my $status, "relayctl show summary|") or die "can't open relayctl: $!";
+                while (<$status>) {
+                        if (/([\w\.]+)\s+(\d+\.\d+)%/) {
+                                print "found spare value: $2 for $1\n" if defined $ENV{MUNIN_DEBUG};
+                                $avail{$1} = $2 unless defined($avail{$1});
+                        }
+                }
+                close $status or die "can't close pipe: $!";
+                $ran = 1;
+        }
 }
 
 print "multigraph relayd_avail\n";
 for my $host (@hosts) {
-	my $clean = clean_fieldname($host);
-	$clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
-  	print "$clean.value " . ($avail{$host} || 'NaN'). "\n";
+        my $clean = clean_fieldname($host);
+        $clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
+        print "$clean.value " . ($avail{$host} || 'NaN'). "\n";
 }
 
 print "multigraph relayd_incidents\n";
 for my $host (@hosts) {
-	my $clean = clean_fieldname($host);
-	$clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
-	print "$clean.value " . ($down{$host} || 0). "\n";
+        my $clean = clean_fieldname($host);
+        $clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
+        print "$clean.value " . ($down{$host} || 0). "\n";
 }
