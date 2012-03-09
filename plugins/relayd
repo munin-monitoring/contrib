@@ -1,0 +1,136 @@
+#! /usr/bin/perl -w
+
+use strict;
+use Munin::Plugin;
+
+=head1 NAME
+
+relayd - Plugin to show statistics about relayd load balancer.
+
+=head1 CONFIGURATION
+
+The following environment variables are used by this plugin:
+
+=over 4
+
+=item logfile
+
+The file where MailScanner logs its action (Default:
+/var/log/relayd.log)
+
+=item logtail
+
+The location of the logtail command (Default: /usr/sbin/logtail)
+
+=item offsetfile
+
+The location of the offset file (Default:
+/var/log/munin/plugin-state/munin-relayd.offset)
+
+=back
+
+=head1 USAGE
+
+Requires the logtail command somewhere in path
+
+=head1 TODO
+
+Parsing relayd.conf would allow us to do the following:
+
+ * determine the hosts in config (may be necessary!)
+ * determine if the table is completely down (may be *impossible* if a partial
+   downtime becomes complete between two runs)
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=
+
+We should have "suggest" once we implement more than availability. We should
+also autoconf (check if logtail and the logfile exist, basically).
+
+See http://munin-monitoring.org/wiki/ConcisePlugins
+
+=cut
+
+my $logfile = '/var/log/relayd.log';
+my $logtail = '/usr/sbin/logtail';
+my $offsetfile = "/var/munin/plugin-state/munin-relayd.offset";
+my $configfile = "/usr/local/etc/relayd.conf";
+
+(defined($ENV{'logfile'})) and $logfile = $ENV{'logfile'};
+(defined($ENV{'logtail'})) and $logtail = $ENV{'logtail'};
+(defined($ENV{'offsetfile'})) and $offsetfile = $ENV{'offsetfile'};
+(defined($ENV{'configfile'})) and $configfile = $ENV{'offsetfile'};
+
+my $cmd = (defined($ARGV[0])) ? $ARGV[0] : '';
+
+if ($cmd eq 'config') {
+	my @hosts = ();
+	open(my $conf, "<", $configfile);
+	my $content = join("", <$conf>);
+	while ( $content =~ /table\s*<([^>]*)>\s*{([^}]*)}/g) {
+		my $hosts = $2;
+		$hosts =~ s/#.*$//mg;
+		@hosts = split /\s+/, $hosts;
+	}
+	print("multigraph relayd_avail\n\n");
+	print("graph_title Relayd host availability\n");
+	print("graph_args --lower-limit 0\n");
+	print("graph_vlabel % availability\n");
+	print("graph_category Load balancer\n");
+	print("graph_info Ratio of time when this host was up. This is provided by relayd itself (not averaged by this plugin)\n");
+	for my $host (@hosts) {
+		my $clean = clean_fieldname($host);
+		print("$clean.label $host\n");
+	}
+	print("\nmultigraph relayd_incidents\n\n");
+	print("graph_title Relayd host incidents\n");
+	print("graph_args --lower-limit 0\n");
+	print("graph_vlabel down incidents\n");
+	print("graph_category Load balancer\n");
+	print("graph_info Number of times this host went down during \${graph_period}\n");
+	for my $host (@hosts) {
+		my $clean = clean_fieldname($host);
+		print("$clean.type ABSOLUTE\n");
+		print("$clean.label $host\n");
+	}
+	exit(0);
+}
+
+# sample lines:
+# Mar  8 23:05:28 rtr0 relayd[81814]: host 209.44.112.101, check http code (2000ms), state up -> down, availability 97.83%
+# Mar  8 23:05:28 rtr0 relayd[81814]: host 209.44.112.96, check http code (2001ms), state up -> down, availability 98.12%
+# Mar  8 23:05:31 rtr0 relayd[81813]: table hag: 1 added, 2 deleted, 0 changed, 0 killed
+# Mar  8 23:05:31 rtr0 relayd[81814]: host 209.44.112.101, check http code (3ms), state down -> up, availability 97.83%
+# Mar  8 23:05:31 rtr0 relayd[81814]: host 209.44.112.96, check http code (3ms), state down -> up, availability 98.12%
+# Mar  8 23:05:36 rtr0 relayd[81813]: table hag: 2 added, 1 deleted, 0 changed, 0 killed
+# Mar  8 23:21:58 rtr0 relayd[81814]: host 209.44.112.96, check http code (2000ms), state up -> down, availability 98.12%
+# Mar  8 23:22:01 rtr0 relayd[81813]: table hag: 0 added, 1 deleted, 0 changed, 0 killed
+
+my (%avail, %down);
+
+open(my $log, "$logtail -f $logfile -o $offsetfile |") or die("cannot open $logfile: $!");
+#open(my $log, "tail -100 $logfile |") or die("cannot open $logfile: $!");
+while (<$log>) {
+	if (/host ([^,]*), check[^,]*, state [^>]* -> ([^,]*), availability ([0-9]+.[0-9]+)%/) {
+		my $host = clean_fieldname($1);
+		$host = clean_fieldname('host'.$1) unless ($host ne '_');
+
+		$down{$host} = 0 unless defined $down{$host};
+		$down{$host}++ if $2 eq 'down';
+		# yes, we overwrite previous value and take only the recent one. be sad.
+		$avail{$host} = $3;
+	}
+}
+close($log) or warn "failed to close pipe: $!";
+
+print "multigraph relayd_avail\n\n";
+for my $host (keys %avail) {
+  	print "$host.value " . $avail{$host} . "\n";
+}
+
+print "\nmultigraph relayd_incidents\n\n";
+for my $host (keys %down) {
+	print "$host.value " . $down{$host} . "\n";
+}
