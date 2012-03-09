@@ -65,15 +65,18 @@ my $configfile = "/usr/local/etc/relayd.conf";
 
 my $cmd = (defined($ARGV[0])) ? $ARGV[0] : '';
 
+my @hosts = ();
+open(my $conf, "<", $configfile) or die "can't open $configfile: $!";
+my $content = join("", <$conf>);
+while ( $content =~ /table\s*<([^>]*)>\s*{([^}]*)}/g) {
+	my $hosts = $2;
+	$hosts =~ s/#.*$//mg; # comments
+	$hosts =~ s/^\s+//mg; # trim spaces before lines
+	print "table $1: $hosts\n" if defined $ENV{MUNIN_DEBUG};
+	push @hosts , split /\s+/, $hosts;
+}
+
 if ($cmd eq 'config') {
-	my @hosts = ();
-	open(my $conf, "<", $configfile);
-	my $content = join("", <$conf>);
-	while ( $content =~ /table\s*<([^>]*)>\s*{([^}]*)}/g) {
-		my $hosts = $2;
-		$hosts =~ s/#.*$//mg;
-		@hosts = split /\s+/, $hosts;
-	}
 	print("multigraph relayd_avail\n\n");
 	print("graph_title Relayd host availability\n");
 	print("graph_args --lower-limit 0\n");
@@ -126,11 +129,11 @@ while (<$log>) {
 close($log) or warn "failed to close pipe: $!";
 
 print "multigraph relayd_avail\n\n";
-for my $host (keys %avail) {
-  	print "$host.value " . $avail{$host} . "\n";
+for my $host (@hosts) {
+  	print "$host.value " . ($avail{$host} || 'NaN'). "\n";
 }
 
 print "\nmultigraph relayd_incidents\n\n";
-for my $host (keys %down) {
-	print "$host.value " . $down{$host} . "\n";
+for my $host (@hosts) {
+	print "$host.value " . ($down{$host} || 0). "\n";
 }
