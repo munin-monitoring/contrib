@@ -29,36 +29,27 @@ The location of the offset file (Default:
 
 =back
 
-=head1 USAGE
-
-Requires the logtail command somewhere in path
-
 =head1 TODO
 
  * determine if the table is completely down (may be *impossible* if a partial
    downtime becomes complete between two runs)
- * look again at Munin::Plugin to see if we can simplify things here (duh.)
 
 =head1 MAGIC MARKERS
 
  #%# family=contrib
  #%# capabilities=
 
-We should autoconf (check if logtail and the logfile exist, basically).
+We should autoconf (check for config file and logfile).
 
 See http://munin-monitoring.org/wiki/ConcisePlugins
 
 =cut
 
 my $logfile = '/var/log/relayd.log';
-my $logtail = '/usr/sbin/logtail';
-my $offsetfile = "/var/munin/plugin-state/munin-relayd.offset";
 my $configfile = "/usr/local/etc/relayd.conf";
 
 need_multigraph();
 
-(defined($ENV{'logfile'})) and $logfile = $ENV{'logfile'};
-(defined($ENV{'logtail'})) and $logtail = $ENV{'logtail'};
 (defined($ENV{'offsetfile'})) and $offsetfile = $ENV{'offsetfile'};
 (defined($ENV{'configfile'})) and $configfile = $ENV{'offsetfile'};
 
@@ -114,7 +105,12 @@ if ($cmd eq 'config') {
 
 my (%avail, %down);
 
-open(my $log, "$logtail -f $logfile -o $offsetfile |") or die("cannot open $logfile: $!");
+my $pos = undef;
+($pos) = restore_state();
+$po = 0 unless defined($pos);
+
+($log,$reset) = tail_open($logfile,$pos);
+#open(my $log, "$logtail -f $logfile -o $offsetfile |") or die("cannot open $logfile: $!");
 #open(my $log, "tail -100 $logfile |") or die("cannot open $logfile: $!");
 while (<$log>) {
         if (/host ([^,]*), check[^,]*, state [^>]* -> ([^,]*), availability ([0-9]+.[0-9]+)%/) {
@@ -127,7 +123,8 @@ while (<$log>) {
                 $avail{$host} = $3;
         }
 }
-close($log) or warn "failed to close pipe: $!";
+$pos = tail_close($log) or warn "failed to close pipe: $!";
+save_state($pos);
 
 # get missing availability values from relayctl, if necessary
 for my $host (@hosts) {
