@@ -130,6 +130,22 @@ while (<$log>) {
 }
 close($log) or warn "failed to close pipe: $!";
 
+# get missing availability values from relayctl, if necessary
+for my $host (@hosts) {
+	my $ran = 0;
+ 	if (!defined $avail{$host} && !$ran) {
+		open(my $status, "relayctl show summary|") or die "can't open relayctl: $!";
+		while (<$status>) {
+			if (/([\w\.]+)\s+(\d+\.\d+)%/) {
+				print "found spare value: $2 for $1\n" if defined $ENV{MUNIN_DEBUG};
+				$avail{$1} = $2 unless defined($avail{$1});
+			}
+		}
+		close $status or die "can't close pipe: $!";
+		$ran = 1;
+	}
+}
+
 print "multigraph relayd_avail\n\n";
 for my $host (@hosts) {
   	print "$host.value " . ($avail{$host} || 'NaN'). "\n";
