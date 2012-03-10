@@ -37,11 +37,7 @@ The location of the offset file (Default:
 =head1 MAGIC MARKERS
 
  #%# family=contrib
- #%# capabilities=
-
-We should autoconf (check for config file and logfile).
-
-See http://munin-monitoring.org/wiki/ConcisePlugins
+ #%# capabilities=autoconf
 
 =cut
 
@@ -91,6 +87,19 @@ if ($cmd eq 'config') {
                 print("$clean.type ABSOLUTE\n");
                 print("$clean.label $host\n");
         }
+        exit(0);
+}
+elsif ($cmd eq 'autoconf') {
+        sub fail($) {
+                my $msg=shift;
+                print "no ($msg)\n";
+                exit(1);
+        }
+        fail("$logfile unreadable)") unless -r $logfile;
+        fail("$configfile unreadable") unless -r $configfile;
+        open(my $status, "relayctl show summary|") or fail("cannot run relayctl: $!");
+        close($status) or fail("cannot run relayctl: $!");
+        print "yes";
         exit(0);
 }
 
