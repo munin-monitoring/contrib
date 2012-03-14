@@ -3,6 +3,7 @@
 # re-write of python version of pgbouncer stats
 # data from stats, pools (cleint, server)
 
+use strict;
 use Munin::Plugin;
 use DBD::Pg;
 
@@ -16,10 +17,10 @@ my $db_port = $ENV{'pgbouncer_port'}  || '6432';
 my $db_host = $ENV{'pgbouncer_host'}  || 'localhost';
 my $db_pass = $ENV{'pgbouncer_pass'}  || '';
 my $db_name = 'pgbouncer';
-
+my @data = ();
 # get the DB (pool) name we want to fetch
 $plugin_name =~ /pgbouncer_(.*)$/;
-$pool_name = $1;
+my $pool_name = $1;
 # bail if no name
 if (!$pool_name)
 {
@@ -33,7 +34,7 @@ if (defined($ARGV[0]))
 	# autoconf, nothing to do
 	if ($ARGV[0] eq 'autoconf')
 	{
-		$dbh = DBI->connect("DBI:Pg:dbname=$db_name;host=$db_host;port=$db_port", $db_user, $db_pass);
+		my $dbh = DBI->connect("DBI:Pg:dbname=$db_name;host=$db_host;port=$db_port", $db_user, $db_pass);
 		if (!$dbh)
 		{
 			print "no\n";
@@ -156,12 +157,12 @@ if (defined($ARGV[0]))
 }
 
 # connect to data
-$dbh = DBI->connect("DBI:Pg:dbname=$db_name;host=$db_host;port=$db_port", $db_user, $db_pass);
+my $dbh = DBI->connect("DBI:Pg:dbname=$db_name;host=$db_host;port=$db_port", $db_user, $db_pass);
 # go trough each set and get the data
-foreach $get ('pools', 'stats')
+foreach my $get ('pools', 'stats')
 {
 	# prep and execute the show query
-	$pre = $dbh->prepare("SHOW $get");
+	my $pre = $dbh->prepare("SHOW $get");
 	$pre->execute();
 	while (@data = $pre->fetchrow)
 	{
