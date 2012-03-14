@@ -1,0 +1,83 @@
+#!/usr/bin/perl
+# -*- cperl -*-
+#
+# Copyright (C) 2012, Clemens Schwaighofer
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+# 02110-1301 USA.
+
+=head1 NAME
+
+postgres_size_detail_ - Plugin to monitor PostgreSQL database size for one database in detail (data, index, sequence, view)
+
+=head1 CONFIGURATION
+
+Configuration is done through libpq environment variables, for example
+PGUSER, PGDATABASE, etc. For more information, see L<Munin::Plugin::Pgsql>.
+
+To monitor a specific database, link to postgres_size_<databasename>.
+This script cannot monitor all database detail sizes at the same time, a valid database name needs to be given.
+
+=head1 SEE ALSO
+
+L<Munin::Plugin::Pgsql>
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=head1 AUTHOR
+
+Magnus Hagander <magnus@hagander.net>, Redpill Linpro AB
+
+=head1 COPYRIGHT/License.
+
+Copyright (c) 2012, Clemens Schwaighofer (gullevek@gullevek.org)
+
+All rights reserved. This program is free software; you can
+redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation; version 2
+dated June, 1991.
+
+=cut
+
+use strict;
+use warnings;
+
+use Munin::Plugin::Pgsql;
+
+my $pg = Munin::Plugin::Pgsql->new(
+    basename => 'postgres_size_detail_',
+    title    => 'PostgreSQL detail database size',
+    info     => 'Size of database in detail',
+    vlabel   => 'Size',
+    paramdatabase => 1,
+    basequery => "SELECT CASE WHEN relkind = 'r' OR relkind = 't' THEN 'db_detail_data' WHEN relkind = 'i' THEN 'db_detail_index' WHEN relkind = 'v' THEN 'db_detail_view' WHEN relkind = 'S' THEN 'db_detail_sequence' ELSE 'db_detail_other' END AS state,
+	SUM(relpages::bigint * 8 * 1024) AS size 
+	FROM pg_class pg, pg_namespace pgn WHERE pg.relnamespace = pgn.oid AND pgn.nspname NOT IN ('information_schema', 'pg_catalog') GROUP BY state",
+    configquery    => [
+        "VALUES ('db_detail_data','Data size'),('db_detail_index','Index size'),('db_detail_sequence','Sequence size'),('db_detail_view','View size'),('db_detail_other','Other size')",
+    ],
+    suggestquery =>
+        "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate AND NOT datname='postgres' UNION ALL SELECT 'ALL' ORDER BY 1 LIMIT 10",
+    stack     => 1,
+    graphmin  => 0,
+    graphdraw => 'AREA',
+	extraconfig => 'graph_total Total'
+);
+
+$pg->Process();
+
