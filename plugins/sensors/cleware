@@ -1,15 +1,26 @@
 #!/bin/bash
 
-# Written by Lars Falk-Petersen, cleware@falk-petersen.no
-# Version 0.3. To be used with http://www.vanheusden.com/clewarecontrol/
+# Written by Lars Falk-Petersen <cleware@falk-petersen.no>
+# Version 0.4. See https://github.com/ways
+# To be used with http://www.vanheusden.com/clewarecontrol/
 # Clewarecontrol device serial must be set in config file:
 
 #  #Put the following lines in /etc/munin/plugin-conf.d/cleware
-#  [cleware*]
-#  #device serial. find it by running: clewarecontrol -l
-#  env.serial 7778
-#  #path of clewarecontrol
-#  env.bin /usr/bin/clewarecontrol
+#   [cleware*]
+#   #device serial. find it by running: clewarecontrol -l
+#   env.serial 7778
+#   #path of clewarecontrol
+#   env.bin /usr/bin/clewarecontrol
+#
+#  Munin must be able to read and write to the device.
+#  Run the following as root:
+#  # chgrp munin /dev/usb/hiddev0
+#  # chmod g+rw /dev/usb/hiddev0
+#
+#  If that works, you have to make it permanent. On Ubuntu:
+#  Create this file: /etc/udev/rules.d/99-hidraw-permissions.rules
+#   #Allow munin to read hidraws from Cleware
+#   SUBSYSTEM=="usb", KERNEL=="hiddev*", GROUP="munin", MODE="0660"
 
 case $1 in
    config)
@@ -32,11 +43,10 @@ if [ ! $serial ]; then
 	exit 1
 fi
 
-$bin -c 1 -ag > /dev/null 2>&1
+$bin -d $serial -c 1 -ag > /dev/null 2>&1
 
 echo -n "temp.value "
 $bin -d $serial -b -c 1 -rt
 
 echo -n "hum.value "
 $bin -d $serial -b -c 1 -rh
-

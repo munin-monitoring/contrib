@@ -1,6 +1,6 @@
-# This is the repository for all user contributed stuff
+This is the repository for all user contributed stuff
 
-## contrib/plugins/ - 3rd-party plugins
+# contrib/plugins/ - 3rd-party plugins
 
 **This is usually where you want to begin your journey.**
 
@@ -9,7 +9,7 @@ That web site is for the time being disabled, new updates are done here.
 
 If a dedicated website comes back alive, its plugin backend will be this git repo.
 
-## contrib/templates/ -  3rd-party templates
+# contrib/templates/ -  3rd-party templates
 
 Feel free to update templates here, or even to create new ones.
 
@@ -21,7 +21,7 @@ It should serves as a base for small editions that can be resynced in SVN trunk,
 * don't copy the whole template
 * directly edit files in this directory
 
-## contrib/tools/ - 3rd-party tools
+# contrib/tools/ - 3rd-party tools
 
 Here, you can put just any kind of tool. Please use this directory instead of a random place on the internet. 
 It makes things way more easy to search for others.
