@@ -264,7 +264,7 @@ def start_servers(instances):
 
 
 def usage():
-    print "Usage: %s [--run] [--verbose] [--muninconf] <configfile>" % sys.argv[0]
+    print "Usage: %s [--run] [--verbose] [--muninconf] <configfile> <configfileN>" % sys.argv[0]
 
 def main():
     if len(sys.argv) <= 2:
@@ -276,7 +276,12 @@ def main():
         verbose = True
 
     config = ConfigParser.RawConfigParser()
-    config.read(sys.argv[-1])
+    for configfile in sys.argv[1:]:
+        if not configfile.endswith(".conf"):
+            continue
+        if verbose:
+            print "Reading config file %s" % configfile
+        config.read(configfile)
 
     instancekeys = [ key for key in config.sections() if key.startswith("instance:") ]
     servers = {}
@@ -330,14 +335,14 @@ def main():
                 instanceconfig[k] = v
 
             instanceconfig["plugins"] = plugins
-            if "--verbose" in sys.argv:
-                instanceconfig["verbose"] = True
+            instanceconfig["verbose"] = verbose
 
             instanceconfig["name"] = "%s-%s" % (instancename, portinstance)
             instanceconfig["expanded_port"] = portinstance
 
             instances.append(instanceconfig)
             # XXX: need to store what handlers we should have.
+    print instances
 
     # output sample munin config for the poller
     if "--muninconf" in sys.argv:
