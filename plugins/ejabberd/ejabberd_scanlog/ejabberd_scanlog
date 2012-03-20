@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 require 'yaml'
 
-# ejabberd_scanlog revision 1 (Feb 2012)
+# ejabberd_scanlog revision 2 (Mar 2012)
 #
 # Scans ejabberd 2.1.x log for known error signatures and counts them
 #
@@ -13,6 +13,11 @@ require 'yaml'
 # 	env.log: ejabberd log file (defaults to /var...)
 #
 # Author: Artem Sheremet <dot.doom@gmail.com>
+
+#
+# Run with 'debug' argument to initiate full log rescan.
+# This will also print out unparsed log entries to stderr.
+# Cache file will be untouched.
 #
 
 LOG_FILE = ENV['log'] || '/var/log/ejabberd/ejabberd.log'
@@ -20,17 +25,21 @@ CACHE_FILE = '/tmp/ejabberd_scanlog_cache' # cache file position
 
 DEFAULT_CACHE = { :start => 0 }
 
-debug_mode = ARGV.first == 'debug'
+$debug_mode = ARGV.first == 'debug'
 
-begin
-	log_info = YAML.load IO.read(CACHE_FILE)
-rescue
+if $debug_mode
 	log_info = DEFAULT_CACHE
-end
+else
+	begin
+		log_info = YAML.load IO.read(CACHE_FILE)
+	rescue
+		log_info = DEFAULT_CACHE
+	end
 
-if File.size(LOG_FILE) < log_info[:start]
-	# logrotate?
-	log_info = DEFAULT_CACHE
+	if File.size(LOG_FILE) < log_info[:start]
+		# logrotate?
+		log_info = DEFAULT_CACHE
+	end
 end
 
 new_data = ''
@@ -53,9 +62,12 @@ LABELS = {
 	:sql_transactions_exceeded =>   'SQL transaction restarts exceeded',
 	:unexpected_info =>             'Unexpected info',
 	:other_sql_cmd_timeout =>       'Other sql_cmd timeout',
+	:system_ports_limit =>          'System limit hit: ports', # check with length(erlang:ports())., set in ejabberdctl config file
+	:system_limit =>                'Other system limit hit', # processes? check with erlang:system_info(process_count)., erlang:system_info(process_limit)., set in ejabberdctl cfg
+	:generic_server_terminating =>  'Generic server terminating',
 	:UNKNOWN =>                     'Unknown error/warning'
 }
-def log_type(text, debug_mode)
+def log_type(text)
 	if text.include? 'ejabberd_odbc_sup'
 		:ejabberd_odbc_failure
 	elsif text.include? "mod_pubsub_odbc,'-unsubscribe"
@@ -86,8 +98,14 @@ def log_type(text, debug_mode)
 		:unexpected_info
 	elsif text.include?('timeout') and text.include?('sql_cmd')
 		:other_sql_cmd_timeout
+	elsif text.include?('system_limit') and text.include?('open_port')
+		:system_ports_limit
+	elsif text.include?('system_limit')
+		:system_limit
+	elsif text.include?('Generic server') and text.include?('terminating')
+		:generic_server_terminating
 	else
-		puts "Cannot parse text: #{text}" if debug_mode
+		warn "Cannot parse text: #{text}" if $debug_mode
 		:UNKNOWN
 	end
 end
@@ -99,18 +117,18 @@ new_data.split("\n=").each { |report|
 	next unless type and time and text
 
 	log_info[type] = (log_info[type] || 0) + 1
-	if sub_type = log_type(text, debug_mode)
+	if sub_type = log_type(text)
 		log_info[sub_type] = (log_info[sub_type] || 0) + 1
 	end
 }
 
 log_info[:start] += new_data.size
-File.open(CACHE_FILE, 'w') { |f| f.write log_info.to_yaml }
+File.open(CACHE_FILE, 'w') { |f| f.write log_info.to_yaml } unless $debug_mode
 
 if ARGV.first == 'config'
 	puts <<CONFIG
 graph_title Ejabberd Log
-graph_vtitle Report count
+graph_vtitle per period
 graph_category ejabberd
 graph_args -l 0
 graph_order #{(LABELS.keys + log_info.keys.select { |k| k.is_a? String }.sort).join(' ')}
@@ -128,6 +146,7 @@ LABELS.each_pair { |type,label|
 			else
 				'STACK'
 			end
+			'LINE'
 		}"
 	else
 		puts "#{type}.value #{log_info[type] or 0}"
@@ -139,7 +158,7 @@ log_info.each_pair { |k,value|
 		if k.is_a? String
 			if ARGV.first == 'config'
 				puts "#{k}.label #{k}"
-				puts "#{k}.draw LINE2"
+				puts "#{k}.draw LINE"
 			else
 				puts "#{k}.value #{value}"
 			end

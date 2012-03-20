@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 
-# netstat_bsd revision 1 (Feb 2012)
+# netstat_bsd_m revision 1 (Feb 2012)
 #
 # This plugin shows various statistics from 'netstat -m'
 #
@@ -17,7 +17,7 @@
 #%# capabilities=autoconf suggest
 
 # original filename
-PLUGIN_NAME = 'netstat_bsd_'
+PLUGIN_NAME = 'netstat_bsd_m_'
 
 class String
 	def escape
@@ -31,7 +31,7 @@ class String
 	end
 end
 
-def netstat(filter = nil)
+def netstat_m(filter = nil)
 	Hash[`netstat -m`.split($/).map { |line|
 		if line =~ /^([\d\/K]+) (.*) \(([\w\/+]+)\)$/
 			# 7891K/22385K/30276K bytes allocated to network (current/cache/total)
@@ -52,9 +52,9 @@ case ARGV.first
 when 'autoconf'
 	puts `uname -s`.include?('FreeBSD') ? 'yes' : 'no'
 when 'suggest'
-	puts netstat.keys.map(&:escape).join $/
+	puts netstat_m.keys.map(&:escape).join $/
 when 'config'
-	data = netstat(stat_name)
+	data = netstat_m(stat_name)
 	if data.empty?
 		warn "no data for <#{stat_name}>. Try running with 'suggest'"
 	else
@@ -84,7 +84,7 @@ CONFIG
 		}.join $/
 	end
 when nil # fetch
-	data = netstat(stat_name)
+	data = netstat_m(stat_name)
 	unless data.empty?
 		puts data.first.last.map { |name, value|
 			value = value.to_i * 1024 if value.end_with? 'K'
