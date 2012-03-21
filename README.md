@@ -28,6 +28,10 @@ It makes things way more easy to search for others.
 
 And, it serves as an incubator of SVN `trunk/contrib` :-)
 
+# contrib/samples/ - 3rd-party examples of configs
+
+This serves as a repository for examples of various configs. You know, the ''learn by example'' way of doing things.
+
 ## Notes to contributors
 
 We like to have ''elementary'' commits (a good rationale is : one per Changelog entry), as it is much easier to manage for reviewing. Debugging is also usually easier that way.
