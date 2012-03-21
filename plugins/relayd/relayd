@@ -47,6 +47,14 @@ The relayd.conf configfile (Default: /usr/local/etc/relayd.conf)
 
 =cut
 
+# wrapper around clean_fieldname() which is too dumb to parse IPs
+sub clean_host($) {
+	my $host = shift;
+        my $clean = clean_fieldname($host);
+        $clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
+	return $clean;
+}
+
 my $logfile = '/var/log/relayd.log';
 my $configfile = "/usr/local/etc/relayd.conf";
 
@@ -77,8 +85,7 @@ if ($cmd eq 'config') {
         print("graph_category Load balancer\n");
         print("graph_info Ratio of time when this host was up. This is provided by relayd itself (not averaged by this plugin)\n");
         for my $host (@hosts) {
-                my $clean = clean_fieldname($host);
-                $clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
+                my $clean = clean_host($host);
                 print("$clean.label $host\n");
         }
         print("multigraph relayd_incidents\n");
@@ -88,8 +95,7 @@ if ($cmd eq 'config') {
         print("graph_category Load balancer\n");
         print("graph_info Number of times this host went down\n");
         for my $host (@hosts) {
-                my $clean = clean_fieldname($host);
-                $clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
+                my $clean = clean_host($host);
                 print("$clean.type ABSOLUTE\n");
                 print("$clean.label $host\n");
         }
@@ -131,8 +137,7 @@ my ($log,$reset) = tail_open($logfile,$pos);
 #open(my $log, "tail -100 $logfile |") or die("cannot open $logfile: $!");
 while (<$log>) {
         if (/host ([^,]*), check[^,]*, state [^>]* -> ([^,]*), availability ([0-9]+.[0-9]+)%/) {
-                my $host = clean_fieldname($1);
-                $host = clean_fieldname('host'.$1) unless ($host ne '_');
+                my $host = clean_host($1);
 
                 $down{$host} = 0 unless defined $down{$host};
                 $down{$host}++ if $2 eq 'down';
@@ -146,8 +151,7 @@ save_state($pos);
 # get missing availability values from relayctl, if necessary
 for my $host (@hosts) {
         my $ran = 0;
-        my $clean = clean_fieldname($host);
-        $clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
+        my $clean = clean_host($host);
         if (!defined $avail{$clean} && !$ran) {
                 open(my $status, "relayctl show summary|") or die "can't open relayctl: $!";
                 while (<$status>) {
@@ -163,14 +167,12 @@ for my $host (@hosts) {
 
 print "multigraph relayd_avail\n";
 for my $host (@hosts) {
-        my $clean = clean_fieldname($host);
-        $clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
+        my $clean = clean_host($host);
         print "$clean.value " . ($avail{$clean} || 'NaN'). "\n";
 }
 
 print "multigraph relayd_incidents\n";
 for my $host (@hosts) {
-        my $clean = clean_fieldname($host);
-        $clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
+        my $clean = clean_host($host);
         print "$clean.value " . ($down{$clean} || 0). "\n";
 }
