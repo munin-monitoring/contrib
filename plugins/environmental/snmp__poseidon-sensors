@@ -1,9 +1,9 @@
 #!/bin/bash
 #==============================================================================#
 #                                                                              #
-#  Check the sensor status of HW Group Poseidon family. For more info refer to:#
+#  check status of sensor of HW Group Poseidon 3268. For more info refer to:   #
 #  http://www.hw-group.com/products/poseidon/poseidon_3268_en.html             #
-#  2012  by Florian Lechner                          (flo-github@catbull.com)  #
+#  2012  by Florian Lechner                                                    #
 #                                                                              #
 #==============================================================================#
 #                                                                              #
@@ -21,28 +21,10 @@
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.      #
 #                                                                              #
 #==============================================================================#
-#                                                                              #
-#  This plugin requires snmpget to work propperly                              #
-#                                                                              #
-#==============================================================================#
 
 #  Munin autoconf and snmpautoconf magic
 #%# family=auto snmpauto contrib
 #%# capabilities=snmpconf
-
-#==============================================================================#
-#                               Config Section                                 #
-#==============================================================================#
-
-#  SNMP Config
-MIBS=":"			#  we don't use any configured MIBs so we don't 
-				#+ have to deal with errors in the MIBs
-SNMPVERSION="1"			#  as of firmware 3.1.5 only SNMPv1 is supported
-SNMPCOMUNITY="public"		#  SNMP community string to read from the device
-
-#==============================================================================#
-#                     No configuration beyonde this line!                      #
-#==============================================================================#
 
 E_OK="0"			#  everything went allright
 E_UNKNOWN="1"			#  "catch all" for otherwise unhandled errors
@@ -50,10 +32,6 @@ E_UNKNOWN="1"			#  "catch all" for otherwise unhandled errors
 E_ARG="81"			#  invalid argument		
 E_USAGE="82"			#  wrong program name or arguments
 E_SNMPGET="83"			#  error while executing the 'snmpget' utility
-
-E_ICINGA_OK="0"			#  Icinga exitcodes for states 'ok',
-E_ICINGA_WARN="1"		#+ 'warning', and
-E_ICINGA_CRIT="2"		#+ 'critical'
 
 E_COMMANDNOTFOUND="127"		#  unable to locate binary
 
@@ -95,23 +73,6 @@ IFS="
 "
 
 #==============================================================================#
-
-#  printIcingaStatus (sensorNumber)
-#  print status output for icinga/icinga
-printIcingaStatus () {
-	_sensorNumber="$1"
-	getSensorData $_sensorNumber
-	_name="$sensorType$_sensorNumber"			#  long name
-	_value="$(($sensorValue/10)),$(($sensorValue%10))"	#  decimal rep.
-
-	if [ "$sensorState" = "$STATE_OK" ]; then
-		echo "$_name OK - $sensorName is $_value $sensorUnit."
-		return $E_ICINGA_OK
-	else
-		echo "$_name Critical - $sensorName is "$_value $sensorUnit"."
-		return $E_ICINGA_CRIT
-	fi
-}
 
 #  printMuninConfig ()
 #  print output for munin auto configuration
@@ -228,7 +189,7 @@ snmpGet () {
 	_longValue="`snmpget	-O v\
 				-m $MIBS\
 				-v $SNMPVERSION\
-				-c $SNMPCOMUNITY\
+				-c $SNMPCOMMUNITY\
 				$_host $_oid 2>/dev/null`"
 	
 	_exitStatus="$?"
@@ -302,23 +263,11 @@ sanitize () {
 	fi
 }
 
-#  usage ([munin|icinga])
-#  print either specific usage for use as munin/icinga plugin or long usage 
+#  usage ()
+#  print usage 
 usage () {
-	case $1 in
-	munin)	echo "usage: snmp_<host>_poseidon-sensors [config|snmpconf]" 1>&2
-		exit $E_USAGE
-		;;
-	icinga)	echo "usage: check_snmp_poseidon <host-ip> <sensor#>" 1>&2
-                exit $E_USAGE
-		;;
-	*)	echo "usage: check_snmp_poseidon <host-ip> <sensor#>
-for nagios/icinga compatible output.
-usage: snmp_<host>_poseidon-sensors [config|snmpconf]
-for munin compatible output" 1>&2
-                exit $E_USAGE
-		;;	
-	esac
+	echo "usage: snmp_<host>_poseidon-sensors [config|snmpconf]" 1>&2
+	exit $E_USAGE
 }
 
 #  err (ErrorMsg, Exitcode)
@@ -341,6 +290,17 @@ err () {
 
 #==============================================================================#
 
+#  SNMP Config
+MIBS=":"			#  we don't use any configured MIBs so we don't 
+				#+ have to deal with errors in the MIBs
+if [ -z $SNMPVERSION ]; then 
+	SNMPVERSION="1"		#  as of firmware 3.1.5 only SNMPv1 is supported
+fi
+
+if [ -z $SNMPCOMMUNITY ]; then 
+	SNMPCOMMUNITY="public"	#  SNMP community string to read from the device
+fi
+
 #  handle -h option
 while getopts ":h" opt; do
 	case $opt in
@@ -357,29 +317,13 @@ if [ ! -x `which snmpget` ]; then
 	err "Fatal: unable to locate \'snmpget\'! Exiting..." $E_COMMANDNOTFOUND
 fi
 
-#  analyze how we have been called and...
-myName="`basename "$0"`"
+#  extract pluginname ...
+myName="`basename "$0" | cut -d "_" -f 1,3`"
 
-hostAddr="`echo $myName | cut -d "_" -f 2`"
-muninName="`echo $myName | cut -d "_" -f 1,3`"
-icingaName="`echo $myName | cut -d  "_" -f 1,2,3`"
+#  ...and hostname
+hostAddr="`basename "$0" | cut -d "_" -f 2`"
 
-#  ...and behave like a munin/icinga plugin...
-if [ "$icingaName" = "check_snmp_poseidon" ]; then
-	#  IP address of the Poseidon device
-	hostAddr=`sanitize $1 || err
-		"Fatal: Invalid argument \"$1\"! Exiting..." $E_ARG`
-	#  number of the sensor
-	sensorNr=`sanitize $2 || err
-		"Fatal: Invalid argument \"$2\"! Exiting..." $E_ARG`
-	if [[ -n ${sensorNr//[0-9]/} ]]; then err \
-		"Fatal: Invalid argument \"$sensorNr\"\! Exiting..." $E_ARG
-	fi
-
-	printIcingaStatus "$sensorNr"
-	exit $?
-#  ...or as a munin plugin
-elif [ "$muninName" = "snmp_poseidon-sensors" ]; then
+if [ "$myName" = "snmp_poseidon-sensors" ]; then
 	hostAddr=`sanitize $hostAddr || err \
 		"Fatal: Invalid argument \"$hostAddr\"! Exiting..." $E_ARG`
 	if [ -z "$hostAddr" ]; then 
