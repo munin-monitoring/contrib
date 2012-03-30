@@ -1,31 +1,68 @@
-LOGFILE=/var/log/vsftpd.log
+#!/bin/sh
 
-if [ "$1" = "autoconf" ]; then
-    if [ -f "${LOGFILE}" ]; then
-        echo yes
-	exit 0
-    else
-        echo no
-	exit 1
+
+#
+# Plugin to monitor a vsftpd server running on the machine
+#
+#
+# Requirements:
+#       - Needs access to the log file of the ftp server
+#	- Needs logtail
+#
+# Configuration:
+#	I am not a munin developer, everything is hardcoded in the beginning
+#	of this script. Contribute and add a configuration section, if you want it
+#
+# Thanks to the one who made the amavis plugin and the one who made the original vsftpd plugin
+
+
+#configuration
+LOGFILE=/var/log/vsftpd.log
+LOGTAIL=/usr/bin/logtail
+#end of configuration
+
+STATEFILE=$MUNIN_PLUGSTATE/munin.offset
+
+mktempfile () {
+#    cmd=`echo $MUNIN_MKTEMP | sed s/\\$1/$1/`
+#    $cmd
+    mktemp -p /tmp/ $1
+}
+
+
+# Try tailing a random file to check how arguments are passed
+ARGS=0
+`$LOGTAIL /etc/hosts 2>/dev/null >/dev/null`
+if [ $? = 66 ]; then
+    if [ ! -n "$logtail" ]; then
+            ARGS=1
     fi
+fi
+                
+ 
+if [ "$1" = "autoconf" ]; then
+	#config is hardcoded why do you want to worry?
+	echo yes
+	exit 0
 fi
 
 if [ "$1" = "config" ]; then
-        echo 'graph_title FTP Server'
-        echo 'graph_args --base 1000 -l 0'
-        echo 'graph_vlabel Requests'
-	echo 'graph_category FTP'
-        echo 'ftp_c.label connections'
-        echo 'ftp_sl.label successful_logins'
-	echo 'ftp_fl.label failed_logins'
-	echo 'ftp_su.label successful_uploads'
-	echo 'ftp_fu.label failed_uploads'
-	echo 'ftp_sd.label successful_downloads'
-	echo 'ftp_fd.label failed_downloads'
-	echo 'ftp_sde.label successful_deletes'
-	echo 'ftp_fde.label failed_deletes'
-        exit 0
+       echo 'graph_title FTP Server'
+       echo 'graph_args --base 1000 -l 0'
+       echo 'graph_vlabel Requests'
+       echo 'graph_category FTP'
+       echo 'ftp_c.label connections'
+       echo 'ftp_sl.label successful_logins'
+       echo 'ftp_fl.label failed_logins'
+       echo 'ftp_su.label successful_uploads'
+       echo 'ftp_fu.label failed_uploads'
+       echo 'ftp_sd.label successful_downloads'
+       echo 'ftp_fd.label failed_downloads'
+       echo 'ftp_sde.label successful_deletes'
+       echo 'ftp_fde.label failed_deletes'
+       exit 0
 fi
+
 
 ftp_c=U
 ftp_sl=U
@@ -37,15 +74,29 @@ ftp_fd=U
 ftp_sde=U
 ftp_fde=U
 
-ftp_c=`grep "CONNECT" ${LOGFILE} | wc -l`
-ftp_sl=`grep "OK LOGIN" ${LOGFILE} | wc -l`
-ftp_fl=`grep "FAIL LOGIN" ${LOGFILE} | wc -l`
-ftp_su=`grep "OK UPLOAD" ${LOGFILE} | wc -l`
-ftp_fu=`grep "FAIL UPLOAD" ${LOGFILE} | wc -l`
-ftp_sd=`grep "OK DOWNLOAD" ${LOGFILE} |wc -l`
-ftp_fd=`grep "FAIL DOWNLOAD" ${LOGFILE} | wc -l`
-ftp_sde=`grep "OK DELETE" ${LOGFILE} |wc -l`
-ftp_fde=`grep "FAIL DELETE" ${LOGFILE} | wc -l`
+
+TEMP_FILE=$(mktempfile munin-vsftpd.XXXXXX)
+
+if [ -n "$TEMP_FILE" -a -f "$TEMP_FILE" ]
+then
+     if [ $ARGS != 0 ]; then
+         $LOGTAIL -f ${LOGFILE} -o ${STATEFILE}  > ${TEMP_FILE}
+     else
+         $LOGTAIL ${LOGFILE} ${STATEFILE}  > ${TEMP_FILE}
+     fi
+                                                      
+	ftp_c=`grep "CONNECT" ${TEMP_FILE} | wc -l`
+	ftp_sl=`grep "OK LOGIN" ${TEMP_FILE} | wc -l`
+	ftp_fl=`grep "FAIL LOGIN" ${TEMP_FILE} | wc -l`
+	ftp_su=`grep "OK UPLOAD" ${TEMP_FILE} | wc -l`
+	ftp_fu=`grep "FAIL UPLOAD" ${TEMP_FILE} | wc -l`
+	ftp_sd=`grep "OK DOWNLOAD" ${TEMP_FILE} |wc -l`
+	ftp_fd=`grep "FAIL DOWNLOAD" ${TEMP_FILE} | wc -l`
+	ftp_sde=`grep "OK DELETE" ${TEMP_FILE} |wc -l`
+	ftp_fde=`grep "FAIL DELETE" ${TEMP_FILE} | wc -l`                                                
+
+   rm ${TEMP_FILE}
+fi
 
 echo "ftp_c.value ${ftp_c}"
 echo "ftp_sl.value ${ftp_sl}"
@@ -56,3 +107,4 @@ echo "ftp_sd.value ${ftp_sd}"
 echo "ftp_fd.value ${ftp_fd}"
 echo "ftp_sde.value ${ftp_sde}"
 echo "ftp_fde.value ${ftp_fde}"
+
