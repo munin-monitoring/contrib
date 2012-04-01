@@ -2,7 +2,7 @@
 #
 # File:        snmp__fn
 # Description: SNMP plugin to monitor open sessions, sslvpn, CPU and Memory on a
-#              Fortigate firewall.
+#              Fortinet Fortigate firewall.
 # 
 # Author:      Thom Diener <munin@tmd.ch>
 # License:     This program is free software; you can redistribute it and/or
@@ -13,6 +13,7 @@
 # Version:     v1.00 30.10.2011 First draft of the fortigate plugin
 #              v1.01 19.01.2012 OID to MIB changed, plugins gets faster
 #              v1.02 25.01.2012 MIB file availability check added
+#              v1.03 01.04.2012 Update to work with Firmware v4.00MR3Patch6
 #
 # Parameters:  config   (required)
 #              autoconf (optional)
@@ -21,49 +22,59 @@
 #              (Example: ln -s /usr/share/munin/plugins/snmp__fn \
 #              /etc/munin/plugins/snmp_foo.example.com_fn)
 #
-#              Global community string /etc/munin/plugin-conf.d/munin-node
-#                [snmp_*]
-#                env.community private
-#                timeout 45   # In case low latency or timeout
+#              Add global community string 
+#              vi /etc/munin/plugin-conf.d/munin-node
+#              [snmp_*]
+#              env.community private
+#              timeout 45   # In case low latency or timeout
 #
-# Fortigate    Activate snmp on your Fortigate firewall. Fortigate documentation
-#              at  https://support.fortinet.com 
+# Fortigate    Activate snmp on your Fortigate firewall. 
+#              Fortigate documentation at https://support.fortinet.com 
 #
-# MIB          Download and copy the original Fortigate MIB defintion file to 
-#              /usr/share/snmp/mibs/FORTINET-300-MIB.txt (Filename depends on
-#              used Version)
+# MIB          Download and copy the original Fortigate MIB defintion files to:
+#              /usr/share/snmp/mibs/FORTINET-CORE-MIB.mib.txt
+#              /usr/share/snmp/mibs/FORTINET-FORTIGATE-MIB.mib
 #
-# Tested with Fortinet Fortigate-50B, Firmware 3.00(MR6) on Ubuntu 10.04 LTS
-# with Munin 1.4.4 installed.
+# Testing      This plugin has been tested with the following OS/software: 
+#              
+#              Appliance/Firmware:
+#              Fortigate-50B 3.00-b0662(MR6 Patch 1)  work with v1.00-1.02
+#              Fortigate-50B 3.00-b0678(MR6 Patch 6)  work with v1.00-1.02
+#              Fortigate-50B 4.00-b0178(MR1 Patch 1)  work with v1.00-1.02
+#              Fortigate-50B 4.00-b0217(MR1 Patch 10) work with v1.00-1.02
+#              Fortigate-50B 4.00-b0217(MR2 Patch 4)  work with v1.00-1.02
+#              Fortigate-50B 4.00-b0521(MR3 Patch 6)  work with v1.03
+#              
+#              Munin-Version:
+#              Munin 1.4.4 (1.4.4-1ubuntu1) 
+#              OS-Version:    
+#              Ubuntu 10.04.3 LTS (lucid) x86_32/64
 #
 #%# family=manual
 #
-
-
 #set -x
 
 ### Constants ------------------------------------------------------------------
 SNMPCLIENT=`basename $0 | sed 's/^snmp_//g' | cut -d "_" -f1`
-MIBFILE="/usr/share/snmp/mibs/FORTINET-300-MIB.20080414.txt"
+MIBFILE="/usr/share/snmp/mibs/FORTINET-FORTIGATE-MIB.mib"
 FNTYPE=`echo $MIBFILE | cut -d "." -f1 | cut -d "/" -f6`
 if [ -r $MIBFILE ]; then
  SNMPGET="/usr/bin/snmpget -m $MIBFILE  -c $community -v 2c $SNMPCLIENT"
 else
- echo no, MIB definition file not available or readable.
+ echo No, MIB definition file not available or readable.
  exit 1
 fi
+UNIT="Fortinet Fortigate Unit"
+
 
 ### Variables ------------------------------------------------------------------
-fnSysVersion="1.3.6.1.4.1.12356.1.3.0"
-FGTcpu="$FNTYPE::fnSysCpuUsage.0"
-fnSysVersion="$FNTYPE::fnSysVersion.0"
-fnSysMemUsage="$FNTYPE::fnSysMemUsage.0"
-fnSysSesCount="$FNTYPE::fnSysSesCount.0"
-fnVPNSslStatsLoginUsers="$FNTYPE::fnVpnSslStatsLoginUsers.1"
-fnVPNSslStatsActiveWebSessions="$FNTYPE::fnVpnSslStatsActiveWebSessions.1"
-fnVPNSslStatsActiveTunnels="$FNTYPE::fnVpnSslStatsActiveTunnels.1"
+FGTcpu="$FNTYPE::fgSysCpuUsage.0"
+fnSysMemUsage="$FNTYPE::fgSysMemUsage.0"
+fnSysSesCount="$FNTYPE::fgSysSesCount.0"
+fnVPNSslStatsLoginUsers="$FNTYPE::fgVpnSslStatsLoginUsers.1"
+fnVPNSslStatsActiveWebSessions="$FNTYPE::fgVpnSslStatsActiveWebSessions.1"
+fnVPNSslStatsActiveTunnels="$FNTYPE::fgVpnSslStatsActiveTunnels.1"
 
-UNIT=`$SNMPGET $fnSysVersion  | cut -d ":" -f4 | cut -d " " -f2 | cut -d "\"" -f2`
 SCPU=`$SNMPGET $FGTcpu        | cut -d ":" -f4 | cut -d " " -f2`
 SMEM=`$SNMPGET $fnSysMemUsage | cut -d ":" -f4 | cut -d " " -f2`
 SCNT=`$SNMPGET $fnSysSesCount | cut -d ":" -f4 | cut -d " " -f2`
