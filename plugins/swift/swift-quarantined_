@@ -1,0 +1,56 @@
+#!/usr/bin/env python
+# -*- encoding: utf-8 -*-
+#
+# Swift monitoring script for munin
+#
+# Copyright © 2012 eNovance <licensing@enovance.com>
+#
+# Author: Julien Danjou <julien@danjou.info>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+import sys
+import json
+import os
+import requests
+
+try:
+    swift_server = sys.argv[0].split("_", 1)[1]
+except:
+    print "E: Cannot find server name using script name"
+    sys.exit(1)
+
+try:
+    if sys.argv[1] == 'config':
+        print "graph_title Swift objects quarantined %s" % swift_server
+        print "graph_category swift"
+        print "quarantined_objects.type GAUGE"
+        print "quarantined_objects.draw AREA"
+        print "quarantined_objects.label Quarantined objects"
+        print "quarantined_containers.type GAUGE"
+        print "quarantined_containers.area STACK"
+        print "quarantined_containers.label Quarantined containers"
+        print "quarantined_accounts.type GAUGE"
+        print "quarantined_accounts.draw STACK"
+        print "quarantined_accounts.label Quarantined accounts"
+    sys.exit(0)
+except IndexError:
+    pass
+
+quarantined = json.loads(requests.get("http://%s:%d/recon/quarantined" \
+                                          % (swift_server, os.getenv("SWIFT_OBJECT_PORT", 6000))).text)
+print "quarantined_objects.value %d" % quarantined['objects']
+print "quarantined_containers.value %d" % quarantined['containers']
+print "quarantined_accounts.value %d" % quarantined['accounts']
