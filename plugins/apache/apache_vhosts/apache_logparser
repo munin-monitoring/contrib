@@ -1,0 +1,190 @@
+#!/usr/bin/perl
+
+=head1 README
+
+This is a logfile watcher for apache, it monitors a log dir for access logs and saves some stats to shared memory.
+Munin can then fetch and reset the stats periodically.
+
+Just start it once, it runs as a daemon and polls logs every n sec keeping track of changes to the logs.
+Filelist is read on startup and on defined scan_intervals. File position is recorded and logs are checked for truncate/delete (for performance reasons).
+
+Requires perl modules File::Tail::Multi Storable IPC::ShareLite Munin::Plugin (optional Data::Dumper)
+
+You can use it in parallel to the pipelogger if that suits you better, the stats are merged in shared mem.
+Both ways should show decent performance, the pipelogger works in RAM only, but writes no logs.
+
+
+=head1 INSTALLATION
+
+Install to /usr/share/munin and run it as root
+
+configure the variables below:
+
+$dir		path to your logfiles
+$files		file-glob to find access logs
+$site		regexp to find sitename from logfile name
+$statefile	file to save last log position for tail
+$nsec		tail and write to shared mem every n seconds
+$debug		dump tallied data every n seconds, print every log line parsed
+$scan_interval	rescan for new log files every n minutes
+$type		log file type:
+                common: CLF + vhost + time + (other fields)
+                combined: combined + time + (other fields)
+=cut
+
+# config
+my $dir = "/logs/apache_logs";
+my $files = "*access_log";
+my $site = "(.*)-access_log";
+my $statefile = "/tmp/logstate";
+`touch $statefile` unless (-f $statefile);
+local $type="combined";
+local $nsec=7;
+local $debug=0;
+
+my $scan_interval=5; # minutes
+
+# perl modules
+use File::Tail::Multi;
+use Storable qw(freeze thaw);
+use List::Util qw(min max);
+use IPC::ShareLite ':lock';
+require Data::Dumper if $debug;
+use Munin::Plugin;
+
+# shared mem
+local $share = IPC::ShareLite->new(
+	-key     => 'mapl',
+	-create  => 1,
+	-destroy => 1,
+	-exclusive => 0,
+	-mode => '0666'
+) or die $!;
+
+# drop stored data on reload
+$share->store( freeze {} );
+
+# tail log files
+my $tail=File::Tail::Multi->new (
+  Files=>["$dir/$files"],
+  ScanForFiles=>$scan_interval,
+  Debug=>0,
+  LastRun_File => $statefile,
+  RemoveDuplicate=>0,
+  NumLines=>0,
+  OutputPrefix=>"f"
+);
+
+# read to current position
+$tail->read;
+
+# register counting function
+$tail->Function(\&count);
+
+local $temp;
+my ($file,$ip,$logname,$user,$rtime,$method,$request,$protocol,$status,$bytes,$referer,$useragent,$time);
+sub count {
+        foreach $_ (@{shift()})  {
+        if ((()=/"/g)==2) {
+          # common with filename prefix, optionally add time and vhost at the end
+          ($file,$ip,$logname,$user,$rtime,$method,$request,$protocol,$status,$bytes,$time,$vhost)=/^(.*?)\s:\s(.*?)\s(.*?)\s(.*?)\s\[(.*?)\]\s"(.*)\s(.*?)\s(.*?)"\s(\d*)\s(\S*)\s?(\S*)\s?(\S*?)$/o;
+        }
+        elsif ((()=/"/g)==6) {
+          # combined with filename prefix, optionally add time and vhost at the end
+          ($file,$ip,$logname,$user,$rtime,$method,$request,$protocol,$status,$bytes,$referer,$useragent,$time,$vhost)=/^(.*?)\s:\s(.*?)\s(.*?)\s(.*?)\s\[(.*?)\]\s"(.*)\s(.*?)\s(.*?)"\s(\d*?)\s(.*?)\s"(.*?)"\s"(.*?)"\s?(\S*)\s?(\S*)$/o;
+        };
+
+	#find sitename
+	$file=~s/$site/$1/;
+	$file=$vhost if $vhost;
+	
+	# skip broken lines
+	next unless $file;
+
+	# sitename to munin fieldname
+	my $vpm=clean_fieldname("$file");
+	$temp{$vpm}{'label'}="$file";
+	$temp{$vpm}{'label'}=~s/www\.//;
+	
+	# count all requests
+	$temp{$vpm}{'requests'}++;
+
+	if ($bytes) {
+	 $bytes=~s/-/0/;
+ 	 # bytes transmitted
+	 $temp{$vpm}{'bytes'}+=$bytes;
+
+	 # max bytes
+	 $temp{$vpm}{'max_bytes'}=max($temp{$vpm}{'max_bytes'},$bytes) || 0;
+
+         # average bytes
+         $temp{$vpm}{'avg_bytes'}=$temp{$vpm}{'bytes'}/$temp{$vpm}{'requests'} || 0;
+	}
+	
+	# count by status / error code
+	$temp{$vpm}{"status"}{$status}++ if $status;
+
+	if ($time) {
+	  # microsec to millisec
+  	  $time=sprintf("%d",$time/1000); 
+
+  	  # min/max execution time
+  	  $temp{$vpm}{'max_time'}=max($temp{$vpm}{'max_time'},$time) || 0;
+
+  	  # cumulative execution time
+  	  $temp{$vpm}{'time'}+=$time;
+
+          # average time
+          $temp{$vpm}{'avg_time'}=$temp{$vpm}{'time'}/$temp{$vpm}{'requests'} || 0;
+        }
+
+        };
+};
+
+
+while (1) {
+        # tail files, calls &count with linearray
+        $tail->read;
+
+        # begin transaction                
+        $share->lock(LOCK_EX);
+        
+        # get data (may be updated by other loggers too)
+        my %old=%{thaw $share->fetch};
+
+        foreach my $vpm (keys %temp){
+                # merge values
+                $old{$vpm}{'label'}=$temp{$vpm}{'label'};
+                $old{$vpm}{'bytes'}+=$temp{$vpm}{'bytes'} if $temp{$vpm}{'bytes'};
+                $old{$vpm}{'requests'}+=$temp{$vpm}{'requests'} if $temp{$vpm}{'requests'};
+                $old{$vpm}{'time'}+=$temp{$vpm}{'time'} if $temp{$vpm}{'time'};
+                # avoid div by zero
+                my $div=($old{$vpm}{'requests'} <1)?1:$old{$vpm}{'requests'};
+                # recalc average on merged data for multiple datasources, use local average after purge/restart
+                $old{$vpm}{'avg_time'}=($old{$vpm}{'avg_time'}>0)?sprintf("%d",($old{$vpm}{'time'}+$temp{$vpm}{'time'})/$div):sprintf("%d",$temp{$vpm}{'avg_time'});
+                $old{$vpm}{'avg_bytes'}=($old{$vpm}{'avg_bytes'}>0)?sprintf("%d",($old{$vpm}{'bytes'}+$temp{$vpm}{'bytes'})/$div):sprintf("%d",$temp{$vpm}{'avg_bytes'});
+                $old{$vpm}{'max_time'}=max($old{$vpm}{'max_time'},$temp{$vpm}{'max_time'}) || 0;
+                $old{$vpm}{'max_bytes'}=max($old{$vpm}{'max_bytes'},$temp{$vpm}{'max_bytes'}) || 0;
+
+                # reset local counters
+                foreach my $check qw(requests bytes time max_bytes avg_bytes max_time avg_time) {
+                        $temp{$vpm}{$check}=0;
+                }
+
+                # reset status counts
+                foreach my $val (keys %{$temp{$vpm}{'status'}}) {
+                        $old{$vpm}{'status'}{$val}+=$temp{$vpm}{'status'}{$val};
+                        $temp{$vpm}{'status'}{$val}=0;
+                }
+
+        };
+
+        # save to shm
+        print Data::Dumper::Dumper(%old) if $debug;
+        $share->store( freeze \%old );
+        # end transaction
+        $share->unlock;
+  
+        # parse/write every n seconds (plus processing time)
+        sleep $nsec;
+}
