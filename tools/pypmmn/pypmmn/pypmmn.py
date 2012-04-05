@@ -2,8 +2,9 @@
 from optparse import OptionParser
 from os import listdir, access, X_OK
 from os.path import join, isdir
-from subprocess import call
-from socket import gethostname
+from subprocess import Popen, PIPE
+from socket import gethostname, SHUT_RDWR
+from time import sleep
 
 import sys
 
@@ -13,25 +14,25 @@ __version__ = '1.0dev3'
 
 class CmdHandler(object):
 
-    def __init__(self, in_stream, out_stream, options):
-        self.out_stream = out_stream
-        self.in_stream = in_stream
+    def __init__(self, get_fun, put_fun, options):
+        self.get_fun = get_fun
+        self.put_fun = put_fun
         self.options = options
 
     def do_version(self, arg):
         """
         Prints the version of this instance.
         """
-        self.out_stream.write('pypmmn on %s version: %s' % (
+        self.put_fun('# munin node at %s\n' % (
             self.options.host,
-            __version__))
+            ))
 
     def do_nodes(self, arg):
         """
         Prints this hostname
         """
-        self.out_stream.write('%s\n' % self.options.host)
-        self.out_stream.write('.')
+        self.put_fun('%s\n' % self.options.host)
+        self.put_fun('.')
 
     def do_quit(self, arg):
         """
@@ -47,9 +48,10 @@ class CmdHandler(object):
             for filename in listdir(self.options.plugin_dir):
                 if not access(join(self.options.plugin_dir, filename), X_OK):
                     continue
-                self.out_stream.write("%s " % filename)
+                self.put_fun("%s " % filename)
         except OSError, exc:
             sys.stdout.write("# ERROR: %s" % exc)
+        self.put_fun("\n")
 
     def _caf(self, arg, cmd):
         """
@@ -58,7 +60,7 @@ class CmdHandler(object):
         """
         plugin_filename = join(self.options.plugin_dir, arg)
         if isdir(plugin_filename) or not access(plugin_filename, X_OK):
-            self.out_stream.write("# Unknown plugin [%s] for %s" % (arg, cmd))
+            self.put_fun("# Unknown plugin [%s] for %s" % (arg, cmd))
             return
 
         if cmd == 'fetch':
@@ -67,11 +69,12 @@ class CmdHandler(object):
             arg_plugin = cmd
 
         try:
-            call([plugin_filename, arg_plugin])
+            output = Popen([plugin_filename, arg_plugin], stdout=PIPE).communicate()[0]
         except OSError, exc:
-            self.out_stream.write("# ERROR: %s" % exc)
+            self.put_fun("# ERROR: %s" % exc)
             return
-        self.out_stream.write('.')
+        self.put_fun(output)
+        self.put_fun('.\n')
 
     def do_alert(self, arg):
         self._caf(arg, 'alert')
@@ -83,43 +86,43 @@ class CmdHandler(object):
         self._caf(arg, 'config')
 
     def do_cap(self, arg):
-        self.out_stream.write("cap ")
+        self.put_fun("cap ")
         if self.options.spoolfetch_dir:
-            self.out_stream.write("spool ")
+            self.put_fun("spool")
+        self.put_fun("cap \n")
 
     def do_spoolfetch(self, arg):
-        call(['%s/spoolfetch_%s' % (self.options.spoolfetch_dir,
+        output = Popen(['%s/spoolfetch_%s' % (self.options.spoolfetch_dir,
             self.options.host),
-            arg])
-        self.out_stream.write('.')
+            arg]).communicate()[0]
+        self.put_fun(output)
+        self.put_fun('.\n')
 
     # aliases
     do_exit = do_quit
 
 
-    def handle_input(self):
-        for line in self.in_stream:
-            line = line.strip()
-            line = line.split(' ')
-            cmd = line[0]
-            if len(line) == 1:
-                arg = ''
-            elif len(line) == 2:
-                arg = line[1]
-            else:
-                raise ValueError('Invalid input: %s' % line)
+    def handle_input(self, line):
+        line = line.strip()
+        line = line.split(' ')
+        cmd = line[0]
+        if len(line) == 1:
+            arg = ''
+        elif len(line) == 2:
+            arg = line[1]
+        else:
+            raise ValueError('Invalid input: %s' % line)
 
-            if not cmd:
-                continue
+        if not cmd:
+            return
 
-            func = getattr(self, 'do_%s' % cmd, None)
-            if not func:
-                commands = [_[3:] for _ in dir(self) if _.startswith('do_')]
-                print "# Unknown command. Supported commands: %s" % commands
-                sys.exit(1)
+        func = getattr(self, 'do_%s' % cmd, None)
+        if not func:
+            commands = [_[3:] for _ in dir(self) if _.startswith('do_')]
+            self.put_fun("# Unknown command. Supported commands: %s" % commands)
+            return
 
-            func(arg)
-        self.out_stream.write('\n')
+        func(arg)
 
 
 def usage(option, opt, value, parser):
@@ -153,15 +156,64 @@ def get_options():
 
 def main():
     options, args = get_options()
+    handler = CmdHandler(None, None, options)
     if not options.port:
-        in_stream = sys.stdin
-        out_stream = sys.stdout
+        handler.get_fun = sys.stdin.read
+        handler.put_fun = sys.stdout.write
     else:
-        sys.stderr.write("TCP connections not yet supported\n")
-        sys.exit(1)
+        import socket
+        host = ''
+        port = int(options.port)
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((host, port))
+        s.listen(1)
 
-    handler = CmdHandler(in_stream, out_stream, options)
-    handler.handle_input()
+        conn, addr = s.accept()
+        handler.get_fun = conn.recv
+        handler.put_fun = conn.send
+        handler.do_version(None)
+        counter = 0
+
+        print 'Connected by', addr
+        while True:
+            data = conn.recv(1024)
+            if not data.strip():
+                sleep(1)
+                counter += 1
+                if counter > 3:
+                    conn.shutdown(SHUT_RDWR)
+                    conn.close()
+                    conn, addr = s.accept()
+                    counter = 0
+                    handler.get_fun = conn.recv
+                    handler.put_fun = conn.send
+                    handler.do_version(None)
+                print "sleep"
+                try:
+                    data = conn.recv(1024)
+                    print 'data2', `data`
+                except socket.error, exc:
+                    conn, addr = s.accept()
+                    counter = 0
+                    handler.get_fun = conn.recv
+                    handler.put_fun = conn.send
+                    handler.do_version(None)
+                    print "Socket error: %s" % exc
+
+            if data.strip() == 'quit':
+                print 'shutting down remote connection'
+                conn.shutdown(SHUT_RDWR)
+                conn.close()
+                conn, addr = s.accept()
+                counter = 0
+                handler.get_fun = conn.recv
+                handler.put_fun = conn.send
+                handler.do_version(None)
+                continue
+
+            handler.handle_input(data)
+
 
 if __name__ == '__main__':
     main()
