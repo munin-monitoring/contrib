@@ -11,11 +11,6 @@ import sys
 __version__ = '1.0dev3'
 
 
-spoolfetch_dir = ''
-plugin_dir = 'plugins'
-host = 'hostname'
-
-
 class CmdHandler(object):
 
     def __init__(self, in_stream, out_stream, options):
@@ -27,14 +22,15 @@ class CmdHandler(object):
         """
         Prints the version of this instance.
         """
-        self.out_stream.write('pypmmn on %s version: %s' % (host,
+        self.out_stream.write('pypmmn on %s version: %s' % (
+            self.options.host,
             __version__))
 
     def do_nodes(self, arg):
         """
         Prints this hostname
         """
-        self.out_stream.write('%s\n' % host)
+        self.out_stream.write('%s\n' % self.options.host)
         self.out_stream.write('.')
 
     def do_quit(self, arg):
@@ -48,19 +44,19 @@ class CmdHandler(object):
         Print a list of plugins
         """
         try:
-            for filename in listdir(plugin_dir):
-                if not access(join(plugin_dir, filename), X_OK):
+            for filename in listdir(self.options.plugin_dir):
+                if not access(join(self.options.plugin_dir, filename), X_OK):
                     continue
                 self.out_stream.write("%s " % filename)
         except OSError, exc:
-            sys.stdout.writte("# ERROR: %s" % exc)
+            sys.stdout.write("# ERROR: %s" % exc)
 
     def _caf(self, arg, cmd):
         """
         handler for ``config``, ``alert`` and ``fetch``
         Calls the plugin with ``cmd`` as only argument.
         """
-        plugin_filename = join(plugin_dir, arg)
+        plugin_filename = join(self.options.plugin_dir, arg)
         if isdir(plugin_filename) or not access(plugin_filename, X_OK):
             self.out_stream.write("# Unknown plugin [%s] for %s" % (arg, cmd))
             return
@@ -88,11 +84,13 @@ class CmdHandler(object):
 
     def do_cap(self, arg):
         self.out_stream.write("cap ")
-        if spoolfetch_dir:
+        if self.options.spoolfetch_dir:
             self.out_stream.write("spool ")
 
     def do_spoolfetch(self, arg):
-        call(['%s/spoolfetch_%s' % (spoolfetch_dir, host), arg])
+        call(['%s/spoolfetch_%s' % (self.options.spoolfetch_dir,
+            self.options.host),
+            arg])
         self.out_stream.write('.')
 
     # aliases
@@ -138,14 +136,14 @@ def get_options():
             default=None,
             help='TCP Port to listen on. (If not specified, use stdin/stdout)')
     parser.add_option('-d', '--plugin-dir', dest='plugin_dir',
-            default='.',
+            default='plugins',
             help=('The directory containing the munin-plugins.'
-                ' Default: <current dir>'))
+                ' Default: <current working dir>/plugins'))
     parser.add_option('-h', '--host', dest='host',
-            help=('The hostname which will be reported in the pluging.'
+            help=('The hostname which will be reported in the plugins.'
                 ' Default: %s' % gethostname()),
             default=gethostname())
-    parser.add_option('-s', '--spoolfech-dir', dest='spoolfech_dir',
+    parser.add_option('-s', '--spoolfech-dir', dest='spoolfetch_dir',
             default=None,
             help='The spoolfetch folder. Default: disabled')
     parser.add_option('--help', action='callback', callback=usage,

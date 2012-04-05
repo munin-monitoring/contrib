@@ -1,7 +1,9 @@
 PyPMMN
 ======
 
-PyPMMN is a pure python port of pmmn_.
+PyPMMN is a pure python port of pmmn_. One small change. Instead of using the
+current working dir as ``plugins`` folder, it will look for a *subdirectory*
+called ``plugins`` in the current working folder.
 
 Requirements
 ============
