@@ -15,9 +15,7 @@ setup(
     author=AUTHOR,
     author_email=AUTHOR_EMAIL,
     license="BSD",
-    include_package_data=True,
     packages=['pypmmn'],
     scripts=['pypmmn/pypmmn.py'],
-    zip_safe=False,
 )
 

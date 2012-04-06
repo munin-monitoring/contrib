@@ -1,4 +1,8 @@
 #!/usr/bin/python
+"""
+A very simple munin-node written in pure python (no external libraries
+required)
+"""
 from logging.handlers import RotatingFileHandler
 from optparse import OptionParser
 from os import listdir, access, X_OK, getpid
@@ -13,7 +17,7 @@ import sys
 LOG = logging.getLogger(__name__)
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 
-from pypmmn.daemon import createDaemon
+from daemon import createDaemon
 
 
 __version__ = '1.0dev4'
@@ -73,36 +77,42 @@ class CmdHandler(object):
                 if not access(join(self.options.plugin_dir, filename), X_OK):
                     LOG.warning('Non-executable plugin %s found!' % filename)
                     continue
-                #LOG.debug('Found plugin: %s' % filename)
+                LOG.debug('Found plugin: %s' % filename)
                 self.put_fun("%s " % filename)
         except OSError, exc:
             self.put_fun("# ERROR: %s" % exc)
         self.put_fun("\n")
 
-    def _caf(self, arg, cmd):
+    def _caf(self, plugin, cmd):
         """
         handler for ``config``, ``alert`` and ``fetch``
         Calls the plugin with ``cmd`` as only argument.
+
+        :param plugin: The plugin name
+        :param cmd: The command which is to passed to the plugin
         """
-        plugin_filename = join(self.options.plugin_dir, arg)
+        plugin_filename = join(self.options.plugin_dir, plugin)
+
+        # Sanity checks
         if isdir(plugin_filename) or not access(plugin_filename, X_OK):
-            msg = "# Unknown plugin [%s] for %s" % (arg, cmd)
+            msg = "# Unknown plugin [%s] for %s" % (plugin, cmd)
             LOG.warning(msg)
             self.put_fun(msg)
             return
 
+        # for 'fetch' we don't need to pass a command to the plugin
         if cmd == 'fetch':
-            arg_plugin = ''
+            plugin_arg = ''
         else:
-            arg_plugin = cmd
+            plugin_arg = cmd
 
         try:
-            cmd = [plugin_filename, arg_plugin]
+            cmd = [plugin_filename, plugin_arg]
             LOG.debug('Executing %r' % cmd)
             output = Popen(cmd, stdout=PIPE).communicate()[0]
         except OSError, exc:
             LOG.exception()
-            self.put_fun("# ERROR: %s" % exc)
+            self.put_fun("# ERROR: %s\n" % exc)
             return
         self.put_fun(output)
         self.put_fun('.\n')
@@ -175,6 +185,7 @@ class CmdHandler(object):
 
         func = getattr(self, 'do_%s' % cmd, None)
         if not func:
+            # Give the client a list of supported commands.
             commands = [_[3:] for _ in dir(self) if _.startswith('do_')]
             self.put_fun("# Unknown command. Supported commands: %s\n" % (
                 commands))
@@ -184,6 +195,9 @@ class CmdHandler(object):
 
 
 def usage(option, opt, value, parser):
+    """
+    Prints the command usage and exits
+    """
     parser.print_help()
     sys.exit(0)
 
@@ -234,6 +248,9 @@ def get_options():
 
 
 def process_stdin(options):
+    """
+    Process commands by reading from stdin
+    """
     rfhandler = RotatingFileHandler(
         join(abspath(dirname(__file__)), 'log', 'pypmmn.log'),
         maxBytes=100 * 1024,
@@ -246,20 +263,33 @@ def process_stdin(options):
     LOG.info('STDIN handler opened')
     while True:
         data = sys.stdin.readline().strip()
+        if not data:
+            return
         handler.handle_input(data)
 
 
 def process_socket(options):
+    """
+    Process socket connections.
 
+    .. note::
+
+        This is not a multithreaded process. So only one connection can be
+        handled at any given time. But given the nature of munin, this is Good
+        Enough.
+    """
+
+    retcode = 0
     if options.no_daemon:
         # set up on-screen-logging
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
         logging.getLogger().addHandler(console_handler)
-
-    retcode = 0
-    if not options.no_daemon:
+    else:
+        # fork fork
         retcode = createDaemon()
+
+        # set up a rotating file log
         rfhandler = RotatingFileHandler(
             join(options.log_dir, 'daemon.log'),
             maxBytes=100 * 1024,
@@ -267,7 +297,9 @@ def process_socket(options):
             )
         rfhandler.setFormatter(logging.Formatter(LOG_FORMAT))
         logging.getLogger().addHandler(rfhandler)
-        LOG.info('Process PID: %d' % getpid())
+
+        # write down some house-keeping information
+        LOG.info('New process PID: %d' % getpid())
         pidfile = open(join(options.log_dir, 'pypmmn.pid'), 'w')
         pidfile.write(str(getpid()))
         pidfile.close()
@@ -276,8 +308,9 @@ def process_socket(options):
 
     LOG.info('Socket handler started.')
 
-    host = ''
+    host = '' # listens on all addresses TODO: make this configurable
     port = int(options.port)
+
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind((host, port))
