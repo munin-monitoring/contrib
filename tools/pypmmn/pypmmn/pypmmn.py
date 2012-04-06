@@ -3,6 +3,7 @@
 A very simple munin-node written in pure python (no external libraries
 required)
 """
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from optparse import OptionParser
 from os import listdir, access, X_OK, getpid
@@ -16,11 +17,12 @@ import sys
 
 LOG = logging.getLogger(__name__)
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+SESSION_TIMEOUT = 10 # Amount of seconds until an unused session is closed
 
 from daemon import createDaemon
 
 
-__version__ = '1.0dev4'
+__version__ = '1.0b1'
 
 
 class CmdHandler(object):
@@ -193,6 +195,12 @@ class CmdHandler(object):
 
         func(arg)
 
+    def is_timed_out(self):
+        return (datetime.now() - self._last_command).seconds > SESSION_TIMEOUT
+
+    def reset_time(self):
+        self._last_command = datetime.now()
+
 
 def usage(option, opt, value, parser):
     """
@@ -321,15 +329,14 @@ def process_socket(options):
     conn, addr = s.accept()
     handler = CmdHandler(conn.recv, conn.send, options)
     handler.do_version(None)
-    counter = 0
+    handler.reset_time()
 
     LOG.info("Accepting incoming connection from %s" % (addr, ))
     while True:
         data = conn.recv(1024)
         if not data.strip():
             sleep(1)
-            counter += 1
-            if counter > 3:
+            if handler.is_timed_out():
                 LOG.info('Session timeout.')
                 conn.shutdown(socket.SHUT_RDWR)
                 conn.close()
@@ -337,7 +344,7 @@ def process_socket(options):
                 LOG.info('Listening on host %r, port %r' % (host, port))
 
                 conn, addr = s.accept()
-                counter = 0
+                handler.reset_time()
                 handler.get_fun = conn.recv
                 handler.put_fun = conn.send
                 handler.do_version(None)
@@ -348,7 +355,7 @@ def process_socket(options):
             except socket.error, exc:
                 LOG.warning("Socket error. Reinitialising.: %s" % exc)
                 conn, addr = s.accept()
-                counter = 0
+                handler.reset_time()
                 handler.get_fun = conn.recv
                 handler.put_fun = conn.send
                 handler.do_version(None)
@@ -363,7 +370,7 @@ def process_socket(options):
             LOG.info('Listening on host %r, port %r' % (host, port))
 
             conn, addr = s.accept()
-            counter = 0
+            handler.reset_time()
             handler.get_fun = conn.recv
             handler.put_fun = conn.send
             handler.do_version(None)
