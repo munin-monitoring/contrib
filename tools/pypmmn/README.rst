@@ -33,6 +33,8 @@ Download the folder and run::
 This will install ``pypmmn.py`` into your system's ``bin`` folder. Commonly,
 this is ``/usr/local/bin``.
 
+And of course, you can use virtual environments too!
+
 Manually
 --------
 
