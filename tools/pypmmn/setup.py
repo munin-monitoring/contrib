@@ -15,6 +15,7 @@ setup(
     author=AUTHOR,
     author_email=AUTHOR_EMAIL,
     license="BSD",
+    url='https://github.com/exhuma/munin-contrib/tree/master/tools/pypmmn',
     packages=['pypmmn'],
     scripts=['pypmmn/pypmmn.py'],
 )
