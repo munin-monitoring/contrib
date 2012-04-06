@@ -51,6 +51,10 @@ All command-line parameters are documented. Simply run::
 
 to get more information.
 
+Example::
+
+    pypmmn.py -l /path/to/log-dir -d /path/to/plugins -p 4949
+
 Daemon mode
 -----------
 
