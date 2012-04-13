@@ -16,23 +16,18 @@ Counts the in/out bandwidth used by each projects/vhost. [Logtail] (https://www.
 ## Installation
 Installation is pretty straight forward. First you need to configure the plugin:
 
-Select the type of server which will be used to define the type of plugin (e.g. category):
-
-      $server = 'Apache'; # define the web server in use
-      #$server = 'Nginx';
-
 Identify the file which will be used by logtail to identify it's position in the log and the path to logtail:
 
-      $statepath = '/usr/local/var/munin/plugin-state'; // where logtail will save the state
+      $statepath = '/usr/local/var/munin/plugin-state'; # directory where logtail will save the state
       $logtail = '/usr/local/bin/logtail';
 
 Multiple logs can be used for the same project/vhost and a regular expression (regex) can be used as a filter:
 
-      $logs = array(
-      'prod' => array('/home/prod/log/access.log'),
-      'test' => array(
-                      array('/var/log/httpd/access.log', '"[A-Z]+ /test/'),
-                      '/home/test/log/access.log'
+      %logs = (
+      'prod' => ('/home/prod/log/access.log'),
+      'test' => (
+                  ('/var/log/httpd/access.log', '"[A-Z]+ /test/'),
+                  '/home/test/log/access.log'
                 )
       );
 

@@ -1,14 +1,17 @@
 #!/usr/bin/perl -w
 #
-# munin_byprojects_access
+# byprojects_bandwidth
 #
-# PHP script to monitor access *byprojects* (e.g. vhost) from multiple files and/or regex.
+# Perl script to monitor total bandwidth *byprojects* (e.g. vhost) from multiple files and/or regex.
 #
 # Danny Fullerton <northox@mantor.org> 
 # Mantor Organization <www.mantor.org>
-# This work is licensed under a Creative Commons Attribution 3.0 Unported License.
 #
-# You need logtail (https://www.fourmilab.ch/webtools/logtail/)
+# You need logtail (https://www.fourmilab.ch/webtools/logtail/) and
+#
+# mod_logio apache module (https://httpd.apache.org/docs/2.0/mod/mod_logio.html).
+# Your logformat should look like this "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %I %O"
+# where %I is input and %O is output.
 #
 # Log can be gather from multiple sources by simply specifying multiple log filename and/or an array with two
 # elements: log filename and a regex.
@@ -18,11 +21,10 @@
 #     Test graph will be using eveything in /home/test/log/access.log and stuff that match '"[A-Z] /test/' in 
 #     /var/log/httpd/access.log such as '"GET /test/'
 
-$server = 'Apache'; # define the web server in use
-#$server = 'Nginx';
-
-$statepath = '/usr/local/var/munin/plugin-state'; # where logtail will save the state
+$statepath = '/usr/local/var/munin/plugin-state'; # directory where logtail will save the state
 $logtail = '/usr/local/bin/logtail';
+
+$server = 'Apache';
 
 %logs = (
 'prod' => ('/home/prod/log/access.log'),
@@ -42,36 +44,40 @@ if(defined($ARGV[0])) {
     $order = '';
     while (($client, $files) = each(%logs)) { $order .= $client.' ' }
     print "graph_order $order\n";
-    print "graph_title $server access byprojects\n";
+    print "graph_title $server total bandwidth byprojects\n";
     print "graph_total Total\n";
-    print "graph_vlabel Access by \${graph_period}\n";
+    print "graph_vlabel Bits\n";
     print "graph_category $server\n";
-    print "graph_info This graph show $server access by various projects.\n";
+    print "graph_info This graph show $server total bandwidth used by various projects.\n";
     while (($client, $files) = each(%logs)) {
       print $client.".label $client\n";
-      print $client.".type DERIVE\n";
-      print $client.".min 0\n";
+      print $client.".type GAUGE\n";
     }
     exit(0);
   }
 }
 
 while (($client, $files) = each(%logs)) {
-  $x = $i = 0;
+  $i = $o = $x = 0;
   foreach $file ($files) {
     $regex = '';
-    $state = $statepath.'/'.$client.$x.'_access.state';
+    $state = $statepath.'/'.$client.$x.'_totalbandwidth.state';
     if(ref($file) eq 'ARRAY') { ($file, $regex) = @file }
     open(my $lt, "$logtail -f $file -o $state |") or die "Can't open $logtail : $!";
     while (<$lt>) {
       $buf = $_;
       if($buf eq '') { next }
       if(!defined($regex) || $buf =~ m/$regex/) {
-        $i++;
+        if($buf =~ m/(\d+) (\d+)$/) {
+          $i += $1;
+          $o += $2;
+        }
       }
     }
     close($lt);
     $x++;
   }
-  print $client.".value $i\n";
+  $x = $i + $o;
+  print $client.".value $x\n";
 }
+
