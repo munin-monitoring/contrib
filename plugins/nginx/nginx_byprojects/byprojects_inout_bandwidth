@@ -1,0 +1,86 @@
+#!/usr/bin/perl -w
+#
+# byprojects_inout_bandwidth
+#
+# Perl script to monitor in/out bandwidth *byprojects* (e.g. vhost) from multiple files and/or regex.
+#
+# Danny Fullerton <northox@mantor.org> 
+# Mantor Organization <www.mantor.org>
+#
+# You need logtail (https://www.fourmilab.ch/webtools/logtail/) and 
+#
+# Your nginx configuration should look like this (i.e. $request_length $body_bytes_sent at the end):
+#   log_format main  '$remote_addr - $remote_user $time_local "$request" '
+#                    '$status $body_bytes_sent "$http_referer" '
+#                    '"$http_user_agent" $request_length $body_bytes_sent';
+#
+# Log can be gather from multiple sources by simply specifying multiple log filename and/or an array with two
+# elements: log filename and a regex.
+#   - 'prod' => array('/home/prod/log/access.log'),
+#     Prod graph will be using everything in /home/prod/log/access.log
+#   - 'test' => array(array('/var/log/httpd/access.log', '"[A-Z]+ /test/'), '/home/test/log/access.log')
+#     Test graph will be using eveything in /home/test/log/access.log and stuff that match '"[A-Z] /test/' in 
+#     /var/log/httpd/access.log such as '"GET /test/'
+
+$server = 'Nginx';
+
+$statepath = '/usr/local/var/munin/plugin-state'; # directory where logtail will save the state
+$logtail = '/usr/local/bin/logtail';
+
+%logs = (
+'prod' => ('/home/prod/log/access.log'),
+'test' => (
+            ('/var/log/httpd/access.log', '"[A-Z]+ /test/'),
+            '/home/test/log/access.log'
+          )
+);
+
+###########
+
+if(defined($ARGV[0])) {
+  if ($ARGV[0] eq 'autoconf') {
+    print "yes\n";
+    exit(0);
+  } elsif ($ARGV[0] eq 'config') {
+    print "graph_title $server in/out bandwidth byprojects\n";
+    print "graph_args --base 1000\n";
+    print "graph_vlabel bits per \${graph_period} in (-) / out (+)\n";
+    print "graph_category $server\n";
+    print "graph_info This graph show $server in/out bandwidth used by various projects.\n";
+    while (($client, $files) = each(%logs)) {
+      print "i".$client.".label $client\n";
+      print "i".$client.".type GAUGE\n";
+      print "i".$client.".graph no\n";
+      print "i".$client.".cdef i".$client.",8,*\n";
+      print "o".$client.".label $client\n";
+      print "o".$client.".type GAUGE\n";
+      print "o".$client.".negative i".$client."\n";
+      print "o".$client.".cdef o".$client.",8,*\n";
+    }
+    exit(0);
+  }
+}
+
+while (($client, $files) = each(%logs)) {
+  $i = $o = $x = 0;
+  foreach $file ($files) {
+    $regex = '';
+    $state = $statepath.'/'.$client.$x.'_inoutbandwidth.state';
+    if(ref($file) eq 'ARRAY') { ($file, $regex) = @file }
+    open(my $lt, "$logtail -f $file -o $state |") or die "Can't open $logtail : $!";
+    while (<$lt>) {
+      $buf = $_;
+      if($buf eq '') { next }
+      if(!defined($regex) || $buf =~ m/$regex/) {
+        if($buf =~ m/(\d+) (\d+)$/) {
+          $i += $1;
+          $o += $2;
+        }
+      }
+    }
+    close($lt);
+    $x++;
+  }
+  print "i".$client.".value $i\n";
+  print "o".$client.".value $o\n";
+}
