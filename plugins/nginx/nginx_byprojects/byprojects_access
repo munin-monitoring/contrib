@@ -1,0 +1,76 @@
+#!/usr/bin/perl -w
+#
+# byprojects_access
+#
+# Perl script to monitor access *byprojects* (e.g. vhost) from multiple files and/or regex.
+#
+# Danny Fullerton <northox@mantor.org> 
+# Mantor Organization <www.mantor.org>
+# This work is licensed under a Creative Commons Attribution 3.0 Unported License.
+#
+# You need logtail (https://www.fourmilab.ch/webtools/logtail/)
+#
+# Log can be gather from multiple sources by simply specifying multiple log filename and/or an array with two
+# elements: log filename and a regex.
+#   - 'prod' => array('/home/prod/log/access.log'),
+#     Prod graph will be using everything in /home/prod/log/access.log
+#   - 'test' => array(array('/var/log/httpd/access.log', '"[A-Z]+ /test/'), '/home/test/log/access.log')
+#     Test graph will be using eveything in /home/test/log/access.log and stuff that match '"[A-Z] /test/' in 
+#     /var/log/httpd/access.log such as '"GET /test/'
+
+$server = 'Nginx';
+
+$statepath = '/usr/local/var/munin/plugin-state'; # where logtail will save the state
+$logtail = '/usr/local/bin/logtail';
+
+%logs = (
+'prod' => ('/home/prod/log/access.log'),
+'test' => (
+            ('/var/log/httpd/access.log', '"[A-Z]+ /test/'),
+            '/home/test/log/access.log'
+          )
+);
+
+###########
+
+if(defined($ARGV[0])) {
+  if ($ARGV[0] eq 'autoconf') {
+    print "yes\n";
+    exit(0);
+  } elsif ($ARGV[0] eq 'config') {
+    $order = '';
+    while (($client, $files) = each(%logs)) { $order .= $client.' ' }
+    print "graph_order $order\n";
+    print "graph_title $server access byprojects\n";
+    print "graph_total Total\n";
+    print "graph_vlabel Access by \${graph_period}\n";
+    print "graph_category $server\n";
+    print "graph_info This graph show $server access by various projects.\n";
+    while (($client, $files) = each(%logs)) {
+      print $client.".label $client\n";
+      print $client.".type DERIVE\n";
+      print $client.".min 0\n";
+    }
+    exit(0);
+  }
+}
+
+while (($client, $files) = each(%logs)) {
+  $x = $i = 0;
+  foreach $file ($files) {
+    $regex = '';
+    $state = $statepath.'/'.$client.$x.'_access.state';
+    if(ref($file) eq 'ARRAY') { ($file, $regex) = @file }
+    open(my $lt, "$logtail -f $file -o $state |") or die "Can't open $logtail : $!";
+    while (<$lt>) {
+      $buf = $_;
+      if($buf eq '') { next }
+      if(!defined($regex) || $buf =~ m/$regex/) {
+        $i++;
+      }
+    }
+    close($lt);
+    $x++;
+  }
+  print $client.".value $i\n";
+}
