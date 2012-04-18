@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+# Plugin to monitor incoming mails greylisted by postfix-policyd
+#
+# Parameters understood:
+#
+#       config   (required)
+#       autoconf (optional)
+#
+
+MYSQL_USER="postfix-policyd"
+MYSQL_PASS=""
+MYSQL_DB="postfixpolicyd"
+
+if [ "$1" = "autoconf" ]; then
+        if [ -n "${MYSQL_PASS}" ] ; then
+                echo yes
+                exit 0
+        else
+                echo "no (set mysql pass)"
+                exit 1
+        fi
+fi
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title Postfix-Policyd daily filtering'
+        echo 'graph_order delayed passed whitelisted'
+        echo 'graph_category mail'
+        echo 'graph_vlabel Count'
+        echo 'graph_scale no'
+
+##      echo 'graph_args --base 1000 -l 0'
+        echo 'delayed.label delayed'
+        echo 'delayed.type GAUGE'
+        echo 'passed.label passed'
+        echo 'passed.type GAUGE'
+        echo 'whitelisted.label whitelisted'
+        echo 'whitelisted.type GAUGE'
+        echo 'blacklisted.label blacklisted'
+        echo 'blacklisted.type GAUGE'
+
+        exit 0
+fi
+
+DELAYED="`echo "SELECT COUNT(*) FROM triplet WHERE _count = 0" | mysql -u${MYSQL_USER} -p${MYSQL_PASS} ${MYSQL_DB} | egrep [0-9]`"
+PASSED="`echo "SELECT COUNT(*) FROM triplet WHERE _count != 0" | mysql -u${MYSQL_USER} -p${MYSQL_PASS} ${MYSQL_DB} | egrep [0-9]`"
+WHITELISTED="`echo "SELECT COUNT(*) FROM whitelist" | mysql -u${MYSQL_USER} -p${MYSQL_PASS} ${MYSQL_DB} | egrep [0-9]`"
+BLACKLISTED="`echo "SELECT COUNT(*) FROM blacklist" | mysql -u${MYSQL_USER} -p${MYSQL_PASS} ${MYSQL_DB} | egrep [0-9]`"
+
+echo "delayed.value ${DELAYED}"
+echo "passed.value ${PASSED}"
+echo "whitelisted.value ${WHITELISTED}"
+echo "blacklisted.value ${BLACKLISTED}"

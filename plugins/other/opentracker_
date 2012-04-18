@@ -1,0 +1,378 @@
+#!/usr/bin/perl
+#
+=head1 OPENTRACKER PLUGIN
+
+A Plugin to monitor OpenTracker Servers and their Performance
+
+=head1 MUNIN CONFIGURATION
+
+[opentracker*]
+ env.host 127.0.0.1      *default*
+ env.port 6969           *default*
+ env.uri /stats          *default*
+
+=head2 MUNIN ENVIRONMENT CONFIGURATION EXPLANATION
+
+ host = opentracker host to connect to
+ port = opentracker http port to connect to
+ uri = stats uri for appending requests for data
+
+ I need this information so I can later build the full url which normally
+ looks like the following example when put together:
+    http://127.0.0.1:6969/stats?mode=conn
+
+=head1 AUTHOR
+
+Matt West < https://github.com/mhwest13/OpenTracker-Munin-Plugin >
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+  
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+=cut
+
+use strict;
+use warnings;
+
+use File::Basename;
+use LWP::UserAgent;
+
+if (basename($0) !~ /^opentracker_/) {
+    print "This script needs to be named opentracker_ and have symlinks which start the same.\n";
+    exit 1;
+}
+
+my $host = $ENV{host} || '127.0.0.1';
+my $port = $ENV{port} || 6969;
+my $uri = $ENV{uri} || '/stats';
+
+=head1 Graph Declarations
+
+    This block of code builds up all of the graph info for all root / sub graphs.
+
+    %graphs   is a container for all of the graph definition information. In here is where you'll
+           find the configuration information for munin's graphing procedure.
+    Format:
+
+    $graph{graph_name} => {
+        config => {
+            { key => value }, You'll find the main graph config stored here.
+            { ... },
+        },
+        keys => [ 'Name', 'Name', 'Name', ... ], Used for building results set.
+        datasrc => [
+            # Name: name given to data value
+            # Attr: Attribute for given value, attribute must be valid plugin argument
+            { name => 'Name', info => 'info about graph' },
+            { ... },
+        ],
+        results => {
+            { key => value }, You'll find the results info from fetch_stats call stored here.
+            { ... },
+        },
+    }
+
+=cut
+
+my %graphs;
+
+# graph for connections
+$graphs{conn} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Connections',
+        category => 'opentracker',
+        title => 'Current Connections',
+        info => 'Current Connections to OpenTracker',
+    },
+    keys => [ 'Requests', 'Announces' ],
+    datasrc => [
+        { name => 'Requests', label => 'Requests', min => '0', type => 'COUNTER', info => 'number of Requests', draw => 'AREA' },
+        { name => 'Announces', label => 'Announces', min => '0', type => 'COUNTER', info => 'number of Announces', draw => 'LINE2' },
+    ],
+};
+# graph for peers
+$graphs{peer} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Peers',
+        category => 'opentracker',
+        title => 'Peers and Seeders',
+        info => 'Current Peer and Seeder Connections',
+    },
+    keys => [ 'Peers', 'Seeders' ],
+    datasrc => [
+        { name => 'Peers', label => 'Peers', min => '0', type => 'GAUGE', info => 'current number of leechers & seeders (peers)', draw => 'AREA' },
+        { name => 'Seeders', label => 'Seeders', min => '0', type => 'GAUGE', info => 'current number of seeders', draw => 'LINE2' },
+    ],
+};
+# graph for scrapes
+$graphs{scrp} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Scrapes',
+        category => 'opentracker',
+        title => 'Scrapes',
+        info => 'Number of Scrapes (TCP/UDP)',
+    },
+    keys => [ 'TCP', 'UDP' ],
+    datasrc => [
+        { name => 'TCP', label => 'TCP Requests', min => '0', type => 'COUNTER', info => 'number of scrapes requested via tcp', draw => 'AREASTACK' },
+        { name => 'UDP', label => 'UDP Requests', min => '0', type => 'COUNTER', info => 'number of scrapes requested via udp', draw => 'AREA' },
+    ],
+};
+# graph for livesyncs
+$graphs{syncs} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Syncs',
+        category => 'opentracker',
+        title => 'LiveSyncs',
+        info => 'OpenTracker LiveSync Requests',
+    },
+    keys => [ 'Incoming', 'Outgoing' ],
+    datasrc => [
+        { name => 'Incoming', label => 'Incoming Syncs', min => '0', type => 'COUNTER', info => 'number of Incoming Syncs', draw => 'AREA' },
+        { name => 'Outgoing', label => 'Outgoing Syncs', min => '0', type => 'COUNTER', info => 'number of Outgoing Syncs', draw => 'LINE2' },
+    ],
+};
+# graph for tcp4 connections
+$graphs{tcp4} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'TCP4 Requests',
+        category => 'opentracker',
+        title => 'TCP4 Requests',
+        info => 'Current TCP4 Requests / Announces',
+    },
+    keys => [ 'Requests', 'Announces' ],
+    datasrc => [
+        { name => 'Requests', label => 'Requests', min => '0', type => 'COUNTER', info => 'number of tcp4 Requests', draw => 'AREA' },
+        { name => 'Announces', label => 'Announces', min => '0', type => 'COUNTER', info => 'number of tcp4 Announces', draw => 'LINE2' },
+    ],
+};
+# graph for torrents
+$graphs{torr} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => '# of Torrents',
+        category => 'opentracker',
+        title => 'Torrents',
+        info => 'Current number of Torrents',
+    },
+    keys => [ 'Torrents' ],
+    datasrc => [
+        { name => 'Torrents', label => 'Torrents', min => '0', type => 'GAUGE', info => 'number of torrents', draw => 'AREA' },
+    ],
+};
+# graph for udp4 connections
+$graphs{udp4} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'UDP4 Requests',
+        category => 'opentracker',
+        title => 'UDP4 Requests',
+        info => 'Current UDP4 Requests / Announces',
+    },
+    keys => [ 'Requests', 'Announces' ],
+    datasrc => [
+        { name => 'Requests', label => 'Requests', min => '0', type => 'COUNTER', info => 'number of udp4 Requests', draw => 'AREA' },
+        { name => 'Announces', label => 'Announces', min => '0', type => 'COUNTER', info => 'number of udp4 Announces', draw => 'LINE2' },
+    ],
+};
+
+=head1 Munin Checks
+
+    These checks look for config / autoconf / suggest params
+
+=head2 Config Check
+
+    This block of code looks at the argument that is possibly supplied,
+    should it be config, it then checks to make sure the plugin 
+    specified exists, assuming it does, it will run the do_config 
+    subroutine for the plugin specified, otherwise it dies complaining
+    about an unknown plugin.
+
+=cut
+
+if (defined $ARGV[0] && $ARGV[0] eq 'config') {
+    # Lets take the plugin from the execution name.
+    $0 =~ /opentracker_(.+)*/;
+    my $plugin = $1;
+    # And lets make sure we have a plugin called that.
+    die 'Unknown Plugin Specified: ' . ($plugin ? $plugin : '') unless $graphs{$plugin};
+    # Now lets go ahead and print out our config.
+    print_config($plugin);
+	exit 0;
+}
+
+=head2 Autoconf Check
+
+    This block of code looks at the argument that is possibly supplied,
+    should it be autoconf, we are going to print yes at this point since
+    we've already tested for our binary to exist and be executable, the
+    process will then exit.
+
+=cut
+
+if (defined $ARGV[0] && $ARGV[0] eq 'autoconf') {
+    # well we can execute the binary, so lets make sure we can curl opentracker
+    my $url = "http://".$host.":".$port.$uri."\?mode=version";
+    my $ua = LWP::UserAgent->new;
+    $ua->timeout(15);
+    my $response = $ua->get($url);
+    if ($response->is_success) {
+        print "yes\n";
+        exit 0;
+    } else {
+        print "no: unable to connect to url: $url\n";
+        exit 1;
+    }
+}
+
+=head2 Suggest Check
+
+    This block of code looks at the argument that is possibly supplied,
+    should it be suggest, we are going to print the possible plugins
+    which can be specified.
+
+=cut
+
+if (defined $ARGV[0] && $ARGV[0] eq 'suggest') {
+    # well we can execute the binary, so print possible plugin names
+    my @rootplugins = ('conn','peer','scrp','syncs','tcp4','torr','udp4');
+    foreach my $plugin (@rootplugins) {
+        print "$plugin\n";
+    }
+    exit 0;
+}
+
+=head1 Subroutines
+
+    Begin Subroutine calls to output data / config information
+
+=head2 fetch_output
+
+    This subroutine is the main call for printing data for the plugin.
+    No parameters are taken as this is the default call if no arguments
+    are supplied from the command line.
+
+=cut
+
+fetch_output();
+
+sub fetch_output {
+    # Lets figure out what plugin they want to run, and check that it exists
+    $0 =~ /opentracker_(.+)*/;
+    my $plugin = $1;
+    die 'Unknown Plugin Specified: ' . ($plugin ? $plugin : '') unless $graphs{$plugin};
+    # Lets print out the data for our plugin
+    print_output($plugin);
+    return;
+}
+
+=head2 print_output
+
+    This block of code prints out the return values for our graphs. It takes
+    one parameter $plugin. Returns when completed
+
+        $plugin;    graph we are calling up to print data values for
+
+    Example: print_output($plugin);
+
+=cut
+
+sub print_output {
+    # Lets get our plugin, set our graph information, and print for Munin to process
+    my ($plugin) = (@_);
+    my $graph = $graphs{$plugin};
+    print "graph opentracker_$plugin\n";
+    # Getting keys to pass to fetch_stats for data retrieval
+    # call up fetch_stats with the keys we just got.
+    my @keys = @{$graph->{keys}};
+    fetch_stats($plugin,@keys);
+    # print the results for the keys with the name for Munin to process
+    foreach my $dsrc (@{$graph->{datasrc}}) {
+        my $output = 0;
+        my %datasrc = %$dsrc;
+        while ( my ($key, $value) = each(%datasrc)) {
+            next if ($key ne 'name');
+            print "$dsrc->{name}.value $graph->{results}->{$value}\n";
+        }
+    }
+    return;
+}
+
+=head2 print_config
+
+    This subroutine prints out the main config information for all of the graphs.
+    It takes one parameters, $plugin
+
+        $plugin;    graph being called up to print config for 
+
+    Example:  print_config($plugin);
+
+=cut
+
+sub print_config {
+    # Lets get our plugin and graph, after that print for Munin to process it.
+    my ($plugin) = (@_);
+    my $graph = $graphs{$plugin};
+    print "graph opentracker_$plugin\n";
+    # Lets print out graph's main config info.
+    my %graphconf = %{$graph->{config}};
+    while ( my ($key, $value) = each(%graphconf)) {
+        print "graph_$key $value\n";
+    }
+    # Lets print our graphs per graph config info.
+    foreach my $dsrc (@{$graph->{datasrc}}) {
+        my %datasrc = %$dsrc;
+        while ( my ($key, $value) = each(%datasrc)) {
+            next if ($key eq 'name');
+            print "$dsrc->{name}.$key $value\n";
+        }
+    }
+    return;
+}
+
+=head2 fetch_stats
+
+    This subroutine actually fetches data from opentracker with the plugin specified
+    It will then parse the data using the keys assigned in an array.
+    Two parameters are passed, $plugin and @keys, and it will return when complete.
+
+        $plugin;    graph we are calling up, we use this to store the results in the hash
+                    for easy recall later.
+        @keys;      keys we want the values for from opentracker stats url.
+
+    Example: fetch_stats($plugin,@keys);
+
+=cut
+
+sub fetch_stats {
+    # Lets get our current plugin and list of keys we want info for, as well as reference our graph
+    my ($plugin,@keys) = (@_);
+    my $graph = $graphs{$plugin};
+    # Lets create our url to fetch
+    my $url = "http://".$host.":".$port.$uri."\?mode=".$plugin;
+    my $ua = LWP::UserAgent->new;
+    $ua->timeout(15);
+    my $response = $ua->get($url);
+    # Lets print some info since we got back some info
+    if ($response->is_success) {
+        my @tmparray = split("\n",$response->content);
+        foreach my $key (@keys) {
+            my $value = shift(@tmparray);
+            $graph->{results}->{$key} = $value;
+        }
+    } else {
+        print "Unable to Fetch data from URL: $url\n";
+        exit 1;
+    }
+    return;
+}

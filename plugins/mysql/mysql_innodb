@@ -1,0 +1,64 @@
+#!/bin/bash
+#
+# Munin plugin to monitor free space in MySQL's InnoDB tablespace.
+# Mostly useful if you use InnoDB on a block device, or if you for
+# some reason don't want to do autoextend on the last file.
+# 
+# 2007-03-18 Stig Sandbeck Mathisen <ssm@fnord.no>
+#
+# Configuration parameters for /etc/munin/plugin-conf.d/mysql_innodb,
+# if you need to override the defaults below:
+#
+# [mysql_innodb]
+#   env.mysqlopts - Options to pass to mysql (host, username, password)
+#   env.warning   - Generate a warning if free space goes below this level
+#   env.critical  - Generate a critical if free space goes below this level
+# 
+# For security reasons, this plugin uses its own schema with a simple,
+# empty table using the InnoDB engine.
+# 
+# You need to run this to get this plugin to work:
+#   mysql> CREATE DATABASE munin_innodb;
+#   mysql> USE munin_innodb
+#   mysql> CREATE TABLE something (anything int) ENGINE=InnoDB;
+
+## Tunable parameters with defaults
+MYSQL="${mysql:-/usr/bin/mysql}"
+MYSQLOPTS="${mysqlopts:---user=munin --password=munin --host=localhost}"
+
+WARNING=${warning:-2147483648}   # 2GB
+CRITICAL=${critical:-1073741824} # 1GB
+
+## No user serviceable parts below
+if [ "$1" = "config" ]; then
+    echo 'graph_title MySQL InnoDB free tablespace'
+    echo 'graph_args --base 1024'
+    echo 'graph_vlabel Bytes'
+    echo 'graph_category mysql'
+    echo 'graph_info Amount of free bytes in the InnoDB tablespace'
+    echo 'free.label Bytes free'
+    echo 'free.type GAUGE'
+    echo 'free.min 0'
+    echo 'free.warning' $WARNING:
+    echo 'free.critical' $CRITICAL:
+    exit 0
+fi
+
+# Get freespace from mysql
+freespace=$($MYSQL $MYSQLOPTS --batch --skip-column-names --execute        \
+    "SELECT table_comment FROM tables WHERE TABLE_SCHEMA = 'munin_innodb'" \
+    information_schema);
+retval=$?
+
+# Sanity checks
+if (( retval > 0 )); then
+    echo "Error: mysql command returned status $retval" 1>&2
+    exit -1
+fi
+if [ -z "$freespace" ]; then
+    echo "Error: mysql command returned no output" 1>&2
+    exit -1
+fi
+
+# Return freespace
+echo $freespace | awk '/InnoDB free:/ {print "free.value", $3 * 1024}'

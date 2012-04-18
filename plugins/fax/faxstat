@@ -1,0 +1,53 @@
+#!/bin/sh
+#
+# Plugin to monitor hylafax queue
+#
+# Usage: Place in /etc/munin/plugins/ (or link it there using ln -s)
+#
+# Parameters understood:
+#
+#       config   (required)
+#       autoconf (optional)
+#
+# Config variables:
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+FAXSTAT=${faxstat:=/usr/bin/faxstat}
+FAXQ=${faxq:=/usr/sbin/faxqclean}
+
+if [ "$1" = "autoconf" ]; then
+        if [ -x ${FAXSTAT} ] ; then
+                echo yes
+                exit 0
+        else
+                echo no
+                exit 1
+        fi
+fi
+
+JOBTYPES="Running Waiting Done"
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title Fax Jobs'
+        echo 'graph_vlabel Jobs in Queue'
+        echo 'graph_category FAX'
+        for i in $JOBTYPES; do
+          echo "$i.info Number of jobs in $i queue."
+          echo "$i.label $i"
+#         echo "$i.type DERIVE"
+          echo "$i.min 0"
+          echo "$i.warning 50"
+          echo "$i.critical 100"
+        done
+        exit 0
+fi
+
+for i in $JOBTYPES; do
+  echo -n "$i.value "
+  $FAXSTAT -dsl | egrep "(root|apache)" | awk -F" " '{print $3}' | grep -c ${i:0:1}
+done
+
+#${FAXQ} -j 1 -d 1
+${FAXQ}

@@ -1,0 +1,123 @@
+#!/usr/bin/perl
+
+=head1
+
+# Log vhost port method response_bytes response_time status
+<IfModule mod_log_config.c>
+  CustomLog "|/usr/share/munin/apache_pipelogger" "%v %p %m %B %D %s"
+</IfModule>
+
+=cut
+# write every n seconds to shared memory
+local $nsec=7;
+local $debug=undef;
+
+use Storable qw(freeze thaw);
+use List::Util qw(min max);
+use IPC::ShareLite ':lock';
+require Data::Dumper if $debug;
+use Munin::Plugin;
+
+
+local $share = IPC::ShareLite->new(
+	-key     => 'mapl',
+	-create  => 1,
+	-destroy => 1,
+	-exclusive => 0,
+	-mode => '0666'
+) or die $!;
+
+
+local $SIG{'ALRM'}=\&periodic_write;
+alarm $nsec;
+
+
+# drop stored data on reload
+local %temp=();
+
+while (<STDIN>) {
+ 	my ($vhost,$port,$method,$bytes,$time,$status)=split(/\s/,$_);
+
+	# sanity check
+	next unless m/^([\d\w.-_]+\s){5}([\d\w.-_]+$)/;
+	$time=sprintf("%d",$time/1000); # microsec to millisec	
+	
+	# sitename to munin fieldname
+	my $vpm=clean_fieldname($vhost);
+	$temp{$vpm}{'label'}=$vhost;
+	$temp{$vpm}{'label'}=~s/www\.//;
+	
+	# count all requests
+	$temp{$vpm}{'requests'}++;
+
+	if ($bytes) {
+	 $bytes=~s/-/0/;
+ 	 # bytes transmitted
+	 $temp{$vpm}{'bytes'}+=$bytes;
+
+	 # max bytes
+	 $temp{$vpm}{'max_bytes'}=max($temp{$vpm}{'max_bytes'},$bytes);
+
+         # average bytes
+         $temp{$vpm}{'avg_bytes'}=$temp{$vpm}{'bytes'}/$temp{$vpm}{'requests'} || 0 if ($bytes);
+	}
+	
+	# count by status / error code
+	$temp{$vpm}{"status"}{$status}++ if $status;
+
+	if ($time) {
+	  # microsec to millisec
+  	  $time=sprintf("%d",$time/1000); 
+
+  	  # min/max execution time
+  	  $temp{$vpm}{'max_time'}=max($temp{$vpm}{'max_time'},$time);
+
+  	  # cumulative and average execution time
+  	  $temp{$vpm}{'cml_time'}+=$time;
+
+          # average time
+          $temp{$vpm}{'avg_time'}=$temp{$vpm}{'cml_time'}/$temp{$vpm}{'requests'} || 0 if ($time);
+        }
+};
+
+sub periodic_write {
+        # begin transaction                
+        $share->lock(LOCK_EX);
+        
+        # get data (may be updated by other loggers too)
+        my %old=%{thaw $share->fetch};
+
+        foreach my $vpm (keys %temp){
+                # merge values
+                $old{$vpm}{'bytes'}+=$temp{$vpm}{'bytes'} if $temp{$vpm}{'bytes'};
+                $old{$vpm}{'requests'}+=$temp{$vpm}{'requests'} if $temp{$vpm}{'requests'};
+                $old{$vpm}{'time'}+=$temp{$vpm}{'time'} if $temp{$vpm}{'time'};
+                $old{$vpm}{'label'}=$temp{$vpm}{'label'};
+                $old{$vpm}{'avg_time'}=sprintf("%d",($old{$vpm}{'avg_time'}+$temp{$vpm}{'avg_time'})/2);
+                $old{$vpm}{'max_time'}=max($old{$vpm}{'max_time'},$temp{$vpm}{'max_time'});
+                $old{$vpm}{'max_bytes'}=max($temp{$vpm}{'max_bytes'},$temp{$vpm}{'max_bytes'});
+                $old{$vpm}{'avg_bytes'}=sprintf("%d",($old{$vpm}{'avg_bytes'}+$temp{$vpm}{'avg_bytes'})/2);
+
+                # reset local counters
+                foreach my $check qw(requests bytes time cml_time max_bytes avg_bytes max_time avg_time) {
+                        $temp{$vpm}{$check}=0;
+                }
+
+                # reset status counts
+                foreach my $val (keys %{$temp{$vpm}{'status'}}) {
+                        $old{$vpm}{'status'}{$val}+=$temp{$vpm}{'status'}{$val};
+                        $temp{$vpm}{'status'}{$val}=0;
+                }
+
+        };
+
+        # save to shm
+#        print Data::Dumper::Dumper(%old) if $debug;
+        $share->store( freeze \%old );
+
+        # end transaction
+        $share->unlock;
+
+        # parse/write every n seconds
+        alarm $nsec;
+}

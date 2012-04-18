@@ -1,0 +1,104 @@
+#!/usr/bin/ruby
+
+# Monitor your EAccelerator usage. 
+# Requires: ruby
+
+# Mandatory Parameters
+
+# user / pwd - for basic authentication against control.php
+# url - fullpath to control.php
+
+# Author: Dirk Gomez <munin@dirkgomez.de>
+# Copyright (C) 2007 Dirk Gomez
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+require 'open-uri'
+
+user  = ENV['user'] || 'user'
+pwd   = ENV['password'] || 'password'
+url   = ENV['url'] || 'http://127.0.0.1/control.php'
+
+if ARGV[0]=="config"
+  print "EAccelerator Monitoring\n"
+  print "graph_title PHP Eaccelerator\n"
+  print "graph_category Apache\n"
+  print "Memoryusagepercentage.label Memory Usage %\n"  
+  print "Memoryusagepercentage.warning 95\n"  
+  print "Memoryusagepercentage.critical 95\n"  
+  print "Memoryusage.label Memory Usage MB\n"  
+  print "Memorymax.label Cache Size MB\n"  
+  print "Freememory.label Free Memory MB\n"
+  print "Cachedscripts.label Cached Scripts\n"
+  print "Removedscripts.label Removed Scripts\n"
+  print "Cachedkeys.label Cached Keys\n"
+  exit
+end
+
+one_liners=0
+three_liners=0
+key=""
+
+open(url, :http_basic_authentication=>[user, pwd]) do |f|
+  f.each do |line|
+    if three_liners>0
+      three_liners=three_liners+1
+
+      if three_liners==2
+        print "Memoryusagepercentage.value "
+      end
+
+      if three_liners==3
+        print "Memoryusage.value "
+      end
+
+      if three_liners==4
+        print "Memorymax.value "
+      end
+
+      print line.gsub!(/[^0-9.]/s,"")
+      print "\n"
+    end
+
+    if one_liners>0
+      one_liners=one_liners+1
+      print "#{key}.value "
+      print line.gsub!(/[^0-9.]/s,"")
+      print "\n"
+    end
+
+    if one_liners>1
+      line=""
+      one_liners=0
+    end
+
+    if three_liners>3
+      line=""
+      three_liners=0
+    end
+
+    if line =~ /Memory usage/
+      key=line.gsub!(/(<[^>]*>)|\n|\t| /s,"")
+      three_liners=three_liners+1
+    end
+
+    if line =~ /<td class="e">Free memory/ || line =~ /<td class="e">Cached scripts/  || line =~ /<td class="e">Removed scripts/ || line =~ /<td class="e">Cached keys/
+      key=line.gsub!(/(<[^>]*>)|\n|\t| /s,"")
+      one_liners=one_liners+1
+    end
+
+  end
+end
+

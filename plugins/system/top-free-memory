@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+# Initial Version 1.0 2009/05/18 14:00:01 BANT
+# Anzeige von FREE Memory mit dem TOP Befehl aus SUN OS
+#
+#%# family=manual
+
+
+TOP=/usr/local/bin/top
+
+if [ "$1" = "config" ]; then
+
+        echo "graph_title  FREE Memory usage (in MB)"
+	echo 'graph_category system'
+        echo "free.label Free memory"
+        exit 0
+fi
+
+# Linjen som grep'es ut kan se ut som dette:
+#
+# Memory: 16G phys mem, 6030M free mem, 32G swap, 32G free swap
+
+$TOP -n -u | nawk '
+function scale(value) {
+  if (value ~ /G$/) { sub("G", "", value); value *= 1024 }
+  else if (value ~ /M$/) sub("M", "", value)
+  else if (value ~ /K$/) { sub("K", "", value); value /= 1024 }
+  else value /= 1024 * 1024;
+  return value;
+}
+/^Memory/ {
+  free  = scale($5);
+
+  print "free.value", free
+}'

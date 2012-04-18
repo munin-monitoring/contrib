@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+#  pdns_recursor munin plugin.
+#  Written by Sean Reifschneider <jafo@tummy.com> 2009-12-03
+#  Placed in the public domain
+#
+#  Requires running as root:
+#
+#    echo '[pdns_rec_*]' >/etc/munin/plugin-conf.d/pdns_rec
+#    echo 'user root' >>/etc/munin/plugin-conf.d/pdns_rec
+
+if [ "$1" = "autoconf" ]; then
+	if [ -e /usr/bin/rec_control ]; then
+		echo yes
+		exit 0
+	else
+		echo no
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title PDNS Recursor Unauthorized'
+	echo 'graph_order tcp udp unexpected'
+	echo 'graph_vlabel queries'
+	echo 'graph_info Unauthorized requests'
+	echo 'graph_category pdns'
+
+	echo 'tcp.label tcp'
+	echo 'tcp.min 0'
+	echo 'tcp.max 100000'
+	echo 'tcp.type COUNTER'
+	echo 'tcp.info Unauthorized TCP queries'
+
+	echo 'udp.label udp'
+	echo 'udp.min 0'
+	echo 'udp.max 100000'
+	echo 'udp.type COUNTER'
+	echo 'udp.info Unauthorized UDP queries'
+
+	echo 'unexpected.label unexpected'
+	echo 'unexpected.min 0'
+	echo 'unexpected.max 100000'
+	echo 'unexpected.type COUNTER'
+	echo 'unexpected.info Unexpected queries (may indicate spoofing)'
+
+	exit 0
+fi
+
+echo tcp.value `rec_control get unauthorized-tcp`
+echo udp.value `rec_control get unauthorized-udp`
+echo unexpected.value `rec_control get unexpected-packets`
+
+exit 0

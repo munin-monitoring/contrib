@@ -1,0 +1,231 @@
+#!/bin/sh
+# ZFS ARC statistics for FreeBSD
+# Author alex@trull.org:
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+sysctl='/sbin/sysctl'
+
+case $1 in
+    config)
+	cat <<EOF
+graph_title ZFS ARC efficiency
+graph_vlabel %
+graph_scale no
+graph_category filesystem 
+graph_args -l 0 
+graph_info FreeBSD ZFS ARC Utilisation - Counters
+graph_period minute
+graph_order hits misses l2_hits l2_misses mfu_hits mru_hits arc_access_total mfu_hits_perc mru_hits_perc arc_misses_perc l2_efficency_tot
+deleted.graph no
+deleted.min 0
+deleted.type DERIVE
+deleted.label Deleted?
+demand_data_hits.graph no
+demand_data_hits.min 0
+demand_data_hits.type DERIVE
+demand_data_hits.label Cache hits - demand data
+demand_data_misses.graph no
+demand_data_misses.min 0
+demand_data_misses.type DERIVE
+demand_data_misses.label Cache miss - demand data
+demand_metadata_hits.graph no
+demand_metadata_hits.min 0
+demand_metadata_hits.type DERIVE
+demand_metadata_hits.label Cache hits - metadata
+demand_metadata_misses.graph no
+demand_metadata_misses.min 0
+demand_metadata_misses.type DERIVE
+demand_metadata_misses.label Cache miss - metadata
+evict_skip.graph no
+evict_skip.min 0
+evict_skip.type DERIVE
+evict_skip.label evict_skip?
+hash_chain_max.graph no
+hash_chain_max.min 0
+hash_chain_max.type DERIVE
+hash_chain_max.label hash_chain_max?
+hash_chains.graph no
+hash_chains.min 0
+hash_chains.type DERIVE
+hash_chains.label hash_chains?
+hash_collisions.graph no
+hash_collisions.min 0
+hash_collisions.type DERIVE
+hash_collisions.label hash_collisions?
+hash_elements.graph no
+hash_elements.min 0
+hash_elements.type DERIVE
+hash_elements.label hash_elements
+hash_elements_max.graph no
+hash_elements_max.min 0
+hash_elements_max.type DERIVE
+hash_elements_max.label hash_elements_max?
+hits.graph no
+hits.min 0
+hits.type DERIVE
+hits.label Cache hits
+l2_abort_lowmem.graph no
+l2_abort_lowmem.min 0
+l2_abort_lowmem.type GAUGE
+l2_cksum_bad.graph no
+l2_cksum_bad.min 0
+l2_cksum_bad.type DERIVE
+l2_cksum_bad.label ARCL2 Bad checksum errors
+l2_evict_lock_retry.graph no
+l2_evict_lock_retry.min 0
+l2_evict_lock_retry.type DERIVE
+l2_evict_reading.graph no
+l2_evict_reading.min 0
+l2_evict_reading.type DERIVE
+l2_feeds.graph no
+l2_feeds.min 0
+l2_feeds.type DERIVE
+l2_free_on_write.graph no
+l2_free_on_write.min 0
+l2_free_on_write.type DERIVE
+l2_hits.graph no
+l2_hits.min 0
+l2_hits.type DERIVE
+l2_hits.label L2ARC hits
+l2_io_error.graph no
+l2_io_error.min 0
+l2_io_error.type DERIVE
+l2_io_error.label L2AC I/O errors
+l2_misses.graph no
+l2_misses.min 0
+l2_misses.type DERIVE
+l2_misses.label L2ARC cache misses
+l2_rw_clash.graph no
+l2_rw_clash.min 0
+l2_rw_clash.type DERIVE
+l2_writes_done.graph no
+l2_writes_done.min 0
+l2_writes_done.type DERIVE
+l2_writes_error.graph no
+l2_writes_error.min 0
+l2_writes_error.type DERIVE
+l2_writes_hdr_miss.graph no
+l2_writes_hdr_miss.min 0
+l2_writes_hdr_miss.type DERIVE
+l2_writes_hdr_miss.label L2ARC Header misses
+l2_writes_sent.graph no
+l2_writes_sent.min 0
+l2_writes_sent.type DERIVE
+l2_writes_sent.label L2ARC writes sent
+memory_throttle_count.graph no
+memory_throttle_count.min 0
+memory_throttle_count.label memory_throttle_count?
+mfu_ghost_hits.graph no
+mfu_ghost_hits.min 0
+mfu_ghost_hits.type DERIVE
+mfu_ghost_hits.label Most frequently used ghost hits
+mfu_hits.graph no
+mfu_hits.min 0
+mfu_hits.type DERIVE
+mfu_hits.label Most frequently used hits
+misses.graph no
+misses.min 0
+misses.type DERIVE
+misses.label Cache misses
+mru_ghost_hits.graph no
+mru_ghost_hits.min 0
+mru_ghost_hits.type DERIVE
+mru_ghost_hits.label Most recently used ghost hits
+mru_hits.graph no
+mru_hits.min 0
+mru_hits.type DERIVE
+mru_hits.label Most recently used hits
+mutex_miss.graph no
+mutex_miss.min 0
+mutex_miss.type DERIVE
+prefetch_data_hits.graph no
+prefetch_data_hits.min 0
+prefetch_data_hits.type DERIVE
+prefetch_data_hits.label Prefetch Data hits
+prefetch_data_misses.graph no
+prefetch_data_misses.min 0
+prefetch_data_misses.type DERIVE
+prefetch_data_misses.label Prefetch data misses
+prefetch_metadata_hits.graph no
+prefetch_metadata_hits.min 0
+prefetch_metadata_hits.type DERIVE
+prefetch_metadata_hits.label Prefetch metadata hits
+prefetch_metadata_misses.graph no
+prefetch_metadata_misses.min 0
+prefetch_metadata_misses.type DERIVE
+prefetch_metadata_misses.label Prefetch metadata misses
+recycle_miss.graph no
+recycle_miss.min 0
+recycle_miss.type DERIVE
+recycle_miss.label Recycle misses
+arc_access_total.graph no
+arc_access_total.cdef hits,misses,ADDNAN
+arc_access_total.label ARC access total number
+arc_hits_perc.cdef hits,100,*,arc_access_total,/
+arc_hits_perc.label ARC hits
+arc_hits_perc.graph no
+real_hits.cdef mfu_hits,mru_hits,ADDNAN,100,*,hits,/
+real_hits.label ARC real (MRU + MFU) hits (no ghost & anon)
+real_hits.graph no
+mfu_hits_perc.cdef mfu_hits,100,*,arc_access_total,/
+mfu_hits_perc.label Most frequently used hits
+mfu_hits_perc.graph yes
+mfu_hits_perc.draw AREA
+mru_hits_perc.cdef mru_hits,100,*,arc_access_total,/
+mru_hits_perc.label Most recently used hits
+mru_hits_perc.graph yes
+mru_hits_perc.draw STACK
+arc_misses_perc.graph yes
+arc_misses_perc.cdef misses,100,*,arc_access_total,/
+arc_misses_perc.label ARC misses
+arc_misses_perc.draw STACK
+l2_efficency_tot.graph yes
+l2_efficency_tot.cdef l2_hits,100,*,l2_hits,l2_misses,hits,misses,ADDNAN,ADDNAN,ADDNAN,/
+l2_efficency_tot.label L2ARC hit ratio of L1&L2 accesses
+EOF
+# demand_data_hits_perc.cdef demand_data_hits,100,*,hits,/
+# demand_data_hits_perc.label Cache hits of demand data type
+# demand_data_hits_perc.graph no
+# demand_metadata_hits_perc.cdef demand_metadata_hits,100,*,hits,/
+# demand_metadata_hits_perc.label Cache hits of Demand metadata type
+# demand_metadata_hits_perc.graph no
+# prefetch_data_hits_perc.cdef prefetch_data_hits,100,*,hits,/
+# prefetch_data_hits_perc.label Prefetch data hits factor of all hits
+# prefetch_data_hits_perc.graph no
+# prefetch_metadata_hits_perc.cdef prefetch_metadata_hits,100,*,hits,/
+# prefetch_metadata_hits_perc.label Prefetch metadata hits factor off hits
+# prefetch_metadata_hits_perc.graph no
+# demand_data_efficency.cdef demand_data_hits,100,*,demand_data_hits,demand_data_misses,ADDNAN,/
+# demand_data_efficency.label Data demand efficency
+# demand_data_efficency.graph no
+# anon_hits.graph no
+# anon_hits.cdef hits,mfu_hits,mru_hits,mfu_ghost_hits,mru_ghost_hits,ADDNAN,ADDNAN,ADDNAN,-,100,*,hits,/
+# anon_hits.label ARC Anon hits
+# mfu_ghost_hits_perc.cdef mfu_ghost_hits,100,*,hits,/
+# mfu_ghost_hits_perc.label Most frequently used ghost hits
+# mfu_ghost_hits_perc.graph no
+# mru_ghost_hits_perc.cdef mru_ghost_hits,100,*,hits,/
+# mru_ghost_hits_perc.label Most recently used ghost hits
+# mru_ghost_hits_perc.graph no
+	exit 0
+	;;
+    autoconf)
+	if [ ! -x ${sysctl} ]; then
+	    echo "no (${sysctl} is not executable)"
+	    exit 1
+	fi
+	ostype=`uname -s`
+	if [ ${ostype} = "FreeBSD" ]; then
+	    echo "yes"
+	    exit 0
+	fi
+	echo "no (You're OS is not supported by this plugin)"
+	exit 1
+	;;
+    suggest)
+	exit 0
+	;;
+esac
+$sysctl kstat.zfs.misc.arcstats | sed -e 's/^kstat.zfs.misc.arcstats.//' -e 's/:/.value/'

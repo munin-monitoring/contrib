@@ -1,0 +1,36 @@
+#!/bin/bash
+
+case $1 in
+    config)
+        cat <<EOF
+graph_title TCP retransmissions
+graph_vlabel Rate, retrs/sockets
+graph_category network
+graph_info dynamic TCP socket retransmission counters
+rate.label Retransmission rate
+rate.draw LINE2
+EOF
+
+	exit 0
+        ;;
+    autoconf)
+        if [ -f /proc/net/tcp -o -f /proc/net/tcp6 ]
+        then
+            echo yes
+            exit 0
+        else
+            echo no
+            exit 1
+        fi
+esac
+
+cat /proc/net/tcp* | awk '
+{
+	TOTAL += $7;
+	COUNT++;
+}
+
+END {
+	printf "rate.value %.3f\n", TOTAL/COUNT
+}
+'

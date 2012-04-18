@@ -1,0 +1,59 @@
+#!/usr/bin/php
+<?php
+/**
+ * SolR Plugin
+ * author : nicolas.moussikian@shopbot-inc.com
+ *
+ * This plugin allows to graph any data present in the stats report on a multi core SolR instance
+ * AKA : http://127.0.0.1:8080/solr/[name of the core]/admin/stats.jsp
+ * Verify the server where the munin-node instance is can access that URL
+ *
+ * You need to have a PHP 5.2.6+ CLI installed too
+ * 
+ * Once the plugin is available you can simlink it with the following naming convention :
+ * solr-[name of the core]-[name of the stats section - ex.: CORE]-[name of the entry in the xml - ex.: searcher]-[name of the stat to graph - ex.: numDocs]
+ */
+$action = empty($argv[1]) ? '' : $argv[1];
+
+$tabParams = explode('-', $argv[0]);
+
+$core = $tabParams[1];
+$category = $tabParams[2];
+$item = $tabParams[3];
+$property = $tabParams[4];
+
+if('config' === $action)
+{
+    echo 'graph_category SolR ' . $core . "\n";
+    echo 'graph_title ' . $item . ' ' . $property . "\n";
+    echo 'graph_vlabel ' . $property . "\n";
+    echo $core . $item . $property . 'solr.label ' . $property . "\n";
+}
+else
+{
+    $file = 'http://127.0.0.1:8080/solr/' . $core . '/admin/stats.jsp';
+
+    $doc = new DOMDocument('1.0', 'utf-8');
+    $doc->load($file);
+
+    $xpath = new DOMXpath($doc);
+
+    $elements = $xpath->query('/solr/solr-info/' . $category . '/entry');
+
+    foreach($elements as $element)
+    {
+        if($item == trim($element->getElementsByTagName('name')->item(0)->textContent))
+        {
+            $stats = $element->getElementsByTagName('stat');
+
+            foreach($stats as $stat)
+            {
+                if($property == trim($stat->getAttribute('name')))
+                {
+                    echo $core . $item . $property . 'solr.value ' . floatval(trim($stat->textContent)) . "\n";
+                }
+            }
+        }
+    }
+}
+

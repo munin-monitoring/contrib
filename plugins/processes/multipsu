@@ -1,0 +1,45 @@
+#!/bin/bash
+#
+# Script to monitor number of processes by user. Programs are configured
+# in /etc/munin/plugin-conf.d/munin-node
+#
+# Parameters:
+#
+# 	config   (required)
+# 	autoconf (optional - used by lrrd-config)
+#
+# Configuration example
+#
+# [multipsu]
+# env.multipsunames root exim ftp 
+# 
+#
+# Magic markers (optional):
+#%# family=manual
+#%# capabilities=autoconf
+
+if [ "$1" = "autoconf" ]; then
+        if [ -z "$multipsunames" ]; then
+            echo "Configuration required $multipsunames"
+        else
+            echo yes
+        fi
+	exit 0
+fi	  
+
+if [ "$1" = "config" ]; then
+
+	echo graph_title Number of selected processes
+	echo 'graph_category processes'
+	echo 'graph_args --base 1000 --vertical-label processes -l 0'
+	for name in $multipsunames; do
+		echo "$name.label $name"
+		echo "$name.draw LINE2"
+	done
+	exit 0
+fi
+
+for name in $multipsunames; do
+	printf "$name.value "
+	(pgrep -u "$name"; pgrep -U "$name") | sort -u | wc -l
+done

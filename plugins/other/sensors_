@@ -1,0 +1,184 @@
+#!/bin/bash
+#
+# Plugin: sensors_
+# Author: Carlos Ladeira (caladeira at gmail dot com]
+# Version: 08.09.13
+#
+#
+# This script handles the output of lm-sensors
+# like this example:
+#
+# it87-isa-0290
+# Adapter: ISA adapter
+# VCore 1:   +1.49 V  (min =  +0.00 V, max =  +4.08 V)
+# VCore 2:   +2.46 V  (min =  +0.00 V, max =  +4.08 V)
+# +3.3V:     +3.25 V  (min =  +0.00 V, max =  +4.08 V)
+# +5V:       +4.97 V  (min =  +0.00 V, max =  +6.85 V)
+# +12V:     +12.22 V  (min =  +0.00 V, max = +16.32 V)
+# -12V:      -1.83 V  (min = -27.36 V, max =  +3.93 V)
+# -5V:       -9.48 V  (min = -13.64 V, max =  +4.03 V)
+# Stdby:     +4.95 V  (min =  +0.00 V, max =  +6.85 V)
+# VBat:      +3.33 V
+# fan1:     3375 RPM  (min =    0 RPM, div = 8)
+# fan2:        0 RPM  (min =    0 RPM, div = 8)
+# fan3:        0 RPM  (min =    0 RPM, div = 2)
+# M/B Temp:    +39Â°C  (low  =    -1Â°C, high =  +127Â°C)   sensor = thermistor
+# CPU Temp:    +34Â°C  (low  =    -1Â°C, high =  +127Â°C)   sensor = thermistor
+# Temp3:       +48Â°C  (low  =    -1Â°C, high =  +127Â°C)   sensor = thermistor
+#
+#
+# Wildcard-plugin to monitor output of lm sensors.
+#
+# Syntax:	sensors_<type>[_ignore1[,ignore2[,...]]]
+#
+#		<type>	fans		monitor fans speed
+#			voltages	monitor system voltages
+#			temperatures	monitor system temperatures
+#
+#		ignore1, ignore2, ...	list of sensores to ignore
+#
+#
+# HOW TO SETUP THIS SCRIPT
+#
+# 1. Start copying this script to the munin main plugin directory
+#
+#	sudo cp sensors_ /usr/share/munin/plugins/sensors_
+#
+# 2. create links in the user plugin directory with the desired setup
+#    Some examples:
+#
+#    ln -s /usr/share/munin/plugins/sensors_ /etc/munin/plugins/sensors_fans
+#    ln -s /usr/share/munin/plugins/sensors_ /etc/munin/plugins/sensors_voltages
+#    ln -s /usr/share/munin/plugins/sensors_ /etc/munin/plugins/sensors_temperatures_5V,12V
+#    ln -s /usr/share/munin/plugins/sensors_ /etc/munin/plugins/sensors_temperatures_Temp3
+#
+#
+# Munin (http://munin.projects.linpro.no/) 
+# lm-sensors (http://www.lm-sensors.org/)
+# 
+# Requirements: * lm-sensors (http://www.lm-sensors.org/)
+#
+#
+# Changelog: v08.09.07 - initial release
+#            v08.09.13 - add ignore parameter list
+#
+#
+#%# family=contrib
+#%# capabilities=autoconf suggest
+
+##### CONSTANTS #####################################################
+
+DETECTED_SENSORS=$(sensors -U -A | wc -l)
+GCAT="sensors"
+
+IGNORE_DELIMITER='_'
+
+ARGS=$(basename $0 | sed -e 's/^sensors_//g')
+MODE=$(echo -n $ARGS | cut -d $IGNORE_DELIMITER -f 1)
+IGNORE=$(echo -n $ARGS | cut -d $IGNORE_DELIMITER -f 2)
+
+IGNORE_LIST=""
+if [ -n "$IGNORE" ] ; then
+	if [ "$IGNORE" != "$MODE" ] ; then
+		IGNORE_LIST="$(echo -n $IGNORE | sed -e 's/,/ /g')"
+	fi
+fi
+
+case "$MODE" in
+
+	voltages)
+		LINE_FILTER=" V"
+		VALUE_FILTER='V'
+		GTITLE="Voltages"
+		GLABEL="Volts"
+	;;
+
+	temperatures)
+		LINE_FILTER="C "
+		VALUE_FILTER='C'
+		GTITLE="Temperatures"
+		GLABEL="Celsius"
+	;;
+
+	fans)
+		LINE_FILTER="RPM"
+		VALUE_FILTER='R'
+		GTITLE="Fans Speed"
+		GLABEL="RPM"
+	;;
+
+	*)
+	echo "Invalid Option: $MODE"
+	exit 1
+
+esac
+
+
+#####################################################################
+
+if [ "$1" == "autoconf" ]; then
+
+	if [ "$DETECTED_SENSORS" -eq 0 ]; then
+		echo "no"
+		exit 1
+	else
+		echo "yes"
+		exit 0
+	fi
+
+elif [ "$1" == "suggest" ]; then
+
+	echo "voltages"
+	echo "temperatures"
+	echo "fans"
+	exit 0
+
+elif [ "$1" == "config" ]; then
+
+	echo "graph_title $GTITLE"
+	echo "graph_vlabel $GLABEL"
+	echo "graph_category $GCAT"
+	echo "graph_args --base 1000 -l 0"
+	echo "graph_scale no"
+
+	sensors | grep "$LINE_FILTER" |
+
+	while read a; do
+		label=$(echo $a | cut -d ':' -f 1 | sed -e 's/[+| |/]//g' -e 's/-/n/' -e 's/\./_/')
+		name=$(echo $a | cut -d ':' -f 1)
+
+		found=0
+		for item in $IGNORE_LIST; do
+			if [ "$item" == "$label" ] ; then
+				found=1
+			fi
+		done
+
+		if [ $found -eq 0 ] ; then
+			echo $label.label $name
+		fi
+	done
+
+else
+
+	sensors | grep "$LINE_FILTER" |
+
+	while read a; do
+		label=$(echo $a | cut -d ':' -f 1 | sed -e 's/[+| |/]//g' -e 's/-/n/' -e 's/\./_/')
+		value=$(echo $a | cut -d ':' -f 2 | cut -d $VALUE_FILTER -f 1 | sed -e 's/[+|[:blank:]|°|C]//g')
+
+		found=0
+		for item in $IGNORE_LIST; do
+			if [ "$item" == "$label" ] ; then
+				found=1
+			fi
+		done
+
+		if [ $found -eq 0 ] ; then
+			echo $label.value $value
+		fi
+
+	done
+
+fi
+

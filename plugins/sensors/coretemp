@@ -1,0 +1,32 @@
+#!/bin/sh
+#
+# Plugin to monitor cpu temperatures through FreeBSD's CORETEMP(4).
+#
+# $Log$
+#
+#%# family=contrib
+
+SYSCTL=/sbin/sysctl
+
+if [ "$1" = "autoconf" ]; then
+	${SYSCTL} dev.cpu.0.temperature 2>&1 >/dev/null
+        if [ "$?" -eq "0" ]; then
+                echo yes
+                exit 0
+        else
+                echo no
+                exit 1
+        fi
+fi
+
+if [ "$1" = "config" ]; then
+
+        echo 'graph_title CPU temperature'
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_vlabel temp in °C'
+        echo 'graph_category sensors'
+	${SYSCTL} dev.cpu | grep temperature | awk -F'.' '{ print "CPU"$3"TEMP.label CPUTEMP"$3}'
+        exit 0
+fi
+
+${SYSCTL} dev.cpu | grep temperature | sed 's/^dev\.cpu\.\([[:digit:]]\)\.temperature: \([[:digit:]]\)/CPU\1TEMP.value \2/'

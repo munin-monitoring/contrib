@@ -1,0 +1,475 @@
+#!/usr/bin/perl -w
+#
+# Munin plugin for MythTV
+# This plugin can graph:- Encoder Status, Days Remaining in Schedule, Job schedule, Recording Schedule, Recorded Programes, Recorded hours
+# 
+# Create a symbolic link to mythtv_status_{GraphType}
+# Where {GraphType} can be encoder, epg, job,  schedule, recorded
+# for example         mythtv_status_encoder
+#
+# NOTE: This plugin needs to run as root so add the following to your munin-node config file 
+#  [mythtv_status*]
+#  user=root
+#  The http/xml status page must be enabled in the mythtv backend.
+#
+# $Log$
+# Revision 0.1  2008/03/27  idobson
+# Code for all options except recorded implemented 
+#
+# Revision 0.2  2008/03/28  idobson
+# Tidied up the code abit/removed dead functions
+#
+# Revision 0.3  2008/03/28  idobson
+# Added first attempt at getting the number of programs recorded using an sql query
+#
+# Revision 0.4  2008/03/29  idobson
+# Fixed the SQL query for the recorded programs/added the number of hours recorded
+#
+# Revision 0.5  2008/03/29  idobson
+# Added upcomming recordings SQL query to the schedule code
+#
+# Revision 0.6  2008/04/1  idobson
+# Added a "watched recordings" to the recorded list. This is only available in MythTV ver.21
+# Added code to read the Myth parameters (Host,SQL server,SQL user, SQL password) from the mysql.txt file
+#
+# Revision 0.7  2008/04/3  idobson
+# Now using SQL to read the number of days in the EPG
+# Changed recordings symlink to schedule, makes more sense
+# 
+# Revision 0.8  2008/04/6  idobson
+# Tidied up the SQL code abit, moved it into a function.
+#
+# Revision 0.9  2008/04/12  idobson
+# Added a check that we got the XML data before trying to  parse it.
+#
+# Revision 1.0  2008/04/15  idobson
+# Fixed undef returned from SQL query, it now returns 0, 
+# added error handler to SQL sub. It just dies with an error text.
+#
+# Revision 1.1  2008/05/03  idobson
+# Changed unwatched to watched & changed the SQL code
+#
+# Revision 1.2  2008/06/13  idobson
+# Split the EPG data up per video source
+# Fixed afew spelling mistakes
+#
+# Revision 1.3  2008/06/27  idobson
+# Tidied up the code abit. Config option only calls XMLparse and SQLsetup when required
+# Removed unnecessary libs
+# This should reduce the load on the munin server abit
+#
+#
+# Revision 1.4  2010/10/10  idobson
+# MythTV database information always loaded (used by autoconf,config and data dump for most options)
+# Active tuner now split up by video source, hung encoders are listed seperatly
+# Schedule now uses myth module/QUERY_GETALLPENDING to get Scheduled Recordings/Repeats/Conflicts
+# Recorded now splits recorded into groups (Expireable, Delete pending, Save)
+# Code now strict safe
+#
+# Magic markers (optional - used by munin-config and installation scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf
+use DBI;
+use MythTV;
+use strict;
+use warnings;
+
+# SQL parameters are read from mysql.txt
+# There should be no need to change anything after this point
+my $SQLServer = "";
+my $SQLUser = "";
+my $SQLPassword = "";
+my $SQLDBName = "";
+
+my @result="";
+my $ScheduleDays=0;
+my $Recordings=0;
+my $GraphOption="";
+my $Recorded=0;
+my $RecHours=0;
+my $RecHoursLiveTV=0;
+my $result="";
+my $gata="";
+my $VideoInput=1;
+ $GraphOption=`basename $0 | sed 's/^mythtv_status_//g' | tr '_' '-'` ;	
+ chomp $GraphOption;
+
+PrepSQLRead();
+
+#Auto config options
+ if ($ARGV[0] and $ARGV[0] eq "autoconf" ) {
+     print "yes\n";
+     exit 0;
+ } 
+
+#Config Options
+##Configuration for encoder, no config data needs to read from anywhere
+ if ($ARGV[0] and $ARGV[0] eq "config"){
+   if ($GraphOption eq "encoder") {
+     print "graph_args --base 1000 --lower-limit 0 --rigid\n";
+     print "graph_scale off\n";
+     print "graph_info MythTV encoder information\n";
+     print "graph_title MythTV Encoders\n";
+     print "graph_category MythTV\n";
+     print "graph_vlabel Encoders\n";
+     @result=SQLQuery("SELECT `name` FROM `videosource`");
+     my $First=0;
+     foreach $gata (@result) {
+       print "ActiveEncoders$gata.draw ";
+       if ( $First == 0 ) {
+          print "AREA\n";
+          print "ActiveEncoders$gata.colour FF0000\n";
+          $First=1;
+       } else {
+          print "STACK\n";
+          print "ActiveEncoders$gata.colour 0000FF\n";
+       }
+       print "ActiveEncoders$gata.label Active encoders for videosource '$gata'\n";
+     }
+     print "FreeEncoders.draw STACK\n";
+     print "FreeEncoders.label Inactive encoders\n";
+     print "FreeEncoders.colour 00FF00\n";
+     print "HungEncoders.colour 000000\n";
+     print "HungEncoders.draw LINE1\n";
+     print "HungEncoders.label Encoders that have hung (no DB update)\n";     
+     print "HungEncoders.warning 0:0\n";
+   }
+
+##Configuration for EPG, information read from SQL database
+   if ($GraphOption eq "epg") {
+     print "graph_args --base 1000 -l 0\n";
+     print "graph_info MythTV EPG information\n";
+     print "graph_scale off\n";
+     print "graph_title MythTV EPG days/Programs\n";
+     print "graph_category MythTV\n";
+     print "graph_vlabel Days\/Programs\n";
+     
+     @result=SQLQuery("SELECT DISTINCT `sourceid` FROM `cardinput`");
+     $VideoInput = 1;
+     foreach $gata (@result) {
+        print "EPGDays$VideoInput.label EPG Data (days) for input $VideoInput\n";
+        print "EPGDays$VideoInput.info Electronic Program Guide number of days stored\n";
+        print "EPGPrograms$VideoInput.label Programs in EPG (1000's)  for input $VideoInput\n";
+        print "EPGPrograms$VideoInput.info Number of programs stored in the Electronic Program Guide (in 1000's)\n";
+        print "EPGDays$VideoInput.min 0\n";
+        print "EPGPrograms$VideoInput.min 0\n";
+        $VideoInput++;
+     }
+   }
+
+##Configuration for jobs, no config data needs to read from anywhere
+   if ($GraphOption eq "job") {
+     print "graph_args --base 1000 -l 0\n";
+     print "graph_scale off\n";
+     print "graph_info MythTV job information\n";
+     print "graph_title MythTV Jobs\n";
+     print "graph_category MythTV\n";
+     print "graph_vlabel Jobs\n";
+     print "CommJobs.label Active commflag jobs\n";
+     print "TransJobs.label Active transcode jobs\n";
+     print "QueueJobs.label Queued Jobs\n";
+   }
+
+##Configuration for schedule, no config data needs to read from anywhere
+   if ($GraphOption eq "schedule") {
+     print "graph_args --base 1000 -l 0\n";
+     print "graph_scale off\n";
+     print "graph_info MythTV schedule information\n";
+     print "graph_title MythTV Schedule\n";
+     print "graph_category MythTV\n";
+     print "graph_vlabel Programs\n";
+     print "RecordingRecordings.label Programs that will be recorded\n";
+     print "RecordingRecordings.info Upcomming programs that will be recorded\n";
+     print "RecordingRecordings.draw AREA\n";
+     print "RecordingConflict.label Recording Conflicts\n";
+     print "RecordingConflict.info Upcomming programs that won't be recorded due to tuner conflicts\n";
+     print "RecordingConflict.draw STACK\n";
+     print "RecordingConflict.colour FF0000\n";
+     print "RecordingConflict.warning 0:0\n";
+     print "RecordingRepeats.label Recording repeats (Already recorded)\n";
+     print "RecordingRepeats.info Upcomming programs that are already recorded (Repeats)\n";
+     print "RecordingRepeats.draw  STACK\n";
+     print "RecordingRepeats.colour 0000FF\n";
+     print "RecordingDisabled.label Disabled recordings\n";
+     print "RecordingDisabled.info Recordings will not be recorded (Inactive/Canceled/Aborted/Manual/Free Diskspace etc)\n";
+     print "RecordingDisabled.draw STACK\n";
+     print "RecordingSchedules.label Scheduled recordings\n";
+     print "RecordingSchedules.info Number of schedules defined (Series only counts as one item)\n";
+     print "RecordingSchedules.draw LINE2\n";
+     print "RecordingSchedules.colour 000000\n";
+   }
+
+##Configuration for recorded
+   if ($GraphOption eq "recorded") {
+     print "graph_args --base 1000 -l 0\n";
+     print "graph_scale off\n";
+     print "graph_info MythTV recorded information\n";
+     print "graph_title MythTV Recorded\n";
+     print "graph_category MythTV\n";
+     print "graph_vlabel Programs or Hours\n";
+     print "graph_order RecLiveTV RecHoursDelete RecHoursExpire RecHours Recorded Watched \n";
+
+     print "RecLiveTV.min 0\n";
+     print "RecLiveTV.label Hours recorded (Live TV)\n";
+     print "RecLiveTV.colour 0000FF\n";
+     print "RecLiveTV.info Hours recorded - Live TV\n";
+     print "RecLiveTV.draw AREA\n";
+
+     print "RecHours.min 0\n";
+     print "RecHours.label Hours recorded (Not marked as auto expire)\n";
+     print "RecHours.colour 00FF00\n";
+     print "RecHours.info Hours recorded - using schedule (Not marked as auto expire)\n";
+     print "RecHours.draw STACK\n";
+
+     print "RecHoursExpire.label Hours recorded (marked as auto expire)\n";
+     print "RecHoursExpire.info Hours recorded - using schedule (marked as auto expire)\n";
+     print "RecHoursExpire.draw STACK\n";
+     print "RecHoursExpire.colour 00C000\n";
+
+     print "RecHoursDelete.label Hours recorded (delete pending)\n";
+     print "RecHoursDelete.info Hours recorded - using schedule (delete pending)\n";
+     print "RecHoursDelete.draw STACK\n";
+     print "RecHoursDelete.colour 008000\n";
+
+     print "Recorded.label Programs recorded\n";
+     print "Recorded.colour FF0000\n";
+     print "Recorded.info Number of programs recorded (Scheduled)\n";
+     print "Recorded.draw LINE1\n";
+
+     print "Watched.label Programs already watched\n";
+     print "Watched.colour 000000\n";
+     print "Watched.info Programes that have been watched atleast once\n";
+     print "Watched.draw LINE1\n";
+   }
+   exit 0;
+ }
+
+#Actually dump data to Munin
+ if ($GraphOption eq "encoder") {
+   @result=SQLQuery("SELECT videosource.name FROM `videosource` ");
+   my %Names;
+   my $Name="";
+   foreach $Name (@result) {
+     $Names{$Name}=0;
+   }
+   @result=SQLQuery("SELECT count(*) FROM `capturecard` ");
+   my $FreeRecorders=$result[0];
+   my $ActiveTuners=0;
+   @result=SQLQuery("SELECT videosource.name, count( inuseprograms.recusage ) 
+                     FROM   inuseprograms, channel, videosource
+                     WHERE  inuseprograms.recusage = 'recorder'
+                     AND    inuseprograms.chanid   = channel.chanid
+                     AND    channel.sourceid       = videosource.sourceid
+                     AND    (UNIX_TIMESTAMP( NOW( )) - UNIX_TIMESTAMP(inuseprograms.lastupdatetime)) / 60 < 20
+                     GROUP BY videosource.sourceid
+                    ");
+   foreach $gata (@result) {
+     if ( $Name eq "" ) {
+       $Name=$gata;
+     } else {
+         $Names{$Name} = $gata;
+         $Name="";
+         $FreeRecorders=$FreeRecorders-$gata;
+     }
+   }
+   foreach $Name (keys %Names) {
+     if ( $Name ne "" ) {
+       print "ActiveEncoders$Name.value  $Names{$Name}\n";
+     }
+   }
+   print "FreeEncoders.value $FreeRecorders\n";
+   @result=SQLQuery("SELECT count(inuseprograms.recusage)
+                     from inuseprograms  
+                     where inuseprograms.recusage = 'recorder'   
+                     and (UNIX_TIMESTAMP( NOW( )) - UNIX_TIMESTAMP(inuseprograms.lastupdatetime)) / 60 > 20");
+   print "HungEncoders.value $result[0]\n";
+ }
+
+#Get number of days of EPG per video source
+ if ($GraphOption eq "epg") {
+   @result=SQLQuery("SELECT (UNIX_TIMESTAMP( MAX( starttime ) ) - UNIX_TIMESTAMP( NOW( ) ) ) /86400 FROM program GROUP BY `listingsource` ");
+   $VideoInput = 1;
+   foreach $gata (@result) {
+      print "EPGDays$VideoInput.value $gata\n";
+      $VideoInput++;
+   }  
+
+#Get number of programs in EPG per video source
+   $VideoInput = 1;
+   @result=SQLQuery("SELECT count(*)/1000 FROM `program` GROUP BY `listingsource` ");
+   foreach $gata (@result) {
+      print "EPGPrograms$VideoInput.value $gata\n";
+      $VideoInput++;
+   }
+ }
+
+#Get active job queue
+ if ($GraphOption eq "job") {
+   @result=SQLQuery("SELECT count(*) FROM `inuseprograms` WHERE `recusage` = 'flagger' ");
+   print "CommJobs.value $result[0]\n";
+
+   @result=SQLQuery("SELECT count(*) FROM `inuseprograms` WHERE `recusage` = 'transcoder' ");
+   print "TransJobs.value $result[0]\n";
+
+   @result=SQLQuery("SELECT count(*) FROM `jobqueue` WHERE `status` = '1' ");
+   print "QueueJobs.value $result[0]\n";
+ }
+
+#Get schedule
+ if ($GraphOption eq "schedule") {
+   @result=SQLQuery("SELECT COUNT(*) FROM `record`");
+   print "RecordingSchedules.value $result[0]\n";
+
+#Connect to mythtv using the MythTV object 
+   my $Repeats=0;
+   my $Recordings=0;
+   my $Conflicts=0;
+   my $Disabled=0;
+   our $show;
+   my $Myth = new MythTV();
+#Grab the schedule list from the backend
+   my %rows = $Myth->backend_rows('QUERY_GETALLPENDING', 2);
+   foreach my $row (@{$rows{'rows'}}) {
+     $show = new MythTV::Program(@$row);
+     $Recordings++ if (is_scheduled($show->{'recstatus'}));
+     $Repeats++ if (is_duplicate($show->{'recstatus'}));
+     $Disabled++ if (is_deactivated($show->{'recstatus'}));
+     $Conflicts++ if(is_conflict($show->{'recstatus'}));
+   }
+   print "RecordingRepeats.value $Repeats\n";
+   print "RecordingRecordings.value $Recordings\n";
+   print "RecordingConflict.value $Conflicts\n";
+   print "RecordingDisabled.value $Disabled\n";
+ }
+
+#Get recorded
+ if ($GraphOption eq "recorded") {
+   @result=SQLQuery("select sum(UNIX_TIMESTAMP(recorded.endtime) - UNIX_TIMESTAMP(recorded.starttime))/3600 from recorded where recorded.recgroup = 'LiveTV' ");
+   print "RecLiveTV.value $result[0]\n";
+
+   @result=SQLQuery("select sum(UNIX_TIMESTAMP(recorded.endtime) - UNIX_TIMESTAMP(recorded.starttime))/3600 from recorded where recorded.recgroup != 'LiveTV' and autoexpire != 1 and deletepending  != 1");
+   print "RecHours.value $result[0]\n";
+
+   @result=SQLQuery("select sum(UNIX_TIMESTAMP(recorded.endtime) - UNIX_TIMESTAMP(recorded.starttime))/3600 from recorded where recorded.recgroup != 'LiveTV' and autoexpire = 1");
+   print "RecHoursExpire.value $result[0]\n";
+
+   @result=SQLQuery("select sum(UNIX_TIMESTAMP(recorded.endtime) - UNIX_TIMESTAMP(recorded.starttime))/3600 from recorded where deletepending  = 1");
+   print "RecHoursDelete.value $result[0]\n";
+
+   @result=SQLQuery("SELECT count( recorded.chanid ) FROM recorded");
+   print "Recorded.value $result[0]\n";
+
+   @result=SQLQuery("SELECT count(*) FROM `recorded` WHERE recorded.watched != 0");
+   print "Watched.value $result[0]\n";
+
+ }
+exit 0;
+
+
+#Try and read MythTV configuration parameters from mysql.txt (This could be in several places)
+sub PrepSQLRead {
+    my $hostname = `hostname`;
+    chomp($hostname);
+    
+# Read the mysql.txt file in use by MythTV. Could be in a couple places, so try the usual suspects
+    my $found = 0;
+    my @mysql = ('/usr/local/share/mythtv/mysql.txt',
+                 '/usr/share/mythtv/mysql.txt',
+                 '/etc/mythtv/mysql.txt',
+                 '/usr/local/etc/mythtv/mysql.txt',
+                 'mysql.txt'
+                );
+    foreach my $file (@mysql) {
+        next unless (-e $file);
+        $found = 1;
+        open(CONF, $file) or die "Unable to open $file:  $!\n\n";
+        while (my $line = <CONF>) {
+        # Cleanup
+            next if ($line =~ /^\s*#/);
+            $line =~ s/^str //;
+            chomp($line);
+        # Split off the var=val pairs
+            my ($var, $val) = split(/\=/, $line, 2);
+            next unless ($var && $var =~ /\w/);
+            if ($var eq 'DBHostName') {
+                $SQLServer = $val;
+            }
+            elsif ($var eq 'DBUserName') {
+                $SQLUser = $val;
+            }
+            elsif ($var eq 'DBName') {
+                $SQLDBName = $val;
+            }
+            elsif ($var eq 'DBPassword') {
+                $SQLPassword = $val;
+            }
+        # Hostname override
+            elsif ($var eq 'LocalHostName') {
+                $hostname = $val;
+            }
+        }
+        close CONF;
+    }
+    die "Unable to locate mysql.txt:  $!\n\n" unless ($found && $SQLServer);
+    return 0;
+}
+
+#Perform  SQL query
+sub SQLQuery {
+   my  ($QUERY) = @_;
+   my @data;
+   my $ref;
+   my $dbh = DBI->connect_cached("DBI:mysql:$SQLDBName:$SQLServer", $SQLUser, $SQLPassword) 
+         or die "Couldn't connect to database: " . DBI->errstr;
+   my $table_data = $dbh->prepare($QUERY) or die "Couldn't prepare statement: " . $dbh->errstr;
+   $table_data->execute or die "Couldn't execute statement: " . $table_data->errstr;
+
+   while ( $ref = $table_data->fetchrow_arrayref() )  {
+      push (@data,@{$ref})
+   }
+   if ($data[0]) {
+     return @data;
+   } else {
+     return 0;
+   }   
+}
+
+# Returns true if the show is scheduled to record
+    sub is_scheduled {
+        my $recstatus = (shift() or 0);
+        return (($MythTV::recstatus_willrecord == $recstatus) ||
+                ($MythTV::recstatus_recorded == $recstatus) ||
+                ($MythTV::recstatus_recording == $recstatus));
+    }
+
+# Returns true if the show is a duplicate
+    sub is_duplicate {
+        my $recstatus = (shift() or 0);
+        return (($MythTV::recstatus_repeat == $recstatus) ||
+                ($MythTV::recstatus_previousrecording == $recstatus) ||
+                ($MythTV::recstatus_currentrecording == $recstatus));
+    }
+
+# Returns true if the show cannot be recorded due to a conflict
+    sub is_conflict {
+        my $recstatus = (shift() or 0);
+        return ($MythTV::recstatus_conflict == $recstatus);
+    }
+
+# Returns true if the recording is deactivated
+    sub is_deactivated {
+        my $recstatus = (shift() or 0);
+        return (($MythTV::recstatus_inactive == $recstatus) ||
+                ($MythTV::recstatus_toomanyrecordings == $recstatus) ||
+                ($MythTV::recstatus_cancelled == $recstatus) ||
+                ($MythTV::recstatus_deleted == $recstatus) ||
+                ($MythTV::recstatus_aborted == $recstatus) ||
+                ($MythTV::recstatus_notlisted == $recstatus) ||
+                ($MythTV::recstatus_dontrecord == $recstatus) ||
+                ($MythTV::recstatus_lowdiskspace == $recstatus) ||
+                ($MythTV::recstatus_tunerbusy == $recstatus) ||
+                ($MythTV::recstatus_neverrecord == $recstatus) ||
+                ($MythTV::recstatus_earliershowing == $recstatus) ||
+                ($MythTV::recstatus_latershowing == $recstatus));
+    }

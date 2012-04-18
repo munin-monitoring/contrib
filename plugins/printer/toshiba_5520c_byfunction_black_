@@ -1,0 +1,40 @@
+#!/bin/bash
+#
+# toshiba_5520c_byfunction_black_ munin grabber script
+# 2009.01 by steve@kosada.com
+
+destination=`basename $0 | sed 's/^toshiba_5520c_byfunction_black_//g'`
+
+if [ "$1" = "config" ]; then
+	echo "graph_title Toshiba 5520C: Black Pages (by function)"
+	echo 'graph_vlabel Pages'
+	echo 'graph_args --lower-limit 0'
+	echo 'graph_category printer'
+
+	echo "blackPrintCopy.label Print: Copy"
+	echo "blackPrintCopy.draw AREA"
+
+	echo "blackPrintComputer.label Print from Computer"
+	echo "blackPrintComputer.draw STACK"
+
+	echo "blackScanNetwork.label Scan to Network"
+	echo "blackScanNetwork.draw STACK"
+
+	echo "blackSendFax.label Fax: Send"
+	echo "blackSendFax.draw STACK"
+
+	echo "blackReceiveFax.label Fax: Receive"
+	echo "blackReceiveFax.draw STACK"
+
+	echo "blackPrintList.label Print: List"
+	echo "blackPrintList.draw STACK"
+else
+	infopage=`wget -q -O - http://$destination:8080/TopAccess/Counter/TotalCount/List.htm | dos2unix | perl -p -e 's/\n/ /m'`
+
+	echo blackPrintCopy.value			`echo $infopage | perl -p -e 's/^.+\<B\>Print Counter\<\/B\>.+?\{Black\,([0-9]+).+$/$1/'`
+	echo blackPrintList.value			`echo $infopage | perl -p -e 's/^.+\<B\>Print Counter\<\/B\>.+?\{Black(\,[0-9]+){3}\,([0-9]+).+$/$2/'`
+	echo blackPrintComputer.value		`echo $infopage | perl -p -e 's/^.+\<B\>Print Counter\<\/B\>.+?\{Black(\,[0-9]+){2}\,([0-9]+).+$/$2/'`
+	echo blackScanNetwork.value			`echo $infopage | perl -p -e 's/^.+\<B\>Scan Counter\<\/B\>.+?\{Black\,[0-9]+\,([0-9]+).+$/$1/'`
+	echo blackSendFax.value				`echo $infopage | perl -p -e 's/^.+\<B\>Scan Counter\<\/B\>.+?\{Black(\,[0-9]+){2}\,([0-9]+).+$/$2/'`
+	echo blackReceiveFax.value			`echo $infopage | perl -p -e 's/^.+\<B\>Print Counter\<\/B\>.+?\{Black\,[0-9]+\,([0-9]+).+$/$1/'`
+fi

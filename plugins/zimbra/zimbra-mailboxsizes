@@ -1,0 +1,67 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+=head1 NAME
+
+zimbra_mailboxsizes = plugin to show mailboxsizes
+
+=head1 NOTES
+
+This is a Munin plugin that gets the sizes of all mailboxes in bytes
+
+=head1 AUTHOR
+
+Contributed by Alexander Swen
+
+=head1 LICENSE
+
+Copyright (c) 2011 Alexander Swen
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; version 2 dated June,
+1991.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+02110-1301 USA.
+
+=head1 CONFIGURATION
+[zimbra_mailboxsizes]
+user zimbra
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+user=${user:-zimbra}
+
+#. $MUNIN_LIBDIR/plugins/plugin.sh
+
+if [ "$1" = "autoconf" ]; then
+  echo yes
+  exit 0
+fi
+
+if [ "$1" = "config" ]; then
+  echo 'graph_title Mailboxsizes'
+  echo 'graph_args --base 1024 -l 0 '
+  echo 'graph_scale yes'
+  echo 'graph_vlabel Mailboxsize'
+  echo 'graph_category Zimbra'
+  /opt/zimbra/bin/zmprov gqu $(hostname)|awk '$3>102400 {sub (/@.*/, "",$1); print $1".label "$1}'
+  exit 0
+fi
+
+/opt/zimbra/bin/zmprov gqu $(hostname)|awk '$3>102400 {sub (/@.*/, "",$1); print $1".value "$3}'
+

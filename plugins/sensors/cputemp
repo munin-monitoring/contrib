@@ -1,0 +1,40 @@
+#!/bin/sh
+#
+# Plugin to graph temperatures based on info from /sys/devices/platform/coretemp.*
+#
+# Parameters:
+#
+# 	
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+if [ "$1" = "autoconf" ]; then
+	if [ -d /sys/devices/platform/coretemp.0 ]; then
+		echo yes
+		exit 0
+	else
+		echo "no (/sys/devices/platform/coretemp.* not there)"
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title CPU temperature'
+	echo 'graph_args --base 1000 -l 0'
+	echo 'graph_vlabel temp in °C'
+	echo 'graph_category sensors'
+	echo 'graph_info This graph shows temperatures based on /sys/devices/platform/coretemp.*/.'
+	echo cputemp.info CPU temperature.
+	for c in /sys/devices/platform/coretemp.*; do
+		core=${c#/sys/devices/platform/coretemp.}
+		label=`cat $c/temp1_label`
+		echo core${core}.label $label
+	done
+fi
+
+for c in /sys/devices/platform/coretemp.*; do
+	core=${c#/sys/devices/platform/coretemp.}
+	temp=$((`cat $c/temp1_input` / 1000))
+	echo core${core}.value $temp
+done

@@ -1,0 +1,242 @@
+#! /usr/bin/perl
+
+# -*- perl -*-
+
+=head1 NAME
+
+xen_multi - Munin multigraph plugin to monitor Xen domains activity
+
+=head1 APPLICABLE SYSTEMS
+
+This plugin should work on any system running a Xen hypervisor and where xentop
+is installed. It also needs Munin 1.4.0 or higher, since it uses AREASTACK
+(available from 1.3.3) and multigraph (available from 1.4.0).
+
+=head1 CONFIGURATION
+
+xentop requires superuser privileges, so you need to include in your
+configuration:
+
+ [xen_multi]
+ user root
+
+Then restart munin-node and you're done.
+
+=head1 INTERPRETATION
+
+This plugin produces four different graphs: CPU usage, memory usage, disk IOs
+and network traffic.
+
+In each graph, all Xen domains (including dom0) have their data stacked, giving
+an overall amount of ressources used.
+
+NOTE: xentop always reports 0 for dom0's disk IOs and network traffic, but
+both graphs show its entry all the same, so each domain can keep its own color
+along the different graphs.
+
+=head2 CPU usage
+
+This graph shows a percentage of the CPU time used by each domain.
+
+=head2 Memory usage
+
+This graph shows the amount of memory (in bytes) used by each domain.
+
+=head2 Disk IOs
+
+This graph shows the number of disk read and write operations for each domain.
+
+=head2 Network traffic
+
+This graph shows the amount of bits received and transmitted for each domain.
+
+=head1 ACKNOWLEDGEMENTS
+
+Michael Renner for the C<diskstats> plugin which I borrowed some code from.
+
+=head1 VERSION
+
+0.90
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 AUTHOR
+
+Raphael HALIMI <raphael.halimi@gmail.com>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+use strict;
+use Munin::Plugin;
+
+# autoconf - quite simple
+if ($ARGV[0] eq "autoconf") {
+  if (`which xentop`) {
+    print "yes\n";
+  } else {
+    print "no (xentop not found)\n";
+  }
+  exit 0;
+}
+
+
+#
+# Common steps for both "config" and a normal run
+#
+
+#
+# trim_label
+#
+# Trims a given label to it's non-wrapping size
+# $type = 'pos' for normal graphs and 'neg' for mirror graphs
+# pos: nnn.nnU_ times 4
+# neg: nnn.nnU/nnn.nnU_ times 4
+
+sub trim_label {
+  my ($type, $label) = @_; my $data_characters;
+  my ($graph_width, $graph_border_width, $padding_characters, $pixels_per_character) = (400,97,10,6);
+  if ($type eq 'pos') {$data_characters = 32;} elsif ($type eq 'neg') {$data_characters = 64;} else {return $label;}
+
+  my $available_characters = abs(($graph_width+$graph_border_width)/$pixels_per_character)-$padding_characters-$data_characters;
+
+  # If the label is longer than the available space, we write as many
+  # characters as we can on both left and right, and two dots in the middle
+  if ( $available_characters < length $label ) {
+    my $center = ($available_characters-2)/2;
+    $label = substr($label,0,($center)) . '..' . substr($label,-$center);
+  }
+
+  return $label;
+}
+
+# Global variables
+my (%domains,$domain,$munindomain,$cpusecs,$memk,$nettxk,$netrxk,$vbdrd,$vbdwr);
+
+open (XENTOP,"xentop -b -f -i1 |") or die "Could not execute xentop, $!";
+
+# Now we build a hash of hashes to store information
+while (<XENTOP>) {
+  # Some cleaning first
+  s/^\s+//; chomp;
+  # Skip the headers
+  next if /^NAME/;
+
+  # We define only what we need
+  ($domain,undef,$cpusecs,undef,$memk,undef,undef,undef,undef,undef,$nettxk,$netrxk,undef,undef,$vbdrd,$vbdwr,undef,undef,undef) = split(/\s+/);
+
+  # We have to store the sanitised domain name in a separate variable
+  $domains{$domain}{'munindomain'} = clean_fieldname($domain);
+
+  # We need the remaining data only for a normal run
+  if ($ARGV[0] eq "") {
+    $domains{$domain}{'cpusecs'} = $cpusecs;
+    $domains{$domain}{'mem'} = $memk;
+    $domains{$domain}{'nettx'} = $nettxk;
+    $domains{$domain}{'netrx'} = $netrxk;
+    $domains{$domain}{'vbdrd'} = $vbdrd;
+    $domains{$domain}{'vbdwr'} = $vbdwr;
+  }
+}
+
+
+#
+# config - quite simple, too
+#
+
+if ($ARGV[0] eq "config") {
+  print "multigraph xen_cpu_time\n";
+  print "graph_title Xen domains CPU time\n";
+  print "graph_args --base 1000 -l 0\n";
+  print "graph_vlabel %\n";
+  print "graph_scale no\n";
+  print "graph_category xen\n";
+  print "graph_info This graph shows CPU time for each Xen domain.\n";
+  for $domain (sort(keys(%domains))) {
+    print "$domains{$domain}{'munindomain'}_cpu_time.label ".trim_label('pos',$domain)."\n";
+    print "$domains{$domain}{'munindomain'}_cpu_time.type COUNTER\n";
+    print "$domains{$domain}{'munindomain'}_cpu_time.cdef $domains{$domain}{'munindomain'}_cpu_time,100,*\n";
+    print "$domains{$domain}{'munindomain'}_cpu_time.draw AREASTACK\n";
+  }
+
+  print "\nmultigraph xen_mem\n";
+  print "graph_title Xen domains memory usage\n";
+  print "graph_args --base 1024 -l 0\n";
+  print "graph_vlabel bytes\n";
+  print "graph_category xen\n";
+  print "graph_info This graph shows memory usage for each Xen domain.\n";
+  for $domain (sort(keys(%domains))) {
+    print "$domains{$domain}{'munindomain'}_mem.label ".trim_label('pos',$domain)."\n";
+    print "$domains{$domain}{'munindomain'}_mem.cdef $domains{$domain}{'munindomain'}_mem,1024,*\n";
+    print "$domains{$domain}{'munindomain'}_mem.draw AREASTACK\n";
+  }
+
+  print "\nmultigraph xen_net\n";
+  print "graph_title Xen domains network traffic\n";
+  print "graph_args --base 1000\n";
+  print "graph_vlabel bits per \${graph_period} in (-) / out (+)\n";
+  print "graph_category xen\n";
+  print "graph_info This graph shows network traffic for each Xen domain.\n";
+  for $domain (sort(keys(%domains))) {
+    print "$domains{$domain}{'munindomain'}_netrx.label none\n";
+    print "$domains{$domain}{'munindomain'}_netrx.cdef $domains{$domain}{'munindomain'}_netrx,8192,*\n";
+    print "$domains{$domain}{'munindomain'}_netrx.type COUNTER\n";
+    print "$domains{$domain}{'munindomain'}_netrx.graph no\n";
+    print "$domains{$domain}{'munindomain'}_nettx.label ".trim_label('neg',$domain)."\n";
+    print "$domains{$domain}{'munindomain'}_nettx.cdef $domains{$domain}{'munindomain'}_nettx,8192,*\n";
+    print "$domains{$domain}{'munindomain'}_nettx.type COUNTER\n";
+    print "$domains{$domain}{'munindomain'}_nettx.draw AREASTACK\n";
+    print "$domains{$domain}{'munindomain'}_nettx.negative $domains{$domain}{'munindomain'}_netrx\n";
+  }
+
+  print "\nmultigraph xen_disk\n";
+  print "graph_title Xen domains disk IOs\n";
+  print "graph_args --base 1000\n";
+  print "graph_vlabel IOs per \${graph_period} read (-) / write (+)\n";
+  print "graph_category xen\n";
+  print "graph_info This graph shows disk IOs for each Xen domain.\n";
+  for $domain (sort(keys(%domains))) {
+    print "$domains{$domain}{'munindomain'}_vbdrd.label none\n";
+    print "$domains{$domain}{'munindomain'}_vbdrd.type COUNTER\n";
+    print "$domains{$domain}{'munindomain'}_vbdrd.graph no\n";
+    print "$domains{$domain}{'munindomain'}_vbdwr.label ".trim_label('neg',$domain)."\n";
+    print "$domains{$domain}{'munindomain'}_vbdwr.type COUNTER\n";
+    print "$domains{$domain}{'munindomain'}_vbdwr.draw AREASTACK\n";
+    print "$domains{$domain}{'munindomain'}_vbdwr.negative $domains{$domain}{'munindomain'}_vbdrd\n";
+  }
+
+  exit 0;
+}
+
+
+#
+# Normal run
+#
+
+print "multigraph xen_cpu_time\n";
+for $domain (sort(keys(%domains))) {
+  print "$domains{$domain}{'munindomain'}_cpu_time.value $domains{$domain}{'cpusecs'}\n";
+}
+
+print "\nmultigraph xen_mem\n";
+for $domain (sort(keys(%domains))) {
+  print "$domains{$domain}{'munindomain'}_mem.value $domains{$domain}{'mem'}\n";
+}
+
+print "\nmultigraph xen_net\n";
+for $domain (sort(keys(%domains))) {
+  print "$domains{$domain}{'munindomain'}_nettx.value $domains{$domain}{'nettx'}\n";
+  print "$domains{$domain}{'munindomain'}_netrx.value $domains{$domain}{'netrx'}\n";
+}
+
+print "\nmultigraph xen_disk\n";
+for $domain (sort(keys(%domains))) {
+  print "$domains{$domain}{'munindomain'}_vbdrd.value $domains{$domain}{'vbdrd'}\n";
+  print "$domains{$domain}{'munindomain'}_vbdwr.value $domains{$domain}{'vbdwr'}\n";
+}

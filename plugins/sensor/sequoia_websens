@@ -1,0 +1,64 @@
+#!/bin/sh
+#
+# Copyright (C) 2010 Mohammad ALI. All rights reserved.
+#
+# munin plugin that logs temperature and humidity from EM01b-STN (Sequoia Websensor)
+#
+# To install the plugin, copy or move the plugin to /usr/share/munin/plugins/ set
+# the chmod to 755 and create a symbolic link:
+# ln -s /usr/share/munin/plugins/sequoia_websens /etc/munin/plugins/sequoia_websens
+#
+# Configuration variables:
+#
+#       host    - host (default "localhost")
+#       port    - port (default "80")
+#
+# If your environment has a average temperature which differs from the default
+# waring and critical value than feel free to configure the warning and critical value
+# 
+#
+#  Author
+#	Mohammad Ali
+#
+# Version 1.0
+# March 19, 2010
+# 01:17:14 PM 
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+# These variables are defined in /etc/munin/plugin-conf.d/munin-node
+# Define the host (hostname or IP) and the port
+host=${host:-localhost}
+port=${port:-80}
+
+# Configuration of Munin for graphs and fetching data
+if [ "$1" = "config" ]; then
+	echo "graph_title Sequoia Websensor"
+	echo "graph_info This graph shows the temperature and humidity"
+	echo "graph_category sensor"
+	echo "graph_args -l 0 -u 100 -r"
+	echo "graph.scale no"
+	echo "graph_vlabel % and C°"
+	echo "tempsens.label Temperature"
+	echo "humsens.label Humidity"
+	echo "tempsens.warning 19:24"
+	echo "humsens.warning :50"
+	echo "tempsens.critical 18:25"
+	echo "humsens.critical :60"
+	exit 0
+fi 
+
+# HTTP GET REQUEST to retrieve the data from the WebSensor
+WEBSENS_DATA_FULL=$(printf "GET $host/index.html?em345678 HTTP/1.0 \n\n" | nc $host $port )
+
+# Selecting line of output (in this case body)
+WEBSENS_DATA=$(echo "$WEBSENS_DATA_FULL" | grep body)
+
+# Custom formatting for each type to trace only necessary
+WEBSENS_TEMP=$(echo "$WEBSENS_DATA" | cut -d ' ' -f11 | cut -d 'H' -f1)
+WEBSENS_HUM=$(echo "$WEBSENS_DATA" | cut -d ' ' -f11 | cut -d ':' -f2 | cut -d '%' -f1)
+
+# Sending custom formatted data to munin to create the graphs
+echo "tempsens.value $WEBSENS_TEMP"
+echo "humsens.value $WEBSENS_HUM"

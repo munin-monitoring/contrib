@@ -1,0 +1,254 @@
+#!/bin/sh
+#
+# Plugin to graph response times of the specified websites/URLs.
+#
+# Parameters:
+#
+#       config   (required)
+#       autoconf (optional - used by lrrd-config)
+#
+# Configuration example:
+#
+# [wget_page]
+# timeout 30
+# env.names url1 url2
+# env.timeout 20
+# env.error_value 60
+# env.max 120
+#
+# env.url_url1 http://www1.example.com/path1/page1
+# env.label_url1 Example URL#1
+# env.timeout_url1 10
+# env.warning_url1 5
+# env.critical_url1 8
+#
+# env.url_url2 https://www2.example.com/path2/page2
+# env.label_url2 Example URL#2
+# env.timeout_url2 30
+# env.warning_url2 15
+# env.critical_url2 20
+# env.wget_opts_url2 --no-cache --tries=1 --no-check-certificate
+#
+# URL options:
+#
+# You can define the following options for each specified URL
+# as seen in the above example.
+#
+# - url: the URL to be downloaded with Wget
+# - label: the label assigned to the line of the given in URL in the graph
+# - timeout: the value passed to Wget through the "--timeout" option.
+# - warning: the value for the given URL that stands for the warning level
+# - critical: the value for the given URL that stands for the critical level
+# - max: the maximum value for the given URL (values above this will be
+#     discarded)
+# - error_value: the value for the given URL that will be used to mark when
+#     Wget returned an error. A zero error_value causes the plugin to ignore
+#     Wget's return value.
+# - regex_error_value: the value for the given URL that will be used to mark
+#     when a regular expression match failed (either for the HTTP response
+#     headers or the body).
+# - regex_header_<n>: a regular expression that the HTTP response header must
+#     match or the plugin will return regex_error_value for the given URL.
+#     By default the plugin uses egrep, thus extended regexps are expected.
+#     You can define any number of regexps, but you've to start the index at
+#     "1" and increase it sequentially.
+#     I.e. regex_header_1, regex_header_2, ...
+# - regex_body_<n>: same as regex_header_<n>, but matches the HTTP response
+#     body.
+# - grep_opts: various options supplied to grep for regexp matches for the
+#     given URL. By default these are: -E (use of extended regexps)
+#     and -i (case insensitive regexp matching)
+# - wget_opts: various options supplied to the Wget command for the given URL.
+# - join_lines: if "true" and regexp matching is applied, the HTTP response body
+#     is stripped of newline ("\n") characters. This helps with complex regexps
+#     since grep can match only in a single line at a time and it would not be
+#     possible to match on complex HTML/XML structures otherwise.
+#     This is enabled by default.
+#
+# $Log$
+#
+# Revision 1.0  2006/07/11 08:49:43 cipixul@gmail.com
+# Initial version
+#
+# Revision 2.0  2010/03/25 13:46:13 muzso@muzso.hu
+# Rewrote most of the code. Added multips-like options.
+#
+# Revision 2.1  2010/04/22 11:43:53 muzso@muzso.hu
+# Added regular expression matching against the contents of the checked URL.
+#
+# Revision 2.2  2010/04/23 15:21:12 muzso@muzso.hu
+# Bugfix. Regexp matching on HTTP response bodies with a trailing newline
+# was flawed.
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+[ -n "${wget_bin}" ] || wget_bin=$(which wget)
+[ -n "${time_bin}" ] || time_bin=$(which time)
+[ -n "${mktemp_bin}" ] || mktemp_bin=$(which mktemp)
+[ -n "${grep_bin}" ] || grep_bin=$(which grep)
+[ -n "${tail_bin}" ] || tail_bin=$(which tail)
+
+default_error_value=30
+default_regex_error_value=40
+default_grep_opts="-E -i"
+default_wget_opts="--no-cache --tries=1"
+default_timeout=20
+default_join_lines=true
+
+if [ "${1}" = "autoconf" ]; then
+  result=0
+  if [ -z "${wget_bin}" -o ! -f "${wget_bin}" -o ! -x "${wget_bin}" ]; then
+    result=1
+  else
+    if [ -z "${time_bin}" -o ! -f "${time_bin}" -o ! -x "${time_bin}" ]; then
+      result=2
+    else
+      if [ -z "${mktemp_bin}" -o ! -f "${mktemp_bin}" -o ! -x "${mktemp_bin}" ]; then
+        result=3
+      else
+        if [ -z "${grep_bin}" -o ! -f "${grep_bin}" -o ! -x "${grep_bin}" ]; then
+          result=4
+        else
+          [ -z "${tail_bin}" -o ! -f "${tail_bin}" -o ! -x "${tail_bin}" ] && result=5
+        fi
+      fi
+    fi
+  fi
+  if [ ${result} -eq 0 ]; then
+    echo "yes"
+  else
+    echo "no"
+  fi
+  exit $result
+fi
+
+if [ -z "${names}" ]; then
+  echo "Configuration required"
+  exit 1
+fi
+
+[ -n "${error_value}" ] || error_value=${default_error_value}
+[ -n "${regex_error_value}" ] || regex_error_value=${default_regex_error_value}
+[ -n "${grep_opts}" ] || grep_opts=${default_grep_opts}
+[ -n "${wget_opts}" ] || wget_opts=${default_wget_opts}
+[ -n "${timeout}" ] || timeout=${default_timeout}
+[ -n "${join_lines}" ] || join_lines=${default_join_lines}
+[ -n "${warning}" ] || warning=$((timeout/2))
+[ -n "${critical}" ] || critical=${timeout}
+[ -n "${max}" ] || max=$((timeout*2))
+
+if [ "${1}" = "config" ]; then
+  echo "graph_title wget loadtime of webpages"
+  echo "graph_args --base 1000 -l 0"
+  echo "graph_scale no"
+  echo "graph_vlabel Load time in seconds"
+  echo "graph_category http"
+  echo "graph_info This graph shows load time in seconds of one or more urls"
+  I=1
+  for name in ${names}; do
+    eval iurl='${url_'${name}'}'
+    if [ -n "${iurl}" ]; then
+      eval ilabel='${label_'${name}':-url${I}}'
+      eval iwarning='${warning_'${name}':-${warning}}'
+      eval icritical='${critical_'${name}':-${critical}}'
+      eval imax='${max_'${name}':-${max}}'
+      cat << EOH
+loadtime${I}.label ${ilabel}
+loadtime${I}.info Load time for ${iurl}
+loadtime${I}.min 0
+loadtime${I}.max ${imax}
+EOH
+      [ ${iwarning} -gt 0 ] && echo "loadtime${I}.warning ${iwarning}"
+      [ ${icritical} -gt 0 ] && echo "loadtime${I}.critical ${icritical}"
+      I=$((I+1))
+    fi
+  done
+  exit 0
+fi
+
+I=1
+for name in ${names}; do
+  eval iurl='${url_'${name}'}'
+  if [ -n "${iurl}" ]; then
+    eval ierror_value='${error_value_'${name}':-${error_value}}'
+    eval iregex_error_value='${regex_error_value_'${name}':-${regex_error_value}}'
+    eval igrep_opts='${grep_opts_'${name}':-${grep_opts}}'
+    eval iwget_opts='${wget_opts_'${name}':-${wget_opts}}'
+    eval iwget_post_data='${wget_post_data_'${name}':-${wget_post_data}}'
+    eval ijoin_lines='${join_lines_'${name}':-${join_lines}}'
+    eval itimeout='${timeout_'${name}':-${timeout}}'
+    loadtime=""
+    tempfile=$(mktemp)
+    if [ -z "${iwget_post_data}" ]; then
+      timing=$(${time_bin} -p ${wget_bin} --save-headers --no-directories --output-document "${tempfile}" --timeout ${itimeout} ${iwget_opts} "${iurl}" 2>&1)
+    else
+      timing=$(${time_bin} -p ${wget_bin} --post-data "${iwget_post_data}" --save-headers --no-directories --output-document "${tempfile}" --timeout ${itimeout} ${iwget_opts} "${iurl}" 2>&1)
+    fi
+    wget_result=$?
+    if [ -f "${tempfile}" ]; then
+      if [ ${wget_result} -ne 0 -a ${ierror_value} -gt 0 ]; then
+        loadtime=${ierror_value}
+      else
+        tempheader=""
+        tempbody=""
+        K=0
+        while [ -z "${loadtime}" ]; do
+          K=$((K+1))
+          eval iregex_header='${regex_header_'${K}'_'${name}':-${regex_header_'${K}'}}'
+          eval iregex_body='${regex_body_'${K}'_'${name}':-${regex_body_'${K}'}}'
+          [ -z "${iregex_header}" -a -z "${iregex_body}" ] && break
+          if [ ${K} -eq 1 ]; then
+            OIFS="${IFS}"
+            # we skip carrige return characters from the end of header lines
+            IFS=$(echo -en "\r")
+            inheader=0
+            # The "read" command reads only lines terminated by a specific
+            # character (which by default the newline char).
+            # To read the end of the file (the bytes after the last newline) too
+            # we append a newline.
+            echo "" >> "${tempfile}"
+            while read -r line; do
+              if [ -z "${line}" ]; then
+                inheader=1
+                # We reached the border of the header and the body.
+                # Setting IFS to an empty string puts the entire read lines from
+                # the body into our "line" variable.
+                IFS=""
+              else
+                if [ ${inheader} -eq 0 ]; then
+                  tempheader="${tempheader}${line}
+"
+                else
+                  if [ "${ijoin_lines}" = "true" ]; then
+                    tempbody="${tempbody}${line}"
+                  else
+                    tempbody="${tempbody}${line}
+"
+                  fi
+                fi
+              fi
+            done < "${tempfile}"
+            IFS="${OIFS}"
+          fi
+          if [ -n "${iregex_header}" ] && ! echo "${tempheader}" | ${grep_bin} -qs ${igrep_opts} "${iregex_header}" 2> /dev/null; then
+            loadtime=${iregex_error_value}
+          else
+            if [ -n "${iregex_body}" ] && ! echo "${tempbody}" | ${grep_bin} -qs ${igrep_opts} "${iregex_body}" 2> /dev/null; then
+              loadtime=${iregex_error_value}
+            fi
+          fi
+        done
+        if [ -z "${loadtime}" ]; then
+          loadtime=$(echo "${timing}" | grep "^real *[0-9]" | cut -d ' ' -f 2)
+        fi
+      fi
+      rm -f "${tempfile}" > /dev/null 2>&1
+    else
+      loadtime=$((ierror_value*2))
+    fi
+    echo "loadtime${I}.value ${loadtime}"
+    I=$((I+1))
+  fi
+done
+

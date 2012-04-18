@@ -1,0 +1,33 @@
+#!/bin/sh
+#%# family=auto
+#%# capabilities=autoconf suggest
+#
+# Supported env variables:
+#   desc: sensor description
+#
+
+NAME="${0#*_}"
+TITLE="Temperature ${desc:-on $NAME}"
+
+case "$1" in
+config)
+	cat << EOF
+graph_title $TITLE
+graph_vtitle Celsius
+graph_args --base 1000 -l 0
+graph_category sensors
+temp.label $NAME
+EOF
+	;;
+suggest)
+	grep -lw "t=[0-9]*" /sys/bus/w1/devices/*/w1_slave 2>&1 |\
+	sed 's#.*/\([0-9a-f-]*\)/w1_slave#\1#'
+	;;
+autoconf)
+	echo "yes"
+	;;
+*)
+	awk '/t=/ { sub("t=", "", $NF); print "temp.value", $NF/1000.0 }' \
+		 /sys/bus/w1/devices/"$NAME"/w1_slave
+	;;
+esac

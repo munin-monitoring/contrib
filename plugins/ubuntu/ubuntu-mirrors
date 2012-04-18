@@ -1,0 +1,125 @@
+#!/bin/bash
+<?php
+
+# plugin made by Dju
+# v1.1
+# allows to monitor the mirrors number and bandwidth from Launchpad for a specific country
+# saves the results in cache and connects to launchpad website every 3 hours
+# the country constant it=s the name of he country, as it appears on the launchpad page (bold, on a gray background)
+
+define( 'URL', 'https://launchpad.net/ubuntu/+cdmirrors' );
+define( 'CACHE_FILE', 'ubuntu_mirrors.txt' );
+define( 'CACHE_UPTIME', 3 );
+define( 'COUNTRY',  'France' );
+
+function find_and_short( $str, &$html, $with_str=true )
+{
+    $pos = strpos( $html, $str );
+    if( $pos === false ) {
+        throw new Exception( "error finding '$str'", 2 );
+    } else {
+        $removed = ( $with_str == true ) ? substr( $html, 0, $pos+strlen($str) ) : substr( $html, 0, $pos );
+        $html = substr( $html, $pos + strlen($str) );
+        return $removed;
+    }
+}
+
+function get_cache()
+{
+    if( !file_exists(CACHE_FILE) ) {
+        return false;
+    } else {
+        $cache_time = @filemtime( CACHE_FILE );
+        $cache_age = ( time() - $cache_time ) / 3600;
+        if( $cache_age <= CACHE_UPTIME ) {
+            $content = @file_get_contents( CACHE_FILE );
+            if( !$content ) throw new Exception( 'Erreur lecture cache '.CACHE_FILE, 3 );
+            return array(
+                'datas' => explode( '|', $content ),
+                'date' => $cache_time
+            );
+        } else {
+            @unlink( CACHE_FILE );
+            return false;
+        }
+    }
+}
+
+function set_cache( $MIRRORS, $BW_RATE, $BW_UNIT )
+{
+    $content = $MIRRORS . '|' . $BW_RATE . '|' . $BW_UNIT;
+    $write = @file_put_contents( CACHE_FILE, $content );
+    if( !$write ) throw new Exception( 'erreur ecriture cache '.CACHE_FILE, 4 );
+}
+
+function get_from_launchpad()
+{
+    $html = @file_get_contents( URL );
+    if( !$html ) throw new Exception( 'Error connecting to launchpad', 1 );
+    $str1 = COUNTRY.'</th>';
+    $str2 = '<th style="text-align: left">';
+    $str3 = '</th>';
+    $str4 = '<span>mirrors</span>';
+    find_and_short( $str1, $html );
+    find_and_short( $str2, $html );
+    $BW = find_and_short( $str3, $html, false );
+    list( $BW_RATE, $BW_UNIT ) = explode( ' ', $BW );
+    $rest = find_and_short( $str4, $html, false );
+    $rest = str_replace( "\n", '', $rest );
+    find_and_short( '<th style="text-align: left">', $rest );
+    $MIRRORS = trim( $rest );
+    return array( $MIRRORS, $BW_RATE, $BW_UNIT  );
+}
+
+try
+{
+
+    $CACHE = get_cache();
+    if( $CACHE != false ) {
+        list( $MIRRORS, $BW_RATE, $BW_UNIT ) = $CACHE['datas'];
+        $CACHE_DATE = date('d/m/y H:i', $CACHE['date'] );
+    }
+
+    if( isset($_SERVER['argv'][1]) && $_SERVER['argv'][1] != '' ) {
+        switch( $_SERVER['argv'][1] ) {
+			case 'autoconf':
+				echo "yes\n";
+				exit( 0 );
+				break;
+			case 'config':
+				echo "graph_title Ubuntu Mirrors in ".COUNTRY."\n";
+				echo "graph_category Ubuntu\n";
+				echo "graph_args --base 1000 -l 0\n";
+				echo "graph_scale no\n";
+				echo "graph_vlabel Bandwith / Mirrors\n";
+				$graph_info = 'This graph shows the available bandwidth and mirrors for ubuntu';
+				if( $CACHE != false ) $graph_info .= ' (cache: '.CACHE_UPTIME.'h - last: '.$CACHE_DATE.')';
+				echo "graph_info ".$graph_info.")\n";
+				echo "nbm.label Mirrors number\n";
+				$bwUnit = ( $CACHE == false ) ? '' : ' in '.$BW_UNIT;
+				echo "bw.label Bandwidth".$bwUnit."\n";
+				exit( 0 );
+				break;
+			default:
+				echo "Unknown arg: ".$arg."\n";
+				exit( 2 );
+        }
+    }
+
+    if( $CACHE == false ) {
+        list( $MIRRORS, $BW_RATE, $BW_UNIT ) = get_from_launchpad();
+        set_cache( $MIRRORS, $BW_RATE, $BW_UNIT );
+    }
+
+    echo "nbm.value ".$MIRRORS."\n";
+    echo "bw.value ".$BW_RATE."\n";
+    exit( 0 );
+
+}
+catch( Exception $ex )
+{
+    echo 'Exception '.$ex->getCode() . ' ('.$ex->getMessage() . ")\n";
+    exit( $ex->getCode() );
+}
+
+?>

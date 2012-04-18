@@ -1,0 +1,226 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+squeezebox_ - plugin to monitor a Logitech Media Server and associated
+players.
+
+=head1 APPLICABLE SYSTEMS
+
+Probably any system running Logitech Media Server. Change the host to
+enable remote monitoring.
+
+=head1 CONFIGURATION
+
+No configuration should be required if run on the same server as
+the Logitech Media Server. If the plugin is run from another unit or
+in a non-default configuration, please use the environment variables
+'squeezebox_host' and 'squeezebox_port' to connect.
+
+Sample content for plugin-conf.d/ follows:
+
+ [squeezebox]
+  env.squeezecenter_host 192.168.100.10
+  env.squeezecenter_port 9095
+
+=head1 INTERPRETATION
+
+The "volume" graphs only graphs the player volume levels, not the
+amplifier or whatever the player may be connected to.
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=head1 BUGS
+
+None known
+
+=head1 AUTHOR
+
+Bjørn Ruberg
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+use strict;
+
+my $ret = undef;
+if (! eval "require Net::Telnet;") {
+  $ret = "Net::Telnet not found";
+}
+if (! eval "require URI::Escape;") {
+  $ret = "URI::Escape not found";
+}
+
+use vars qw ($host $port $config);
+
+# Define connection settings, from plugin environment file or use defaults
+my $host = exists $ENV{'squeezecenter_host'} ? $ENV{'squeezecenter_host'} : "127.0.0.1";
+my $port = exists $ENV{'squeezecenter_port'} ? $ENV{'squeezecenter_port'} : "9090";
+
+# Argument handling: autoconf, suggest, update, config
+
+if (@ARGV) {
+  if ($ARGV[0] eq "autoconf") {
+    # autoconf for magically self-configuring the plugin
+    if ($ret) {
+      print "no ($ret)";
+      exit 0;
+    }
+    my $conn = new Net::Telnet (Telnetmode => 0);
+    $conn->open (Host    => $host,
+		 Port    => $port,
+		 Errmode => "return");
+    if ($conn->errmsg) {
+      print "no (No connection on $host port $port)";
+      exit 0;
+    } else {
+      my $version = "";
+      my $line = "";
+      $conn->print("version ?");
+      $conn->print("exit");
+      while (($line = $conn->getline) and ($line !~ /exit/)) {
+	$version = $line if $line =~ /version/;
+      }
+      if ($version =~ /^version/) {
+	print "yes";
+	exit 0;
+      } else {
+	print "no (socket responded but the server didn't respond as expected)";
+	exit 0;
+      }
+    }
+  } elsif ($ARGV[0] eq "suggest") {
+    print "I am a multigraph plugin, and suggest is not required\n";
+    exit 0;
+  } elsif ($ARGV[0] eq "update") {
+    # For scheduled inventory rescan, add this plugin to a cron job
+    # with the argument "update" Adjust the interval to your own tempo
+    # for adding/deleting music. This equals a "Look for new and
+    # changed media files" rescan from the webUI.
+    #
+    # example: 5 * * * * /usr/share/munin/plugins/squeezebox update
+
+    my $conn = new Net::Telnet (Telnetmode => 0);
+    $conn->open (Host    => $host,
+                 Port    => $port,
+                 Errmode => "return");
+    if ($conn->errmsg) {
+      print $conn->errmsg, "\n";;
+      exit 1;
+    } else {
+      $conn->print("rescan");
+      $conn->print("exit");
+      exit 0;
+    }
+  } elsif ($ARGV[0] eq "config") {
+    # Sets $config value for using in the main execution cycle
+    $config = 1;
+  }
+}
+
+# We're keeping the socket open for all checks
+my $conn = new Net::Telnet (Telnetmode => 0);
+$conn->open (Host => $host,
+             Port => $port);
+
+use URI::Escape;
+# use Encode qw (from_to);
+use Text::Iconv;
+my $converter = Text::Iconv->new("UTF-8", "LATIN1");
+# $converted = $converter->convert("Text to convert");
+
+# First all the simple readings
+foreach my $attr qw (albums artists genres songs) {
+  $conn->print ("info total ${attr} ?");
+  my $line = uri_unescape($conn->getline);
+  if ($line =~ /^info total ${attr} (\d+)$/) {
+    my $number = $1;
+    print "multigraph squeezebox_${attr}\n";
+    if ($config) {
+      print "graph_title Number of ${attr}\n";
+      print "graph_scale no\n";
+      print "graph_category Squeezebox\n";
+      print "${attr}.label ${attr}\n";
+    } else {
+      print "${attr}.value $number\n";
+    }
+  }
+}
+
+# years
+$conn->print ("years");
+if (uri_unescape($conn->getline) =~ /^years\s+count:(\d+)/) {
+  my $no_of_years = $1;
+  $conn->print ("years 0 $no_of_years");
+  my @years = split (" ", uri_unescape($conn->getline));
+  print "multigraph squeezebox_years\n";
+
+  if ($config) {
+    # config run
+    print "graph_title Albums per year\n";
+    print "graph_category Squeezebox\n";
+    print "graph_args --base 1000 -l 0\n";
+    foreach my $year (@years) {
+      if ($year =~ /year\:(\d+)/) {
+	print "y" . $1 . ".label $1\n";
+	print "y" . $1 . ".draw AREASTACK\n";
+      }
+    }
+  } else {
+    # regular run
+    foreach my $year (@years) {
+      if ($year =~ /(year\:\d+)/) {
+	$conn->print ("albums 0 0 $1");
+	# albums 0 0 year:2007 count:13
+	my $line = uri_unescape ($conn->getline);
+	if ($line =~ /^.*year\:(\d+) count\:(\d+)$/) {
+	  print "y${1}.value ${2}\n";
+	}
+
+      }
+    }
+  }
+}
+
+# mixer volume and signalstrength
+foreach my $attr ("signalstrength",  "mixer volume") {
+  # The plugin reports as squeezebox_volume while the command is
+  # "mixer volume".
+  (my $attr_print = $attr) =~ s/mixer //g;
+  print "multigraph squeezebox_${attr_print}\n";
+  if ($config) {
+    print "graph_title " . ucfirst ($attr) . "\n";
+    print "graph_category Squeezebox\n";
+  }
+  $conn->print ("player count ?");
+  (my $no_of_players = uri_unescape ($conn->getline)) =~ s/player count\s+//;
+  chomp $no_of_players;
+  my $id;
+  for ($id = 0; $id < $no_of_players; $id++) {
+    $conn->print ("player id ${id} ?");
+    (my $mac = uri_unescape ($conn->getline)) =~ s/player id \d+ //g;
+    chomp ($mac);
+    (my $mac_print = 'm' . $mac) =~ s/\://g;
+    if ($config) {
+      $conn->print ("player name ${mac} ?");
+      (my $name = uri_unescape ($conn->getline)) =~ s/player name ${mac} //g;
+      chomp $name;
+      print "${mac_print}.label ", $converter->convert($name), "\n";
+    } else {
+      $conn->print ("${mac} ${attr} ?");
+      (my $value = uri_unescape ($conn->getline)) =~ s/^.* //g;
+      chomp $value;
+      print "${mac_print}.value $value\n";
+    }
+  }
+}
+

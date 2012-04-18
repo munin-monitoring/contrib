@@ -1,0 +1,67 @@
+#!/usr/bin/env python
+"""Thomas R. N. Jansson (tjansson@tjansson.dk)
+16-MAY-2010
+"""
+
+# The SNMP traps for the NetApp filer can be found in
+# /net/netappfiler/vol0/etc/mib/traps.dat if the filer is 
+# NFS automounted mounted on server.
+# Example: the SNMP id for cpuBusyTimePerCent is
+# snmp.1.3.6.1.4.1.789.1.2.1.3.0 
+# and retrival of this value is done by 
+# snmpget -v 1 -c public netappfiler 1.3.6.1.4.1.789.1.2.1.3.0
+#
+# Requires snmpget and assumes public community.
+
+import commands
+import sys
+import time
+
+# Provided a servername and a snmpid it returns the value stripped of bogus information.
+def snmpget(iservername,isnmpid):
+    runcmd = 'snmpget -v 1 -c public ' + iservername + ' ' + isnmpid 
+    output = commands.getoutput(runcmd)
+    return output.split()[3]
+
+# Calculates the bps by asking twice divided per second. 
+def calcbps(iservername,isnmpid):
+    val_first  = int(snmpget(iservername,isnmpid))
+    time.sleep(1)
+    val_second = int(snmpget(iservername,isnmpid))
+    return str(val_second-val_first)
+
+# The interface number corresponds to vif1 on my netapp
+iface            = '8'
+ifEntryDescr     = '1.3.6.1.2.1.2.2.1.2.'+iface
+ifEntrySpeed     = '1.3.6.1.2.1.2.2.1.5.'+iface
+ifEntryStatus    = '1.3.6.1.2.1.2.2.1.8.'+iface
+ifEntryInOctets  = '1.3.6.1.2.1.2.2.1.10.'+iface
+ifEntryOutOctets = '1.3.6.1.2.1.2.2.1.16.'+iface
+servername       = sys.argv[0].split('_')[2]
+ifacename        = snmpget(servername,ifEntryDescr)
+
+if len(sys.argv) == 2 and sys.argv[1]  == "config":
+    print 'graph_title Network usage on '+servername+' inteface '+ifacename
+    print 'graph_order recv send'
+    print 'graph_args --base 1000'
+    print 'graph_vlabel bits in (-) / out (+) per \${graph_period}'
+    print 'graph_category netapp'
+    print 'graph_info This graph shows traffic for the '+ifacename+' network interface.'
+
+    print 'recv.label recv'
+    print 'recv.graph no'
+    print 'recv.cdef recv,8,*'
+    print 'recv.max 2000000000'
+    print 'recv.min 0'
+    
+    print 'send.info Bits sent/received by the '+ifacename+' interface.'
+    print 'send.label bps'
+    print 'send.negative recv'
+    print 'send.cdef send,8,*'
+    print 'send.max 2000000000'
+    print 'send.min 0'
+    sys.exit(0)
+
+# Gathers info from the servers and gathers data
+print 'send.value '+calcbps(servername,ifEntryOutOctets)
+print 'recv.value '+str(int(calcbps(servername,ifEntryInOctets))*-1)

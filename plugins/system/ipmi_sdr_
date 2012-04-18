@@ -1,0 +1,153 @@
+#!/usr/bin/perl -w
+#
+# IPMI data gathering for munin.
+# 
+# Author: 2008 Benjamin Pineau <ben.pineau@gmail.com>
+# This work is hereby released into the Public Domain. 
+# To view a copy of the public domain dedication, visit
+# http://creativecommons.org/licenses/publicdomain/
+#
+# Requirements :
+#
+#   - ipmitool command line utility (and kernel drivers)
+#   - access rights to /dev/ipmi0 device (ie, root privileges
+#     can be configured in /etc/munin/plugin-conf.d/munin-node)
+# 
+# Parameters supported:
+#
+#   config
+#   autoconf
+#
+# Setup :
+#
+#   ipmitool sdr || echo "please load IPMI kernel modules"
+#   cp ipmi_sdr_ /usr/share/munin/plugins/
+#   chmod +x /usr/share/munin/plugins/ipmi_sdr_
+#   ln -s /usr/share/munin/plugins/ipmi_sdr_ /etc/munin/plugins/ipmi_sdr_fan
+#   ln -s /usr/share/munin/plugins/ipmi_sdr_ /etc/munin/plugins/ipmi_sdr_current
+#   ln -s /usr/share/munin/plugins/ipmi_sdr_ /etc/munin/plugins/ipmi_sdr_voltage
+#   ln -s /usr/share/munin/plugins/ipmi_sdr_ /etc/munin/plugins/ipmi_sdr_temperature
+#   echo -e "\n[ipmi_sdr*]\nuser root\ntimeout 15\n" >> /etc/munin/plugin-conf.d/munin-node
+#   /etc/init.d/munin-node restart
+#
+# Magic markers
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use warnings;
+
+$ENV{'LANG'} = 'C';
+$ENV{'LC_ALL'} = 'C';
+
+my $ipmidump = $ENV{'ipmidump'} || '/var/lib/munin/plugin-state/ipmi_sdr';
+my $ipmitool = $ENV{'ipmitool'} || 'ipmitool';
+my $drefresh = $ENV{'drefresh'} || 86400;
+
+my %sensors;
+
+my $desc = {
+    'fan'         => {
+        'graph_title'  => 'Fans rotations per minute',
+        'graph_vlabel' => 'RPM',
+        'graph_info'   => 'Fans rotations per minute',
+    },
+    'voltage'     => {
+        'graph_title'  => 'Electrical tensions',
+        'graph_vlabel' => 'Volts',
+        'graph_info'   => 'Electrical tensions',
+    },
+    'temperature' => {
+        'graph_title'  => 'Hardware temperatures',
+        'graph_vlabel' => 'Degrees Celsius',
+        'graph_info'   => 'Hardware temperature sensors output',
+    },
+    'current'     => {
+        'graph_title'  => 'Hardware power consumption',
+        'graph_vlabel' => 'Watts or Amperes',
+        'graph_info'   => 'Hardware power consumption',
+    },
+};
+
+my $stype = $0 =~ /.*ipmi_sdr_(\w+)$/ ? lc($1) : 'temperature';
+
+if (!defined($desc->{"$stype"})) {
+    printf STDERR "Unknown sensor type : '$stype'. Aborting.\n";
+    exit 1;
+}
+
+sub strip_spaces($) {
+    (my $s = shift) =~ s/^\s*(.*?)\s*\n?$/$1/;
+    return $s;
+}
+
+sub normalize_name($) {
+    (my $l = lc(strip_spaces(shift))) =~ tr/\t ./_/;
+    return $l;
+}
+
+sub sdrlist_parse(@) {
+    foreach(@_) {
+        next unless /^([^\|]+)\s*\|\s*(\w+)\s*\|[^\|]+\|[^\|]+\|\s*([\d\.]+)\s+/;
+        $sensors{$_}{"name"}  = strip_spaces($1);
+        $sensors{$_}{"value"} = strip_spaces($3);
+        $sensors{$_}{"label"} = normalize_name($1) . normalize_name($2);
+    }
+}
+
+if (defined $ARGV[0] and $ARGV[0] eq 'autoconf') {
+    `$ipmitool help 2> /dev/null`;
+    if ($?) {
+        print "no ($ipmitool not found)";
+        exit 1;
+    }
+
+    `$ipmitool sdr dump $ipmidump`;
+    if ($?) {
+        printf "no (ipmitool sdr dump returned code %d)\n", $? >> 8;
+        exit 1;
+    }
+
+    `$ipmitool sdr type $stype -S $ipmidump`;
+    if ($?) {
+        print "no (ipmitool didn't found any sensor of type ";
+        printf "'$stype', returned code %d)\n", $? >> 8;
+        exit 1;
+    }
+
+    print "yes\n";
+    exit 0;
+}
+
+# "ipmitool dump" dumps speeds up data retreival big time, by avoiding
+# IPMI sensors autodiscovery. This only caches sensors names/types/ids 
+# (not values/datas), so we can have a very long cache lifetime policy.
+if (-f $ipmidump) {
+    unlink($ipmidump) if (time - (stat($ipmidump))[9] >= $drefresh);
+}
+ 
+unless (-f $ipmidump) {
+    `$ipmitool sdr dump $ipmidump` || die $!;
+}
+ 
+(my @dt = `$ipmitool sdr type $stype -S $ipmidump`) || die $!;
+sdrlist_parse(@dt);
+
+if (defined($ARGV[0]) && $ARGV[0] eq "config") {
+    print "graph_category system\n";
+    print "graph_title "  . $desc->{$stype}->{"graph_title"}  . "\n";
+    print "graph_vlabel " . $desc->{$stype}->{"graph_vlabel"} . "\n";
+    print "graph_info "   . $desc->{$stype}->{"graph_info"}   . "\n";
+
+    foreach my $v (values(%sensors)) {
+        print $v->{"label"} . ".label " . $v->{"name"} . "\n";
+        print $v->{"label"} . ".type GAUGE\n";
+    }
+
+    exit 0;
+}
+
+foreach my $v (values(%sensors)) {
+    print $v->{"label"} . ".value " . $v->{"value"} . "\n";
+}
+

@@ -1,0 +1,96 @@
+#!/bin/sh
+#
+# Copyright (C) 2009 Alexey Illarionov <littlesavage@rambler.ru>
+#
+# Wildcard plugin to monitor ipfw rules counters
+# Usage:
+#
+# Method 1:
+#
+# Link ipfwcnt_<rule number> to this file. E.g.
+#
+#  ln -s ipfwcnt_ ipfwcnt_100
+#
+# ... will monitror ipfw rule 100
+#
+# Method 2:
+#
+# 1. Add count rules to ipfw E.g.
+#
+#   ipfw add 100 count ip from any to table(1,0) in via rl0
+#   ipfw add 200 count ip from any to table(1,1) in via rl0
+#   ipfw add 300 count ip from any to table(1,2) in via rl0
+#   ipfw add 400 count ip from any to not table(1) in via rl0
+#
+# 2. Link ipfwcnt_<name> to this file. E.g.
+#   ln -s ipfwcnt_ ipfwcnt_rl0-in
+#
+# 3. Add rules configuration to plugins.conf:
+# [ipfwcnt_rl0-in]
+# user root
+# env.rules		  group0 group1 group2 nogroup
+# env.rule_group0	  100
+# env.rule_group0_label   group0
+# env.rule_group0_info    Incoming traffic of group 0
+# env.rule_group1	  200
+# env.rule_group1_label   group1
+# env.rule_group1_info    Incoming traffic of group 1
+# env.rule_group2	  300
+# env.rule_group2_label   group2
+# env.rule_group2_info    Incoming traffic of group 2
+# env.rule_nogroup	  400
+# env.rule_nogroup_label  nogroup
+# env.rule_nogroup_info   Incoming traffic of no group
+#
+# ...  will monitor ipfw rules 100,200,300,400
+#
+# This plugin needs to be run as root.
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#
+#%# family=manual
+
+NAME=`basename $0 | sed 's/^ipfwcnt_//g'`
+
+if [ -z "$rules" ]; then
+	if [ -z "$NAME" ]; then exit 1; fi
+	rules="r$NAME"
+	eval "rule_r$NAME=$NAME"
+fi
+
+if [ "$1" = "config" ]; then
+	echo "graph_title Ipfw rules counters $NAME"
+	echo 'graph_args --base 1000 -l 0'
+	echo 'graph_vlabel bits / ${graph_period}'
+	echo 'graph_category network'
+	draw="AREA"
+	for rule in $rules; do
+		eval "label0=\$rule_${rule}_label"
+		eval "info0=\$rule_${rule}_info"
+		label=${label0:-$rule}
+		info=${info0:-$rule}
+
+		echo "$rule.label $label"
+		echo "$rule.draw $draw"
+		echo "$rule.type DERIVE"
+		echo "$rule.min 0"
+		echo "$rule.cdef $rule,8,*"
+		echo "$rule.info $info"
+
+		draw="STACK"
+	done
+
+	echo "graph_info Ipfw rules counters $NAME"
+	exit 0
+fi
+
+for rule in $rules; do
+	eval "num=\$rule_$rule"
+	if [ -z $(echo "$num" | sed 's/[0-9]//g') ]; then
+		val0=$(/sbin/ipfw show $num 2>/dev/null | awk '{res+=$3;} END{print res;}')
+	fi
+	val=${val0:-"U"}
+	echo "$rule.value $val"
+done
+

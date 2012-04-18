@@ -1,0 +1,120 @@
+#! /usr/bin/perl -w
+
+=head1 NAME
+
+lvm_usage - Plugin to monitor usage of LVM volume groups
+
+=head1 CONFIGURATION
+
+Must be run as root:
+
+  [lvm_usage]
+    user root
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=head1 AUTHOR
+
+Gábor Gombás <gombasg@sztaki.hu>
+
+=head1 LICENSE
+
+GPLv2 or later
+
+=cut
+
+use strict;
+use Munin::Plugin;
+use Carp;
+
+need_multigraph();
+
+if ($ARGV[0] and $ARGV[0] eq 'autoconf') {
+	if (-c "/dev/mapper/control") {
+		print "yes\n";
+	}
+	else {
+		print "no (/dev/mapper/control is missing)\n";
+	}
+	exit 0;
+}
+
+my %vgs;
+
+open(VGS, "vgs --units b --nosuffix --noheadings -o vg_name,vg_size,vg_free |")
+	or croak("Failed to run 'lvs': " . $!);
+while (my $line = <VGS>) {
+	chomp $line;
+	$line =~ s/^\s+//;
+	my ($vg_name, $vg_size, $vg_free) = split(/\s+/, $line);
+	$vgs{$vg_name}->{size} = $vg_size unless $vgs{$vg_name}->{size};
+	$vgs{$vg_name}->{free} = $vg_free unless $vgs{$vg_name}->{free};
+	$vgs{$vg_name}->{lvs} = {};
+}
+close VGS;
+
+open(LVS, "lvs --units b --nosuffix --noheadings -o vg_name,lv_name,lv_size |")
+	or croak("Failed to run 'lvs': " . $!);
+while (my $line = <LVS>) {
+	chomp $line;
+	$line =~ s/^\s+//;
+	my ($vg_name, $lv_name, $lv_size) = split(/\s+/, $line);
+	$vgs{$vg_name}->{lvs}->{$lv_name} = $lv_size;
+}
+close LVS;
+
+if ($ARGV[0] and $ARGV[0] eq 'config') {
+	print "multigraph lvm_usage\n";
+	print "graph_title LVM volume group usage\n";
+	print "graph_args --base 1024 --lower-limit 0 --upper-limit 100\n";
+	print "graph_vlabel %\n";
+        print "graph_category disk\n";
+	print "graph_order " . join(' ', map { clean_fieldname($_) } (sort keys %vgs)) . "\n";
+	for my $vg (sort keys %vgs) {
+		my $id = clean_fieldname($vg);
+		print "$id.label $vg\n";
+		print "$id.type GAUGE\n";
+		print "$id.draw LINE2\n";
+	}
+
+	for my $vg (sort keys %vgs) {
+		my $id = clean_fieldname($vg);
+
+		print "multigraph lvm_usage.$id\n";
+		print "graph_title Volume group usage ($vg)\n";
+		print "graph_args --base 1024 --lower-limit 0\n";
+		print "graph_vlabel bytes\n";
+        	print "graph_category disk\n";
+		print "__free.label Free space\n";
+		print "__free.draw AREA\n";
+
+		foreach my $lv (sort keys %{$vgs{$vg}->{lvs}}) {
+			my $id = clean_fieldname($lv);
+			print "$id.label $lv\n";
+			print "$id.draw STACK\n";
+		}
+	}
+
+	exit 0;
+}
+
+print "multigraph lvm_usage\n";
+for my $vg (sort keys %vgs) {
+	my $id = clean_fieldname($vg);
+	my $used = $vgs{$vg}->{'size'} - $vgs{$vg}->{'free'};
+	print "$id.value " . int($used * 100 / $vgs{$vg}->{'size'}) . "\n";
+}
+
+for my $vg (sort keys %vgs) {
+	my $id = clean_fieldname($vg);
+	print "multigraph lvm_usage.$id\n";
+	print "__free.value " . $vgs{$vg}->{free} . "\n";
+
+	foreach my $lv (sort keys %{$vgs{$vg}->{lvs}}) {
+		my $id = clean_fieldname($lv);
+		print "$id.value " . $vgs{$vg}->{lvs}->{$lv} . "\n";
+	}
+}

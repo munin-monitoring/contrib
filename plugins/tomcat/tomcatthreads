@@ -1,0 +1,46 @@
+#!/usr/bin/env groovy
+/* 
+ * Reports tomcat thread status from the tomcat manager application
+ *
+ * Stian B. Lindhom <stian@lindhom.no> 2010
+ */
+
+def username = ''
+def password = ''
+def addr = 'http://localhost:8080/manager/status?XML=true'
+def connector = 'http-8080'
+
+def authString = (username + ":" + password).getBytes().encodeBase64()
+def conn = addr.toURL().openConnection()
+
+def maxthreads
+def threadsBusy 
+def threadCount
+conn.setRequestProperty("Authorization", "Basic ${authString}")	
+if (conn.responseCode == 200) {
+    def doc = new XmlParser().parseText(conn.content.text)
+    httpConnector = doc.connector.findAll{ it.'@name'.contains(connector) }[0]
+    maxthreads = Integer.parseInt(httpConnector.threadInfo.'@maxThreads'.text())
+    threadsBusy = Integer.parseInt(httpConnector.threadInfo.'@currentThreadsBusy'.text())
+    threadCount = Integer.parseInt(httpConnector.threadInfo.'@currentThreadCount'.text())
+}
+
+if (args && args[0] == 'config') {
+    warningThreshold = (Integer) (maxthreads - (maxthreads* 0.2))
+    criticalThreshold = (Integer) (maxthreads - (maxthreads * 0.05))
+
+    println """graph_category Tomcat
+graph_title Tomcat threads
+graph_info The number of busy threads describes how many HTTP requests are being processed at the moment
+graph_vlabel Threads
+currentThreadCount.label currentThreadCount
+currentThreadsBusy.label currentThreadsBusy
+maxThreads.label maxThreads
+currentThreadCount.warning ${warningThreshold}
+currentThreadCount.critical ${criticalThreshold}"""
+    return;
+}
+
+println """currentThreadCount.value ${threadCount}
+currentThreadsBusy.value ${threadsBusy}
+maxThreads.value ${maxthreads}"""

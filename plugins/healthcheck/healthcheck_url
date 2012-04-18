@@ -1,0 +1,195 @@
+#!/bin/bash
+#
+#healthcheck on munin
+#check site speed.
+#egrep contents string
+# ... and alert.
+#
+#programed by rti (hiroyuki fujie) super.rti@gmail.com @super_rti
+#LICENSE: NYSL (public domain)
+#
+#config file
+#      /etc/munin/plugin-conf.d/munin-node
+#
+#example minimum config
+#---------------------------------------------------
+#[healthcheck_url]
+#env.url_1  http://127.0.0.1/
+#---------------------------------------------------
+#
+#chcek two site 
+#---------------------------------------------------
+#[healthcheck_url]
+#env.url_1  http://127.0.0.1/
+#env.url_2  http://www.google.com/
+#---------------------------------------------------
+#
+#chcek three site 
+#---------------------------------------------------
+#[healthcheck_url]
+#env.url_1  http://127.0.0.1/
+#env.url_2  http://www.google.com/
+#env.url_3  http://www.yahoo.com/
+#---------------------------------------------------
+#
+#set name
+#---------------------------------------------------
+#[healthcheck_url]
+#env.url_1  http://127.0.0.1/
+#env.name_1 homhom
+#---------------------------------------------------
+#
+#check over proxy
+#---------------------------------------------------
+#[healthcheck_url]
+#env.url_1  http://127.0.0.1/
+#env.proxy_1 127.0.0.1:8080
+#---------------------------------------------------
+#
+#set slow speed(second)
+#---------------------------------------------------
+#[healthcheck_url]
+#env.url_1  http://127.0.0.1/
+#env.slowspeed_1 30
+#---------------------------------------------------
+#
+#grep string
+#---------------------------------------------------
+#[healthcheck_url]
+#env.url_1  http://127.0.0.1/
+#env.htmlgrep_1 saysaya
+#---------------------------------------------------
+#
+#check html contents byte size.
+#---------------------------------------------------
+#[healthcheck_url]
+#env.url_1  http://127.0.0.1/
+#env.htmlsize_1 50000                  #check 50000 bytes over.
+#---------------------------------------------------
+#
+#full option
+#/etc/munin/plugin-conf.d/munin-node
+#---------------------------------------------------
+#[healthcheck_url]
+#env.url_1  http://127.0.0.1/          #check url
+#env.htmlgrep_1 apache                 #check egrep string
+#env.name_1 127.0.0.1                  #set line name. default by url domain
+#env.proxy_1 127.0.0.1:8080            #over proxy
+#env.slowspeed_1 30                    #slow time on alert
+#env.htmlsize_1 50000                  #check 50000 bytes over.
+#---------------------------------------------------
+#
+#
+
+#edakari speed up.
+CHECKMAX=`env | grep url_ | wc -l`
+let CHECKMAX="$CHECKMAX + 1"
+
+CURL=/usr/bin/curl
+
+if [ "$1" = "autoconf" ]; then
+    if [ $CHECKMAX -le 1 ]; then
+         echo no
+         exit 1
+    fi
+    echo yes
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    echo 'graph_title site speed (second)'
+    echo "graph_args --base 1000 -l 0 --vertical-label second"
+    echo 'graph_scale no'
+    echo 'graph_vlabel second'
+    echo 'graph_category healthcheck'
+    echo 'graph_info This graph shows the site speed'
+
+    for(( I = 1; I < $CHECKMAX; ++I ))
+    do
+         eval url=\$url_${I}
+         eval name=\$name_${I}
+         eval slowspeed=\$slowspeed_${I}
+         if [ "x${url}" = "x" ]; then
+              continue
+         fi
+         if [ "x${name}" = "x" ]; then
+             #default name by domain
+             name=`echo $url | sed 's#\.#_#g' | sed -e 's/[^/]*\/\/\([^@]*@\)\?\([^:/]*\).*/\2/'`
+         fi
+         if [ "x${slowspeed}" = "x" ]; then
+             slowspeed=10
+         fi
+         let slowspeed15="slowspeed * 3 / 2" #slowspeed * 1.5
+
+         echo "$name.label $name"
+         echo "$name.info $url"
+         echo "$name.draw LINE2"
+         echo "$name.min -10"
+         echo "$name.max ${slowspeed15}"
+         echo "$name.critical 0:${slowspeed}"
+    done
+
+    exit 0
+fi
+
+for(( I = 1; I < $CHECKMAX; ++I ))
+do
+     eval url=\$url_${I}
+     eval grep=\$htmlgrep_${I}
+     eval size=\$htmlsize_${I}
+     eval name=\$name_${I}
+     eval proxy=\$proxy_${I}
+     eval slowspeed=\$slowspeed_${I}
+
+     if [ "x${url}" = "x" ]; then
+        continue
+     fi
+     if [ "x${name}" = "x" ]; then
+        #default name by domain
+        name=`echo $url | sed 's#\.#_#g' | sed -e 's/[^/]*\/\/\([^@]*@\)\?\([^:/]*\).*/\2/'`
+     fi
+
+     PROXY_CMD=""
+     if [ "x${proxy}" != "x" ]; then
+        PROXY_CMD=" --proxy ${proxy} "
+     fi
+     if [ "x${slowspeed}" = "x" ]; then
+        slowspeed=10
+     fi
+     let timeout="${slowspeed} + 1"
+
+     START=`date +%s`
+     HTML_RESULT=`$CURL "${url}" -s --connect-timeout ${timeout} ${PROXY_CMD}`
+     CURLEXITCODE=$?
+     END=`date +%s`
+
+     if [ $CURLEXITCODE -ne 0 ]; then
+         echo "$name.value -10"
+         echo "$name.extinfo curl return $CURLEXITCODE"
+         continue
+     fi
+
+     GREPEXITCODE=0
+     if [ "x${grep}" != "x" ]; then
+         echo $HTML_RESULT | egrep -i "${grep}" > /dev/null
+         GREPEXITCODE=$?
+         if [ $GREPEXITCODE -ne 0 ]; then
+             echo "$name.value -9"
+             echo "$name.extinfo can not found $grep regex strings"
+             continue
+         fi
+     fi
+
+
+     if [ "x${size}" != "x" ]; then
+         if [ ${#HTML_RESULT} -lt ${size} ]; then
+             echo "$name.value -8"
+             echo "$name.extinfo html size ${#HTML_RESULT} is smaller than ${size}"
+             continue
+         fi
+     fi
+
+
+     let SPEED="$END - $START"
+     echo "$name.value $SPEED"
+done

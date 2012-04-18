@@ -1,0 +1,53 @@
+#!/bin/sh
+#
+# Plugin to monitor the CPU temperature through lm-sensors.
+# v1.0 (2008-02-15) Oliver Ladner <oli@lugh.ch>
+# 
+# Requirements:
+# 	- A configured lm-sensors installation
+#       - Supported device (see http://www.lm-sensors.org/wiki/Devices)
+#       - grep, sed and awk
+#
+# Todo:
+#       - Ability to monitor multiple sensors like fan speeds, voltage etc.
+#       - Better checks (availabilty of lm-sensors, sensors itself, path names)
+#
+# Parameters supported:
+#
+# 	config
+# 	autoconf
+#
+# Magic markers:
+#%# capabilities=autoconf
+
+DETECTED_SENSORS=`sensors -U -A | wc -l`
+
+case $1 in
+   config)
+        cat <<'EOM'
+graph_title CPU temperature
+graph_vlabel CPU temperature in °C
+graph_options light
+graph_info This graph shows CPU temperature in °C
+temp.label temp
+temp.draw LINE1
+graph_category sensors
+temp.warning 65
+temp.critical 80
+EOM
+        exit 0;;
+esac
+
+case $1 in
+   autoconf)
+        if [ "$DETECTED_SENSORS" -eq 0 ]; then
+                echo "no"
+                exit 1
+        else
+                echo "yes"
+                exit 0
+        fi
+esac
+ 
+echo -n "temp.value "
+sensors | grep 'CPU Temp' | sed 's/[+|°|C]//g' | awk {'print $3'}

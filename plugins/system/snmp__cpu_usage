@@ -1,0 +1,175 @@
+#!/usr/bin/perl -w
+#
+# Copyright (C) 2004 Jimmy Olsen
+# Copyright (C) 2009 Xavier Montagutelli
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+#
+# $Log: snmp__cpu_usage,v $
+# Revision 1.1  2009/09/21 06:59:33  root
+# Initial revision
+#
+# Revision 1.1  2009/09/17 13:43:35  root
+# Initial revision
+#
+# Revision 1.11  2004/12/10 18:51:43  jimmyo
+# linux/apt* has been forced to LANG=C, to get predictable output.
+#
+# Revision 1.10  2004/12/10 10:47:47  jimmyo
+# Change name from ${scale} to ${graph_period}, to be more consistent.
+#
+# Revision 1.9  2004/12/09 22:12:55  jimmyo
+# Added "graph_period" option, to make "graph_sums" usable.
+#
+# Revision 1.8  2004/11/21 00:16:56  jimmyo
+# Changed a lot of plugins so they use DERIVE instead of COUNTER.
+#
+# Revision 1.7  2004/11/16 20:08:26  jimmyo
+# License cleanups.
+#
+# Revision 1.6  2004/11/12 20:28:03  ilmari
+# No debugging info by default
+#
+# Revision 1.5  2004/09/08 15:25:33  ilmari
+# Use /usr/bin/perl in all perl shebang lines.
+#
+# Revision 1.4  2004/09/07 13:19:22  ilmari
+# SNMP plugins now honour the "host" environment variable if they can't deduce the hostname from zsh.
+#
+# Revision 1.3  2004/09/05 12:00:18  jimmyo
+# Set family and capabilities.
+#
+# Revision 1.2  2004/09/04 21:58:28  jimmyo
+# Set category and info fields.
+#
+# Revision 1.1  2004/04/30 22:22:07  jimmyo
+# Added to SNMP based fibre-channel plugins: fc_if and fc_if_err.
+#
+# Revision 1.4  2004/04/30 16:58:14  jimmyo
+# Added max.
+#
+# Revision 1.3  2004/02/22 20:17:58  jimmyo
+# Typo fix
+#
+# Revision 1.2  2004/02/18 21:54:56  jimmyo
+# Did a bit of work on the snmp-thingie.
+#
+# Revision 1.1  2004/01/02 18:50:00  jimmyo
+# Renamed occurrances of lrrd -> munin
+#
+# Revision 1.1.1.1  2004/01/02 15:18:07  jimmyo
+# Import of LRRD CVS tree after renaming to Munin
+#
+# Revision 1.1  2003/12/19 20:53:45  jimmyo
+# Created by jo
+#
+#
+#%# family=snmpauto
+#%# capabilities=snmpconf
+
+use strict;
+use Munin::Plugin::SNMP;
+
+my $DEBUG = 0;
+
+my $host      = $ENV{host}      || undef;
+my $port      = $ENV{port}      || 161;
+my $community = $ENV{community} || "public";
+my $iface     = $ENV{interface} || undef;
+
+my $response;
+
+if (defined $ARGV[0] and $ARGV[0] eq "snmpconf")
+{
+	print "number  1.3.6.1.4.1.2021.11.9\n";
+	exit 0;
+}
+
+if ($0 =~ /^(?:|.*\/)snmp_([^_]+)_cpu_usage$/)
+{
+	$host  = $1;
+	if ($host =~ /^([^:]+):(\d+)$/)
+	{
+		$host = $1;
+		$port = $2;
+	}
+}
+elsif (!defined($host))
+{
+	print "# Debug: $0 -- $1 -- $2\n" if $DEBUG;
+	die "# Error: couldn't understand what I'm supposed to monitor.";
+}
+
+my $cpuUser     = "1.3.6.1.4.1.2021.11.9";
+my $cpuSystem   = "1.3.6.1.4.1.2021.11.10";
+my $cpuIdle     = "1.3.6.1.4.1.2021.11.11";
+
+my $cpu = 0;
+
+my %cpuCounters = ( 
+	cpuUser 	=> "1.3.6.1.4.1.2021.11.9.$cpu", 	# The percentage of CPU time spent processing user-level code, calculated over the last minute
+	cpuSystem	=> "1.3.6.1.4.1.2021.11.10.$cpu", 	# The percentage of CPU time spent processing system-level code, calculated over the last minute
+	cpuIdle		=> "1.3.6.1.4.1.2021.11.11.$cpu",	# The percentage of processor time spent idle, calculated over the last minute
+);
+
+my $session = Munin::Plugin::SNMP->session(-translate =>
+					   [ -timeticks => 0x0 ]);
+
+if (!defined ($session))
+{
+	die "Croaking: could not establish SNMP object";
+}
+
+
+if (!defined ($session))
+{
+	die "Croaking: $error";
+}
+
+if ($ARGV[0] and $ARGV[0] eq "config")
+{
+	print "host_name $host\n";
+	my $warn = undef;
+	print "graph_title CPU Usage on $host\n";
+	print "graph_args --base 1000 --lower-limit 0\n";
+	print "graph_vlabel Percentage on one minute\n";
+	print "graph_category system\n";
+	print "graph_info This graph shows the CPU usage on one minute\n";
+
+	my $firstCounter = 1;
+	foreach my $c (keys %cpuCounters) {
+		print $c . ".label $c\n";
+		print $c . ".type GAUGE\n";
+		if ($firstCounter) { 
+			print $c . ".draw AREA\n";
+			$firstCounter = 0;
+		} else {
+			print $c . ".draw STACK\n";
+		}
+		print $c . ".min 0\n";
+	}
+
+	exit 0; 
+}
+
+foreach my $c (keys %cpuCounters) {
+	if (defined ($response = $session->get_request($cpuCounters{$c})) && $response->{$cpuCounters{$c}} =~ /^[0-9]*$/) {
+		print $c . ".value ", $response->{$cpuCounters{$c}}, "\n";
+	} else {
+		print $c . ".value U\n";
+	}
+}
+

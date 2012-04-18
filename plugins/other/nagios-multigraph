@@ -1,0 +1,701 @@
+#!/usr/bin/perl
+#
+=head1 NAGIOS MULTIGRAPH
+
+A Plugin to monitor Nagios Servers and their Performance (Multigraph)
+
+=head1 MUNIN CONFIGURATION
+
+[nagios_multi_*]
+ user root
+ env.binary /usr/local/nagios/bin/nagiostats *default*
+ env.passive off *default*
+
+=head2 MUNIN ENVIRONMENT CONFIGURATION EXPLANATION
+
+ binary = location of your nagiostats binary including binary
+ passive = tell the plugin to graph passive results 
+
+=head1 NODE CONFIGURATION
+
+ Make sure the nagiostats binary exists and is executable by root
+ or by the user specified that the plugin will run as.
+
+ Available root graphs and subgraphs contained in this Plugin.
+
+ services => I<MULTIGRAPH> This graphs the current service problems.
+    svcchkdetail => This graph shows current services warning,critical,unknown,checked,scheduled,flapping,down
+    svcchkext => This graph shows the service check execution times
+    svcchklat => This graph shows the service check latency times
+    svcchksc => This graph shows the serivce check state change %
+
+ hosts => I<MULTIGRAPH> This graphs the current host problems.
+    hostchkdetail => This graph shows current hosts down,unreachable,checked,scheduled,flapping,down
+    hostchkext => This graph shows the host check execution times
+    hostchklat => This graph shows the host check latency times
+    hostchksc => This graph shows the host check state change %
+
+ checks => I<MULTIGRAPH> This graphs the current host problems.
+    extcmdcount => This graph shows external command buffer availability / usage
+    hostchkactcount => This graph shows the active host checks for the last 1,5,15,60M
+    hostchkpsvcount => This graph shows the passive host checks for the last 1,5,15,60M
+        * depends on passive flag, which defaults to off, and forces these graphs to not be drawn
+    svcchkactcount => This graph shows the active service checks for the last 1,5,15,60M
+    svcchkpsvcount => This graph shows the passive service checks for the last 1,5,15,60M
+        * depends on passive flag, which defaults to off, and forces these graphs to not be drawn
+
+=head1 MUNIN PLUGIN DOCUMENTATION
+
+    This is just some helpful links for plugin troubleshooting.
+
+        http://munin-monitoring.org/wiki/Documentation#Plugins
+        http://munin-monitoring.org/wiki/protocol-config
+
+=head1 AUTHOR
+
+Matt West < https://github.com/mhwest13/Nagios-Munin-Plugin >
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+  
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+=cut
+
+use strict;
+use warnings;
+use Munin::Plugin;
+use File::Basename;
+
+if (basename($0) !~ /^nagios_multi_/) {
+    print "This script needs to be named nagios_multi_ and have symlinks which start the same.\n";
+    exit 1;
+}
+
+# tell munin about our multigraph capabilties
+need_multigraph();
+
+# import binary information or use default setting
+my $binary = $ENV{binary} || '/usr/local/nagios/bin/nagiostats';
+unless ((-e $binary) && (-x $binary)) {
+    # err, I'm unable to run the binary specified
+    print "no: Unable to execute $binary\n";
+    exit 1;
+}
+
+# import passive flag or use default setting
+my $passive = $ENV{passive} || 'off';
+
+=head1 Graph Declarations
+
+    This block of code builds up all of the graph info for all root / sub graphs.
+
+    %graphs: is a container for all of the graph definition information. In here is where you'll
+             find the configuration information for munin's graphing procedure.
+    Format:
+
+    $graph{graph_name} => {
+        config => {
+            You'll find the main graph config stored here
+            { key => value },
+            { ... },
+        },
+        keys => [ 'Name', 'Name', 'Name', ... ],
+        datasrc => [
+            Name: name given to data value
+            Attr: Attribute and value, attribute must be valid plugin argument
+            { name => 'Name', info => 'info about graph' },
+            { ... },
+        ],
+        results => {
+            You'll find the results info from a stats call stored here
+            { key => value },
+            { ... },
+        },
+    }
+
+=cut
+
+my %graphs;
+
+# main graph for service checks 
+$graphs{services} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Service Problems',
+        category => 'nagios',
+        title => 'Service Problems',
+        info => 'Current Service Problems by Alert Status',
+    },
+    keys => [ 'NUMSVCOK', 'NUMSVCWARN', 'NUMSVCUNKN', 'NUMSVCCRIT' ],
+    datasrc => [
+        { name => 'NUMSVCOK', label => 'Up', min => '0', type => 'GAUGE', info => 'number of services which are Ok.', graph => 'no', draw => 'LINE2' },
+        { name => 'NUMSVCWARN', label => 'Warning', min => '0', type => 'GAUGE', info => 'number of services which are Warning.', draw => 'LINE2' },
+        { name => 'NUMSVCUNKN', label => 'Unknown', min => '0', type => 'GAUGE', info => 'number of services which are Unknown.', draw => 'LINE2' },
+        { name => 'NUMSVCCRIT', label => 'Critical', min => '0', type => 'GAUGE', info => 'number of services which are Critical.', draw => 'LINE2' },
+    ],
+};
+# multi-graph for service check detail information ( sub graph of service problems graph )
+$graphs{svcchkdetail} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Total number of Service Checks',
+        category => 'details',
+        title => 'Detailed Service Info',
+        info => 'Detailed Service Check Information',
+    },
+    keys => [ 'NUMSVCWARN', 'NUMSVCUNKN', 'NUMSVCCRIT', 'NUMSVCCHECKED', 'NUMSVCSCHEDULED', 'NUMSVCFLAPPING', 'NUMSVCDOWNTIME' ],
+    datasrc => [
+        { name => 'NUMSVCWARN', label => 'Warning', min => '0', type => 'GAUGE', info => 'number of services which are Warning.', draw => 'LINE2' },
+        { name => 'NUMSVCUNKN', label => 'Unknown', min => '0', type => 'GAUGE', info => 'number of services which are Unknown.', draw => 'LINE2' },
+        { name => 'NUMSVCCRIT', label => 'Critical', min => '0', type => 'GAUGE', info => 'number of services which are Critical.', draw => 'LINE2' },
+        { name => 'NUMSVCCHECKED', label => 'Checked', min => '0', type => 'GAUGE', info => 'total number of services that have been checked since start.', draw => 'LINE2' },
+        { name => 'NUMSVCSCHEDULED', label => 'Scheduled', min => '0', type => 'GAUGE', info => 'total number of services that are currently scheduled to be checked.', draw => 'LINE2' },
+        { name => 'NUMSVCFLAPPING', label => 'Flapping', min => '0', type => 'GAUGE', info => 'total number of services that are currently flapping.', draw => 'LINE2' },
+        { name => 'NUMSVCDOWNTIME', label => 'Scheduled Downtime', min => '0', type => 'GAUGE', info => 'total number of services that are currently in scheduled downtime.', draw => 'LINE2' },
+    ],
+};
+# multi-graph for service check % state change ( sub graph of service problems graph )
+$graphs{svcchksc} = {
+    config => {
+        args => '--lower-limit 0 --upper-limit 100',
+        vlabel => '%',
+        category => 'statechange',
+        title => 'Service State Change',
+        info => 'Total Percent of State Change between checks',
+    },
+    keys => [ 'MINSVCPSC', 'MAXSVCPSC', 'AVGSVCPSC' ],
+    datasrc => [
+        { name => 'MINSVCPSC', label => 'Min', min => '0', type => 'GAUGE', info => 'min service check % state change.', draw => 'AREA' },
+        { name => 'MAXSVCPSC', label => 'Max', min => '0', type => 'GAUGE', info => 'max service check % state change.', draw => 'AREA' },
+        { name => 'AVGSVCPSC', label => 'Average', min => '0', type => 'GAUGE', info => 'avg service check % state change.', draw => 'LINE2' },
+    ],
+};
+# multi-graph for service check latency and execution times ( sub graph of service problems graph )
+$graphs{svcchklat} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'time (ms)',
+        category => 'latency',
+        title => 'Service Check Latency Times',
+        info => 'Service Check Latency Times',
+    },
+    keys => [ 'MINACTSVCLAT', 'MAXACTSVCLAT', 'AVGACTSVCLAT' ],
+    datasrc => [
+        { name => 'MINACTSVCLAT', label => 'Min Latency', min => '0', type => 'GAUGE', info => 'min active service check latency (ms).', draw => 'LINE2' },
+        { name => 'MAXACTSVCLAT', label => 'Max Latency', min => '0', type => 'GAUGE', info => 'max active service check latency (ms).', draw => 'LINE2' },
+        { name => 'AVGACTSVCLAT', label => 'Average Latency', min => '0', type => 'GAUGE', info => 'avg active service check latency (ms).', draw => 'LINE2' },
+    ],
+};
+# multi-graph for service check execution time ( sub graph of service problems graph )
+$graphs{svcchkext} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'time (ms)',
+        category => 'execution',
+        title => 'Service Check Execution Times',
+        info => 'Service Check Execution Times',
+    },
+    keys => [ 'MINACTSVCEXT', 'MAXACTSVCEXT', 'AVGACTSVCEXT' ],
+    datasrc => [
+        { name => 'MINACTSVCEXT', label => 'Min Execution', min => '0', type => 'GAUGE', info => 'min active service check execution time (ms).', draw => 'LINE2' },
+        { name => 'MAXACTSVCEXT', label => 'Max Execution', min => '0', type => 'GAUGE', info => 'max active service check execution time (ms).', draw => 'LINE2' },
+        { name => 'AVGACTSVCEXT', label => 'Average Execution', min => '0', type => 'GAUGE', info => 'avg active service check execution time (ms).', draw => 'LINE2' },
+    ],
+};
+# main graph for host problems 
+$graphs{hosts} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Host Problems',
+        category => 'nagios',
+        title => 'Host Problems',
+        info => 'Current Host Problems by Alert Status',
+    },
+    keys => [ 'NUMHSTUP', 'NUMHSTDOWN', 'NUMHSTUNR' ],
+    datasrc => [
+        { name => 'NUMHSTUP', label => 'Up', min => '0', type => 'GAUGE', info => 'number of hosts up.', graph => 'no', draw => 'LINE2' },
+        { name => 'NUMHSTDOWN', label => 'Down', min => '0', type => 'GAUGE', info => 'number of hosts which are down.', draw => 'LINE2' },
+        { name => 'NUMHSTUNR', label => 'Unknown', min => '0', type => 'GAUGE', info => 'number of hosts which are Unreachable.', draw => 'LINE2' },
+    ],
+};
+# multi-graph for host check detail information ( sub graph of host problems graph )
+$graphs{hostchkdetail} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Total number of Host Checks',
+        category => 'details',
+        title => 'Detailed Host Info',
+        info => 'Detailed Host Check Information',
+    },
+    keys => [ 'NUMHSTDOWN', 'NUMHSTUNR', 'NUMHSTCHECKED', 'NUMHSTSCHEDULED', 'NUMHSTFLAPPING', 'NUMHSTDOWNTIME' ],
+    datasrc => [
+        { name => 'NUMHSTDOWN', label => 'Down', min => '0', type => 'GAUGE', info => 'number of hosts which are down.', draw => 'LINE2' },
+        { name => 'NUMHSTUNR', label => 'Unknown', min => '0', type => 'GAUGE', info => 'number of hosts which are Unreachable.', draw => 'LINE2' },
+        { name => 'NUMHSTCHECKED', label => 'Checked', min => '0', type => 'GAUGE', info => 'total number of hosts that have been checked since start.', draw => 'LINE2' },
+        { name => 'NUMHSTSCHEDULED', label => 'Scheduled', min => '0', type => 'GAUGE', info => 'total number of hosts that are currently scheduled to be checked.', draw => 'LINE2' },
+        { name => 'NUMHSTFLAPPING', label => 'Flapping', min => '0', type => 'GAUGE', info => 'total number of hosts that are currently flapping.', draw => 'LINE2' },
+        { name => 'NUMHSTDOWNTIME', label => 'Downtime', min => '0', type => 'GAUGE', info => 'total number of hosts that are currently in scheduled downtime.', draw => 'LINE2' },
+    ],
+};
+# multi-graph for host check % state change ( sub graph of host problems graph )
+$graphs{hostchksc} = {
+    config => {
+        args => '--lower-limit 0 --upper-limit 100',
+        vlabel => '%',
+        category => 'statechange',
+        title => 'Host State Change',
+        info => 'Total Percent of State Change between checks',
+    },
+    keys => [ 'MINHSTPSC', 'MAXHSTPSC', 'AVGHSTPSC' ],
+    datasrc => [
+        { name => 'MINHSTPSC', label => 'Min', min => '0', type => 'GAUGE', info => 'min host check % state change.', draw => 'AREA' },
+        { name => 'MAXHSTPSC', label => 'Max', min => '0', type => 'GAUGE', info => 'max host check % state change.', draw => 'AREA' },
+        { name => 'AVGHSTPSC', label => 'Average', min => '0', type => 'GAUGE', info => 'avg host check % state change.', draw => 'LINE2' },
+    ],
+};
+# multi-graph for host check latency times ( sub graph of host problems graph )
+$graphs{hostchklat} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'time (ms)',
+        category => 'latency',
+        title => 'Host Check Latency Times',
+        info => 'Host Check Latency Times',
+    },
+    keys => [ 'MINACTHSTLAT', 'MAXACTHSTLAT', 'AVGACTHSTLAT' ],
+    datasrc => [
+        { name => 'MINACTHSTLAT', label => 'Min Latency', min => '0', type => 'GAUGE', info => 'min active host check latency (ms).', draw => 'LINE2' },
+        { name => 'MAXACTHSTLAT', label => 'Max Latency', min => '0', type => 'GAUGE', info => 'max active host check latency (ms).', draw => 'LINE2' },
+        { name => 'AVGACTHSTLAT', label => 'Average Latency', min => '0', type => 'GAUGE', info => 'avg active host check latency (ms).', draw => 'LINE2' },
+    ],
+};
+# multi-graph for host check execution times ( sub graph of host problems graph )
+$graphs{hostchkext} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'time (ms)',
+        category => 'execution',
+        title => 'Host Check Execution Times',
+        info => 'Host Check Execution Times',
+    },
+    keys => [ 'MINACTHSTEXT', 'MAXACTHSTEXT', 'AVGACTHSTEXT' ],
+    datasrc => [
+        { name => 'MINACTHSTEXT', label => 'Min Execution', min => '0', type => 'GAUGE', info => 'min active host check execution time (ms).', draw => 'LINE2' },
+        { name => 'MAXACTHSTEXT', label => 'Max Execution', min => '0', type => 'GAUGE', info => 'max active host check execution time (ms).', draw => 'LINE2' },
+        { name => 'AVGACTHSTEXT', label => 'Average Execution', min => '0', type => 'GAUGE', info => 'avg active host check execution time (ms).', draw => 'LINE2' },
+    ],
+};
+# main graph for host / service check counts 
+$graphs{checks} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Total number of Checks',
+        category => 'nagios',
+        title => 'Totals',
+        info => 'Total Number of Service and Host Checks',
+    },
+    keys => [ 'NUMSERVICES', 'NUMHOSTS' ],
+    datasrc => [
+        { name => 'NUMSERVICES', label => 'Number of Services', min => '0', type => 'GAUGE', info => 'total number of services.', draw => 'LINE2' },
+        { name => 'NUMHOSTS', label => 'Number of Hosts', min => '0', type => 'GAUGE', info => 'total number of hosts.', draw => 'LINE2' },
+    ],
+};
+# multi-graph for number of host checks in x mins ( sub graph of checks graph )
+$graphs{hostchkactcount} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Host Checks',
+        category => 'active',
+        title => 'Host Checks',
+        info => 'Total Number of Active Host Checks',
+        order => 'NUMHSTACTCHK60M NUMHSTACTCHK15M NUMHSTACTCHK5M NUMHSTACTCHK1M',
+    },
+    keys => [ 'NUMHSTACTCHK1M', 'NUMHSTACTCHK5M', 'NUMHSTACTCHK15M', 'NUMHSTACTCHK60M' ],
+    datasrc => [
+        { name => 'NUMHSTACTCHK1M', label => 'Active Checks 1m', min => '0', type => 'GAUGE', info => 'number of hosts actively checked in last 1 minutes.', draw => 'AREA' },
+        { name => 'NUMHSTACTCHK5M', label => 'Active Checks 5m', min => '0', type => 'GAUGE', info => 'number of hosts actively checked in last 5 minutes.', draw => 'AREA' },
+        { name => 'NUMHSTACTCHK15M', label => 'Active Checks 15m', min => '0', type => 'GAUGE', info => 'number of hosts actively checked in last 15 minutes.', draw => 'AREA' },
+        { name => 'NUMHSTACTCHK60M', label => 'Active Checks 60m', min => '0', type => 'GAUGE', info => 'number of hosts actively checked in last 60 minutes.', draw => 'AREA' },
+    ],
+};
+# multi-graph for number of host checks in x mins ( sub graph of checks graph )
+$graphs{hostchkpsvcount} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Host Checks',
+        category => 'passive',
+        title => 'Host Checks',
+        info => 'Total Number of Passive Host Checks',
+        order => 'NUMHSTPSVCHK60M NUMHSTPSVCHK15M NUMHSTPSVCHK5M NUMHSTPSVCHK1M',
+    },
+    keys => [ 'NUMHSTPSVCHK1M', 'NUMHSTPSVCHK5M', 'NUMHSTPSVCHK15M', 'NUMHSTPSVCHK60M' ],
+    datasrc => [
+        { name => 'NUMHSTPSVCHK1M', label => 'Passive Checks 1m', min => '0', type => 'GAUGE', info => 'number of hosts passively checked in last 1 minutes.', draw => 'AREA' },
+        { name => 'NUMHSTPSVCHK5M', label => 'Passive Checks 5m', min => '0', type => 'GAUGE', info => 'number of hosts passively checked in last 5 minutes.', draw => 'AREA' },
+        { name => 'NUMHSTPSVCHK15M', label => 'Passive Checks 15m', min => '0', type => 'GAUGE', info => 'number of hosts passively checked in last 15 minutes.', draw => 'AREA' },
+        { name => 'NUMHSTPSVCHK60M', label => 'Passive Checks 60m', min => '0', type => 'GAUGE', info => 'number of hosts passively checked in last 60 minutes.', draw => 'AREA' },
+    ],
+};
+# multi-graph for number of service checks in x mins ( sub graph of checks graph )
+$graphs{svcchkactcount} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Service Checks',
+        category => 'active',
+        title => 'Service Checks',
+        info => 'Total Number of Active Service Checks',
+        order => 'NUMSVCACTCHK60M NUMSVCACTCHK15M NUMSVCACTCHK5M NUMSVCACTCHK1M',
+    },
+    keys => [ 'NUMSVCACTCHK1M', 'NUMSVCACTCHK5M', 'NUMSVCACTCHK15M', 'NUMSVCACTCHK60M' ],
+    datasrc => [
+        { name => 'NUMSVCACTCHK1M', label => 'Active Checks 1m', min => '0', type => 'GAUGE', info => 'number of services actively checked in last 1 minutes.', draw => 'AREA' },
+        { name => 'NUMSVCACTCHK5M', label => 'Active Checks 5m', min => '0', type => 'GAUGE', info => 'number of services actively checked in last 5 minutes.', draw => 'AREA' },
+        { name => 'NUMSVCACTCHK15M', label => 'Active Checks 15m', min => '0', type => 'GAUGE', info => 'number of services actively checked in last 15 minutes.', draw => 'AREA' },
+        { name => 'NUMSVCACTCHK60M', label => 'Active Checks 60m', min => '0', type => 'GAUGE', info => 'number of services actively checked in last 60 minutes.', draw => 'AREA' },
+    ],
+};
+# multi-graph for number of service checks in x mins ( sub graph of checks graph )
+$graphs{svcchkpsvcount} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Service Checks',
+        category => 'passive',
+        title => 'Service Checks',
+        info => 'Total Number of Passive Service Checks',
+        order => 'NUMSVCPSVCHK60M NUMSVCPSVCHK15M NUMSVCPSVCHK5M NUMSVCPSVCHK1M',
+    },
+    keys => [ 'NUMSVCPSVCHK1M', 'NUMSVCPSVCHK5M', 'NUMSVCPSVCHK15M', 'NUMSVCPSVCHK60M' ],
+    datasrc => [
+        { name => 'NUMSVCPSVCHK1M', label => 'Passive Checks 1m', min => '0', type => 'GAUGE', info => 'number of services passively checked in last 1 minutes.', draw => 'AREA' },
+        { name => 'NUMSVCPSVCHK5M', label => 'Passive Checks 5m', min => '0', type => 'GAUGE', info => 'number of services passively checked in last 5 minutes.', draw => 'AREA' },
+        { name => 'NUMSVCPSVCHK15M', label => 'Passive Checks 15m', min => '0', type => 'GAUGE', info => 'number of services passively checked in last 15 minutes.', draw => 'AREA' },
+        { name => 'NUMSVCPSVCHK60M', label => 'Passive Checks 60m', min => '0', type => 'GAUGE', info => 'number of services passively checked in last 60 minutes.', draw => 'AREA' },
+    ],
+};
+# multi-graph for external command count ( sub graph of checks graph )
+$graphs{extcmdcount} = {
+    config => {
+        args => '--lower-limit 0',
+        vlabel => 'Ext Command Slots',
+        category => 'externalcmds',
+        title => 'External Commands',
+        info => 'External Command Buffer Slot Information',
+    },
+    keys => [ 'TOTCMDBUF', 'USEDCMDBUF', 'HIGHCMDBUF', 'NUMEXTCMDS1M', 'NUMEXTCMDS5M', 'NUMEXTCMDS15M' ],
+    datasrc => [
+        { name => 'TOTCMDBUF', label => 'Total', min => '0', type => 'GAUGE', info => 'total number of external command buffer slots available.', draw => 'AREA' },
+        { name => 'USEDCMDBUF', label => 'Current Used', min => '0', type => 'GAUGE', info => 'number of external command buffer slots currently in use.', draw => 'LINE2' },
+        { name => 'HIGHCMDBUF', label => 'Peak Used', min => '0', type => 'GAUGE', info => 'highest number of external command buffer slots ever in use.', draw => 'LINE2' },
+        { name => 'NUMEXTCMDS1M', label => 'Used last 1m', min => '0', type => 'GAUGE', info => 'number of external commands processed in last 1 minutes.', draw => 'LINE2' },
+        { name => 'NUMEXTCMDS5M', label => 'Used last 5m', min => '0', type => 'GAUGE', info => 'number of external commands processed in last 5 minutes.', draw => 'LINE2' },
+        { name => 'NUMEXTCMDS15M', label => 'Used last 15m', min => '0', type => 'GAUGE', info => 'number of external commands processed in last 15 minutes.', draw => 'LINE2' },
+    ],
+};
+
+=head1 Munin Checks
+
+    These checks look for config / autoconf / suggest params
+
+=head2 Config Check
+
+    This block of code looks at the argument that is possibly supplied,
+    should it be config, it then checks to make sure the plugin 
+    specified exists, assuming it does, it will run the do_config 
+    subroutine for the plugin specified, otherwise it dies complaining
+    about an unknown plugin.
+
+=cut
+
+if (defined $ARGV[0] && $ARGV[0] eq 'config') {
+    # Lets take the plugin from the execution name.
+    $0 =~ /nagios_multi_(.+)*/;
+    my $plugin = $1;
+    # And lets make sure we have a plugin called that.
+    die 'Unknown Plugin Specified: ' . ($plugin ? $plugin : '') unless $graphs{$plugin};
+    # Now lets go ahead and print out our config.
+	do_config($plugin);
+	exit 0;
+}
+
+=head2 Autoconf Check
+
+    This block of code looks at the argument that is possibly supplied,
+    should it be autoconf, we are going to print yes at this point since
+    we've already tested for our binary to exist and be executable, the
+    process will then exit.
+
+=cut
+
+if (defined $ARGV[0] && $ARGV[0] eq 'autoconf') {
+    # well we can execute the binary, so plugin should be good from here...
+    print "yes\n";
+    exit 0;
+}
+
+=head2 Suggest Check
+
+    This block of code looks at the argument that is possibly supplied,
+    should it be suggest, we are going to print the possible plugins
+    which can be specified. Note we only specify the root graphs for the
+    multigraphs, since the rest of the subgraphs will appear "behind" the
+    root graphs.
+
+=cut
+
+if (defined $ARGV[0] && $ARGV[0] eq 'suggest') {
+    # well we can execute the binary, so print possible root multigraph plugin names
+    my @rootplugins = ('services','hosts','checks');
+    foreach my $plugin (@rootplugins) {
+        print "$plugin\n";
+    }
+    exit 0;
+}
+
+=head1 Subroutines
+
+    Begin Subroutine calls to output data / config information
+
+=head2 fetch_output
+
+    This subroutine is the main call for printing data for the plugin.
+    No parameters are taken as this is the default call if no arguments
+    are supplied from the command line.
+
+=cut
+
+fetch_output();
+
+sub fetch_output {
+    # Lets figure out what plugin they want to run, and check that it exists
+    $0 =~ /nagios_multi_(.+)*/;
+    my $plugin = $1;
+    die 'Unknown Plugin Specified: ' . ($plugin ? $plugin : '') unless $graphs{$plugin};
+    # Lets set up our subgraphs array with all of the graphs which are extensions
+    # of the root graph / plugin
+    my @subgraphs;
+    if ($plugin eq 'services') {
+        @subgraphs = ('svcchkdetail','svcchksc','svcchklat','svcchkext');
+    } elsif ($plugin eq 'hosts') {
+        @subgraphs = ('hostchkdetail','hostchksc','hostchklat','hostchkext');
+    } elsif ($plugin eq 'checks') {
+        @subgraphs = ('svcchkactcount','hostchkactcount','extcmdcount');
+        if ($passive =~ /on/i) {
+            push(@subgraphs,'svcchkpsvcount');
+            push(@subgraphs,'hostchkpsvcount');
+        }
+    }
+    # Lets just double check the plugin you specified is a root graph / plugin
+    if (grep $_ eq $plugin, @subgraphs) {
+        die "Error: $plugin is not a valid root graph, valid graphs are: @subgraphs\n";
+    }
+    # Lets print out the data for our sub graphs / plugins
+    foreach my $subgraph (@subgraphs) {
+        print_sub_output($plugin,$subgraph);
+    }
+    # Lets print out the data for our main graph / plugin
+    print_root_output($plugin);
+    return;
+}
+
+=head2 print_root_output
+
+    This block of code prints out the return values for our root graphs. It takes
+    one parameter $plugin. Returns when completed
+
+        $plugin;    main(root) graph we are calling up to print data values for
+
+    Example: print_root_output($plugin);
+
+=cut
+
+sub print_root_output {
+    # Lets get our plugin, set our graph information, and print for Munin to process
+    my ($plugin) = (@_);
+    my $graph = $graphs{$plugin};
+    print "multigraph nagios_$plugin\n";
+    # Getting keys to pass to nagiostats for data retrieval
+    # call up fetch_nagios_stats with the keys we just got.
+    my @keys = @{$graph->{keys}};
+    fetch_nagios_stats($plugin,@keys);
+    # print the results for the keys with the name for Munin to process
+    foreach my $dsrc (@{$graph->{datasrc}}) {
+        my $output = 0;
+        my %datasrc = %$dsrc;
+        while ( my ($key, $value) = each(%datasrc)) {
+            next if ($key ne 'name');
+            print "$dsrc->{name}.value $graph->{results}->{$value}\n";
+        }
+    }
+    return;
+}
+
+=head2 print_sub_output
+
+    This block of code prints out the return values for our root graphs. It takes
+    one parameter $plugin. Returns when completed
+
+        $plugin;    main(root) being called, used for multigraph output
+        $subgraph;  graph we are actually trying to print data values for
+
+    Example: print_sub_output($plugin,$subgraph);
+
+=cut
+
+sub print_sub_output {
+    # Lets get our plugin, set our graph information, and print for Munin to process
+    my ($plugin,$subgraph) = (@_);
+    my $graph = $graphs{$subgraph};
+    print "multigraph nagios_$plugin\.$subgraph\n";
+    # Getting keys to pass to nagiostats for data retrieval
+    # call up fetch_nagios_stats with the keys we just got.
+    my @keys = @{$graph->{keys}};
+    fetch_nagios_stats($subgraph,@keys);
+    # print the results for the keys with the name for Munin to process
+    foreach my $dsrc (@{$graph->{datasrc}}) {
+        my $output = 0;
+        my %datasrc = %$dsrc;
+        while ( my ($key, $value) = each(%datasrc)) {
+            next if ($key ne 'name');
+            print "$dsrc->{name}.value $graph->{results}->{$value}\n";
+        }
+    }
+    return;
+}
+
+=head2 do_config
+
+    This is the main call issued assuming we call up config and plugin specified exists
+    The subroutine takes one parameter $plugin, and returns when completed.
+
+        $plugin; main(root) graph being called
+
+    Example: do_config($plugin);
+
+=cut
+
+sub do_config {
+    # Lets get our plugin and set subgraphs to undef
+    my ($plugin) = (@_);
+    my @subgraphs;
+    if ($plugin eq 'services') {
+        # update subgraphs since our plugin is services
+        @subgraphs = ('svcchkdetail','svcchksc','svcchklat','svcchkext');
+    } elsif ($plugin eq 'hosts') {
+        # update subgraphs since our plugin is hosts
+        @subgraphs = ('hostchkdetail','hostchksc','hostchklat','hostchkext');
+    } elsif ($plugin eq 'checks') {
+        # update subgraphs since our plugin is checks
+        @subgraphs = ('svcchkactcount','hostchkactcount','extcmdcount');
+        if ($passive =~ /on/i) {
+            push(@subgraphs,'svcchkpsvcount');
+            push(@subgraphs,'hostchkpsvcount');
+        }
+    }
+    # Now that we know what graphs to reference, lets print out their config info
+    foreach my $subgraph (@subgraphs) {
+        print_sub_config($plugin,$subgraph);
+    }
+    # Now lets print out the config information for our root graph
+    print_root_config($plugin);
+    return;
+}
+
+=head2 print_sub_config
+
+    This subroutine prints out the config information for all of the subgraphs.
+    It takes two parameters, $plugin and $subgraph
+
+        $plugin;    main(root) graph used for multigraph call
+        $subgraph;  subgraph being called up.
+
+    Example:  print_sub_config($plugin,$subgraph);
+
+=cut
+
+sub print_sub_config {
+    # Lets get our plugin and subgraph, after that print for Munin to process it. 
+    my ($plugin,$subgraph) = (@_);
+    my $graph = $graphs{$subgraph};
+    print "multigraph nagios_$plugin.$subgraph\n";
+    # Lets print our subgraph's main config info.
+    my %graphconf = %{$graph->{config}};
+    while ( my ($key, $value) = each(%graphconf)) {
+        print "graph_$key $value\n";
+    }
+    # Lets print our subgraph's per graph config info.
+    foreach my $dsrc (@{$graph->{datasrc}}) {
+        my %datasrc = %$dsrc;
+        while ( my ($key, $value) = each(%datasrc)) {
+            next if ($key eq 'name');
+            print "$dsrc->{name}.$key $value\n";
+        }
+    }
+    return;
+}
+
+=head2 print_root_config
+
+    This subroutine prints out the config information for all of the main(root) graphs.
+    It takes one parameters, $plugin
+
+        $plugin;    main(root) graph used for multigraph call
+
+    Example:  print_root_config($plugin);
+
+=cut
+
+sub print_root_config {
+    # Lets get our plugin and graph, after that print for Munin to process it.
+    my ($plugin) = (@_);
+    my $graph = $graphs{$plugin};
+    print "multigraph nagios_$plugin\n";
+    # Lets print out graph's main config info.
+    my %graphconf = %{$graph->{config}};
+    while ( my ($key, $value) = each(%graphconf)) {
+        print "graph_$key $value\n";
+    }
+    # Lets print our graphs per graph config info.
+    foreach my $dsrc (@{$graph->{datasrc}}) {
+        my %datasrc = %$dsrc;
+        while ( my ($key, $value) = each(%datasrc)) {
+            next if ($key eq 'name');
+            print "$dsrc->{name}.$key $value\n";
+        }
+    }
+    return;
+}
+
+=head2 fetch_nagios_stats
+
+    This subroutine actually runs the nagiostats binary with the keys specified in an array
+    Two parameters are passed, $plugin and @keys, and it will return when complete.
+
+        $plugin;    graph we are calling up, we use this to store the results in the hash
+                    for easy recall later.
+        @keys;      keys we want the values for from nagiostats binary.
+
+    Example: fetch_nagios_stats($plugin,@keys);
+
+=cut
+
+sub fetch_nagios_stats {
+    # Lets get our current plugin and list of keys we want info for, as well as reference our graph
+    my ($plugin,@keys) = (@_);
+    my $graph = $graphs{$plugin};
+    # Lets set our command to include our binary plus options, as well as join our array with ,'s
+    my $command = $binary . " -m -d " . join(",",@keys);
+    # Lets open the command and pipe it out for easy reading by line
+    open(CMD, "$command |") or die "Unable to execute command: $command\n";
+    # While a return exists from the command, store the value in the key specified
+    while (my $line = <CMD>) {
+        chomp($line);
+        my $key = shift(@keys);
+        $graph->{results}->{$key} = $line;
+    }
+    return;
+}

@@ -1,0 +1,115 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+rt_ticket_loadtime - Plugin to monitor the RT ticket loadtime
+
+=head1 CONFIGURATION
+
+The following environment variables are used by this plugin:
+
+=over 4
+
+=item web_url
+
+The RT WebURL configuration parameter
+
+=item username
+
+The RT username
+
+=item password
+
+The RT password
+
+=item ticket_id
+
+The RT ticket id to test
+
+=back
+
+This configuration section shows the defaults of the plugin:
+
+ [rt_ticket_loadtime]
+     env.web_url https://localhost/
+     env.username root
+     env.password password
+     env.ticket 1
+
+To test the plungin run:
+ munin-run --debug rt_ticket_loadtime
+
+An appropriate test ticket should have 30 transactions or more
+of type Create, Correspond or Comment and should load in about
+1-10 seconds in the WebUI to have reproducible results.
+
+If the test ticket needs more than 10 seconds to load (both WebUI
+and REST values together), you have to add an appropriate timeout
+value to your plugin configuration to override the munin default
+timeout value of 10 seconds.
+
+=head1 AUTHOR
+
+Christian Loos <cloos@netsandbox.de>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+web_url=${web_url:-"http://localhost/"}
+username=${username:-"root"}
+password=${password:-"password"}
+ticket_id=${ticket_id:-"1"}
+
+time=$(which time)
+wget=$(which wget)
+
+if [ "$1" = "autoconf" ]; then
+    if [ "x$time" = "x" -o "x$wget" = "x" ]; then
+        echo "no (need time and wget programs)"
+    else
+        echo yes
+    fi
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    echo "graph_title RT ticket loadtime"
+    echo "graph_args --base 1000 -l 0"
+    echo "graph_vlabel Loadtime in seconds"
+    echo "graph_category requesttracker"
+    echo "graph_info This graph shows the loadtime in seconds of RT ticket $ticket_id"
+    echo "webui.label loadtime WebUI"
+    echo "webui.max 300"
+    echo "webui.min 0"
+    echo "webui.info Ticket loadtime with WebUI"
+    echo "rest.label loadtime REST"
+    echo "rest.max 300"
+    echo "rest.min 0"
+    echo "rest.info Ticket loadtime with REST API"
+    exit 0
+fi
+
+tmpdir=$(mktemp -d) || exit 1
+trap "rm -rf $tmpdir" 0
+
+url_webui="${web_url}Ticket/Display.html?id=${ticket_id}&user=${username}&pass=${password}"
+url_rest="${web_url}REST/1.0/ticket/${ticket_id}/history?format=l&user=${username}&pass=${password}"
+
+cd $tmpdir || exit1
+loadtime_webui=$($time --portability $wget --page-requisites --no-cache --no-check-certificate --delete-after --quiet $url_webui 2>&1 | awk '/^real / {print $2}')
+loadtime_rest=$($time --portability $wget --page-requisites --no-cache --no-check-certificate --delete-after --quiet $url_rest 2>&1 | awk '/^real / {print $2}')
+cd ..
+
+echo "webui.value $loadtime_webui"
+echo "rest.value $loadtime_rest"

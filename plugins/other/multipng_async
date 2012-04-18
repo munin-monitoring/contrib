@@ -1,0 +1,266 @@
+#!/usr/bin/env perl
+package Munin::Plugin::Multiping::Async;
+use 5.10.0;
+use MooseX::POE;
+use MooseX::POE::SweetArgs qw(event);
+use POE::Quickie;
+use Munin::Plugin;
+use Storable;
+use Digest;
+
+=head1 NAME
+
+multiping_async - Like the multiping plugin but runs asynchronously
+
+=head1 SYNOPSIS
+
+    munin-run multiping_async
+
+=head1 CONFIGURATION
+
+The following environment variables are used:
+
+    host     - Whitespace-seperated list of hosts to ping
+    times    - How many times to ping the hosts, 3 by default
+    timeout  - The ping timeout (ping -W), 1 by default (ignored on Solaris)
+    title    - The graph_title to use for the munin RRD graph
+    category - What category the graph should be in, network by default
+
+Configuration example, ping all the Linode clusters:
+
+    # An optional custom category
+    [multiping_async_*]
+    env.category ping
+
+    [multiping_async_linode]
+    # From http://www.linode.com/speedtest/
+    env.title Ping times to all the Linode clusters
+    env.host  london1.linode.com newark1.linode.com atlanta1.linode.com dallas1.linode.com fremont1.linode.com
+
+=head1 DESCRIPTION
+
+Like the L<munin
+multiping|http://munin-monitoring.org/browser/people/janl/src/node/node.d/multiping>
+plugin except that it runs L<ping(1)> asynchronously with POE, and you
+can add/remove hosts later on without screwing up your RRD files
+(multiping reports statistics based on the order of hosts in
+C<hosts=>).
+
+This plugin used to use L<POE::Component::Client::Ping> but I switched
+away from it due to having odd timing issues with it, and it had to
+run as root.
+
+This plugin requires the L<MooseX::POE> and L<POE::Quickie> modules
+from CPAN. It has been tested with the Linux, FreeBSD and Solaris
+L<ping(1)> implementations.
+
+=head1 AUTHOR
+
+E<AElig>var ArnfjE<ouml>rE<eth> Bjarmason <avar@cpan.org>
+
+=head1 LICENSE
+
+This program is in the public domain.
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+has graph_title => (
+    isa => 'Str',
+    is  => 'ro',
+    default => $ENV{title} // 'Ping times',
+    documentation => 'The munin graph_title',
+);
+
+has hosts => (
+    isa        => 'ArrayRef',
+    is         => 'ro',
+    auto_deref => 1,
+    default    => sub {
+        my $host = $ENV{host} // '';
+        return [ split /\s+/, $host ]
+    },
+    documentation => "Hosts we're going to ping",
+);
+
+has times => (
+    isa           => 'Int',
+    is            => 'ro',
+    default       => $ENV{times} // 3,
+    documentation => "How many times we ping each host (ping -c)",
+);
+
+has timeout => (
+    isa           => 'Int',
+    is            => 'ro',
+    default       => $ENV{timeout} // 1,
+    documentation => "How long until ping timeouts (ping -W)",
+);
+
+has category => (
+    isa           => 'Str',
+    is            => 'ro',
+    default       => $ENV{category} // 'network',
+    documentation => "What munin category we should appear in",
+);
+
+has should_config => (
+    isa => 'Bool',
+    is => 'ro',
+    default => sub { defined $ARGV[0] and $ARGV[0] eq "config" },
+    documentation => 'Spew out config section?',
+);
+
+has response => (
+    isa        => 'HashRef',
+    is         => 'ro',
+    auto_deref => 0,
+    default    => sub { +{} },
+    documentation => 'To store ping responses',
+);
+
+has statefile => (
+    isa           => 'Str',
+    is            => 'ro',
+    default       => $ENV{MUNIN_STATEFILE},
+    documentation => 'Where we store state between invocations',
+);
+
+sub START {
+    my ($self) = @_;
+
+    die "You must supply some hosts" unless @{ $self->hosts } > 0;
+
+    if ($self->should_config) {
+        $self->print_config;
+        return;
+    }
+
+    for my $host ($self->hosts) {
+        POE::Quickie->new->run(
+            Program     => [ $self->ping_arguments($host) ],
+            StdoutEvent => 'stdout',
+            ExitEvent   => 'exit',
+            Context     => $host,
+        );
+    }
+}
+
+sub ping_arguments {
+    my ($self, $host) = @_;
+
+    given ($^O) {
+        when ('solaris') {
+            return ('ping', '-s', $host, '64', $self->times);
+        }
+        default {
+            # Linux and FreeBSD
+            return ('ping', '-c', $self->times, '-W', $self->timeout, => $host);
+        }
+    }
+}
+
+event stdout => sub {
+    my ($self, $output, undef, $context) = @_;
+
+    given ($output) {
+        my $noslash = qr{[^/]+};
+        # Linux output: rtt min/avg/max/mdev = 7.218/7.255/7.293/0.030 ms
+        # BSD output  : round-trip min/avg/max/stddev = 34.935/35.665/36.684/0.743 ms
+        # Solaris     : round-trip (ms)  min/avg/max/stddev = 5.82/5.95/6.01/0.11
+        when (m[= (?<min>$noslash)/(?<avg>$noslash)/(?<max>$noslash)/]) {
+            $self->response->{ $context } = $+{avg};
+        }
+    }
+};
+
+event exit => sub {
+    my ($self, $code, $x, $context) = @_;
+
+    given ($code) {
+        when (0) {
+            die "Got no response from $context" unless exists $self->response->{ $context };
+            $self->yield( print_host => $context => $self->response->{ $context } );
+        }
+        default {
+            # Host down, probably
+            $self->yield( print_host => $context => 0 );
+        }
+    }
+
+    return;
+};
+
+sub STOP {
+    my ($self) = @_;
+
+    if (not $self->should_config and my $file = $self->statefile) {
+        my $res = $self->response;
+        my $ret = store($res, $file);
+        # use Data::Dumper;
+        # say Dumper { gonna_store => $res, ret => $ret, file => $file };
+    }
+}
+
+sub print_config {
+    my ($self) = @_;
+    my $title = $self->graph_title;
+    my $times = $self->times;
+    my $category = $self->category;
+    print <<GRAPH;
+graph_title $title
+graph_args --base 1000 -l 0
+graph_vlabel milliseconds
+graph_category $category
+graph_info Average ping times (over $times pings)
+GRAPH
+    for my $host ($self->sorted_hosts) {
+        my $fieldname = $self->fieldname($host);
+        print <<HOST;
+$fieldname.label $host
+$fieldname.info Average ping time over $times pings for $host
+$fieldname.draw LINE2
+HOST
+    }
+};
+
+sub sorted_hosts {
+    my ($self) = @_;
+
+    my @hosts = $self->hosts;
+    my $state = $self->statefile;
+
+    given ($self->statefile) {
+        when (-e and -r) {
+            my $last_res = retrieve($_);
+            my @sorted = sort { $last_res->{$b} <=> $last_res->{$a} } keys %$last_res;
+            if ($last_res and @hosts == @sorted) {
+                return @sorted;
+            }
+        }
+    }
+
+    return @hosts;
+}
+
+event print_host => sub {
+    my ($self, $context, $time) = @_;
+
+    my $fieldname = $self->fieldname($context);
+    my $value = sprintf "%6.6f", $time;
+
+    say "$fieldname.value $value";
+};
+
+sub fieldname {
+    my ($self, $name) = @_;
+    my $sha1 = substr Digest->new("SHA-1")->add($name)->hexdigest, 0, 10;
+    return clean_fieldname($name) . '_' . $sha1;
+}
+
+no MooseX::POE;
+Munin::Plugin::Multiping::Async->new;
+POE::Kernel->run;

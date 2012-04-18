@@ -1,0 +1,153 @@
+#!/bin/bash
+#
+# Munin plugin to monitor oracle connections w/o DBD::Oracle, or perl for that
+# matter ;-)
+#
+# Author: Kevin Kunkel (kunkel.kevin@gmail.com) on December 11, 2007
+# (Based off the perl munin plugin by Joan Carles Soler)
+#
+# Licenced under GPL v2.
+#
+# Usage:
+#
+#       If required, give username, password and/or oracle server
+#       host through environment variables.
+#
+# Parameters:
+#	autoconf
+#       config   (required)
+#
+# Config variables:
+#
+#       ORACLE_SID        - Which database to use. Defaults to orcl
+#       oracle_user       - A oracle user account with read permission to
+#                           the v$session view. Defaults to
+#                           'oracle'. Anyway, Munin must be told which user
+#                           this plugin should be run as.
+#       oracle_pass       - The corresponding password, if
+#                           applicable. Default to undef. 
+#
+#	SHOW_ORACLE_USERS - If set to 1 show usernames and num. of connections.
+#		     Default is not show users (0).
+# Magic markers
+#%# family=auto
+#%# capabilities=autoconf
+
+
+# Hard-code environment variables here
+
+#oracle_user=
+#oracle_pass=
+#ORACLE_SID=
+#ORACLE_HOME=
+#SHOW_ORACLE_USERS=
+
+# End variable hard-code
+
+
+
+if [ -z "$ORACLE_HOME" ] ; then
+	# Adjust to your oratab locations
+	for oratab in /var/opt/oracle/oratab /etc/oratab
+	do
+		[ ! -f $oratab ] && continue
+		IFS=:
+		while read SID HOME STARTUP;
+		do
+			if [ "$SID" = "*" ]
+			then
+				ORACLE_HOME=$HOME
+				break
+			fi
+		done < $oratab
+	[ -n "$ORACLE_HOME" ] && break
+	break
+	done
+fi
+
+if [ -z "$ORACLE_SID" ]
+then
+	ORACLE_SID="orcl"
+fi
+
+if [ -z "$oracle_user" ]
+then
+	oracle_user="oracle"
+fi
+
+if [ -z "$SHOW_ORACLE_USERS" ]
+then
+	SHOW_ORACLE_USERS=0
+else
+	if [ $SHOW_ORACLE_USERS -ne 1 ]
+	then
+		SHOW_ORACLE_USERS=0
+	fi
+fi
+
+PATH=$PATH:$ORACLE_HOME/bin
+export ORACLE_HOME PATH ORACLE_SID
+
+if [ "$1" = "autoconf" ]
+then
+	echo yes
+	exit 0
+fi
+if [ "$1" = "config" ]
+then
+	WARN_CRIT=`sqlplus -s ${oracle_user}/${oracle_pass}@$ORACLE_SID << EOF | \
+		grep -v '^$' | awk '{print $1 * 0.7 " " $1 * 0.8 }'
+set pagesize 0
+select value from v\\$parameter where name = 'sessions';
+EOF`
+	echo "graph_title Oracle active connections to $ORACLE_SID"
+	echo "graph_args -l 0 --base 1000"
+	echo "graph_vlabel Connections"
+	echo "graph_category Oracle"
+	echo "graph_info Shows active oracle connections to $ORACLE_SID"
+	echo "graph_scale no"
+	if [ $SHOW_ORACLE_USERS -eq 1 ]
+	then
+		sqlplus -s ${oracle_user}/${oracle_pass}@$ORACLE_SID << EOF | \
+			grep -v '^$' | awk '{ print $1 ".label " $1 " active connections"
+					print $1 ".info " $1 " active connections"
+					print $1 ".type GAUGE" }; END {
+					print "total.label active connections"
+					print "total.info active connections"
+					print "total.type GAUGE"
+				}'
+set pagesize 0
+select username, count(username) from v\$session where username is not null group by username;
+EOF
+		echo $WARN_CRIT| awk '{ print "total.warning " $1 "\ntotal.critical " $2 }' 
+	else
+		echo "connections.label active connections"
+		echo "connections.info active connections"
+		echo "connections.type GAUGE"
+		echo $WARN_CRIT| awk '{ print "connections.warning " $1 "\nconnections.critical " $2 }' 
+	fi
+fi
+
+
+if [ $SHOW_ORACLE_USERS -eq 1 ] 
+then
+		sqlplus -s ${oracle_user}/${oracle_pass}@$ORACLE_SID << EOF | \
+			grep -v '^$'|awk 'BEGIN { total=0 } {
+				print $1 ".value " $2 
+				total=total+$2 } END { print "total.value " total }'
+set pagesize 0
+select username, count(username) from v\$session where username is not null group by username;
+EOF
+else
+	sqlplus -s ${oracle_user}/${oracle_pass}@$ORACLE_SID << EOF | grep -v '^$'|\
+			awk '{ print "connections.value " $1 }'
+set pagesize 0
+select count(username) from v\$session where username is not null;
+EOF
+fi
+	
+echo "max_connections.value" "`sqlplus -s ${oracle_user}/${oracle_pass}@$ORACLE_SID << EOF | \
+	grep -v '^$' | awk '{print $1 }'
+set pagesize 0
+select value from v\\$parameter where name = 'sessions';
+EOF`"

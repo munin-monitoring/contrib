@@ -1,0 +1,145 @@
+	#!/usr/bin/python
+#
+#    Copyright (C) 2011  Andreas Thienemann <andreas@bawue.net>
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+"""
+=head1 NAME
+
+smart_raw__ - Munin plugin to retreive raw SMART values from a disk.
+
+=head1 APPLICABLE SYSTEMS
+
+All machines with a SMART capable disk and smartmontools installed.
+
+This plugin is very useful if you want to need to monitor a single raw S.M.A.R.T.
+value reported by a disk. Load Cycle Counts or Pending Sectors come to mind as
+these are a good indicator of problems with a disk.
+
+=head1 CONFIGURATION
+
+The plugin should be installed as smart_raw_sda_193 which means that the smart value
+numbered 193 will be read from the disk sda.
+
+
+Basic configuration for every system is that the plugin needs to be called as root
+in order to execute smartmontools.
+
+Add the following to your /etc/munin/plugin-conf.d/smart_raw:
+
+ [smart_raw_sda_193]
+ user root
+
+=head1 INTERPRETATION
+
+Smart RAW values are provided as is. You need to undertand what you are monitoring...
+
+=head1 MAGIC MARKERS
+
+  #%# family=contrib
+  #%# capabilities=
+
+=head1 VERSION
+
+0.0.1
+
+=head1 BUGS
+
+None known.
+
+=head1 AUTHOR
+
+Andreas Thienemann <andreas@bawue.net>
+
+=head1 LICENSE
+
+GPLv3+
+
+=cut
+"""
+
+import subprocess
+import sys
+import os
+import re
+import pprint
+
+# We are a wildcard plugin, figure out what we are being called for
+try:
+	disk = sys.argv[0].split('_')[2]
+	value = sys.argv[0].split('_')[3]
+except IndexError:
+	sys.exit(1)
+
+def normalize_name(name):
+    name = re.sub("[^a-z0-9A-Z]","_", name)
+    return name
+
+# Code sniplet from Philipp Keller
+# http://code.pui.ch/2007/02/19/set-timeout-for-a-shell-command-in-python/
+def timeout_command(command, timeout):
+    """call shell-command and either return its output or kill it
+    if it doesn't normally exit within timeout seconds and return None"""
+    import subprocess, datetime, os, time, signal
+    start = datetime.datetime.now()
+    process = subprocess.Popen(command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    while process.poll() is None:
+        time.sleep(0.1)
+        now = datetime.datetime.now()
+        if (now - start).seconds> timeout:
+            os.kill(process.pid, signal.SIGKILL)
+            os.waitpid(-1, os.WNOHANG)
+            return None
+    return process.stdout.read()
+
+def read_smart():
+    """Read SMART attributes"""
+    out = timeout_command("/usr/sbin/smartctl -A -d ata /dev/%s" % (disk), 2)
+    smart_attribs = dict()
+    for line in out.split('\n')[7:-2]: # Cut away the header and the footer
+        line = line.split()
+        smart_attribs[line[0]] = {
+            'name' : line[1],
+            'label' : normalize_name(line[1]),
+            'raw' : line [-1],
+        }
+    return smart_attribs
+
+def print_config():
+    """Return configuration arguments for munin"""
+    attribs = read_smart()
+    print "graph_title S.M.A.R.T raw value %s for drive %s" % (attribs[value]['name'], disk)
+    print "graph_vlabel Raw value"
+    print "graph_info RAW smartctl value"
+    print "graph_category disk"
+    print "graph_args --base 1000 -l 0"
+
+    print "%s.label %s" % (value, attribs[value]['label'])
+    sys.exit(0)
+
+def fetch():
+    attribs = read_smart()
+    print "%s.value %s" % (value, attribs[value]['raw'])
+    sys.exit(0)
+
+if "config" in sys.argv[1:]:
+    print_config()
+elif "autoconf" in sys.argv[1:]:
+    pass
+elif "suggest" in sys.argv[1:]:
+    pass
+else:
+    fetch()

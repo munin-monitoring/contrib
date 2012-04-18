@@ -1,0 +1,169 @@
+#!/usr/bin/perl -w
+#
+# Munin plugin for MythTV
+# This plugin can graph:- EPG programs per channel
+# 
+# NOTE: This plugin needs to run as root so add the following to your munin-node config file 
+#  [mythtv_status*]
+#  user=root
+#
+# $Log$
+# Revision 0.1  2008/03/27  idobson
+#
+# Revision 0.2  2010/10/07 idobson
+# Fixed up autoconf option, it actually checks if MythTV/mysql Database options are configured
+# Code now strict safe, cleaned up the sql queries
+#
+# Magic markers (optional - used by munin-config and installation scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf
+use strict;
+use warnings;
+use DBI;
+
+# SQL parameters are read from mysql.txt
+# There should be no need to change anything after this point
+my $SQLServer = "";
+my $SQLUser = "";
+my $SQLPassword = "";
+my $SQLDBName = "";
+
+my @result="";
+my $result="";
+my $gata="";
+my $VideoInput=1;
+my $Channel="";
+
+#Setup SQL access
+ PrepSQLRead();
+
+#Auto config options
+ if ($ARGV[0] and $ARGV[0] eq "autoconf" ) {
+    if ( $SQLDBName ne "" ) {
+       print "yes\n";
+       exit 0;
+    } else {
+       print "no\n";
+       print "cannot find MythTV configuration file my.txt\n";
+       exit 1;
+    }
+ } 
+ 
+#Config Options
+##Configuration for encoder, no config data needs to read from anywhere
+ if ($ARGV[0] and $ARGV[0] eq "config"){
+     print "graph_scale off\n";
+     print "graph_title MythTV EPG per channel\n";
+     print "graph_args --base 1000 --upper-limit 12 --lower-limit 0 --rigid\n";
+     print "graph_category MythTV\n";
+     print "graph_vlabel EPG days\n";
+     @result=SQLQuery("SELECT  `chanid` , `name` FROM `channel` WHERE `visible` = '1' order by `chanid` ");
+     my $Ptr=0;
+     foreach $gata  (@result) {
+      if ($Ptr == 0) {
+       $Channel = $gata;
+       print "Channel" . $Channel . "EPG.draw LINE1\n";
+       print "Channel" . $Channel . "EPG.min -1\n";
+       print "Channel" . $Channel . "EPG.max 12\n";
+       $Ptr=1;
+      } else {
+       print "Channel" . $Channel . "EPG.label EPG days for channel $gata\n";
+       $Ptr=0;
+      }
+     }   
+   exit 0;
+ }
+
+#Actually dump data to Munin
+   @result=SQLQuery("SELECT o.chanid, (UNIX_TIMESTAMP(MAX(c.endtime)) 
+                     - UNIX_TIMESTAMP(NOW()))/86400  
+                     FROM  channel o, program c 
+                     WHERE o.chanid = c.chanid
+                     AND o.visible = '1'  
+                     GROUP BY o.chanid");
+     my $Ptr=0;
+     foreach $gata (@result) {
+      if ($Ptr == 0) {
+       $Channel = $gata;
+       $Ptr=1;
+      } else {
+       if ( $gata > 12 ) {
+         print "Channel" . $Channel . "EPG.value 12.0\n";  
+     } else {
+         print "Channel" . $Channel . "EPG.value $gata\n";
+       } 
+       $Ptr=0;
+      }
+   }
+
+exit 0;
+
+
+#Try and read MythTV configuration parameters from mysql.txt (This could be in several places)
+sub PrepSQLRead {
+    my $hostname = `hostname`;
+    chomp($hostname);
+    
+# Read the mysql.txt file in use by MythTV. Could be in a couple places, so try the usual suspects
+    my $found = 0;
+    my @mysql = ('/usr/local/share/mythtv/mysql.txt',
+                 '/usr/share/mythtv/mysql.txt',
+                 '/etc/mythtv/mysql.txt',
+                 '/usr/local/etc/mythtv/mysql.txt',
+                 'mysql.txt'
+                );
+    foreach my $file (@mysql) {
+        next unless (-e $file);
+        $found = 1;
+        open(CONF, $file) or die "Unable to open $file:  $!\n\n";
+        while (my $line = <CONF>) {
+        # Cleanup
+            next if ($line =~ /^\s*#/);
+            $line =~ s/^str //;
+            chomp($line);
+        # Split off the var=val pairs
+            my ($var, $val) = split(/\=/, $line, 2);
+            next unless ($var && $var =~ /\w/);
+            if ($var eq 'DBHostName') {
+                $SQLServer = $val;
+            }
+            elsif ($var eq 'DBUserName') {
+                $SQLUser = $val;
+            }
+            elsif ($var eq 'DBName') {
+                $SQLDBName = $val;
+            }
+            elsif ($var eq 'DBPassword') {
+                $SQLPassword = $val;
+            }
+        # Hostname override
+            elsif ($var eq 'LocalHostName') {
+                $hostname = $val;
+            }
+        }
+        close CONF;
+    }
+    die "Unable to locate mysql.txt:  $!\n\n" unless ($found && $SQLServer);
+    return 0;
+}
+
+#Perform  SQL query
+sub SQLQuery {
+   my  ($QUERY) = @_;
+   my @data;
+   my $ref;
+   my $dbh = DBI->connect("DBI:mysql:$SQLDBName:$SQLServer", $SQLUser, $SQLPassword) 
+         or die "Couldn't connect to database: " . DBI->errstr;
+   my $table_data = $dbh->prepare($QUERY) or die "Couldn't prepare statement: " . $dbh->errstr;
+   $table_data->execute or die "Couldn't execute statement: " . $table_data->errstr;
+
+   while ( $ref = $table_data->fetchrow_arrayref() )  {
+      push (@data,@{$ref})
+   }
+   if ($data[0]) {
+     return @data;
+   } else {
+     return 0;
+   }   
+}

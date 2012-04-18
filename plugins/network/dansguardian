@@ -1,0 +1,79 @@
+#!/usr/bin/perl -w
+#
+# Parameters:
+#
+# 	logfile      - Location of the query log
+# 	statefile    - Where to put temporary statefile.
+#
+# Stolen directly from the bind log analzyer
+# contributed by Nicolai Langfeldt
+#
+# Modified by Sean Whitney
+# $Id: dansguardian,v 1.1 2011/10/04 13:53:17 root Exp root $
+#
+#%# family=contrib
+
+use strict;
+
+my $QUERYLOG = $ENV{logfile} || '/var/log/dansguardian/access.log';
+my $STATEFILE = $ENV{statefile}
+  || '/var/lib/munin/plugin-state/dansguardian.state';
+my %IN;
+
+sub get_state {
+    open( Q, "< $STATEFILE" ) or die;
+    while (<Q>) {
+        chomp;
+        my ( $q, $n ) = split( /\s+/, $_, 2 );
+        $IN{$q} = $n unless defined( $IN{$q} );
+    }
+    close(Q);
+}
+
+sub do_stats {
+    my $k;
+
+    open( Q, "< $QUERYLOG" ) or die "$!";
+    while (<Q>) {
+        chomp;
+        my ( $date, $time, $sep, $ip, $url, $action, $rest ) = split(' ');
+        $action =~ s/[^a-zA-Z0-9]//g;
+        $IN{$action}++;
+    }
+    close(Q);
+
+    get_state;
+
+    open( Q, "> $STATEFILE" ) or die;
+    foreach $k ( keys %IN ) {
+        print "query_$k.value ", $IN{$k}, "\n";
+        print Q "$k ", $IN{$k}, "\n";
+    }
+    close(Q);
+
+}
+
+sub do_config {
+    my $k;
+
+    print "graph_title Danguardian hits by type\n";
+    print "graph_vlabel Hits / \${graph_period}\n";
+    print "graph_category network\n";
+    print "graph_info This graph shows the rate of traffic through a dansguardian filter\n";
+
+    get_state;
+    foreach $k ( keys %IN ) {
+        print "query_$k.label $k\n";
+	print "query_$k.type DERIVE\n";
+	print "query_$k.min 0\n";
+    }
+}
+
+if ( defined( $ARGV[0] ) and ( $ARGV[0] eq 'config' ) ) {
+    do_config;
+    exit(0);
+}
+
+do_stats;
+
+# vim:syntax=perl

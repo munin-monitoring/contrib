@@ -1,0 +1,96 @@
+#!/usr/bin/env ruby
+
+# netstat_bsd_m revision 1 (Feb 2012)
+#
+# This plugin shows various statistics from 'netstat -m'
+#
+# Required privileges: none
+#
+# OS:
+# 	Supposed: BSD
+# 	Tested:   FreeBSD 8.2
+#
+# Author: Artem Sheremet <dot.doom@gmail.com>
+#
+
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+# original filename
+PLUGIN_NAME = 'netstat_bsd_m_'
+
+class String
+	def escape
+		self.gsub /[^\w]/, '_'
+	end
+
+	unless method_defined? :start_with?
+		def start_with?(str)
+			self[0...str.size] == str
+		end
+	end
+end
+
+def netstat_m(filter = nil)
+	Hash[`netstat -m`.split($/).map { |line|
+		if line =~ /^([\d\/K]+) (.*) \(([\w\/+]+)\)$/
+			# 7891K/22385K/30276K bytes allocated to network (current/cache/total)
+			values, desc, names = $1, $2, $3
+			[desc, names.split('/').zip(values.split '/')] if filter.nil? or desc.escape == filter
+		elsif line =~ /^(\d+) (.*)$/
+			# 12327 requests for I/O initiated by sendfile
+			value, desc = $1, $2
+			[desc, [[ :value, value ]]] if filter.nil? or desc.escape == filter
+		end
+	}.compact]
+end
+
+stat_name = File.basename($0, '.*').escape
+stat_name.slice! 0, PLUGIN_NAME.size if stat_name.start_with? PLUGIN_NAME
+
+case ARGV.first
+when 'autoconf'
+	puts `uname -s`.include?('FreeBSD') ? 'yes' : 'no'
+when 'suggest'
+	puts netstat_m.keys.map(&:escape).join $/
+when 'config'
+	data = netstat_m(stat_name)
+	if data.empty?
+		warn "no data for <#{stat_name}>. Try running with 'suggest'"
+	else
+		desc, values = data.first
+		stack = values.size > 1
+		first = true
+		puts <<CONFIG
+graph_title Netstat: #{desc}
+graph_category netstat
+graph_vtitle current
+graph_order #{values.map { |name, _| name.to_s.escape }.join ' '}
+CONFIG
+		puts values.map { |name, _|
+			esc_name = name.to_s.escape
+			"#{esc_name}.draw " + if %w(total max).include? name
+				'LINE'
+			elsif stack
+				if first
+					first = false
+					'AREA'
+				else
+					'STACK'
+				end
+			else
+				'LINE2'
+			end + "\n#{esc_name}.label #{name}"
+		}.join $/
+	end
+when nil # fetch
+	data = netstat_m(stat_name)
+	unless data.empty?
+		puts data.first.last.map { |name, value|
+			value = value.to_i * 1024 if value.end_with? 'K'
+			"#{name.to_s.escape}.value #{value}"
+		}.join $/
+	end
+else
+	warn "unrecognized argument <#{ARGV.fist}>"
+end

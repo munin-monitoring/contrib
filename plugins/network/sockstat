@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+
+PATH=/bin:/usr/bin
+
+if [ "$1" = "autoconf" ]; then
+  echo yes
+  exit 0
+fi
+
+DAEMONS=`sockstat | awk '{print substr($0, 1, 8)}' | sort | uniq`
+
+if [ "$1" = "config" ]; then
+  echo 'graph_title Connections'
+  echo 'graph_vlabel Connections'
+  echo 'graph_noscale true'
+  echo 'graph_category network'
+  echo 'graph_info This graph shows connections load.'
+
+  for D in $DAEMONS
+  do
+      echo "_$D.label $D"
+  done
+
+  echo "_TOTAL.label TOTAL"
+
+  exit 0
+fi
+
+VALUES=`sockstat | awk '{print substr($0, 1, 8)}' | sort | uniq -c`
+NUM=1
+
+for D in $DAEMONS
+do
+    echo -n "_$D.value "
+    VAL=`echo $VALUES | cut -d ' ' -f $NUM`
+    echo $VAL
+NUM=$(($NUM + 2))
+done
+
+echo -n "_TOTAL.value "
+sockstat | wc -l

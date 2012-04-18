@@ -1,0 +1,98 @@
+#!/bin/bash
+
+# Plugin to monitor traffic rate to specific host.
+#
+# Requirements:
+#	- tcpdump
+#	- should be run as root or any other user for tcpdump
+#
+# Parameters supported:
+#	config
+#	autoconf
+#
+# Configurable variables
+#
+#	type       - monitor type. Available values: packets, bytes. Defaults to packets because it's faster
+#	hostname   - mandatory. Hostname (ip) to monitor connections to. Actually just a part of tcpdump expr.
+#                    Thus a hack: '1.2.3.4 and port 80' will monitor port 80 only. Bingo!
+#	interface  - self-explanatory
+#
+# IMPORTANT! This plugin spawns 'tcpdump' process along with bash shell piping tcpdump output there
+# PLEASE DO NOT FORGET TO KILL when removing plugin/stopping/etc. You can kill any of three, the others should die
+#
+# Revision 0.1  2011/08/06 Artem Sheremet
+# Revision 0.2  2011/10/23 -
+
+INTERVAL=300
+
+if [ -z "$type" ]; then
+        type=packets
+fi
+
+if [ -z "$hostname" ]; then
+        echo "Configuration problem" >&2
+        exit 1
+fi
+
+if [ "$interface" ]; then
+	interface="-i $interface"
+fi
+
+TCPDUMP="tcpdump $interface -nqt host $hostname"
+
+if [ "$1" = "config" ]; then
+        echo "graph_title Number of $type for host $hostname"
+        if [ "$type" == "bytes" ]; then
+                echo "graph_args --base 1024"
+        fi
+        echo "graph_category network"
+        echo "graph_vlabel $type per second"
+        echo "graph_info This plugin shows number of $type within host $hostname through the tcp protocol using tcpdump"
+        echo "rate.label $type within $hostname"
+        exit 0
+fi
+
+TMP_DIR="/tmp/host_traffic_${hostname}_${type}"
+
+if [ ! -d "$TMP_DIR" ]; then
+	mkdir -p "$TMP_DIR"
+fi
+
+if [ -f "$TMP_DIR/pid" ]; then
+	PID=`cat "$TMP_DIR/pid"`
+
+	if [ -z "$PID" -o ! -d /proc/$PID ]; then
+		unset PID
+	fi
+fi
+
+if [ "$PID" ]; then
+	rm -f "$TMP_DIR/value"
+	# IPC: call data print & reset
+	kill -USR1 $PID
+	# wait 10 sec for data to arrive
+	for i in {1..10}; do
+		if [ -r "$TMP_DIR/value" ]; then
+			VALUE=`cat "$TMP_DIR/value"`
+			echo $VALUE $INTERVAL | awk '{ printf("rate.value %.3f\n", $1/$2) }'
+			exit 0
+		fi
+		sleep 1
+	done
+	echo "rate.value U"
+else
+	$TCPDUMP 2>/dev/null | (
+		COUNTER=0
+		# IPC: install SIGUSR1 handler
+		trap 'echo $COUNTER > "$TMP_DIR/value"; COUNTER=0' SIGUSR1
+		echo $BASHPID >"$TMP_DIR/pid"
+		while read line; do
+			if [[ "$type" == "bytes" ]]; then
+				# get the last field separated by space
+				COUNTER=$(($COUNTER+${line/* /})) 2>/dev/null
+			else
+				COUNTER=$(($COUNTER+1))
+			fi
+		done
+	) 2>/dev/null &
+fi

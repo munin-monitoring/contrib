@@ -1,0 +1,47 @@
+#!/bin/sh
+#
+#  pdns_recursor munin plugin.
+#  Written by Sean Reifschneider <jafo@tummy.com> 2009-12-03
+#  Placed in the public domain
+#
+#  Requires running as root:
+#
+#    echo '[pdns_rec_*]' >/etc/munin/plugin-conf.d/pdns_rec
+#    echo 'user root' >>/etc/munin/plugin-conf.d/pdns_rec
+
+if [ "$1" = "autoconf" ]; then
+	if [ -e /usr/bin/rec_control ]; then
+		echo yes
+		exit 0
+	else
+		echo no
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title PDNS Outbound Queries'
+	echo 'graph_order all tcp'
+	echo 'graph_vlabel queries'
+	echo 'graph_info Outbound queries'
+	echo 'graph_category pdns'
+
+	echo 'all.label all'
+	echo 'all.min 0'
+	echo 'all.max 100000'
+	echo 'all.type COUNTER'
+	echo 'all.info All queries'
+
+	echo 'tcp.label tcp'
+	echo 'tcp.min 0'
+	echo 'tcp.max 100000'
+	echo 'tcp.type COUNTER'
+	echo 'tcp.info TCP queries'
+
+	exit 0
+fi
+
+echo all.value `rec_control get all-outqueries`
+echo tcp.value `rec_control get tcp-outqueries`
+
+exit 0

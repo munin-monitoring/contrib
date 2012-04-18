@@ -1,0 +1,283 @@
+#!/usr/bin/env python
+# -*- encoding: iso-8859-1 -*-
+#
+# Wildcard-plugin to monitor DVB signal information via femon command line utility,
+# 
+# To monitor a dvb device, link femon_<device> to this file. 
+# E.g.
+#    ln -s /usr/share/munin/plugins/femon_ /etc/munin/plugins/femon_adapter0
+# ...will monitor /dev/dvb/adapter0.
+#
+# Needs following minimal configuration in plugin-conf.d/munin-node:
+#   [femon_*]
+#   user root
+#
+# Parameters
+# 	femonpath     - Specify path to femon program (Default: /usr/bin/femon)
+# 
+# Author: Nicolas Knotzer  <nknotzer@gmail.com>
+# 
+# v1.0 02/10/2011
+# v1.1 20/10/2011 - Prints OSError.strerror in verbose mode, uses rsplit instead of split for parsing femon output
+# v1.2 21/20/2011 - Uses subprocess.Popen instead of subprocess.check_output for compatibility with older python versions
+#
+# Copyright (c) 2011 Nicolas Knotzer.
+#
+# The smart_ plugin by Nicolas Stransky <Nico@stransky.cx> was used as a template!
+#
+# Permission to use, copy, and modify this software with or without fee
+# is hereby granted, provided that this entire notice is included in
+# all source code copies of any software which is or includes a copy or
+# modification of this software.
+#
+# THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR
+# IMPLIED WARRANTY. IN PARTICULAR, NONE OF THE AUTHORS MAKES ANY
+# REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE
+# MERCHANTABILITY OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR
+# PURPOSE.
+#
+#
+# Magic markers
+#%# capabilities=autoconf suggest
+#%# family=auto
+
+## You may edit the following 2 variables
+# Increase verbosity (True/False)
+verbose=False
+# Modify to your needs:
+statefiledir='/var/lib/munin/plugin-state'
+# You may not modify anything below this line
+
+import os, sys, string, subprocess
+from math import log
+plugin_version="1.2"
+
+def verboselog(s):
+    global plugin_name
+    sys.stderr.write(plugin_name+': '+s+'\n')
+
+if not verbose :
+    verboselog = lambda s: None
+
+def find_dvb_adapters() :
+    adapters=[]
+    if os.path.exists('/dev/dvb/'):
+        try :
+            for adapter in os.listdir('/dev/dvb/') :
+                try :
+                    verboselog('Found '+adapter+'...')
+                    adapters.append(adapter)
+                except :
+                    continue
+        except : 
+            verboselog('Failed to list adapters in /dev/dvb')
+    return(adapters)
+
+def get_dvb_adapter_name() :
+    global plugin_name
+    try :
+        name=[plugin_name[string.rindex(plugin_name,'_')+1:]]
+        
+        # Check that the adapter exists in /dev/dvb
+        if not os.path.exists('/dev/dvb/'+name[0]):
+            verboselog('/dev/dvb/'+name[0]+' not found!')
+            sys.exit(1)
+        return(name)
+    except :
+        verboselog('No dvb adapter name found in plugin\'s symlink!')
+        sys.exit(1)
+
+def print_adapter_config(dvb_adapter) :
+    verboselog('Printing configuration')
+    print ('graph_title DVB Femon Sensors '+dvb_adapter[0])
+    print ('graph_args -l 0')
+    print ('graph_vlabel Quality')
+    print ('graph_category DVB')
+    print ('graph_info This graph shows the femon values for your DVB '+dvb_adapter[0])
+
+    print ('str.label Signal Strength')
+    print ('str.info Signal Strength')
+    print ('str.draw LINE2')
+
+    print ('snr.label Signal-to-Noise Ratio')
+    print ('snr.info Signal-to-Noise Ratio')
+    print ('snr.draw LINE2')
+
+    print ('ber.label Bit Error Rate')
+    print ('ber.info Bit Error Rate')
+    print ('ber.draw LINE2')
+
+    print ('unc.label Uncorrected Blocks')
+    print ('unc.info Uncorrected Blocks')
+    print ('unc.draw LINE2')
+
+
+def print_dvb_adapter_values(dvb_adapter) :
+    try :
+        
+        verboselog('Reading values from '+dvb_adapter[0])
+        mypipe = subprocess.Popen([os.getenv('femonpath','/usr/bin/femon'), '-H', '-c 1', '-a '+dvb_adapter[0].replace('adapter','')], stdout=subprocess.PIPE)
+        femon_output = mypipe.communicate()[0]        
+	verboselog(femon_output)
+    except OSError, e:
+        verboselog('Cannot access femon values! Check user rights or proper femon installation.')
+        verboselog('Error: '+e.strerror)
+        sys.exit(1)
+    splitstr=femon_output.rsplit ('|',5)
+    print ('str.value '+splitstr[1].replace('signal','').strip(' %'))
+    print ('snr.value '+splitstr[2].replace('snr','').strip(' %'))
+    print ('ber.value '+splitstr[3].replace('ber','').strip(' '))
+    print ('unc.value '+splitstr[4].replace('unc','').strip(' '))
+
+
+### Main part ###
+
+plugin_name=list(os.path.split(sys.argv[0]))[1]
+verboselog('plugins\' UID: '+str(os.geteuid())+' / plugins\' GID: '+str(os.getegid()))
+
+# Parse arguments
+if len(sys.argv)>1 :
+    if sys.argv[1]=="config" :
+        dvb_adapter=get_dvb_adapter_name()
+        print_adapter_config (dvb_adapter)
+        sys.exit(0)
+    elif sys.argv[1]=="autoconf" :
+        if os.path.exists(os.getenv('femonpath','/usr/bin/femon')) : 
+            if not find_dvb_adapters():
+                print('no (no dvb adapters accessible)')
+            else :
+                print('yes')
+            sys.exit(0)
+        else : 
+            print('no (femon not found)')
+            sys.exit(0)
+    elif sys.argv[1]=="suggest" :
+        for adapter in find_dvb_adapters() :
+            print(adapter)
+        sys.exit(0)
+    elif sys.argv[1]=="version" :
+        print('femon_ Munin plugin, version '+plugin_version)
+        sys.exit(0)
+    elif sys.argv[1]!="" :
+        verboselog('unknown argument "'+sys.argv[1]+'"')
+        sys.exit(1)
+
+# No argument given, doing the real job:
+dvb_adapter=get_dvb_adapter_name()
+print_dvb_adapter_values (dvb_adapter)
+exit(0)
+
+
+### The following is the _ plugin documentation, intended to be used with munindoc
+"""
+=head1 NAME
+
+femon_ - Munin wildcard-plugin to monitor dvb signal information attribute values through femon
+
+=head1 APPLICABLE SYSTEMS
+
+Node with B<Python> interpreter and B<femon> 
+installed and in function.
+
+=head1 CONFIGURATION
+	
+=head2 Create link in service directory
+
+To monitor a dvb device, create a link in the service directory
+of the munin-node named femon_<device>, which is pointing to this file.
+ 
+E.g.
+
+ln -s /usr/share/munin/plugins/femon_ /etc/munin/plugins/femon_adapter0
+
+...will monitor /dev/dvb/adapter0.
+
+=head2 Grant privileges in munin-node
+
+The plugin must be run under high privileged user B<root>, to get access to the raw device.
+
+So following minimal configuration in plugin-conf.d/munin-node is needed.
+
+=over 2
+
+  [femon_*]
+  user root
+
+=back
+
+=head2 Set Parameter if needed
+
+  femonpath     - Specify path to femon program (Default: /usr/bin/femon)
+  
+=head1 INTERPRETATION
+
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=head1 CALL OPTIONS
+
+B<none>
+
+=over 2
+
+Fetches values if called without arguments:
+
+E.g.: munin-run femon_adapter0
+
+=back
+
+B<config>
+
+=over 2
+
+Prints plugins configuration.
+
+E.g.: munin-run femon_adapter0 config
+
+=back
+
+B<autoconf>
+
+=over 2
+
+Tries to find femon and outputs value 'yes' for success, 'no' if not.
+
+It's used by B<munin-node-configure> to see wether autoconfiguration is possible.
+
+=back
+
+B<suggest>
+
+=over 2
+
+Outputs the list of device names, that it found plugged to the system.
+
+B<munin-node-configure> use this to build the service links for this wildcard-plugin.
+
+=back
+
+=head1 VERSION
+
+Version 1.2
+
+=head1 BUGS
+
+None known
+
+=head1 AUTHOR
+
+(C) 2011 Nicolas Knotzer <nknotzer@gmail.com>
+
+The smart_ plugin by Nicolas Stransky <Nico@stransky.cx> was used as a template!
+
+=head1 LICENSE
+
+GPLv2 (http://www.gnu.org/licenses/gpl-2.0.txt)
+
+=cut
+
+
+"""

@@ -1,0 +1,129 @@
+#!/bin/sh
+#
+# Copyright (C) 2009 Alexey Illarionov <littlesavage@rambler.ru>
+#
+# Wildcard plugin to monitor ipfw nat aliasing links count
+#
+# Usage: Link ipfwnat_<nat number> to this file. E.g,
+#
+#	ln -s ipfwnat_ /etc/munin/node.d/ipfwnat_123
+#
+# ... will moninot nat number 123
+#
+# This plugin needs to be run as root. Sample plugins.conf:
+#
+# [ipfwnat_*]
+# user root
+#
+# Furthermore, nat configuration must contain "log" option. E.g.
+#
+# ipfw nat 123 config ip 198.76.28.4 log 
+#
+# This plugin is based on the if_ plugin.
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+NAT_NUM=`basename $0 | sed 's/^ipfwnat_//g'`
+
+ipfw="/sbin/ipfw"
+
+if [ "$1" = "autoconf" ]; then
+	if [ ! -x $ipfw ]; then
+		echo "no ($ipfw not found)"
+		exit 1
+	fi
+
+	err=$($ipfw nat show config 2>&1)
+	if [ $? -ne 0 ]; then
+		echo "no ($err)"
+		exit 1
+	fi
+
+	echo "yes"
+	exit 0
+fi	
+
+if [ "$1" = "suggest" ]; then
+	$ipfw nat show config 2> /dev/null | /usr/bin/awk '/nat [0-9]+ .+ log/{print $3;}'
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+	echo "graph_title Ipfw NAT ${NAT_NUM} aliasing links count"
+	echo 'graph_args --base 1000 -l 0'
+	echo 'graph_vlabel links count'
+	echo 'graph_noscale true'
+	echo 'graph_category network'
+
+	echo 'tcp.draw AREA'
+	echo 'tcp.label tcp'
+	echo 'tcp.info TCP aliasing links count'
+
+	echo 'udp.draw STACK'
+	echo 'udp.label udp'
+	echo 'udp.info UDP aliasing links count'
+
+	echo 'sctp.draw STACK'
+	echo 'sctp.label sctp'
+	echo 'sctp.info SCTP aliasing links count'
+
+	echo 'icmp.draw STACK'
+	echo 'icmp.label icmp'
+	echo 'icmp.info ICMP aliasing links count'
+
+	echo 'pptp.draw STACK'
+	echo 'pptp.label pptp'
+	echo 'pptp.info PPTP aliasing links count'
+
+	echo 'proto.draw STACK'
+	echo 'proto.label proto'
+	echo 'proto.info proto aliasing links count'
+
+	echo 'fragid.draw STACK'
+	echo 'fragid.label frag_id'
+	echo 'fragid.info Fragment id aliasing links count'
+
+	echo 'fragptr.draw STACK'
+	echo 'fragptr.label frag_ptr'
+	echo 'fragptr.info Fragment ptr aliasing links count'
+
+	echo "graph_info Ipfw NAT ${NAT_NUM} aliasing links count."
+	exit 0
+fi
+
+$ipfw nat ${NAT_NUM} show 2>/dev/null | /usr/bin/awk '
+BEGIN {
+	res["tcp"] = "U";
+	res["udp"] = "U";
+	res["sctp"] = "U";
+	res["icmp"] = "U";
+	res["pptp"] = "U";
+	res["proto"] = "U";
+	res["frag_id"] = "U";
+	res["frag_ptr"] = "U";
+}
+/^nat [0-9]+:/{
+	split($0, a, /[,\/:[:space:]]+/);
+	for (f in a) {
+		if (a[f] ~ /^[a-z_]+=[0-9]+$/) {
+			split(a[f], v, /=/);
+			res[v[1]] += (v[2] + 0);
+		}
+	}
+ }
+END {
+	printf "tcp.value %s\n", res["tcp"];
+	printf "udp.value %s\n", res["udp"];
+	printf "sctp.value %s\n", res["sctp"];
+	printf "icmp.value %s\n", res["icmp"];
+	printf "pptp.value %s\n", res["pptp"];
+	printf "proto.value %s\n", res["proto"];
+	printf "fragid.value %s\n", res["frag_id"];
+	printf "fragptr.value %s\n", res["frag_ptr"];
+}
+'
+

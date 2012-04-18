@@ -1,0 +1,160 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+multi_tcp_ping - Graphs together the TCP ping results for several hosts
+
+=head1 SYNOPSIS
+
+This plugin is meant to be called from Munin. You should set the
+'hosts' environment variable from Munin's configuration (i.e.
+/etc/munin/munin.conf) to specify which hosts and ports to query.
+
+=head1 DESCRIPTION
+
+This plugin expects to receive the following environment variables:
+
+=over 4
+
+=item hosts (REQUIRED!)
+
+Comma-separated list of hosts to query. You can specify the TCP port
+to connect to on each of the hosts by listing them as host:port - The
+port defaults to 80. The following is a valid hosts declaration:
+
+    hosts='192.168.0.15, 192.168.0.18:22'
+
+It will query host 192.168.0.15 on the default port (80), as well as
+host 192.168.0.18 on port 22.
+
+=back
+
+If the connection was opened successfully, it gives as the return
+value the time it took to establish the connection. If the requested
+host is not reachable, a hard-wired '-0.01' will be returned. Why
+-0.01? Because giving a negative value is the best way to easily get
+-visually- that something failed. Connection establishment times are
+usually in the 5-500ms range. 100ms will be not too little (and thus
+invisible), not too much (and thus killing the details in our graphs).
+
+=head1 DEPENDS ON
+
+L<Net::Ping>
+
+=head1 SEE ALSO
+
+L<munin>, L<munin-node>
+
+=head1 AUTHOR
+
+Gunnar Wolf <gwolf@gwolf.org>
+
+=head1 COPYRIGHT
+
+
+Copyright 2008 Gunnar Wolf, Instituto de Investigaciones
+Economicas, UNAM. This plugin is Free Software; you can
+redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation; version 2
+dated June, 1991, or any later version (at your choice).
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
+USA.
+
+=cut
+
+use strict;
+use warnings;
+use threads;
+use Net::Ping;
+my (%defaults, @hosts, $cmd_arg);
+
+%defaults = (port => 80, timeout => 2, unreachable => -0.01);
+@hosts = get_hosts($ENV{hosts});
+die "Hosts not set - cannot continue\n" unless @hosts;
+
+$cmd_arg = $ARGV[0] || '';
+config() if($cmd_arg eq "config");
+autoconf() if ($cmd_arg eq 'autoconf');
+
+for my $host (@hosts) { 
+    threads->new(\&ping_host, $host)
+}
+
+map {$_->join} threads->list;
+exit 0;
+
+sub ping_host {
+    my ($host, $addr, $p, $ret, $time, $ip);
+    $host = shift;
+    $addr = host_label_for($host);
+
+    $p=Net::Ping->new("tcp", $defaults{timeout});
+    $p->hires();
+    $p->{port_num} = $host->[1] || $defaults{port};
+
+    ($ret, $time, $ip) = $p->ping($host->[0]);
+
+    $time = $defaults{unreachable} if !$ret;
+    print "${addr}.value $time\n";
+}
+
+sub get_hosts {
+    # Hosts are defined in the 'hosts' environment variable. It's a list of
+    # hosts (and optionally ports) - We parse the list and arrange it neatly
+    # to be easily consumed.
+    my ($hostsdef, @hosts);
+    $hostsdef = shift;
+    return unless $hostsdef;
+
+    for my $host (split(/,/, $hostsdef)) {
+	$host =~ s/\s//g;
+
+	$host =~ /^(?:([^:]+))
+	    (?::(\d+))?$/x;
+
+	push @hosts, [$1, $2 || $defaults{port}];
+
+    }
+
+    return @hosts;
+}
+
+sub config {
+    my @res = ("graph_title TCP connection times",
+	       "graph_args --base 1000 -l 0",
+	       "graph_vlabel seconds",
+	       "graph_category network",
+	       "graph_info Shows the time to establish a TCP connection");
+    for my $host (@hosts) {
+	my $addr = host_label_for($host);
+	push @res, "$addr.label $addr";
+	push @res, "$addr.draw LINE2";
+	push @res, "$addr.info Time to establish TCP connection to " .
+	    "$host->[0]:$host->[1]";
+
+    }
+
+    print map {"$_\n"} @res;
+    exit 0;
+}
+
+sub autoconf {
+    print "yes\n";
+    exit 0;
+}
+
+sub host_label_for {
+    my ($ip, $port) = @{$_[0]};
+    # Periods and colonsare not allowed in variable names
+    my $addr = "src_${ip}_${port}";
+    $addr =~ s/\./_/g;
+    return $addr;
+}

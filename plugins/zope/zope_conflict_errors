@@ -1,0 +1,58 @@
+#!/usr/bin/python
+#
+# Copyright (c) 2008 LOGILAB S.A. (Paris, FRANCE).
+# http://www.logilab.fr/ -- mailto:contact@logilab.fr
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2 of the License, or (at your option) any later
+# version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details
+#
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to the Free Software Foundation, Inc.,
+# 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#%# family=contrib
+#%# capabilities=autoconf suggest
+
+# this should really go in plugins.conf
+# logs = ['/var/lib/zope/plone-site/event.log',]
+logs = []
+date_format = '%Y-%m-%dT%H:%M:%S'
+#end config
+
+from sys import argv
+from datetime import datetime
+import time
+
+
+if len(argv) > 1:
+    if argv[1] == 'config':
+
+        print """graph_title Zope Conflict Errors 
+    graph_vlabel Count 
+    graph_category Zope
+    graph_info The number of conflict errors in event logs over the past 24h""".replace("\n    ","\n")
+        for i in range(0,len(logs)):
+            print """error_count%(i)s.label %(n)s error count"""% dict(i=i,
+                                                                       n=logs[i])
+    elif argv[1] == 'autoconf':
+        print 'yes'
+else:
+    for i in range(0,len(logs)):
+        log = logs[i]
+        error_count = 0
+        for line in file(log):
+            splitted = line.split()
+            if 'ConflictError' in splitted:
+                logdate = datetime(*time.strptime(splitted[0], date_format)[:-3])
+                delta = datetime.now() - logdate
+                if delta.days >= 1:
+                    continue
+                error_count += 1 
+        id = dict(i=i)
+        print 'error_count%(i)s.value' % id, error_count
+                    

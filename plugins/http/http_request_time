@@ -1,0 +1,143 @@
+#!/usr/bin/perl
+
+=head1 INSTALLATION
+
+	This plugin does http requests to specified URLs and takes the response time.
+	Use it to monitor remote sites.
+	
+	LWP::UserAgent and Time::HiRes are required
+
+=head1 CONFIGURATION
+
+  [http_request_time]
+     env.url   http://127.0.0.1/1 http://127.0.0.1/2 http://127.0.0.1/3
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+use strict;
+use warnings;
+use Munin::Plugin;
+use Time::HiRes qw(gettimeofday tv_interval);
+my $ret = undef;
+
+need_multigraph();
+
+sub clean {
+	my $surl=shift;
+	$surl=~s/^https?:\/\///;
+	$surl=~s|%[\w\d]|_|g;
+	$surl=~s|[^\w\d_]|_|g;
+	$surl=~s|_*$||g;
+	$surl=~s|^_*||g;
+	return $surl;
+};
+
+
+if (! eval "require LWP::UserAgent;")
+{
+	$ret = "LWP::UserAgent not found";
+        if ( ! defined $ARGV[0] ) {
+                die $ret;
+        }
+}
+
+my $URL = $ENV{'url'}?$ENV{'url'}:"http://127.0.0.1/";
+my %URLS;
+foreach $_ (split(/ /,$URL)){
+	$URLS{$_}={
+		url=>$_,
+		surl=>clean($_),
+		time=>'U'
+	};
+}
+
+if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" )
+{
+	if ($ret)
+	{
+		print "no ($ret)\n";
+		exit 0;
+	}
+
+	my $ua = LWP::UserAgent->new(timeout => 30);
+
+	foreach my $url (keys %URLS) {
+		my $response = $ua->request(HTTP::Request->new('GET',$url));
+                if ($response->is_success) {
+                	next;
+                }
+                else {
+                        print "no (URL $url: ". $response->message .")\n";
+                        exit 0;
+                }
+	}
+	print "yes\n";
+	exit 0;
+}
+
+if ( defined $ARGV[0] and $ARGV[0] eq "config" )
+{
+	# master graph
+	print "multigraph http_request_time\n";
+	print "graph_title HTTP(S) Request response times\n";
+	print "graph_args --base 1000\n";
+	print "graph_vlabel response time in ms\n";
+	print "graph_category other\n";
+
+	my @go;
+	foreach my $url (values %URLS) {
+		print "$$url{'surl'}.label $$url{'url'}\n";
+		print "$$url{'surl'}.info The response time of a single request\n";
+		print "$$url{'surl'}.min 0\n";
+		print "$$url{'surl'}.draw LINE1\n";
+		push(@go,$$url{'surl'});
+	}
+
+	# multigraphs
+
+	foreach my $url (values %URLS) {
+		print "\nmultigraph http_request_time.$$url{'surl'}\n";
+		print "graph_title $$url{'url'}\n";
+		print "graph_args --base 1000\n";
+		print "graph_vlabel response time in ms\n";
+		print "graph_category other\n";
+		print "$$url{'surl'}.label $$url{'url'}\n";
+		print "$$url{'surl'}.info The response time of a single request\n";
+		print "$$url{'surl'}.min 0\n";
+		print "$$url{'surl'}.draw LINE1\n";
+	}
+
+	exit 0;
+}
+
+my $ua = LWP::UserAgent->new(timeout => 15);
+
+foreach my $url (values %URLS) {
+	my $t1=[gettimeofday];
+	my $response = $ua->request(HTTP::Request->new('GET',$$url{'url'}));
+	my $t2=[gettimeofday];
+	if ($response->is_success) {
+		$$url{'time'}=sprintf("%d",tv_interval($t1,$t2)*1000);
+	};		
+};
+
+print("multigraph http_request_time\n");
+foreach my $url (values %URLS) {
+	print("$$url{'surl'}.value $$url{'time'}\n");
+}
+foreach my $url (values %URLS) {
+	print("\nmultigraph http_request_time.$$url{'surl'}\n");
+	print("$$url{'surl'}.value $$url{'time'}\n");
+}
+
+
+# vim:syntax=perl

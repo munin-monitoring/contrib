@@ -1,0 +1,52 @@
+#!/bin/sh
+# -*- sh -*-
+#
+# Plugin to monitor voip statistics.
+#
+# Parameters:
+#
+# 	config   (required)
+# 	autoconf (optional - only used by munin-config)
+#
+# Bugs:
+#       At least one SuSE netstat appears to report
+#         "passive connections rejected because of time stamp"
+#        We have never seen that, patch requested.
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#%# family=auto
+#%# capabilities=autoconf
+
+
+
+if [ "$1" = "autoconf" ]; then
+	echo yes
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title PRI channels in use'
+
+	# Most T1s have 23 channels, with one control channel. If you have more than
+	# one T1, increase the limit here appropriately
+	echo 'graph_args --upper-limit 22 -l 0'
+	echo 'graph_scale no'
+	echo 'graph_vlabel active connections'
+	echo 'graph_category VOIP'
+	echo 'graph_period second'
+	echo 'graph_info This graph shows the number of PRI lines in use.'
+	echo 'calls.label calls'
+	echo 'calls.min 0'
+	echo 'calls.info The number of calls per second.'
+	exit 0
+fi
+
+# it would be wise to put the following in a separate shell script that runs as root in
+# cron, and dumps its output to a separate file for this plugin to read later on. Letting
+# Munin plugins run as root is a security hole.
+
+zap=`asterisk -rx 'zap show channels' |grep -v "[[:digit:]]*[[:space:]] local" |grep -vc "Chan Extension"`
+
+echo "calls.value $zap"

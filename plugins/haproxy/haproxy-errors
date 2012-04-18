@@ -1,0 +1,52 @@
+#!/bin/sh
+# Pasha "p01nt" Klets <pasha@klets.name>
+
+name=`basename $0`
+title=`echo ${name} | awk -F_ '{print $NF}'`
+
+hp_stat() {
+	echo "show stat" | socat unix-connect:/tmp/haproxy stdio
+}
+
+labels() {
+	cat <<EOF
+req.label requests
+req.type COUNTER
+req.draw AREASTACK
+conn.label connections
+conn.type COUNTER
+conn.draw AREASTACK
+resp.label responses
+resp.type COUNTER
+resp.draw AREASTACK
+EOF
+}
+
+values() {
+	cat <<EOF
+req.value `hp_stat | grep '^'${title}',FRONTEND' | awk -F, '{print $13}'`
+conn.value `hp_stat | grep '^'${title}',BACKEND' | awk -F, '{print $14}'`
+resp.value `hp_stat | grep '^'${title}',BACKEND' | awk -F, '{print $15}'`
+EOF
+}
+
+
+graph_title="${title} errors"
+graph_vlabel=${title}
+
+case $1 in
+   config)
+		cat <<EOF
+graph_category haproxy
+graph_title  ${graph_title}
+graph_vlabel ${graph_vlabel}
+
+`labels`
+EOF
+		exit 0
+	;;
+esac
+
+values
+
+exit 0

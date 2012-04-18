@@ -1,0 +1,170 @@
+#!/bin/bash
+#
+# apache_users - Munin plugin, displays traffic by user
+#
+# Version: 03.06.2009
+# Author: Rainer Wolff <rainer.wolff@gmx.com>
+#
+# ################################################################################ MAGIC MARKERS
+
+#%# family=contrib
+#%# capabilities=autoconf
+
+# ####################################################################################### CONFIG
+
+DIRECTORY=${MUNIN_PLUGINSTATE:-/var/lib/munin/plugin-state/apache_users}
+TIMESTAMP=$DIRECTORY/.apache_users
+ACCESSLOG=/var/log/apache2/access_log
+
+# ##################################################################################### AUTOCONF
+
+if [ "$1" = "autoconf" ]
+then
+	if ! ls $ACCESSLOG > /dev/null
+	then
+		echo "no (could not find apache access log \"$ACCESSLOG\")"
+		exit 1
+	elif ! ls $DIRECTORY > /dev/null
+	then
+		echo "no (could not find munin plugins directory \"$DIRECTORY\")"
+		exit 2
+
+	else
+		echo "yes"
+		exit 0
+	fi
+fi
+
+# ######################################################################################### INIT
+
+# Define regex for all possible timestamps of last 5 minutes block
+REGEX=$(LC_ALL=en_US date -d "5 minutes ago" "+\[%d\/%b\/%Y:%H: %M :[0-5][0-9] %z\]" \
+	| awk '{ printf "%s(%02d|%02d|%02d|%02d|%02d)%s", $1, $2-$2%5, $2-$2%5+1, $2-$2%5+2, $2-$2%5+3, $2-$2%5+4, $3 }')
+
+
+# Analyse logfile
+while read REQUEST_ADDR REQUEST_USERNAME REQUEST_BYTES
+do
+	# Name resolution for known adresses
+	REQUEST_DOMAIN=$( awk '/^'"$REQUEST_ADDR"'/ { print $2 }' /etc/hosts )
+	REQUEST_ADDR=${REQUEST_DOMAIN:-$REQUEST_ADDR}
+
+
+	# Scan for known addresses, if found, sum up traffic
+	FOUND=false
+	for (( I=${#ADDR[@]}-1; I>=0; I-- ))
+	do
+		# Address known, name maybe, anonymous access (again)
+		if [ "${ADDR[I]}" == "$REQUEST_ADDR" -a "$REQUEST_USERNAME" == "-" ]
+		then
+			FOUND=true
+			BYTES[$I]=$(( ${BYTES[I]} + $REQUEST_BYTES ))
+			break
+
+		# Known address and name
+		elif [ "${ADDR[I]}" == "$REQUEST_ADDR" -a "${USERNAME[I]}" == "$REQUEST_USERNAME" ]
+		then
+			FOUND=true
+			BYTES[$I]=$(( ${BYTES[I]} + $REQUEST_BYTES ))
+			break
+
+		# Known address, previous access anonymous
+		elif [ "${ADDR[I]}" == "$REQUEST_ADDR" -a "${USERNAME[I]}" == "-" ]
+		then
+			FOUND=true
+			USERNAME[$I]="$REQUEST_USERNAME"
+			BYTES[$I]=$(( ${BYTES[I]} + $REQUEST_BYTES ))
+			break
+		fi
+	done
+
+	# Combination of address and name unknown, create new entry
+	if [ "$FOUND" == "false" ]
+	then
+		ADDR[${#ADDR[@]}]=$REQUEST_ADDR
+		USERNAME[${#USERNAME[@]}]="$REQUEST_USERNAME"
+		BYTES[${#BYTES[@]}]=$REQUEST_BYTES
+	fi
+
+done < <( awk '/'"$REGEX"'/ { printf "%s %s %d\n", $1, $3, $10 }' $ACCESSLOG )
+
+
+# Assign anonymous access when possible and correct identifiers
+for (( I=0; I<${#USERNAME[@]}; I++ ))
+do
+	if [ "${USERNAME[I]}" == "-" ]
+	then
+		if $( echo "${ADDR[I]}" | egrep -q "[^0-9.]" )
+		then
+			USERNAME[$I]="${ADDR[I]}"
+		else
+			USERNAME[$I]="anonymous"
+		fi
+		NAME[$I]="_${USERNAME[I]}" # Output sort order 
+	else
+		NAME[$I]="${USERNAME[I]}"
+	fi
+
+	NAME[$I]="$( echo "${NAME[I]}" \
+		| sed "s/^[^A-Za-z_]/_/" | sed "s/[^A-Za-z0-9_]/_/g" \
+		| sed "s/^\(.\{,19\}\).*/\1/" )"
+done
+
+# Create timestamp
+mkdir -p $DIRECTORY
+touch -d "-1 second" $TIMESTAMP # find needs time span
+
+# Aggregate parallel traffic
+for (( I=0; I<${#NAME[@]}; I++ ))
+do
+	if [ -z "$( find $DIRECTORY -name "${NAME[I]}" -newer $TIMESTAMP )" ]
+	then
+		echo "${NAME[I]} ${BYTES[I]} ${USERNAME[I]}" > $DIRECTORY/${NAME[I]}
+	else
+		awk '{ printf "%s %d %s", $1, $2+${BYTES[I]}, $3 }' $DIRECTORY/${NAME[I]} > $DIRECTORY/${NAME[I]}
+	fi
+done
+
+
+# ####################################################################################### CONFIG
+
+if [ "$1" = "config" ]
+then
+	echo "graph_title Apache users"
+	echo "graph_vlabel bytes per five minute period"
+	echo "graph_args --lower-limit 1 --base 1024 --logarithmic"
+	echo "graph_category Apache"
+	echo "graph_total total"
+	echo "graph_info Webserver traffic by user."
+
+	FILENAMES=$( find $DIRECTORY -type f -not -wholename $TIMESTAMP | sort)
+
+	awk '{ printf "%s.label %s\n%s.draw AREA\n", $1, $3, $1 }' $( echo "$FILENAMES" | head -n1 )
+	
+	for FILENAME in $( echo "$FILENAMES" | tail -n+2)
+	do
+		awk '{ printf "%s.label %s\n%s.draw STACK\n", $1, $3, $1 }' $FILENAME
+	done
+
+	exit 0
+fi
+
+
+# ######################################################################################## VALUE
+
+{
+
+for FILENAME in $( find $DIRECTORY -type f -newer $TIMESTAMP -not -wholename $TIMESTAMP )
+do
+	awk '{ printf "%s.value %d\n", $1, $2 }' $FILENAME
+done
+
+for FILENAME in $( find $DIRECTORY -type f -not -newer $TIMESTAMP -not -wholename $TIMESTAMP )
+do
+	awk '{ printf "%s.value 0\n", $1 }' $FILENAME
+done
+
+} | sort
+
+exit 0
+

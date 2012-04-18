@@ -1,0 +1,95 @@
+#!/usr/bin/perl -w
+#
+# Copyright (C) 2006 Lars Strand
+#
+# Plugin to fetch temperature from weather.noaa.gov
+#
+# Parameters supported:
+#
+#       config
+#       autoconf
+#
+# Magic markers:
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+
+my $usehum = $ENV{humidity} || undef;   # set to "yes" to enable humidity
+my $wcode  = $ENV{wcode}    || "ENGM";  # Find areacode here http://weather.noaa.gov/
+my $unit   = $ENV{unit}     || "C";     # "C" = Celsius, "F" = Fahrenheit
+my $proxy  = $ENV{proxy}    || undef;   # Example: "http://proxy.foo.bar:8080/"
+
+my $ret = undef;
+if (! eval "require LWP::UserAgent;") {
+    $ret = "LWP::UserAgent not found";
+}
+
+if (defined $ARGV[0] and $ARGV[0] eq "autoconf") {
+    if (defined $ret) {
+	print "no ($ret)\n";
+	exit 1;
+    } else {
+	print "yes\n";
+	exit 0;
+    }
+}
+
+# Extract weather-code from filename. Example: weather_CODE
+if ($0 =~ /^(?:|.*\/)temperature_([^_]+)$/) {
+    $wcode  = $1;
+}
+
+
+my $datasource = "http://weather.noaa.gov/pub/data/observations/metar/decoded/$wcode.TXT";
+
+my $ua = LWP::UserAgent->new(timeout => 30);
+$ua->agent('Munin');
+
+# Use proxy, if defined.
+if (defined $proxy) {
+    $ua->proxy(['http'], $proxy);
+}
+
+my $response = $ua->request(HTTP::Request->new('GET',$datasource));
+
+if (defined $ARGV[0] and $ARGV[0] eq "config") {
+
+    if ($response->content =~ /^((.*?),.*\)).*\n/) {
+	print "graph_title Temperature at $2\n";
+    } else {
+	print "graph_title Temperature at locationcode $wcode\n";
+    }
+
+    if ($unit =~ /F/) {
+	print "graph_vlabel temp in F\n";
+    } else {
+	print "graph_vlabel temp in C\n";
+    }
+
+    print "graph_args --base 1000 -l 0\n";
+    print "graph_category sensors\n";
+    print "graph_info Temperatures at $1 (fetched from weather.nooa.gov).\n";
+    print "temperature.label temperature\n";
+    if (defined $usehum) {
+	print "humidity.label humidity\n";
+	print "humidity.info Humidity in %.\n";
+    }
+    exit 0;
+}
+
+if ($response->content =~ /Temperature:\s*(.*)\s+F\s*\(\s*(.*)\s+C/) {
+    if ($unit =~ /F/) {
+	print "temperature.value $1\n";
+    } else {
+	print "temperature.value $2\n";
+    }
+} else {
+    print "temperature.value U\n";
+}
+
+if (defined $usehum) {
+    if ($response->content =~ /Relative Humidity:\s*(\d+)\%.*/) {
+	print "humidity.value $1\n";
+    }
+}

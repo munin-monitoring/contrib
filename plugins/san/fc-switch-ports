@@ -1,0 +1,367 @@
+#!/usr/bin/env python
+
+"""
+Munin plugin which reports selected counters regarding ports on a 
+Brocade SAN FC-switch. Only enabled ports are considered.
+
+The counters shown:
+
+enc_out:            Encoding errors outside FC frame.
+                    Not as interesting as enc_out_per_mframe,
+                    but it reflects the absolute values, instead
+                    of being put in relation to the port's trafic.
+
+enc_out_per_mframe: As above, but per million frames of trafic.
+                    If there is a high number for this counter,
+                    it could reflect:
+                     - If there is also a high value for 
+                       rx_crcs for the port, then there is likely
+                       a GBIC/SFP problem.
+                     - If there the value of rx_crcs for the port
+                       is low, there is likely a cable/connector
+                       problem.
+
+rx_crcs:            CRC errors detected in received frames.
+                    Together with enc_out errors, CRC errors 
+                    indicate a GBIC/SFP problem.
+
+bits:               Number of bits transmitted(tx)/received(rx)
+                    by the port. Inspecting this graph will help
+                    determining if the port is saturated.
+
+When symlinking to the plugin, indicate hostname like this:
+brocade_san_switch_ports_HOSTNAME
+
+# Special requirements:
+#  - the pysnmp module; on RHEL 6 with EPEL 6, you may simply yum-
+#    install it
+"""
+
+# Note: In the SNMP output from brocade switches, the interesting
+# counters are named with numbers starting with 1, while the 
+# ports' real names on the box and in the administration interface
+# start with 0. And there doesn't seem to be a way to map between
+# ifDesc and the interesting crc and enc_out counters :-(
+# Therefore, this plugin is Brocade-specific, and thus some
+# manipulation of port numbers are performed for the output
+# of this plugin (see comments marked ARGH below).
+
+# TODOs:
+#  - implement snmpconf?
+
+# Munin magic markers
+#%# family=manual
+#%# capabilities=
+
+# http://community.brocade.com/servlet/JiveServlet/download/5581-1453/portErrShow.pdf
+# is useful when trying to understand counters on a Brocade switch.
+
+# Author: Troels Arvin <tra@sst.dk>
+# See http://troels.arvin.dk/code/munin/ for latest version.
+
+# Only tested with Red Hat Enterprise Linux 5, currently.
+
+# Released according to the "New BSD License" AKA the 3-clause
+# BSD License:
+# ==================================================================== 
+# Copyright (c) 2011, Danish National Board of Health.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the  the Danish National Board of Health nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY the Danish National Board of Health ''AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL the Danish National Board of Health BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# ==================================================================== 
+
+# $Id: brocade_san_switch_ports_ 15443 2011-03-03 12:23:56Z tra $
+
+import os, sys, re
+from pysnmp.entity.rfc3413.oneliner import cmdgen
+
+my_canonical_name = 'brocade_san_switch_ports_' # If called as - e.g. - 
+                                                # brocade_san_switch_ports_sansw1,then
+                                                # sansw1 will be interpreted as
+                                                # the host_name
+
+# For reference:
+# SW-MIB::swFCPortLinkState   = .1.3.6.1.4.1.1588.2.1.1.1.6.2.1.6
+# SW-MIB::swFCPortTxWords     = .1.3.6.1.4.1.1588.2.1.1.1.6.2.1.11
+# SW-MIB::swFCPortRxWords     = .1.3.6.1.4.1.1588.2.1.1.1.6.2.1.12
+# SW-MIB::swFCPortTxFrames    = .1.3.6.1.4.1.1588.2.1.1.1.6.2.1.13
+# SW-MIB::swFCPortRxFrames    = .1.3.6.1.4.1.1588.2.1.1.1.6.2.1.14
+# SW-MIB::swFCPortRxCrcs      = .1.3.6.1.4.1.1588.2.1.1.1.6.2.1.22
+# SW-MIB::swFCPortRxEncOutFrs = .1.3.6.1.4.1.1588.2.1.1.1.6.2.1.26
+
+# OID strings must be without leading dot in this script
+port_link_state_oidstr = '1.3.6.1.4.1.1588.2.1.1.1.6.2.1.6'
+oidstrs = {
+    'rx_crcs'           : '1.3.6.1.4.1.1588.2.1.1.1.6.2.1.22',
+    'enc_out'           : '1.3.6.1.4.1.1588.2.1.1.1.6.2.1.26',
+    'tx_words'          : '1.3.6.1.4.1.1588.2.1.1.1.6.2.1.11',
+    'rx_words'          : '1.3.6.1.4.1.1588.2.1.1.1.6.2.1.12',
+    'tx_frames'         : '1.3.6.1.4.1.1588.2.1.1.1.6.2.1.13',
+    'rx_frames'         : '1.3.6.1.4.1.1588.2.1.1.1.6.2.1.14',
+}
+
+descriptions = {
+    'rx_crcs'           : 'the number of CRC errors detected for frames received',
+    'enc_out'           : 'encoding errors outside FC frame',
+    'enc_out_per_mframe': 'enc errors outside FC frame, per million frames of rx+tx trafic',
+    'bits'              : 'received(rx)/transmitted(tx) bits'
+}
+
+rrd_types = {
+    'rx_crcs'           : 'GAUGE',
+    'enc_out'           : 'GAUGE',
+    'enc_out_per_mframe': 'GAUGE',
+    'bits'              : 'COUNTER'
+}
+
+
+# Some helper functions:
+
+def bailout(msg):
+    sys.stderr.write(msg+"\n")
+    sys.exit(1)
+
+def debug(msg):
+    print('Debug: %s\n' % msg)
+
+# Break OID-string in to a tuple of elements
+def oidstr2tuple(oidstr): 
+    int_list = [ int(s) for s in oidstr.split('.') ]
+    return tuple(int_list)
+
+# if object_name is 1.3.6.1.4.1.1588.2.1.1.1.6.2.1.26.1, return
+#                   1.3.6.1.4.1.1588.2.1.1.1.6.2.1.26
+def get_ObjectName_subtree(obj):
+   return obj[:len(obj)-1]
+
+# Convert SNMP objects to simpler structure, and cut off
+# excessive return-value data (which bulkCmd may generated)
+def varBindTable2plainDict(varBindTable):
+    ret_dict = {}
+    wanted_subtree = get_ObjectName_subtree(varBindTable[0][0][0])
+    #debug('wanted_subtree: '+str(wanted_subtree))
+    for varBindTableRow in varBindTable:
+        if get_ObjectName_subtree(varBindTableRow[0][0]) == wanted_subtree:
+            portnum = varBindTableRow[0][0][-1]
+            count = int(varBindTableRow[0][1])
+            ret_dict[portnum] = count
+        else:
+            #debug('Skipped '+str(varBindTableRow))
+            pass
+    #debug('ret_dict: '+str(ret_dict))
+    return ret_dict
+
+
+
+# The more interesting functions:
+
+# Honor the munin-APIs "config" command
+def print_config(host_name,enabled_ports):
+    print('host_name %s' % host_name)
+
+    # Per-port
+    for counter_type in descriptions:
+        for portnum in enabled_ports:
+            print('multigraph %s.port_%d' % (counter_type,portnum-1))  # ARGH: numbering base stuff
+            print('graph_title Port %d %s' % (portnum-1,counter_type)) # ARGH: numbering base stuff
+            print('graph_args --base 1000 -l 0')
+            print('graph_category SAN')
+            print('graph_info This graph shows the count of %s' % descriptions[counter_type])
+
+            if counter_type == 'bits':
+                print('graph_vlabel bits rx (-) / tx (+) per ${graph_period}')
+                print('graph_order rx tx')
+                print('rx.label rx')
+                print('rx.graph no')
+                print('rx.type %s' % rrd_types[counter_type])
+                print('rx.max 20000000000') # initial-spike prevention: 20Gbit/s is max FC speed
+                print('tx.label bps')
+                print('tx.negative rx')
+                print('tx.type %s' % rrd_types[counter_type])
+                print('tx.max 20000000000') # initial-spike prevention: 20Gbit/s is max FC speed
+            else:
+                print('graph_vlabel count')
+                print('count.label count')
+                print('count.type %s' % rrd_types[counter_type])
+
+    # Totals
+    for counter_type in descriptions:
+        print('multigraph %s' % counter_type)
+        print('graph_title %s total %s' % (host_name,counter_type))
+        print('graph_args --base 1000 -l 0')
+        print('graph_category SAN')
+        print('graph_info This graph shows the total count of %s across all ports' % descriptions[counter_type])
+
+        if counter_type == 'bits':
+            print('graph_vlabel bits rx (-) / tx (+) per ${graph_period}')
+            print('rx.label rx')
+            print('rx.graph no')
+            print('rx.type %s' % rrd_types[counter_type])
+            print('rx.max 800000000000') # initial-spike prevention: Assuming a max of 40 ports with each 20Gbit/s max
+            print('tx.label bps')
+            print('tx.negative rx')
+            print('tx.type %s' % rrd_types[counter_type])
+            print('tx.max 800000000000') # initial-spike prevention: Assuming a max of 40 ports with each 20Gbit/s max
+        else:
+            print('graph_vlabel count')
+            print('count.label count')
+            print('count.type %s' % rrd_types[counter_type])
+
+# We don't care for disabled ports
+def get_enabled_ports(host_name,community):
+    link_states = get_port_values(host_name,community,port_link_state_oidstr)
+    # status 1 means enabled
+    return [ portnum for portnum in link_states if link_states[portnum] == 1 ]
+
+# Talk to the SNMP agent performing the equivalent of an snmpwalk from
+# the starting point indicated by the oid_start_tpl tuple.
+# Handle potential errors.
+def pull_values(host_name,community,oid_start_tpl):
+    try:
+        errorIndication, errorStatus, errorIndex, varBindTable = cmdgen.CommandGenerator().bulkCmd(
+            cmdgen.CommunityData('whatever', community),
+            cmdgen.UdpTransportTarget((host_name, 161)),
+            300, 0,
+            (oid_start_tpl)
+        )
+    except Exception, e:
+        err("Walking %s threw exception: %s" % (oid_start_str,str(e)))
+    if errorStatus:
+        err("Walking %s failed: %s" % (oid_start_str,errorStatus.prettyPrint()))
+    if errorIndication:
+        err("Walking %s failed with errorIndication=" % (oid_start_str,errorIndication))
+    if len(varBindTable) < 1:
+        err("Empty result from walk of %s" % oid_start_str)
+    #debug('Pull result: %s' % varBindTable)
+    return varBindTable
+
+# Combine oidstr2tupl, pull_values and varBindTable2plainDict.
+# Return dict of port-number => count
+def get_port_values(host_name,community,oid_start_str):
+    return varBindTable2plainDict(
+        pull_values(host_name,community,oidstr2tuple(oid_start_str))
+    )
+
+# Initial sanity check
+n_args=len(sys.argv)
+if n_args > 2:
+    # At most one arg expected
+    bailout('%d arguments given - expecting only one' % n_args)
+
+# Make sure that multigraphs are supported
+if 'MUNIN_CAP_MULTIGRAPH' not in os.environ:
+    bailout('MUNIN_CAP_MULTIGRAPH not found in environment')
+
+# Parse host_name and counter type from arg0
+called_as = os.path.basename(sys.argv[0])
+regex_str = '^'+my_canonical_name+'(.+)'
+match = re.match(regex_str, called_as)
+if match:
+    host_name     = match.group(1)
+else:
+    bailout('Missing host_name and/or counter type')
+
+# Determine SNMP community
+try:
+    community = os.environ['community']
+except:
+    community = 'public'
+
+enabled_ports = get_enabled_ports(host_name,community)
+
+# See how we were called
+if n_args == 2:
+    # An argument was given, so let's not simply print
+    # values.
+    arg = sys.argv[1]
+    if arg == 'config':
+        print_config(host_name,enabled_ports)
+        sys.exit(0)
+    if arg == 'fetch':
+        pass
+    else:
+        bailout("Unknown argument '%s'" % arg)
+        sys.exit(1)
+
+# Prepare some structures
+counters = {}
+counters['rx_crcs'  ] = get_port_values(host_name,community,oidstrs['rx_crcs'  ])
+counters['enc_out'  ] = get_port_values(host_name,community,oidstrs['enc_out'  ])
+counters['rx_frames'] = get_port_values(host_name,community,oidstrs['rx_frames'])
+counters['tx_frames'] = get_port_values(host_name,community,oidstrs['tx_frames'])
+counters['rx_words' ] = get_port_values(host_name,community,oidstrs['rx_words' ])
+counters['tx_words' ] = get_port_values(host_name,community,oidstrs['tx_words' ])
+
+totals = {}
+totals['rx_crcs']            = 0
+totals['enc_out']            = 0
+totals['enc_out_per_mframe'] = 0
+totals['rx_frames']          = 0
+totals['tx_frames']          = 0
+totals['rx_bits']            = 0
+totals['tx_bits']            = 0
+
+# special handling of enc_out per million frames
+counters['enc_out_per_mframe'] = {}
+for k in counters['rx_frames'].keys():
+    if counters['rx_frames'][k] + counters['tx_frames'][k] > 0:
+        counters['enc_out_per_mframe'][k] = 1000000*counters['enc_out'][k] / (counters['rx_frames'][k] + counters['tx_frames'][k])
+    else:
+        counters['enc_out_per_mframe'][k] = 0
+
+#debug('counters: ' + str(counters))
+
+
+# Handle the default case (fetch)
+
+# Per-port values
+for portnum in enabled_ports:
+    for counter_type in descriptions:
+        print('multigraph %s.port_%d' % (counter_type,portnum-1)) # ARGH: numbering base stuff
+
+        # For some of the graphs, there is an in/out aspect, for others
+        # they are combined or not applicable
+        if counter_type == 'bits':
+            rx_value = counters['rx_words'][portnum]
+            tx_value = counters['tx_words'][portnum]
+            rx_bits = rx_value * 40  # Each word consists of four
+            tx_bits = tx_value * 40  # 10-bit units.
+            print('rx.value %d' % rx_bits)
+            print('tx.value %d' % tx_bits)
+            totals['rx_bits'] += rx_bits
+            totals['tx_bits'] += tx_bits
+        else:
+            print('count.value %d' % counters[counter_type][portnum])
+            totals[counter_type] += counters[counter_type][portnum]
+
+# Totals
+for counter_type in descriptions:
+    print('multigraph %s' % (counter_type))
+
+    # For some of the graphs, there is an in/out aspect, for others
+    # they are combined or not applicable
+    if counter_type == 'bits':
+        print('rx.value %d' % totals['rx_bits'])
+        print('tx.value %d' % totals['tx_bits'])
+    else:
+        print('count.value %d' % totals[counter_type])

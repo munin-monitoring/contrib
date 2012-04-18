@@ -1,0 +1,300 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+dspam_activity - Plugin to monitor DSPAM message handling activities.
+
+=head1 APPLICABLE SYSTEMS
+
+Any system running a recent (3.8.0 or higher) DSPAM install.
+
+=head1 CONFIGURATION
+
+The plugin uses the contents of the SystemLog or UserLog produced by DSPAM.
+
+The following environment variables are used by this plugin:
+
+ logfile - Where to find the system.log that is written by dspam
+          (default: /var/spool/dspam/system.log)
+
+=head2 CONFIGURATION EXAMPLES
+
+ [dspam_activity]
+  env.logfile /opt/dspam/var/spool/dspam/system.log
+  # or when monitoring only a single user in stead of all users:
+  env.logfile /var/spool/dspam/data/example.org/username/username.log
+
+=head1 USAGE
+
+Link this plugin to /etc/munin/plugins/ and restart the munin-node.
+
+You'll need to enable system logging in dspam.conf, set 'SystemLog on'
+in the DSPAM configuration file.
+
+=head1 INTERPRETATION
+
+The graph shows the messages that DSPAM has processed over the monitored
+period, and what kind of action was taken on it. Possible activities are:
+
+ Received messages can be classified as:
+ - Innocent (I)
+ - Spam (S)
+ - Auto-whitelist (W)
+ - Virus (V)
+ - Blocklist (O)
+ - Blacklist (RBL) (A)
+ Other actions:
+ - Retrained as spam (M)
+ - Retrained as innocent (F)
+ - Inoculation (N)
+ - Corpusfed (C)
+
+Please see DSPAM documentation for more information on used terminology. The
+single character in parentheses is the DSPAM internal name for the classifications.
+
+=head1 AUTHOR
+
+Copyright 2010-2011 Tom Hendrikx <tom@whyscream.net>
+
+=head1 LICENSE
+
+GPLv2
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; version 2 dated June, 1991.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+02110-1301 USA.
+
+=head1 BUGS
+
+None known. Please report to author when you think you found something.
+
+=head2 TODO LIST
+
+=head1 VERSION
+
+$Id: dspam_activity 139 2011-08-04 20:03:22Z tomhendr $
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+# defaults for configurable settings
+: ${logfile:=/var/spool/dspam/system.log}
+: ${statefile:=$MUNIN_STATEFILE}
+
+# include munin plugin helper
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+##########################
+# Some generic functions #
+##########################
+
+#
+# debug $message
+#	Prints debugging output when munin-run is called with --pidebug argument (i.e. when MUNIN_DEBUG is set)
+#
+debug() {
+	if [ -n "$MUNIN_DEBUG" ]; then
+		echo "# DEBUG: $@"
+	fi
+}
+
+#
+# get_activity_description $activity $type
+#	Return textual descriptions for the various activities
+#
+get_activity_description() {
+	local activity=$1
+	local type=$2
+
+	# defaults
+	local short="Unknown ($activity)"
+	local long="Unknown ($activity)"
+
+	# Possible activities: I S W V O A M F N C
+	case $activity in
+		I) short=Innocent long="Messages received and classified as innocent" ;;
+		S) short=Spam long="Messages received and classified as spam" ;;
+		W) short=Auto-whitelisted long="Messages received and auto-whitelisted" ;;
+		V) short=Virus long="Messages received and classified as virus by Clamav" ;;
+		O) short=Blocklisted long="Messages received but not classified because the sender domain is on to the user blocklist" ;;
+		A) short="Blacklisted (RBL)" long="Message received and classified as spam because the sender ip is listed on the RBL" ;;
+		M) short="Retrained as spam" long="Messages classified as innocent, but retrained by user as spam" ;;
+		F) short="Retrained as innocent" long="Messages classified as spam, but retrained by the user as innocent" ;;
+		N) short=Inoculation long="Messages trained as spam trough inoculation" ;;
+		C) short=Corpusfed long="Messages fed from a corpus" ;;
+	esac
+
+	[ "$type" = "short" ] && echo $short && return
+	[ "$type" = "long" ] && echo $long && return
+}
+
+########################################
+# Functions that generate munin output #
+########################################
+
+#
+# print_autoconf
+#	Output for 'munin-node-configure autoconf' functionality
+#
+print_autoconf() {
+	if [ ! -r $logfile ]; then
+		echo "no (logfile $logfile does not exist or not readable)"
+	else
+		echo yes
+	fi
+}
+
+#
+# print_config
+#	Output for 'munin-run <plugin> config' command.
+#
+print_config() {
+	debug printing config
+
+	echo "graph_title DSPAM activity"
+	echo graph_category dspam
+	echo graph_args --base 1000
+	echo graph_vlabel Messages / \${graph_period}
+	echo graph_period minute
+
+	for activity in I S W V O A M F N C; do
+		local label=$(get_activity_description $activity short)
+		local info=$(get_activity_description $activity long)
+		echo $activity.label $label
+		echo $activity.info $info
+		echo $activity.draw AREASTACK
+		echo $activity.type DERIVE
+		echo $activity.min 0
+	done
+
+	debug finished printing config
+}
+
+#
+# print_fetch
+#	Output for 'munin-run <plugin> fetch' command: the actual data to graph.
+#
+print_fetch() {
+	debug printing fetch
+
+	local old_ts
+	[ -r $statefile ] && old_ts=$(cat $statefile)
+	if [ -n "$old_ts" ]; then
+		debug read timestamp $old_ts from statefile
+
+		# sample from system.log:
+		# 1285144434<tab>M<tab>"Dr.Abdul Qahaar" <dr.abdulqahaar@sify.com><tab>2,4c99980137698241679684 \
+		#  <tab>Business Proposal / Partnership Investment<tab>1.256280<tab>username@example.org<tab>Retrained<tab><421586.75972.qm@web120402.mail.ne1.yahoo.com>
+
+		if [ -r $logfile ]; then
+
+			# Possible activities: I S W V O A M F N C
+			local aI=0 aS=0 aW=0 aV=0 aO=0 aA=0 aM=0 aF=0 aN=0 aC=0
+
+			local skipped=0 processed=0
+			local old_IFS=$IFS
+			IFS="	" # tab-separator in $logfile
+			while read ts activity from signature subject x recipient info msgid; do
+				if ! [ $ts -gt 0 2> /dev/null ]; then
+					debug skipped entry with non-numeric timestamp: $ts
+				elif [ $ts -gt $old_ts ]; then
+					debug processing entry with timestamp $ts, activity=$activity, subject=$subject, msgid=$msgid
+					case $activity in
+						I) aI=$((aI + 1)) ;;
+						S) aS=$((aS + 1)) ;;
+						W) aW=$((aW + 1)) ;;
+						V) aV=$((aV + 1)) ;;
+						O) aO=$((aO + 1)) ;;
+						A) aA=$((aA + 1)) ;;
+						M) aM=$((aM + 1)) ;;
+						F) aF=$((aF + 1)) ;;
+						N) aN=$((aN + 1)) ;;
+						C) aC=$((aC + 1)) ;;
+						*) debug unknown activity $activity found, subject=$subject, msgid=$msgid ;;
+					esac
+
+					processed=$((processed + 1))
+				else
+					skipped=$((skipped + 1))
+				fi
+			done < $logfile
+			IFS=$old_IFS
+			debug skipped $skipped lines in logfile because timestamp was too old
+			debug processed $processed lines in logfile
+
+			# show results
+			echo I.value $aI
+			echo S.value $aS
+			echo W.value $aW
+			echo V.value $aV
+			echo O.value $aO
+			echo A.value $aA
+			echo M.value $aM
+			echo F.value $aF
+			echo N.value $aN
+			echo C.value $aC
+		else
+			debug logfile not available $logfile
+			exit 66 # EX_NOINPUT
+		fi
+	else
+		debug could not read timestamp from statefile
+		# no exit here, we need the next operation to write a timestamp in the statefile
+	fi
+
+	# update statefile with current timestamp
+	local new_ts=$(date +%s)
+	echo $new_ts > $statefile
+	debug timestamp in statefile updated to $new_ts, old was $old_ts
+
+	debug finished printing fetch
+}
+
+
+#####################
+# Main process loop #
+#####################
+
+# show env settings
+debug dspam_activity plugin started, pid=$$
+debug settings:
+debug - logfile is set to: $logfile
+debug - statefile is set to: $statefile
+
+command=$1
+[ -n "$command" ] || command="fetch"
+debug - command is set to: $command
+
+debug settings completed, starting process
+
+case $command in
+	autoconf)
+		print_autoconf
+		;;
+	config)
+		print_config
+		;;
+	fetch)
+		print_fetch
+		;;
+esac
+
+debug exiting
+exit 0 # EX_OK

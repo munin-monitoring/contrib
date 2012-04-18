@@ -1,0 +1,35 @@
+#! /bin/sh
+# anders@fupp.net, 2007-09-19
+# Shows the amount of virtual memory allocated by Varnish for storing cache
+# objects
+
+PATH="$PATH:/usr/local/bin"
+export PATH
+
+vversion=`varnishstat -V 2>&1 | egrep "^varnishstat" | perl -p -e "s@varnishstat\s*@@;s@\(@@;s@\)@@;s@varnish-@@"`
+
+pvstat() {
+	# $1: vname $2: grabstat
+	printf "$1.value "
+	case $vversion in
+	1.0*) varnishstat -1 | egrep "$2" | awk '{print $1}';;
+	*) varnishstat -1 | egrep "$2" | awk '{print $2}';;
+	esac
+}
+
+case $1 in
+autoconf) echo yes;;
+config)
+	echo 'graph_title Virtual memory allocated'
+	echo 'graph_vlabel memory'
+	echo 'graph_category varnish'
+	echo 'graph_info This graph shows the amount of virtual memory allocated by Varnish for storing cache objects'
+
+	echo 'memory.label memory'
+	echo 'memory.type GAUGE'
+	echo 'memory.graph yes'
+	;;
+*)
+	pvstat memory 'bytes allocated$'
+	;;
+esac

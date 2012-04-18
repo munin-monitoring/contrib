@@ -1,0 +1,165 @@
+#! /usr/local/bin/perl -w
+#
+# Plugin to monitor Proliant server health status using hpasmcli.
+#
+# Config variables:
+#   user root       -- requrired by hpasmcli
+#   env.hpasmcli    -- path to hpasmcli executable (optional)
+#   env.degree      -- Unit of temperatures (C or F / default value is C)
+#
+#
+# Author: Tsuyoshi Wada <mail@tuyo.jp>
+#
+# v1.0  2007/12/08 - First version
+#
+# Copyright (c) 2007 Tsuyoshi Wada
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+# OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+# IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+# NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+# THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+# Magic markers
+#%# family=contrib
+#%# capabilities=autoconf suggest
+
+use strict;
+
+my $hpasmcli = exists $ENV{hpasmcli} ? $ENV{hpasmcli} : undef;
+$hpasmcli = `which hpasmcli` unless $hpasmcli;
+chomp $hpasmcli;
+$hpasmcli = undef unless -x $hpasmcli;
+my @dirs = qw(/usr/bin /usr/sbin /usr/local/bin /usr/local/sbin);
+until ($hpasmcli or @dirs == 0) {
+    my $dir = shift @dirs;
+    my $path = $dir.'/hpasmcli';
+    $hpasmcli = $path if -x $path;
+}
+my $degree = exists $ENV{degree} ? $ENV{degree} : 'C';
+my $deg_name = $degree eq 'C' ? "Celsius": "Fahrenheit";
+
+if (defined($ARGV[0])) {
+    if ($ARGV[0] eq 'autoconf') {
+        if ($hpasmcli and -x $hpasmcli) {
+            my @chk_result = `$hpasmcli -s \"help\"`;
+            if ($? eq "0") {
+                print "yes\n";
+                exit 0;
+            } else {
+                my $reason = 'Unknown error';
+                foreach my $line (@chk_result) {
+                    if ($line =~ /^ERROR/i) {
+                        chomp($line);
+                        $reason = $line;
+                        last;
+                    }
+                }
+                print "no ($reason)\n";
+                exit 1;
+            }
+        } else {
+            print "no (hpasmcli not found)\n";
+            exit 1;
+        }
+    } elsif ($ARGV[0] eq 'suggest') {
+        print "temp\nfans\n";
+        exit 0;
+    }
+}
+
+$0 =~ /hpasmcli2_(.+)*$/;
+my $show_target = $1;
+my @show_result = `$hpasmcli -s \"show $show_target\"`;
+my %output;
+
+if (defined($show_target) and $show_target eq 'temp') {
+    foreach my $line (@show_result) {
+        if ($line =~ /^#/) {
+            $line =~ s/\s+/ /g;
+            $line =~ s/^\s//g;
+            my ($sensor, $loc, $temp, $threshold) = split(/\s/, $line);
+            next if ($temp eq "-");
+            $loc =~ s/\/|#//g;
+            $temp = $degree eq 'C' ? (split(/\//, $temp))[0] : (split(/\//, $temp))[1];
+            $temp =~ s/C|F//g;
+            $threshold = $degree eq 'C' ? (split(/\//, $threshold))[0] : (split(/\//, $threshold))[1];
+            $threshold =~ s/C|F//g;
+            $sensor =~s/#//g;
+            $output{$sensor} = {
+                'location'  => lc($loc),
+                'temp'      => $temp,
+                'threshold' => $threshold
+            };
+        }
+    }
+    if (defined($ARGV[0]) and $ARGV[0] eq 'config') {
+        print "graph_title hpasm: Temperature\n";
+        print "graph_args --base 1000 -l 0\n";
+        print "graph_vlabel Degrees in $deg_name\n";
+        print "graph_category sensors\n";
+        print "graph_info This graph shows the temperatures as reported by hpasmcli.\n";
+        foreach my $key (sort keys %output) {
+            print "temp$key.label $output{$key}->{'location'}\n";
+            print "temp$key.warning " . ($output{$key}->{'threshold'} * 0.75) . "\n";
+            print "temp$key.critical $output{$key}->{'threshold'}\n";
+        }
+    } else {
+        foreach my $key (sort keys %output) {
+            print "temp$key.value $output{$key}->{'temp'}\n";
+        }
+    }
+} elsif (defined($show_target) and $show_target eq 'fans') {
+    foreach my $line (@show_result) {
+        if ($line =~ /^#/) {
+            $line =~ s/\s+/ /g;
+            $line =~ s/^\s//g;
+            my ($fan, $loc, $present, $speed, $rate, $redundant, $partner, $pluggable) = split(/\s/, $line);
+            next if ($present ne "Yes");
+            $loc =~ s/\/|#//g;
+            $rate =~ s/\%//g;
+            my $threshold = '100';
+            $fan =~s/#//g;
+            $output{$fan} = {
+                'location'  => lc($loc),
+                'rate'      => $rate,
+                'threshold' => $threshold
+            };
+        }
+    }
+    if (defined($ARGV[0]) and $ARGV[0] eq 'config') {
+        print "graph_title hpasm: Fans\n";
+        print "graph_args --base 1000 -l 0\n";
+        print "graph_vlabel of max (%)\n";
+        print "graph_category sensors\n";
+        print "graph_info This graph shows the info of fans as reported by hpasmcli.\n";
+        foreach my $key (sort keys %output) {
+            print "fan$key.label FAN$key $output{$key}->{'location'}\n";
+            print "fan$key.warning " . ($output{$key}->{'threshold'} * 0.75) . "\n";
+            print "fan$key.critical $output{$key}->{'threshold'}\n";
+        }
+    } else {
+        foreach my $key (sort keys %output) {
+            print "fan$key.value $output{$key}->{'rate'}\n";
+        }
+    }
+} else {
+    die "Unknown target specified ($show_target)\n";
+}
+
+exit 0;

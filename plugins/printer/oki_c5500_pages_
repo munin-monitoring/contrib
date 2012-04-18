@@ -1,0 +1,24 @@
+#!/bin/bash
+#
+# oki_c5500_pages_ munin grabber script
+# 2008.03 by steve@kosada.com
+
+destination=`basename $0 | sed 's/^oki_c5500_pages_//g'`
+password='foo'
+
+if [ "$1" = "config" ]; then
+	echo "graph_title oki c5500 pages: $destination"
+	echo 'graph_vlabel count'
+	echo 'graph_args --lower-limit 0'
+	echo 'graph_category printer'
+
+	echo "tray1.label Tray 1"
+	echo "tray2.label Tray 2"
+	echo "total.label Total"
+else
+	infopage=`wget -q -O - http://root:$password@$destination/printer/printerinfo_top.htm | perl -p -e 's/\n/ /m'`
+
+	echo tray1.value    `echo $infopage | perl -p -e 's/^.+Tray\ 1\ Page\ Count\:\ \<\/TD\>\<TD\ WIDTH\=\"94\"\>([0-9]+)\<.+$/$1/'`
+	echo tray2.value    `echo $infopage | perl -p -e 's/^.+Tray\ 2\ Page\ Count\:\ \<\/TD\>\<TD\ WIDTH\=\"94\"\>([0-9]+)\<.+$/$1/'`
+	echo total.value    `echo $infopage | perl -p -e 's/^.+Total\ Page\ Count\:\ \<\/TD\>\<TD\ WIDTH\=\"94\"\>([0-9]+)\<.+$/$1/'`
+fi

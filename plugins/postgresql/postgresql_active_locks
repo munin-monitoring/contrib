@@ -1,0 +1,59 @@
+#!/bin/bash
+#
+# Plugin to monitor PostgreSQL Locks
+#
+# Author:
+#    Guilherme Augusto da Rocha Silva <gars.dba@gmail.com>
+#
+# Created:
+#    5th of november 2007
+#
+# Modified:
+#    22th of September 2011 by Nozomu Kaneko <nozom.kaneko@gmail.com>
+#
+# Usage:
+#    Place in /etc/munin/plugins/ (or link it there using ln -s)
+#
+# Parameters:
+#    config   (required)
+#
+# General info:
+#    Require permission for database access and read (no writes are processed).
+#    Recomended user is PostgreSQL database owner (default: postgres).
+#
+# Log info:
+#
+
+dbserver='localhost'
+dbuser='postgres'
+
+modes="AccessExclusive AccessShare Exclusive RowExclusive RowShare Share ShareRowExclusive ShareUpdateExclusive"
+
+if [ "$1" = "config" ]; then
+   echo 'graph_args --lower-limit 0'
+   echo 'graph_category Postgresql'
+   echo 'graph_info Shows active locks on database server.'
+   echo 'graph_scale no'
+   echo 'graph_title PostgreSQL Active Locks'
+   echo 'graph_vlabel Number of active locks'
+   for mode in $modes; do
+     echo $mode.label $mode
+     echo $mode.info `echo $mode | perl -pe 's/(.)([A-Z])/$1 $2/g'` Lock.
+   done
+   exit 0
+fi
+
+for mode in $modes; do
+   eval ${mode}=0
+done
+
+eval $(psql -h ${dbserver} -U ${dbuser} template1 -tc "SELECT trim(mode, 'Lock'), COUNT(*) FROM pg_locks GROUP BY mode ORDER BY 1;" | while read name sep num
+do
+   test -z "${name}" && continue
+   echo ${name}=${num}
+done)
+
+for mode in $modes; do
+   echo ${mode}.value $(eval echo \$$mode)
+done
+

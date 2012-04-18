@@ -1,0 +1,82 @@
+#!/bin/sh
+#
+
+myname=`basename $0 | sed 's/^hp2600_status_//g'`
+
+name="${name-}"
+REGEX="${regex-\<$name\>}"
+
+printer_ip=$name
+printer_ip='10.34.9.12'
+
+get_data (){
+    /usr/local/bin/wget  -q -O - http://${printer_ip}/SSI/supply_status_info.htm | egrep -e '>[0-9]+'| awk -F '(<|>)' '{a=$5; sub("%"," ",a);sub("\r","",a); print a}'
+}
+
+do_stats () {
+    count=1
+    for I in `get_data`; do 
+	[ $count = 1 ]  && echo "statb.value $I" 
+	[ $count = 4 ]  && echo "staty.value $I" 
+	[ $count = 7 ]  && echo "statc.value $I" 
+	[ $count = 10 ] && echo "statm.value $I" 
+	count=$(($count + 1))
+    done
+
+}
+
+case $1 in
+    config)
+        cat <<'EOF'
+host_name printers
+graph_title HP 2600 cartridge status 
+graph_vlabel Status (%)
+graph_category HP2600 Printer
+graph_info Toner status.
+graph_args --upper-limit 400 -l 0 
+line.label ---
+line.line 400
+statb.label Black
+statb.draw AREA
+statb.colour 000000
+statb.min 0
+statb.max 100
+lineb.label ---
+lineb.draw STACK
+lineb.colour ffffff
+lineb.skipprint 1
+lineb.cdef 100,statb,-
+staty.label Yellow
+staty.min 0
+staty.max 100
+staty.draw STACK
+staty.colour ffff00
+liney.label ---
+liney.draw STACK
+liney.colour ffffff
+liney.skipprint 1
+liney.cdef 100,staty,-
+statc.label Cyan
+statc.min 0
+statc.max 100
+statc.draw STACK
+statc.colour 00ffff
+linec.label ---
+linec.draw STACK
+linec.colour ffffff
+linec.skipprint 1
+linec.cdef 100,statc,-
+statm.label Magenta
+statm.min 0
+statm.max 100
+statm.draw STACK
+statm.colour ff00ff
+EOF
+        exit 0
+        ;;
+esac
+
+do_stats
+
+
+#EOF

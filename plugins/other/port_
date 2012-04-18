@@ -1,0 +1,81 @@
+#! /opt/csw/bin/ruby
+#
+# Wildcard-script to monitor network port usage using netstat. To monitor a
+# port, link port_<service> to this file. E.g. This plugin shall run by root user
+#
+#    ln -s /usr/share/munin/node/plugins-auto/port_ /etc/munin/node.d/port_www
+#
+# ...will monitor www connections. Services are those listed in
+# /etc/services. Case service is not listed the numeric value shall be passed
+#
+# Author: Luis García Acosta
+# V 1.0
+# Date Tue April 12 09:20:21 CET 2011
+
+require 'rubygems'
+require 'munin'
+
+SERVICE   = $0.split( '_' ).last
+SERVICE_F = '/etc/services'
+PORT      = /^[\d]+(\.[\d]+){0,1}$/ === SERVICE ? SERVICE : %x[grep #{SERVICE} #{SERVICE_F}].split( "\t\t" )[1].split( '/' )[0]
+
+class PortMonit < Munin::Plugin
+
+  graph_attributes "#{SERVICE} port usage, known as #{PORT}",
+    :category   => 'network',
+    :info       => 'This graph shows connection split by the state of the socket.',
+    :vlabel     => 'Current connections'
+
+   declare_field :ESTABLISHED,
+    :label  => 'Established',         :draw => :AREA,
+    :type   => :GAUGE, :min => 0
+
+   declare_field :CLOSE_WAIT,
+    :label  => 'Waiting close',       :draw => :STACK,
+    :type   => :GAUGE, :min => 0
+
+   declare_field :TIME_WAIT,
+    :label  => 'Waiting after close', :draw => :STACK,
+    :type   => :GAUGE, :min => 0
+
+   declare_field :CLOSING,
+    :label  => 'Closing',             :draw => :STACK,
+    :type   => :GAUGE, :min => 0
+
+   declare_field :LAST_ACK,
+    :label  => 'Waiting for acknowledgement',   :draw => :STACK,
+    :type   => :GAUGE, :min => 0
+
+   declare_field :FIN_WAIT_1,
+    :label  => 'Socket closed, connection shutting down', :draw => :STACK,
+    :type   => :GAUGE, :min => 0
+
+   declare_field :FIN_WAIT_2,
+    :label  => 'Connection closed, Socket still waiting', :draw => :STACK,
+    :type   => :GAUGE, :min => 0
+
+  def retrieve_values
+   
+    @_netstat   = %x[netstat -n -P tcp | egrep "\.#{PORT} "].split( "\n" )
+
+
+    { :ESTABLISHED  => count( @_netstat, 'ESTABLISHED' ),
+      :CLOSE_WAIT   => count( @_netstat, 'CLOSE_WAIT' ),
+      :CLOSING      => count( @_netstat, 'CLOSING' ),
+      :LAST_ACK     => count( @_netstat, 'LAST_ACK' ),
+      :FIN_WAIT_1   => count( @_netstat, 'FIN_WAIT_1' ),
+      :FIN_WAIT_2   => count( @_netstat, 'FIN_WAIT_2' ),
+      :TIME_WAIT    => count( @_netstat, 'TIME_WAIT' ) }
+  end
+
+  private
+  def count( source, regex )
+    @_result = 0
+
+    source.each { |obj| @_result += 1 if obj.match( regex ) }
+    
+    return @_result
+  end
+end
+
+PortMonit.new.run

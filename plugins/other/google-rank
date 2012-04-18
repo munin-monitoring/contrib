@@ -1,0 +1,159 @@
+#!/bin/bash
+# Simple munin plugin to find the google rank for a URL/WORD combination
+#
+# THIS SCRIPT BREAKS THE TOS OF GOOGLE SO USE WITH CARE AND DON'T BLAME ME IF THINGS GO WRONG
+# 
+# (c) 2009 i.dobson@planet-ian.com
+#
+# For each url/words that you want to watch you need to create a variable/word pair in your 
+# munin-node configuration file for example
+#
+#[google_rank]
+#user root
+#timeout 60
+#env.URL1 http://www.plant-ian.com
+#env.WORD1 avr webcam
+#env.URL2 http://www.plant-ian.com
+#env.WORD2 bascom
+#
+# Version 0.5 24.1.2009
+# Added loop to check the first 500 pages. Note the script sleeps 5 seconds beween each page grab so
+# If the word/url your looking for is in the higher positions then you need to increase the timeout
+#  
+# Version 0.5 21.1.2009
+# Dump each page grabbed from google into seperate files (helps with debugging) 
+#
+# Version 0.4 19.1.2009
+# Fixed corrupt then empty cache file bug
+#
+# Version 0.3 19.1.2009 
+#  The script now grabs the google page based on the LASTHIT counter.
+#  The script grabs the google page for URL1, then the next time it's called URL2 etc. If the url/word pair doesn't exist for LASTHIT then the script just dumps the cached data
+#
+# Version 0.2 18.01.2009 
+#  Cache added, the script only grabs the pages from google every 10 calls
+#  The script still only checks to first 100 pages returned by google
+#
+# Version 0.1 17.01.2009 Initial release
+#  The script only checks to first 100 pages returned by google
+#
+
+# Auto Configure, Check it word 1 is defined
+if [ "$1" = "autoconf" ]; then
+   if [ "$URL1" != "" ]; then
+      if [ "$WORD1" != "" ]; then
+         echo yes
+         exit 0
+      fi
+   fi
+   echo no
+   exit 1
+fi
+
+#Configure, loop through each variable defined WORDx URLx dumping it to munin
+if [ "$1" = "config" ]; then
+   iLoop=1
+   echo 'graph_title Google page rank'
+   echo 'graph_args --upper-limit 100 -l 0'
+   echo 'graph_category other'
+   echo 'graph_scale no'
+   echo 'graph_info Google page rank for URLs & Words'
+
+   URL="xxx"
+   until [  "$URL" = "" ]; do
+     TMPURL=URL$iLoop
+     URL="${!TMPURL}"
+     TMPWORD=WORD$iLoop
+     WORD="${!TMPWORD}"
+     if [ "$URL" = "" ]; then
+       exit 0
+     fi
+     if [ "$WORD" = "" ]; then
+       exit 0
+     fi 
+     VAR=`echo $URL.$WORD | sed -e "s/http:\/\///g"| sed -e "s/ /_/g"| sed -e "s/\./_/g"| sed -e "s/\-/_/g"`
+     URL=`echo $URL| sed -e "s/http:\/\///g"`
+     echo $VAR.label Pagerank $URL - $WORD
+     let iLoop="$iLoop +1"
+   done
+   exit 0
+fi
+
+#Meat of the program, grabs data from google for one word/url pair using LASTHIT as the pointer to which url/word pair to read
+
+#Read update & save counter
+LASTHIT=0
+if [ -f /tmp/google_rank.status ]; then
+  LASTHIT=`cat /tmp/google_rank.status | awk '{print $1}'`
+fi
+
+let LASTHIT="$LASTHIT + 1"
+echo $LASTHIT > /tmp/google_rank.status
+
+#Find URL/WORD PAIR for loop counter
+TMPURL=URL$LASTHIT
+URL="${!TMPURL}"
+TMPWORD=WORD$LASTHIT
+WORD="${!TMPWORD}"
+
+if [ "$URL" != "" ]; then
+
+#Setup defaults
+  base=0
+  num=1
+  start=0
+  FOUND=0
+#Clean up URL/WORD pair, removing http:// replacing " " with "_", "." with "_", "-" with "-"
+  VAR=`echo $URL.$WORD | sed -e "s/http:\/\///g"| sed -e "s/ /_/g"| sed -e "s/\./_/g"| sed -e "s/\-/_/g"`
+  SEARCHWORD=`echo $WORD| sed -e "s/ /%20/g"`
+
+until [ "$FOUND" -ne "0" ]; do
+#Grab page from google for the WORD/PAGE combination.Pipe it into awk to pull out the url's only, one per line. Then dump only the lines containing the URL defined 
+    wget -q --user-agent=Firefox -O - http://www.google.com/search?q=$SEARCHWORD\&num=100\&hl=en\&safe=off\&pwst=1\&start=$start\&sa=N > /tmp/google_rank.$LASTHIT.data
+    VALUE=`cat /tmp/google_rank.$LASTHIT.data|sed 's/<a href=\"\([^\"]*\)\" class=l>/\n\1\n/g'|awk -v num=$num -v base=$base '{ if ( $1 ~ /^http/ ) print base,num++,$NF }'|awk '{ print $2 "  " $3}'|grep -i $URL| awk '{ print $1}'`
+    VALUE=`echo $VALUE| awk '{ print $1}'`
+    if [ "$VALUE" = "" ]; then
+      VALUE=-1
+      let start="start + 100"
+      sleep 5
+    else
+      FOUND=1 
+      let VALUE="$VALUE + $start"
+    fi
+###    echo Start=$start Value=$VALUE Found=$FOUND
+    if [ "$start" -gt 500 ];then
+      FOUND=-1
+      VALUE=-1
+    fi
+done
+
+#Read through cache file saving to array
+  iLoop=1
+  while read line ;do
+    Data[$iLoop]=$line
+    let iLoop="$iLoop +1"
+  done < /tmp/google_rank.cache
+
+#replace one line with the new value grabbed from google
+  Data[$LASTHIT]="$VAR.value $VALUE"
+
+#write data back
+  rm /tmp/google_rank.cache
+  for iLoop in `seq 1 10`; do 
+    echo ${Data[$iLoop]} >> /tmp/google_rank.cache
+  done
+fi
+
+#Reset counter to start 
+  if [ "$LASTHIT" -gt 30 ]; then
+     echo 0 > /tmp/google_rank.status
+  fi
+
+#Dump data to munin
+  while read line ;do
+    if [ "$line" != "" ]; then
+       echo $line
+    fi
+  done < /tmp/google_rank.cache
+exit 0
+

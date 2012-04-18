@@ -1,0 +1,57 @@
+#!/bin/bash
+#
+# munin plugin to monitor bans on Fail2ban jails
+#
+# Origional Author: Thomas Leveil
+# Contributors: none
+# Version: 1.1
+#
+###############################################
+# You have to specify a different user in the munin-node config file as follow:
+#
+# [fail2ban_all_jails]
+# user root
+###############################################
+#
+# HISTORY
+# v1.1 : better autoconf
+#
+#%# family=contrib
+#%# capabilities=autoconf
+
+
+case $1 in
+	autoconf)
+		if [ -z $(which fail2ban-client) ]; then
+			echo no
+			exit 1
+		fi
+		if [ $(whoami) != "root" ]; then
+			echo "no (fail2ban-client found but must run as root)"
+			exit 1
+		fi
+		if [ -x $(which fail2ban-client) ]; then
+			echo yes
+			exit 0
+		else
+			echo "no (fail2ban-client found but not executable)"
+			exit 1
+		fi
+		;;
+	config)
+		echo "graph_title Fail2ban"
+		echo 'graph_vlabel active bans'
+		echo 'graph_category Network'
+		echo 'graph_info number of jailled ip'
+		echo 'graph_info This graph shows the amount of bans caught by Fail2ban'
+		$(which fail2ban-client) status | awk '/Jail list:/ { for (i=4; i<=NF; i++) { sub(/,$/,"",$i); jail=$i; sub(/-/,"_",$i); print "fail2ban_"$i".label "jail } }'
+		exit 0
+		;;
+esac
+
+ $(which fail2ban-client) status | awk '/Jail list:/ { for (i=4; i<=NF; i++) { sub(/,$/,"",$i); print $i } }' | \
+  while read JAIL; do 
+    echo -n "fail2ban_${JAIL//-/_}.value "
+    $(which fail2ban-client) status $JAIL | awk '/Currently banned:/ { print $NF }'
+  done
+  

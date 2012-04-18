@@ -1,0 +1,75 @@
+#!/bin/bash
+#
+# HDHomeRun Signal grapher
+# David Muench - davemuench at gmail
+#
+# Version 1 - 1/19/11 - Initial release
+#
+# Munin plugin to graph the signal strength/quality for a HDHomeRun TV tuner.
+# Developed and tested against a HDHR US Dual model.
+#
+# Requires the hdhomerun_config binary. It can be obtained from
+# http://www.silicondust.com/support/hdhomerun/downloads/linux/
+# Or if you are running Debian/Ubuntu:
+# apt-get install hdhomerun-config
+#
+# Place the hdhomerun_ script in your munin plugins directory (usually
+# /usr/share/munin/plugins) and create symlinks of the format
+# "hdhomerun_<deviceid>_tuner<number>", such as hdhomerun_123456_tuner0.
+# The deviceid can be obtained by running "hdhomerun_config discover".
+# Alternatively, the script supports the suggest option which will
+# scan for all HDHomeRun devices on the network and set up the symlinks.
+# To do this, run:
+#
+# munin-node-configure --shell | grep hdhomerun | bash
+#
+# Note: It will assume you have a dual tuner model and set up links
+# for tuner0 and tuner1. If you have a single tuner model, just delete
+# the tuner1 link.
+#
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+CONFIGPROG="/usr/bin/hdhomerun_config"
+
+DEVID="`echo $0 | cut -d _ -f 2`"
+TUNER="`echo $0 | cut -d _ -f 3`"
+
+
+if [ "$1" = "autoconf" ] ; then
+        if [ -x "$CONFIGPROG" ] ; then
+                echo "yes"
+        else
+                echo "no ($CONFIGPROG Does not exist or isn't executable!)."
+        fi
+        exit
+fi
+
+if [ "$1" = "config" ] ; then
+	echo "graph_title HDHomeRun $DEVID $TUNER Signal Strength"
+	echo "graph_args --upper-limit 100 -l 0"
+	echo "graph_vlabel %"
+	echo "graph_scale no"
+	echo "graph_category tv"
+	echo "ss.label Signal Strength"
+	echo "snq.label Signal Quality"
+	echo "seq.label Symbol Quality"
+	exit
+fi
+
+if [ "$1" = "suggest" ] ; then
+	for i in "`$CONFIGPROG discover`"; do
+		echo "`echo $i | awk '{print $3}'`_tuner0"
+		echo "`echo $i | awk '{print $3}'`_tuner1"
+	done
+	exit
+fi
+
+OUTPUT="`$CONFIGPROG $DEVID get /$TUNER/status`"
+
+# Signal Strength
+echo "ss.value `echo $OUTPUT | sed -e 's/^.*ss=//' -e 's/d* .*$//'`"
+# Signal Quality
+echo "snq.value `echo $OUTPUT | sed -e 's/^.*snq=//' -e 's/d* .*$//'`"
+# Symbol Quality
+echo "seq.value `echo $OUTPUT | sed -e 's/^.*seq=//' -e 's/d* .*$//'`"

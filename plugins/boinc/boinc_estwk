@@ -1,0 +1,438 @@
+#!/usr/bin/perl -w
+#
+# boinc_estwk - Munin plugin to monitor estimated time of BOINC WUs
+#
+# Run 'perldoc boinc_estwk' for full man page
+#
+# Author:  Palo M. <palo.gm@gmail.com>
+# License: GPLv3 <http://www.gnu.org/licenses/gpl-3.0.txt>
+#
+#
+# Parameters supported:
+# 	config
+#
+#
+# Configurable variables
+#       boinccmd   - command-line control program (default: boinccmd)
+# 	host       - Host to query (default: none)
+#       port       - GUI RPC port (default: none = use BOINC-default)
+#       boincdir   - Directory containing appropriate password file
+#                    gui_rpc_auth.cfg (default: none)
+#       estwk_warn - Warning level - minimum estimated work (default: 24.00 hours)
+#       password   - Password for BOINC (default: none) !!! UNSAFE !!!
+#
+#
+# $Log$
+#
+# Revision 1.0  2009/09/13  Palo M.
+#   Add documentation and license information
+#   Ready to publish on Munin Exchange
+# Revision 0.9  2009/09/13  Palo M.
+#   Add possibility to read password from file
+# Revision 0.8  2009/09/12  Palo M.
+#   Update default binary name: boinc_cmd -> boinccmd
+# Revision 0.7  2008/08/30  Palo M.
+#   Creation - Attempt to port functionality from C++ code
+#
+# (Revisions 0.1 - 0.6) were done in C++
+#
+#
+#
+# Magic markers:
+#%# family=contrib
+
+use strict;
+
+
+#########################################################################
+# 1. Parse configuration variables
+#
+my $BOINCCMD = exists $ENV{'boinccmd'} ? $ENV{'boinccmd'} : "boinccmd";
+my $HOST = exists $ENV{'host'} ? $ENV{'host'} : undef;
+my $PORT = exists $ENV{'port'} ? $ENV{'port'} : undef;
+my $PASSWORD = exists $ENV{'password'} ? $ENV{'password'} : undef;
+my $BOINCDIR = exists $ENV{'boincdir'} ? $ENV{'boincdir'} : undef;
+my $ESTWKWRN = exists $ENV{'estwk_warn'} ? $ENV{'estwk_warn'} : 24;
+
+#########################################################################
+# 2. Basic executable
+#
+if (defined $HOST) {
+  $BOINCCMD .= " --host $HOST";
+  if (defined $PORT) {
+    $BOINCCMD .= ":$PORT";
+  }
+}
+if (defined $PASSWORD) {
+  $BOINCCMD .= " --passwd $PASSWORD";
+}
+if (defined $BOINCDIR) {
+  chdir $BOINCDIR;
+}
+
+#########################################################################
+# 3. Get host info, to retrieve number of CPUs
+#
+my $nCPUs;
+my $hostInfo = `$BOINCCMD --get_host_info 2>/dev/null`;
+if ($hostInfo ne "") {
+  my @hostInfo = split /\n/, $hostInfo;
+  my @nCPUs = grep /^\s+#CPUS: /,@hostInfo;
+  if ($#nCPUs != 0) { die "Unexpected output from boinccmd"; }
+  $nCPUs = $nCPUs[0];
+  $nCPUs =~ s/^\s+#CPUS: //;
+  no warnings;  # for following line only
+  if ($nCPUs < 1) { die "Unexpected output from boinccmd"; }
+}
+else {
+  # No host info (e.g. client not running)
+  exit -1;
+}
+
+#print "$nCPUs\n";
+
+#########################################################################
+# 4. Display config if applicable
+#
+if ( (defined $ARGV[0]) && ($ARGV[0] eq "config") ) {
+
+  if (defined $HOST) {
+    print "host_name $HOST\n";
+  }
+
+  print "graph_title BOINC work cache estimation\n";
+  print "graph_category BOINC\n";
+  print "graph_args --base 1000 -l 0 --alt-autoscale-max\n";
+  print "graph_vlabel Hours\n";
+  print "graph_scale no\n";
+
+  # Longest WU is AREA, each CPU estimated is LINE2
+  print "longest.label Longest WU\n";
+  print "longest.draw AREA\n";
+  print "longest.type GAUGE\n";
+  for (my $i = 0; $i < $nCPUs; ++$i) {
+    print "cpu$i.label CPU$i\n";
+    print "cpu$i.draw LINE2\n";
+    print "cpu$i.type GAUGE\n";
+    printf "cpu$i.warning %.2f:\n",$ESTWKWRN;
+    print "cpu$i.critical 0:\n";
+  }
+
+  exit 0;
+}
+
+#########################################################################
+# 5. Fetch all needed data from BOINC-client with single call
+#
+my $prj_status = "";
+my $results = "";
+
+my $simpleGuiInfo = `$BOINCCMD --get_simple_gui_info 2>/dev/null`;
+if ($simpleGuiInfo ne "") {
+  # Some data were retrieved, so let's split them
+  my @sections;
+  my @section1;
+  @sections = split /=+ Projects =+\n/, $simpleGuiInfo;
+  @section1 = split /=+ [A-z]+ =+\n/, $sections[1];
+  $prj_status = $section1[0];
+
+  @sections = split /=+ Results =+\n/, $simpleGuiInfo;
+  @section1 = split /=+ [A-z]+ =+\n/, $sections[1];
+  $results = $section1[0];
+}
+
+#########################################################################
+# 6. Parse BOINC data
+#
+# 6.a) Get suspended projects
+my @prjInfos = split /\d+\) -+\n/, $prj_status;
+shift @prjInfos; # Throw out first empty line
+
+my @susp_projects;    # array of suspended projects
+for my $prj_info (@prjInfos) {
+  my @lines = split /\n/, $prj_info;
+  my @prjURL = grep /^\s+master URL: /,@lines;
+  if ($#prjURL != 0) {die "Unexpected output from boinccmd"; }
+  my $prjURL =$prjURL[0];
+  $prjURL =~ s/^\s+master URL: //;
+  my @suspGUI = grep /^\s+suspended via GUI: /,@lines;
+  if ($#suspGUI != 0) {die "Unexpected output from boinccmd"; }
+  my $suspGUI =$suspGUI[0];
+  $suspGUI =~ s/^\s+suspended via GUI: //;
+  if ($suspGUI eq "yes") {
+    push @susp_projects, $prjURL
+  }
+}
+for my $i (@susp_projects) { print "$i\n"; }
+
+# 6.b) Parse results, check their states
+#      Get those which are NOT suspended by GUI
+my @rsltInfos = split /\d+\) -+\n/, $results;
+shift @rsltInfos; # Throw out first empty line
+my @rsltRemain;
+
+for my $rslt_info (@rsltInfos) {
+  my @lines = split /\n/, $rslt_info;
+  my @estRemain = grep /^\s+estimated CPU time remaining: /,@lines;
+  my $estRemain = $estRemain[0];
+  $estRemain =~ s/^\s+estimated CPU time remaining: //;
+  my @schedstat = grep /^\s+scheduler state: /,@lines;
+  my $schedstat = $schedstat[0];
+  $schedstat =~ s/^\s+scheduler state: //;
+  my @state = grep /^\s+state: /,@lines;
+  my $state = $state[0];
+  $state =~ s/^\s+state: //;
+  my @acttask = grep /^\s+active_task_state: /,@lines;
+  my $acttask = $acttask[0];
+  $acttask =~ s/^\s+active_task_state: //;
+  my @suspGUI = grep /^\s+suspended via GUI: /,@lines;
+  my $suspGUI =$suspGUI[0];
+  $suspGUI =~ s/^\s+suspended via GUI: //;
+  my @prjURL = grep /^\s+project URL: /,@lines;
+  my $prjURL =$prjURL[0];
+  $prjURL =~ s/^\s+project URL: //;
+  if ($suspGUI eq "yes") {
+    # This result is not in work cache - at the moment
+    next;
+  }
+  my @suspPRJ = grep /^$prjURL$/,@susp_projects;
+  if ($#suspPRJ == 0) {
+    # This result is not in work cache - at the moment
+    next;
+  }
+  if ($state eq "2") {
+    # RESULT_FILES_DOWNLOADED
+    if ( ($schedstat eq "0") ||
+	 ($schedstat eq "1")    ) {
+      # CPU_SCHED_UNINITIALIZED   0
+      #  Not started yet: result is available in work cache
+      # CPU_SCHED_PREEMPTED       1
+      #  preempted: result is available in work cache
+      push @rsltRemain,$estRemain;
+      next;
+    }
+    if ($schedstat eq "2") {
+      # CPU_SCHED_SCHEDULED       2
+      if ( ($acttask eq "1") ||
+	   ($acttask eq "0") ||
+	   ($acttask eq "9")    ) {
+	# PROCESS_EXECUTING       1
+	#  running
+	# PROCESS_UNINITIALIZED   0
+	# PROCESS_SUSPENDED       9
+	#  suspended by "user active"/benchmark?
+	# available in work cache
+	push @rsltRemain,$estRemain;
+	next;
+      }
+      # other active-task-state - maybe failing/aborted WU
+      # => not in work cache
+      next;
+    }
+    # There should be no other scheduler state
+    next;
+  }
+  # RESULT_FILES_DOWNLOADING
+  # RESULT_COMPUTE_ERROR
+  # RESULT_FILES_UPLOADING
+  # RESULT_FILES_UPLOADED
+  # RESULT_ABORTED
+  # => not in work cache
+}
+
+#########################################################################
+# 7. Distribute remaining results per CPUs
+#
+# 7.a) Sort remaining results descending
+my @sortRemain = sort {$b <=> $a} @rsltRemain;
+
+# 7.b) Assign to CPU with smallest workcache
+my @CPUcache;
+for (my $i = 0; $i < $nCPUs; ++$i) {
+  $CPUcache[$i] = 0;
+}
+
+for my $length (@sortRemain) {
+  # find CPU with smallest workcache:
+  my @sortedCPUs = sort {$a <=> $b} @CPUcache;
+  $sortedCPUs[0] = $sortedCPUs[0] + $length;
+  @CPUcache = @sortedCPUs;
+}
+
+# At the end, sort CPUs descending
+@CPUcache = sort {$b <=> $a} @CPUcache;
+
+#########################################################################
+# 8. Display output
+#
+
+# Convert from seconds to hours
+printf "longest.value %.2f\n",$sortRemain[0]/3600;
+for (my $i = 0; $i < $nCPUs; ++$i) {
+  printf "cpu$i.value %.2f\n",$CPUcache[$i]/3600;
+}
+
+exit 0;
+
+
+#########################################################################
+# perldoc section
+
+=head1 NAME
+
+boinc_estwk - Munin plugin to monitor estimated time of BOINC WUs
+
+=head1 APPLICABLE SYSTEMS
+
+Linux machines running BOINC and munin-node
+
+- or -
+
+Linux servers (running munin-node) used to collect data from other systems 
+which are running BOINC, but not running munin-node (e.g. non-Linux systems)
+
+=head1 CONFIGURATION
+
+Following configuration variables are supported:
+
+=over 12
+
+=item B<boinccmd>
+
+command-line control program (default: boinccmd)
+
+=item B<host>
+
+Host to query (default: none)
+
+=item B<port>
+
+GUI RPC port (default: none = use BOINC-default)
+
+=item B<boincdir>
+
+Directory containing appropriate file gui_rpc_auth.cfg (default: none)
+
+=item B<estwk_warn>
+
+Warning level - minimum estimated work (default: 24.00 hours)
+
+=item B<password>
+
+Password for BOINC (default: none) 
+
+=back
+
+=head2 B<Security Consideration:>
+
+Using of variable B<password> poses a security risk. Even if the Munin 
+configuration file for this plugin containing BOINC-password is properly 
+protected, the password is exposed as environment variable and finally passed 
+to boinccmd as a parameter. It is therefore possible for local users of the 
+machine running this plugin to eavesdrop the BOINC password. 
+
+Using of variable password is therefore strongly discouraged and is left here 
+as a legacy option and for testing purposes.
+
+It should be always possible to use B<boincdir> variable instead - in such case 
+the file gui_rpc_auth.cfg is read by boinccmd binary directly. 
+If this plugin is used to fetch data from remote system, the gui_rpc_auth.cfg 
+can be copied to special directory in a secure way (e.g. via scp) and properly 
+protected by file permissions.
+
+=head1 INTERPRETATION
+
+This plugin shows the estimated remaining computation time for all CPUs of 
+the machine and the estimated remaining computation time of longest workunit.
+The estimation is based on assumption that the workunits of different lengths 
+will be distributed to the CPUs evenly (which is not always the case).
+
+The warning level can be used to warn in forward about the risk of workunits 
+local cache depletion and BOINC client running out of the work.
+Although such warning can be achieved by configuring Munin master, there is 
+also this option to configure it on munin-node side.
+
+=head1 EXAMPLES
+
+=head2 Local BOINC Example
+
+BOINC is running on local machine. The BOINC binaries are installed in 
+F</opt/boinc/custom-6.10.1/>, the BOINC is running in directory
+F</usr/local/boinc/> under username boinc, group boinc and the password is used 
+to protect access to BOINC.
+Warning will be set when estimated work for any of CPUs will decrease under 
+48 hours:
+
+  [boinc_*]
+  group boinc
+  env.boinccmd /opt/boinc/custom-6.10.1/boinccmd
+  env.boincdir /usr/local/boinc
+  env.warn 48
+
+=head2 Remote BOINC Example
+
+BOINC is running on 2 remote machines C<foo> and C<bar>. 
+On the local machine the binary of command-line interface is installed in 
+directory F</usr/local/bin/>.
+The BOINC password used on the remote machine C<foo> is stored in file 
+F</etc/munin/boinc/foo/gui_rpc_auth.cfg>.
+The BOINC password used on the remote machine C<bar> is stored in file 
+F</etc/munin/boinc/bar/gui_rpc_auth.cfg>.
+These files are owned and readable by root, readable by group munin and not 
+readable by others. 
+There are 2 symbolic links to this plugin created in the munin plugins 
+directory (usually F</etc/munin/plugins/>): F<snmp_foo_boincestwk> and 
+F<snmp_bar_boincestwk>
+
+  [snmp_foo_boinc*]
+  group munin
+  env.boinccmd /usr/local/bin/boinccmd
+  env.host foo
+  env.boincdir /etc/munin/boinc/foo
+
+  [snmp_bar_boinc*]
+  group munin
+  env.boinccmd /usr/local/bin/boinccmd
+  env.host bar
+  env.boincdir /etc/munin/boinc/bar
+
+This way the plugin can be used by Munin the same way as the Munin plugins 
+utilizng SNMP (although this plugin itself does not use SNMP).
+
+=head1 BUGS
+
+The estimation is based on simple assumption, that longest workunits will be 
+processed first. This is the case when work is distributed evenly among CPUs. 
+But this is not always the case, because various deadlines for various 
+workunits may fire the "panic mode" of BOINC and scheduling could be much 
+different. 
+For example, there can be 4 CPUs, and BOINC having downloaded 4 workunits 
+with estimated run-time 1 hour each and 3 workunits with estimated run-time 
+4 hours each. 
+This Munin plugin will report estimated work 4 hours for each CPU.
+But if deadline of those 1-hour workunits will be much shorter than deadline 
+of those 4-hours workunits, BOINC will schedule short workunits first (for all 
+4 CPUs) and after finishing them it will schedule those long workunits.
+This will result in real computation for 5 hours on 3 CPUs but only 1 hour on
+remaining 4th CPU. So after 1 hour of computation 1 of CPUs will run out of 
+work.
+
+There is no C<autoconf> capability at the moment. This is due to the fact, that 
+BOINC installations may vary over different systems, sometimes using default 
+directory from distribution (e.g. F</var/lib/boinc/> in Debian or Ubuntu), but 
+often running in user directories or in other separate directories.
+Also the user-ID under which BOINC runs often differs. 
+Under these circumstances the C<autoconf> would be either lame or too 
+complicated.
+
+=head1 AUTHOR
+
+Palo M. <palo.gm@gmail.com>
+
+=head1 LICENSE
+
+GPLv3 L<http://www.gnu.org/licenses/gpl-3.0.txt>
+
+=cut
+
+# vim:syntax=perl

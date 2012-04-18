@@ -1,0 +1,161 @@
+#!/bin/bash
+#
+#healthcheck on munin
+#egrep system log and alert.
+#
+#programed by rti (hiroyuki fujie) super.rti@gmail.com @super_rti
+#LICENSE: NYSL (public domain)
+#
+#
+#config file
+#      /etc/munin/plugin-conf.d/munin-node
+#
+#example minimum config
+#---------------------------------------------------
+#[healthcheck_log]
+#user root
+#env.log_1  /var/log/messages
+#---------------------------------------------------
+#
+#check two log
+#---------------------------------------------------
+#[healthcheck_log]
+#user root
+#env.log_1  /var/log/messages
+#env.log_2  /var/log/syslog
+#---------------------------------------------------
+#
+#check two three
+#---------------------------------------------------
+#[healthcheck_log]
+#user root
+#env.log_1  /var/log/messages
+#env.log_2  /var/log/syslog
+#env.log_3  /var/log/dmesg
+#---------------------------------------------------
+#
+#set name
+#---------------------------------------------------
+#[healthcheck_log]
+#user root
+#env.log_1  /var/log/messages
+#env.name_1 my_server_messages
+#---------------------------------------------------
+#
+#set egrep string
+#---------------------------------------------------
+#[healthcheck_log]
+#user root
+#env.log_1  /var/log/messages
+#env.grep_1 alert|warning
+#---------------------------------------------------
+#
+#set egrep string
+#---------------------------------------------------
+#[healthcheck_log]
+#user root
+#env.log_1  /var/log/messages
+#env.grep_1 alert|warning
+#---------------------------------------------------
+#
+#full option
+#/etc/munin/plugin-conf.d/munin-node
+#---------------------------------------------------
+#[healthcheck_log]
+#user root                          #log file is read only root user.
+#env.log_1  /var/log/messages       #target log filename
+#env.grep_1 critical|error          #egrep string.
+                                    #defualt by critical|error|warning|crash|fatal|kernel
+#---------------------------------------------------
+#
+
+
+#edakari speed up.
+CHECKMAX=`env | grep log_ | wc -l`
+let CHECKMAX="$CHECKMAX + 1"
+MINUTE_BY_GREP_RANGE=10
+
+if [ "$1" = "autoconf" ]; then
+    if [ $CHECKMAX -le 1 ]; then
+         echo no
+         exit 1
+    fi
+    echo yes
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    echo 'graph_title log grep (match count)'
+    echo "graph_args --base 1000 -l 0 --vertical-label match_count"
+    echo 'graph_scale no'
+    echo 'graph_vlabel match_count'
+    echo 'graph_category healthcheck'
+    echo 'graph_info This graph shows the bad event count on log'
+
+    for(( I = 1; I < $CHECKMAX; ++I ))
+    do
+         eval log=\$log_${I}
+         eval name=\$name_${I}
+         eval grep=\$grep_${I}
+         if [ "x${log}" = "x" ]; then
+              continue
+         fi
+         if [ "x${name}" = "x" ]; then
+             name=`echo $log | sed 's#[/|\.]#_#g'`
+         fi
+         if [ "x${name}" = "x" ]; then
+             grep="critical|error|crash|fatal|kernel"
+         fi
+
+         echo "$name.label $name"
+         echo "$name.info egrep $grep $log | wc -l"
+         echo "$name.draw LINE2"
+         echo "$name.min 0"
+         echo "$name.max 20"
+         echo "$name.critical 0:0"
+    done
+
+    exit 0
+fi
+
+NOWTIME=`date --date "$MINUTE_BY_GREP_RANGE minute ago" +%s`
+
+for(( I = 1; I < $CHECKMAX; ++I ))
+do
+    eval log=\$log_${I}
+    eval name=\$name_${I}
+    eval grep=\$grep_${I}
+    if [ "x${log}" = "x" ]; then
+         continue
+    fi
+    if [ "x${name}" = "x" ]; then
+         name=`echo $log | sed 's#[/|\.]#_#g'`
+    fi
+    if [ "x${grep}" = "x" ]; then
+         grep="critical|error|crash|fatal|kernel"
+    fi
+
+    COUNT=0
+    MESSAGE=
+    IFS=$'\n'
+    MATCHLINES=(`egrep -i "$grep" "$log"`)
+    for(( N = ${#MATCHLINES[@]} - 1; N >= 0 ; --N ))
+    do
+         LINE=${MATCHLINES[$N]}
+         DATESTRING=`echo $LINE | awk '{ printf("%s %s %s",$1,$2,$3)}'`
+         LOGTIME=`date --date "$DATESTRING" +%s`
+         if [ $LOGTIME -lt $NOWTIME ]; then
+               break
+         fi
+         let COUNT="$COUNT + 1"
+         MESSAGE="$MESSAGE$LINE //@LINE@// "
+    done
+
+
+    if [ $COUNT -eq 0 ]; then
+        echo "${name}.value 0"
+    else
+        echo "${name}.value ${COUNT}"
+        echo "${name}.extinfo ${MESSAGE}"
+    fi
+done

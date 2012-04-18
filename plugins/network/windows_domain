@@ -1,0 +1,25 @@
+#!/bin/sh
+# munin plugin to monitor the number of logged in users
+# and the number of hosts they're spread across on a windows domain.
+# uses output dump of "net sess" from the domain controller.
+# (c) 2011 jon@jon.bpa.nu
+#%# family=manual
+
+SESSIONS="/srv/pub/kram/dud"
+
+case $1 in
+	config)
+	cat <<CFG
+graph_title windows domain
+graph_vlabel users/hosts
+graph_category network
+users.label users
+hosts.label hosts
+CFG
+	exit 0;;
+esac
+
+tail -n+5 "$SESSIONS" | head -n-2  | awk '$2 !~ "[\[\]\(\)\:;\"<>\*\+=\|\\/\?,]" { if(length($2)>=2) ua[tolower($2)] }
+					  $1 !~ "\:" { ha[$1] }
+					  END{ print "users.value",length(ua);
+					  print "hosts.value",length(ha) }' 2>/dev/null

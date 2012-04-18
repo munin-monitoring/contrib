@@ -1,0 +1,163 @@
+#!/usr/bin/env python
+# coding=iso-8859-1
+
+"""
+=head1 NAME
+
+esxi__sensors - Munin plugin to monitor hardware sensors in a VMware ESXi
+installation.
+
+=head1 APPLICABLE SYSTEMS
+
+VMware ESX and ESXi systems.  Might work with other systems that use CIM and
+CIM_NumericSensors, probably with changes to the namespace.
+
+The host on which the plugin is run must have the pywbem Python library
+installed.
+
+=head1 CONFIGURATION
+
+The remote host name is taken from the plugin name as the SNMP plugins are;
+to monitor host 192.168.1.15, symlink the plugin to snmp_192.168.1.15_sensors .
+
+The username and password for accessing the ESXi system must be set in a config
+file:
+
+  [esxi_192.168.1.15_*]
+  env.user monitor
+  env.pass passw0rd
+
+In the event that not all sensor types are desired, the plugin can be limited
+to a subset of the types available:
+
+  env.sensors 2 3 5
+
+Check the sensor_data dictionary at the top of the script to see what sensor
+types are available.
+
+=head1 INTERPRETATION
+
+This is a multigraph plugin that will generate separate graphs for each type
+of sensor.  The names of the sensors are taken from the ESXi host.
+
+If the host provides error thresholds for the sensor readings, those will be
+passed along to munin.
+
+=head1 VERSION
+
+1.0
+
+=head1 AUTHOR
+
+Phil Gold <phil_g@pobox.com>
+
+=head1 LICENSE
+
+To the extent possible under law, the author(s) have dedicated all copyright and
+related and neighboring rights to this software to the public domain worldwide
+under a CC0 waiver.  This software is distributed without any warranty. 
+
+http://creativecommons.org/publicdomain/zero/1.0/
+
+=cut
+"""
+
+import os, sys
+import re, string
+import pywbem
+
+NS = 'root/cimv2'
+
+sensor_data = {
+  2 : {'prefix':'temp', 'title':'Temperatures', 'unit':'°C'},
+  3 : {'prefix':'volt', 'title':'Voltages',     'unit':'Volts'},
+  4 : {'prefix':'amp',  'title':'Current',      'unit':'Amps'},
+  5 : {'prefix':'fan',  'title':'Fans',         'unit':'RPM'}
+}
+
+def munin_id(instance):
+  return sensor_data[instance['SensorType']]['prefix'] + \
+      re.sub('[^a-zA-Z0-9]', '_', instance['DeviceId'])
+
+def inst_val(instance, field):
+  return instance[field] * 10 ** instance['UnitModifier']
+
+def munin_warning(instance):
+  if not instance['EnabledThresholds']:
+    return ':'
+
+  result = ''
+  if 0 in instance['EnabledThresholds']:
+    result += str(inst_val(instance, 'LowerThresholdNonCritical'))
+  result += ':'
+  if 1 in instance['EnabledThresholds']:
+    result += str(inst_val(instance, 'UpperThresholdNonCritical'))
+  return result
+
+def munin_critical(instance):
+  if not instance['EnabledThresholds']:
+    return ':'
+
+  result = ''
+  if 2 in instance['EnabledThresholds']:
+    result += str(inst_val(instance, 'LowerThresholdCritical'))
+  elif 4 in instance['EnabledThresholds']:
+    result += str(inst_val(instance, 'LowerThresholdFatal'))
+  result += ':'
+  if 3 in instance['EnabledThresholds']:
+    result += str(inst_val(instance, 'UpperThresholdCritical'))
+  elif 5 in instance['EnabledThresholds']:
+    result += str(inst_val(instance, 'UpperThresholdFatal'))
+  return result
+
+def print_sensors(sensor_type, instances, config):
+  print 'multigraph esxi_' + sensor_data[sensor_type]['prefix'] + 's'
+
+  if config:
+    print "graph_title ESXi " + sensor_data[sensor_type]['title']
+    print "graph_args --base 1000 -l 0"
+    print "graph_vlabel " + sensor_data[sensor_type]['unit']
+    print "graph_category sensors"
+    for i in instances:
+      if i['SensorType'] == sensor_type:
+        print '{0}.label {1}'.format(munin_id(i), i['Caption'])
+        print '{0}.max {1}'.format(munin_id(i), inst_val(i, 'MaxReadable'))
+        print '{0}.min {1}'.format(munin_id(i), inst_val(i, 'MinReadable'))
+        if munin_warning(i) != ':':
+          print '{0}.warning {1}'.format(munin_id(i), munin_warning(i))
+        if munin_critical(i) != ':':
+          print '{0}.critical {1}'.format(munin_id(i), munin_critical(i))
+
+    print ''
+    return
+
+  for i in instances:
+    if i['SensorType'] == sensor_type:
+      print '{0}.value {1}'.format(munin_id(i), inst_val(i, 'CurrentReading'))
+  print ''
+
+plugin_name = list(os.path.split(sys.argv[0]))[1]
+host = plugin_name[string.index(plugin_name, '_')+1:string.rindex(plugin_name, '_')]
+if host == '':
+  sys.stderr.write("No hostname found.\n")
+  exit(1)
+try:
+  username = os.environ['user']
+  password = os.environ['pass']
+except KeyError:
+  sys.stderr.write("Username and password must be specified.\n")
+  exit(1)
+
+try:
+  sensors = map(int, re.split(',? +', os.environ['sensors']))
+except:
+  sensors = [2, 3, 4, 5]
+
+config = len(sys.argv) > 1 and sys.argv[1] == 'config'
+
+wbemclient = pywbem.WBEMConnection('https://' + host, (username, password), NS)
+insts = sorted(wbemclient.EnumerateInstances('CIM_NumericSensor'))
+
+print 'host_name ' + host
+for sensor_type in sensors:
+  print_sensors(sensor_type, insts, config)

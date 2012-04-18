@@ -1,0 +1,293 @@
+#!/bin/bash
+# 
+# Munin plugin for ejabberd2.
+# This script supports versions 2.0 and 2.1 of ejabberd.
+#
+# Written by Lasse Karstensen <lkarsten@hyse.org> 2007-05-27.
+# Based on ejabberd-plugin by Christian Dröge <Christian@draugr.de>
+#
+# Status, memory, threads, ejabberd2 and other code optimalisation
+# by Peter Viskup <skupko.sk@gmail.com>
+#
+# As connected users, registered users and server-connections have somewhat
+# different scales, this plugin uses munins suggest feature to create three
+# different graphs.
+# 
+# ejabberd_connections
+# ejabberd_users
+# ejabberd_registrations
+# ejabberd_statuses
+# ejabberd_memory
+# ejabberd_threads
+# ejabberd_usersindays
+# ejabberd_uptime
+#
+# use ln -s ejabberd ejabberd_(connections|users|registrations|statuses|memory|threads|usersindays|uptime)
+# to activate.
+#
+# If the autodetect-feature for vhosts breaks, you can set
+# """
+# [ejabberd*]
+# env.vhosts foo.com bar.com
+# env.statuses available away chat xa # monitoring of statuses
+# env.days 1 7 30                     # monitoring for usersindays
+# user ejabberd                       # user ejabberd should have enough priviledges
+#                                     # depends on your setup
+# """
+# in plugin-conf.d/munin-node to override it.
+#
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+shopt -s extglob
+
+EJCTL=$(which ejabberdctl)
+EJVER=$($EJCTL status | awk '/^ejabberd / {print $2}')
+
+if [ "$1" == "autoconf" ]; then
+        if [ -x $EJCTL > /dev/null ]; then
+            echo yes
+            exit 0
+        fi
+        echo "no (ejabberdctl not found)"
+        exit 1
+fi
+
+if [ "$1" == "suggest" ]; then
+    echo "connections"
+    echo "users"
+    echo "registrations"
+    echo "statuses"
+    echo "memory"
+    echo "threads"
+    echo "usersindays"
+    echo "uptime"
+    exit 0
+fi
+
+# Add munin argument to ejabberdctl to prevent a lot of ejabberdctl
+# records in memory see discussion:
+# http://lists.jabber.ru/pipermail/ejabberd/2009-September/005337.html
+# Add these lines to ejabberdctl script to get it work
+#@@ -56,6 +56,15 @@
+#            $KERNEL_OPTS \
+#            "$@"
+#     ;;
+#+    munin)
+#+        shift
+#+        exec $ERL $SNAME ejabberdctlmunin \
+#+            -pa $EBIN_DIR \
+#+            -s ejabberd_ctl \
+#+            -noinput \
+#+            $KERNEL_OPTS \
+#+            -extra $ERLANG_NODE "$@"
+#+    ;;
+#     *)
+#        exec $ERL $SNAME ejabberdctl$SUFFIX \
+#            -pa $EBIN_DIR \
+#
+# Or just comment out following line
+EJCTL="$EJCTL munin"
+
+# trying to autodetect running vhosts.
+if [ -z "$vhosts" ]; then
+    for CFGPATH in /etc/ejabberd /usr/local/ejabberd/etc; do
+        if [ -f "$CFGPATH/ejabberd.cfg" ]; then
+            EJCFG=$CFGPATH/ejabberd.cfg
+        fi
+    done
+    if [ -z "$EJCFG" ]; then
+        echo "Unable to find ejabberd.cfg. Exiting." > /dev/stderr
+        exit -1
+    fi
+    # you have to have all of vhosts defined on one line in $EJCFG or in plugins-conf.d/munin-node config file
+    vhosts=$(awk '/^\s*{hosts/ {gsub( /\{\s?hosts\s?,|[\",\[\]]|\}\s?.|localhost/ ,""); print;}' $EJCFG)
+fi
+
+# get ejabberd PID
+if [[ ${EJVER%\.+([0-9]|[0-9][0-9])} == 2.1 ]]; then
+    EJPID=$(cat /var/run/ejabberd/ejabberd.pid)
+else
+    EJPID=$(ps -ef | awk '/\/bin\/beam.smp/ && !/awk/ {print $2}')
+fi
+
+if [ -z "$vhosts" ]; then
+    echo "No vhosts to sample." > /dev/stderr
+    echo "Please set env.vhosts in plugins-conf.d/munin-node." > /dev/stderr
+    exit -1
+fi
+
+MODE=$(basename $0 | sed 's/^ejabberd_//g')
+
+if ! [ "$MODE" == "connections" -o "$MODE" == "users" \
+ -o "$MODE" == "registrations" -o "$MODE" == "statuses" \
+ -o "$MODE" == "memory" -o "$MODE" == "threads" \
+ -o "$MODE" == "usersindays" -o "$MODE" == "uptime" ]; then
+    echo "ERROR: Unknown mode \"$MODE\". Exiting." > /dev/stderr
+    exit -1
+fi
+
+if [ "$1" = "config" ]; then
+    echo 'graph_category ejabberd'
+    echo 'graph_info This graph shows statistics of ejabberd server'
+    if [ "$MODE" == "memory" ]; then
+        echo 'graph_args --base 1024 -l 0'
+        echo 'graph_scale yes'
+        echo 'graph_title Memory usage'
+        echo 'graph_vlabel Bytes'
+        echo "ejabberd_memory_size.label actual memory"
+        echo "ejabberd_memory_size.info Memory used by ejabberd process in Bytes"
+        echo "ejabberd_memory_peak.label memory peak"
+        echo "ejabberd_memory_peak.info Memory peak of ejabberd process in Bytes"
+    else
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_scale no'
+        if [ "$MODE" == "connections" ]; then
+            echo 'graph_title Server-to-server conections'
+            echo 'graph_vlabel connections'
+            echo 's2s_connections_out.label outgoing s2s connections'
+            echo 's2s_connections_out.info Number of outgoing server to server connections'
+            echo 's2s_connections_in.label incoming s2s connections'
+            echo 's2s_connections_in.info Number of incoming server to server connections'
+        elif [ "$MODE" == "users" ]; then
+            echo 'graph_title Connected users'
+            echo 'graph_vlabel users'
+            for host in $vhosts; do
+                formathost=$(echo $host | tr '.' '_')
+                echo "connected_users_$formathost.label $host connected users"
+                echo "connected_unique_users_$formathost.label $host unique connected users"
+            done
+        elif [ "$MODE" == "registrations" ]; then
+            echo 'graph_title User registrations'
+            echo 'graph_vlabel users'
+            for host in $vhosts; do
+                formathost=$(echo $host | tr '.' '_')
+                echo "registered_$formathost.label $host registered users"
+                echo "registered_$formathost.info Registered users for vhost $host"
+            done
+        elif [ "$MODE" == "statuses" ]; then
+            echo 'graph_title User statuses'
+            echo 'graph_vlabel users'
+            for host in $vhosts; do
+                for status in $statuses; do
+                    formathost=$(echo $host | tr '.' '_')
+                    echo "status_${formathost}_${status}.label $status on $host"
+                    echo "status_${formathost}_${status}.info Users with status $status on $host [xa=not available, dnd=(do not disturb) or (busy), chat=free for chat]"
+                done
+            done
+        elif [ "$MODE" == "threads" ]; then
+            echo 'graph_title Threads'
+            echo 'graph_vlabel threads'
+            echo "ejabberd_threads.label number of threads"
+            echo "ejabberd_threads.info Number of threads of ejabberd process"
+        elif [ "$MODE" == "usersindays" ]; then
+            echo 'graph_title Active users'
+            echo 'graph_vlabel users'
+            for host in $vhosts; do
+                for num in $days; do
+                    formathost=$(echo $host | tr '.' '_')
+                    echo "usersindays_${formathost}_${num}.label $host active users [$num days]"
+                    echo "usersindays_${formathost}_${num}.info Number of $host users active in last $num days"
+                done
+            done
+        elif [ "$MODE" == "uptime" ]; then
+            echo 'graph_title Uptime'
+            echo 'graph_vlabel days'
+            echo "uptime.label uptime"
+            echo 'uptime.draw AREA'
+        fi
+    fi
+    exit 0
+fi
+
+if [[ ${EJVER%\.+([0-9]|[0-9][0-9])} == 2.1 ]]; then
+    if [ "$MODE" == "users" ]; then
+        for host in $vhosts; do
+            formathost=$(echo $host | tr '.' '_')
+            echo "connected_users_$formathost.value $($EJCTL stats_host onlineusers $host)"
+            echo "connected_unique_users_$formathost.value $($EJCTL connected_users_vhost $host | awk -v var=$host -F/ '{users[$1]} END {for (user in users) {if (index(user,var)) {count++}} print count}')"
+        done
+    elif [ "$MODE" == "registrations" ]; then
+        for host in $vhosts; do
+             formathost=$(echo $host | tr '.' '_')
+             num=$($EJCTL stats_host registeredusers $host)
+             if [ "$?" != 0 ]; then
+                 num="U"
+             fi
+             echo "registered_$formathost.value $num"
+        done
+    elif [ "$MODE" == "statuses" ]; then
+        for host in $vhosts; do
+            formathost=$(echo $host | tr '.' '_')
+            for status in $statuses; do
+                num=$($EJCTL status_num_host $host $status)
+                if [ "$?" != 0 ]; then
+                    num="U"
+                fi
+                echo "status_${formathost}_${status}.value $num"
+            done
+        done
+    elif [ "$MODE" == "usersindays" ]; then
+        for host in $vhosts; do
+            for num in $days; do
+                formathost=$(echo $host | tr '.' '_')
+                echo "usersindays_${formathost}_${num}.value $($EJCTL num_active_users $host $num)"
+            done
+        done
+    elif [ "$MODE" == "uptime" ]; then
+        echo "uptime.value $($EJCTL stats uptimeseconds | awk '{printf "%.2f", $1/86400}')"
+    elif [ "$MODE" == "connections" ]; then
+        echo "s2s_connections_out.value $($EJCTL outgoing_s2s_number)"
+        echo "s2s_connections_in.value $($EJCTL incoming_s2s_number)"
+    fi
+elif [[ ${EJVER%\.+([0-9]|[0-9][0-9])} == 2.0 ]]; then
+    if [ "$MODE" == "users" ]; then
+        for host in $vhosts; do
+            formathost=$(echo $host | tr '.' '_')
+            echo "connected_users_$formathost.value $($EJCTL vhost $host stats onlineusers)"
+            echo "connected_unique_users_$formathost.value $($EJCTL connected-users | awk -v var=$host -F/ '{users[$1]} END {for (user in users) {if (index(user,var)) {count++}} print count}')"
+        done
+    elif [ "$MODE" == "registrations" ]; then
+        for host in $vhosts; do
+            formathost=$(echo $host | tr '.' '_')
+            num=$($EJCTL vhost $host stats registeredusers)
+            if [ "$?" != 0 ]; then
+                num="U"
+            fi
+            echo "registered_$formathost.value $num"
+        done
+    elif [ "$MODE" == "statuses" ]; then
+        for host in $vhosts; do
+            formathost=$(echo $host | tr '.' '_')
+            for status in $statuses; do
+                num=$($EJCTL vhost $host status-num $status)
+                if [ "$?" != 0 ]; then
+                    num="U"
+                fi
+                echo "status_${formathost}_${status}.value $num"
+            done
+        done
+    elif [ "$MODE" == "usersindays" ]; then
+        for host in $vhosts; do
+            for num in $days; do
+                formathost=$(echo $host | tr '.' '_')
+                echo "usersindays_${formathost}_${num}.value $($EJCTL vhost $host num-active-users $num)"
+            done
+        done
+    elif [ "$MODE" == "uptime" ]; then
+        echo "uptime.value $($EJCTL stats uptime-seconds | awk '{printf "%.2f", $1/86400}')"
+    elif [ "$MODE" == "connections" ]; then
+        echo "s2s_connections_out.value $($EJCTL outgoing-s2s-number)"
+        echo "s2s_connections_in.value $($EJCTL incoming-s2s-number)"
+    fi
+else
+   echo "# Unknown Ejabberd Version: $EJVER -> '${EJVER%\.+([0-9]|[0-9][0-9])}'"
+fi
+
+if [ "$MODE" == "memory" ]; then
+    echo "ejabberd_memory_size.value $(awk '/VmSize/ {print $2*1024}' /proc/${EJPID}/status)"
+    echo "ejabberd_memory_peak.value $(awk '/VmPeak/ {print $2*1024}' /proc/${EJPID}/status)"
+elif [ "$MODE" == "threads" ]; then
+    echo "ejabberd_threads.value $(awk '/Threads/ {print $2}' /proc/${EJPID}/status)"
+fi
+exit 0

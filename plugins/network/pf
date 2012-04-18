@@ -1,0 +1,145 @@
+#!/bin/sh
+#
+# OpenBSD's pf(4) monitoring for FreeBSD
+# 2007, Gergely Czuczy <phoemix@harmless.hu>
+#
+# Needs to run as root.
+# Add "user root" for the [pf] into plugins.conf.
+#
+# Options:
+#  - env.do_searches yes: to enable state table search monitoring`
+#
+# 0.1 - initial release:
+# - state table usage
+# - search rate
+# - match rate
+# - state mismatch rate
+# - blocked packets
+# - monitoring of labelled rules
+#
+# 0.2 - feature improvements:
+#  - Labelled rules for packet count
+#  - OpenBSD compatibility
+#  - Warning and critical on state table
+#
+# 0.3 - feature improvements:
+#  - Aggregate rules with the same label
+#
+# 0.4 - feature changes:
+#  - State searches are optional. it can shrink others.
+#  - Labelled targets are marked with a leading L
+#
+#
+#%# family=auto
+#%# capabilities=autoconf
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PATH
+
+pfctl="/sbin/pfctl"
+
+case $1 in
+    config)
+	echo "graph_title OpenBSD pf statistics"
+	echo "graph_vlabel Entries per second"
+	echo "graph_scale no"
+	echo "graph_category network"
+	echo "graph_args -l 0"
+	echo "graph_info OpenBSD's pf usage statistics"
+	echo "states.label States"
+	echo "states.type GAUGE"
+	${pfctl} -sm 2> /dev/null | awk '/states/ {print "states.warning "$4*0.9; print "states.critical "$4*0.95}'
+	if [ "x${do_searches}" = "xyes" ]; then
+		echo "searches.label Searches"
+		echo "searches.min 0"
+		echo "searches.type DERIVE"
+	fi
+	echo "matches.label Matches"
+	echo "matches.min 0"
+	echo "matches.type DERIVE"
+	echo "mismatches.label State mismatches"
+	echo "mismatches.min 0"
+	echo "mismatches.type DERIVE"
+	echo "blocks.label Blocked packets"
+	echo "blocks.type DERIVE"
+	echo "blocks.min 0"
+	${pfctl} -sl 2>/dev/null | awk '{
+		 l="";
+		 for (i=1; i<NF-2; i=i+1) l=l" "$i;
+		 sub(/^ /, "", l);
+		 f=l;
+		 gsub(/[^a-z0-9A-Z]/, "_", f);
+		 print f".label L: "l;
+		 print f".type DERIVE"
+		 print f".min 0"}'
+	exit 0
+	;;
+
+    autoconf)
+	ostype=`uname -s`
+        # NetBSD
+	if [ ${ostype} = "NetBSD" ]; then
+	# enabled?
+		if [ `${pfctl} -si 2>/dev/null | awk '/^Status:/{print $2}'` != "Enabled" ]; then
+			echo "no (pf(4) is not enabled, consult pfctl(8))"
+			exit 1
+		fi
+	# FreeBSD
+	elif [ ${ostype} = "FreeBSD" ]; then
+		# enabled?
+		if [ `${pfctl} -si 2>/dev/null | awk '/^Status:/{print $2}'` != "Enabled" ]; then
+			echo "no (pf(4) is not enabled, consult pfctl(8))"
+			exit 1
+		fi
+	# OpenBSD
+	elif [ ${ostype} = "OpenBSD" ]; then
+		# pf(4) module loaded?
+		if [ `kldstat -v | grep pf | wc -l` -eq 0 ]; then
+			echo "no (pf(4) is not loaded)"
+			exit 1
+		fi
+		# enabled?
+		if [ `${pfctl} -si 2>/dev/null | awk '/^Status:/{print $2}'` != "Enabled" ]; then
+			echo "no (pf(4) is not enabled, consult pfctl(8))"
+			exit 1
+		fi
+	# Other OSes
+	else
+		echo "no (this plugin is not supported on your OS)"
+		exit 1
+	fi
+	echo "yes"
+	exit 0
+	;;
+
+    suggest)
+	exit 0;
+	;;
+
+esac
+
+#
+${pfctl} -si 2>/dev/null | awk '
+	/current entries/{print "states.value",$3}
+	/searches/{if ( "'${do_searches}'" == "yes" ) print "searches.value",$2}
+	$1~/^match$/{print "matches.value",$2}
+	/state-mismatch/{print "mismatches.value",$2}'
+${pfctl} -vsr 2> /dev/null| grep -A 1 ^block | awk 'BEGIN {sum=0}/^[ \t]*\[/{sum=sum+$5} END {print "blocks.value",sum}'
+
+# the labeled ones
+${pfctl} -sl 2>/dev/null | awk '
+	BEGIN {
+		total=0
+	}
+	{
+		l="";
+		for (i=1; i<NF-2; i=i+1) l=l" "$i;
+		sub(/^ /, "", l);
+		f=l;
+		gsub(/[^a-z0-9A-Z]/, "_", f);
+		total=total+1;
+		fields[f]=fields[f]+$(NF-i+2);
+	}
+	END {
+		if ( total == 0 ) exit 0;
+		for ( k in fields ) print k".value "fields[k]
+	}'

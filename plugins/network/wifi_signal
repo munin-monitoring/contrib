@@ -1,0 +1,62 @@
+#!/bin/bash
+#
+# Show noise and signal levels of wifi enabled devices.
+# Author: Nicolai Langfeldt, janl@linprolno
+# Modifications: Sebastián Cruz, crux@lugmen.org.ar
+# License: GPL v. 2
+#
+#%# family=auto
+#%# capabilitoes=autoconf
+
+PNWL=/proc/net/wireless
+
+do_fetch () {
+    awk -F'[ :]*' '/:/ {
+                gsub(/\. /," ",$0); # Remove periods with no decimals after
+	        print $2"_noise.value "$6;
+	        print $2"_signal.value "$5;
+	}' $PNWL
+}
+
+do_config () {
+    echo "graph_title WiFi signal and noise"
+    echo "graph_args --base 1000 -u 0"
+    echo "graph_vlabel dB"
+    echo "graph_category network"
+    echo "graph_info This graph shows the noise and singal levels of your WiFi devices"
+    
+    awk -F'[ :]*' '/:/ {
+	        print $2"_noise.label Noise "$2;
+	        print $2"_signal.label Signal "$2;
+	}' $PNWL
+}
+
+do_autoconf () {
+    if [ ! -f $PNWL ] ; then
+	echo "no (no $PNWL)"
+	exit 1
+    fi
+
+    if [ ! -r $PNWL ] ; then
+	echo "no (could not read $PNWL)"
+	exit 1
+    fi
+
+    if grep -qs : $PNWL ; then
+	echo yes
+	exit 0
+    fi
+
+    echo "no (no devices in $PNWL)"
+    exit 1
+}
+
+case $1 in
+    config|autoconf)
+        eval do_$1
+	exit 0;;
+    '')
+        do_fetch
+	exit 0;;
+esac
+

@@ -1,0 +1,101 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+# vim: set fileencoding=utf-8
+#
+# Munin plugin to show CPU used by vm
+#
+# Copyright Maxence Dunnewind, Rodolphe Quiédeville
+#
+# License : GPLv3
+#
+# parsed environment variables:
+# vmsuffix: part of vm name to be removed
+#
+#%# capabilities=autoconf
+#%# family=contrib
+
+import re, os, sys
+from subprocess import Popen, PIPE
+
+def config(vm_names):
+    ''' Print the plugin's config
+    @param vm_names : a list of "cleaned" vms' name
+    '''
+    percent = len(filter(lambda x: x[0:3] == 'cpu' and x[3] != ' ', open('/proc/stat', 'r').readlines())) * 100
+
+    base_config = """graph_title KVM Virtual Machine CPU usage
+graph_vlabel %%
+graph_category KVM
+graph_scale no
+graph_period second
+graph_info This graph shows the current CPU used by virtual machines
+graph_args --base 1000 -r --lower-limit 0 --upper-limit %d""" % percent
+    print base_config
+    draw = "AREA"
+    for vm in vm_names:
+        print "%s_cpu.label %s" % (vm, vm)
+        print "%s_cpu.min 0" % vm
+        print "%s_cpu.type DERIVE" % vm
+        print "%s_cpu.draw %s" % (vm, draw)
+        print "%s_cpu.info percent of cpu time used by virtual machine" % vm
+	draw = "STACK"
+
+
+def clean_vm_name(vm_name):
+    ''' Replace all special chars
+    @param vm_name : a vm's name
+    @return cleaned vm's name
+    '''
+
+    # suffix part defined in conf
+    suffix = os.getenv('vmsuffix')
+    if suffix:
+        vm_name = re.sub(suffix,'',vm_name)
+
+    return re.sub(r"[^a-zA-Z0-9_]", "_", vm_name)
+
+def detect_kvm():
+    ''' Check if kvm is installed
+    '''
+    kvm = Popen("which kvm", shell=True, stdout=PIPE)
+    kvm.communicate()
+    return not bool(kvm.returncode)
+
+def find_vm_names(pids):
+    '''Find and clean vm names from pids
+    @return a dictionnary of {pids : cleaned vm name}
+    '''
+    result = {}
+    for pid in pids:
+        cmdline = open("/proc/%s/cmdline" % pid, "r")
+        result[pid] = clean_vm_name(re.sub(r"^.*-name\x00([a-zA-Z0-9.-]*)\x00\-.*$",r"\1", cmdline.readline()))
+    return result
+    
+def list_pids():
+    ''' Find the pid of kvm processes
+    @return a list of pids from running kvm
+    '''
+    pid = Popen("pidof kvm", shell=True, stdout=PIPE)
+    return pid.communicate()[0].split()
+
+def fetch(vms):
+    ''' Fetch values for a list of pids
+    @param dictionnary {kvm_pid: cleaned vm name}
+    '''
+    for ( pid, name ) in vms.iteritems():
+        ( user, system ) = open("/proc/%s/stat" % pid, 'r').readline().split(' ')[13:15]
+        print '%s_cpu.value %d' % ( name, int(user) + int(system) )
+        
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        if sys.argv[1] in ['autoconf', 'detect']:
+            if detect_kvm():
+                print "yes"
+            else:
+                print "no"
+        elif sys.argv[1] == "config":
+            config(find_vm_names(list_pids()).values())
+        else:
+            fetch(find_vm_names(list_pids()))
+    else:
+        fetch(find_vm_names(list_pids()))

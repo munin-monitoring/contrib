@@ -1,0 +1,76 @@
+#!/usr/bin/env perl
+# ex:ts=4
+# Copyright © Nicolas BOUTHORS / Smile <nicolas.bouthors@smile.fr>
+# 
+# Licence GPLv2
+#
+# Based on a script distributed on munin-exchange.
+
+use strict;
+use warnings;
+
+use Cache::Memcached;
+
+my %instances = (); 
+
+# Will look into /etc for memcached config files and extract TCP listening port
+# from the config file. 
+sub fetch_instances() {
+        my @files = glob("/etc/memcached_*.conf");
+        undef $/;
+        for my $f (@files) {
+                $f =~ m/.*memcached_(.*)\.conf/;
+                my $instance_name = $1;
+
+                open(CONF, $f);
+                my $confdata = <CONF>;
+                close(CONF);
+
+                if ($confdata =~ m/-p ([0-9]+)/m) {
+                    $instances{$instance_name}{'port'} = $1;
+                }
+        }
+}
+
+fetch_instances();
+
+my $cmd = shift || '';
+
+if ($cmd eq 'config') {
+        print "graph_title Memcached bytes used for all instances\n";
+        print "graph_args --base 1024 -l 0\n";
+        print "graph_vlabel bytes\n";
+        print "graph_category memcached\n";
+        print "graph_info This graph monitors the size of the memcached cache for every instance.\n";
+
+        foreach my $instance_name (keys(%instances)) {
+            my $pretty_name = $instance_name;
+            $pretty_name =~ s/[^a-zA-Z0-9]/_/g;
+
+            print "${pretty_name}_bytes.label $instance_name used\n";
+            print "${pretty_name}_bytes.info Number of bytes currently used\n";
+            print "${pretty_name}_bytes.min 0\n";
+            print "${pretty_name}_bytes.draw LINE2\n";
+            print "${pretty_name}_maxbytes.label $instance_name maximum\n";
+            print "${pretty_name}_maxbytes.info The configured cache size\n";
+            print "${pretty_name}_maxbytes.min 0\n";
+        }
+
+        exit 0;
+}
+
+foreach my $instance_name (keys(%instances)) {
+    my $ip = "127.0.0.1";
+    my $port = $instances{$instance_name}{'port'};
+    my $pretty_name = $instance_name;
+    $pretty_name =~ s/[^a-zA-Z0-9]/_/g;
+
+    my $address = "$ip:$port";
+
+    my $memd = new Cache::Memcached { 'servers' => [$address] };
+    my $memstats = $memd->stats(['misc']);
+
+    print "${pretty_name}_bytes.value " . $memstats->{hosts}->{$address}->{misc}->{bytes} . "\n";
+    print "${pretty_name}_maxbytes.value " .
+            $memstats->{hosts}->{$address}->{misc}->{limit_maxbytes} . "\n";
+}

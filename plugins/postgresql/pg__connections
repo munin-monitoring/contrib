@@ -1,0 +1,114 @@
+#!/usr/bin/perl -w
+# Plugin for monitor postgres connections without DBI.
+#
+# Licenced under GPL v2.
+#
+# Usage:
+#
+#       Symlink into /etc/munin/plugins/ and add the monitored
+#       database to the filename. e.g.:
+#
+#       ln -s /usr/share/munin/plugins/pg__connections \
+#         /etc/munin/plugins/pg_<databasename>_connections
+#       This should, however, be given through autoconf and suggest.
+#
+#       If required, give username, password and/or Postgresql server
+#       host through environment variables.
+#
+#       You must also activate Postgresql statistics. See
+#       http://www.postgresql.org/docs/7.4/interactive/monitoring-stats.html
+#       for how to enable this. Specifically, the following lines must
+#       exist in your postgresql.conf:
+#
+#           stats_start_collector = true
+#           stats_block_level = true
+#
+#
+# Parameters:
+#
+#       config   (required)
+#
+# Config variables:
+#
+#       dbhost     - Which database server to use. Defaults to
+#                    'localhost'.
+#       dbname     - Which database to use. Defaults to template1
+#       dbuser     - A Postgresql user account with read permission to
+#                    the given database. Defaults to
+#                    'postgres'. Anyway, Munin must be told which user
+#                    this plugin should be run as.
+#       dbpass     - The corresponding password, if
+#                    applicable. Default to undef. Remember that
+#                    pg_hba.conf must be configured accordingly.
+#
+# Magic markers
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+
+my $psql   = $ENV{'psql'} || '/usr/bin/psql';
+my $dbhost = $ENV{'dbhost'} || '127.0.0.1';
+my $dbname = $ENV{'dbname'} || 'template1';
+my $dbuser = $ENV{'dbuser'} || 'munin';
+#my $dbuserx = $ENV{'dbuserx'} || '';
+my $dbport = $ENV{'dbport'} || '5432';
+my $dbpass = $ENV{'dbpass'} || 'munin';
+
+my $COMMAND = "PGPASSWORD='$dbpass' '$psql' '$dbname' -h '$dbhost' -U '$dbuser' -p '$dbport' -A -F, -t ";
+
+if (exists $ARGV[0]) {
+    if ($ARGV[0] eq "config") {
+		my $sqlCommand = "$COMMAND -c 'SHOW max_connections;'";
+		my ($max_connections) = `$sqlCommand`;
+		my $warning = int ($max_connections * 0.7);
+		my $critical = int ($max_connections * 0.8);
+		print "graph_title PostgresSQL active connections\n";
+		print "graph_args -l 0 --base 1000\n";
+		print "graph_vlabel Connections\n";
+		print "graph_category Postgresql\n";
+		print "graph_info Shows active Postgresql connections from $dbname\n";
+
+
+		$sqlCommand = "$COMMAND -c 'select datname, count(*) from pg_stat_activity group by datname;'";
+		open(SERVICE, "$sqlCommand |")
+			or die("Could not execute '$sqlCommand': $!");
+
+		my $setarea = "yes";
+		while (<SERVICE>) {
+			my ($datname, $curr_conn) = (m/(\w+).*?(\d+(?:\.\d+)?)/);
+
+			print "$datname.label $datname active connections\n";
+			print "$datname.info $datname active connections\n";
+			print "$datname.type GAUGE\n";
+			if ($setarea eq "yes") {
+        		print "$datname.draw AREA\n";
+				$setarea="";
+        	} else {
+				print "$datname.draw STACK\n";
+			}
+		}
+
+		print "max_connections.label Max. connections\n";
+		print "max_connections.info Max. connections\n";
+		print "max_connections.type GAUGE\n";
+
+		print "warning $warning\n";
+		print "critical $critical\n";
+		exit 0;
+    }
+}
+
+# select datname, count(*) from pg_stat_activity group by datname
+my $sqlCommand = "$COMMAND -c 'SHOW max_connections;'";
+my ($max_connections) = `$sqlCommand`;
+
+$sqlCommand = "$COMMAND -c 'select datname, count(*) from pg_stat_activity group by datname;'";
+open(SERVICE, "$sqlCommand |")
+	or die("Could not execute '$sqlCommand': $!");
+
+while (<SERVICE>) {
+	my ($datname, $curr_conn) = (m/(\w+).*?(\d+(?:\.\d+)?)/);
+	print "$datname.value $curr_conn\n";
+}
+print "max_connections.value $max_connections\n";

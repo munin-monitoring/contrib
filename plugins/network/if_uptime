@@ -1,0 +1,158 @@
+#!/bin/bash
+# This script is intended for use with Munin to monitor
+# network interface uptime. Usually this would be ppp0 or smth.
+# Tested under Ubuntu Gutsy.
+# v. 1.00, 12/15/2007
+# (c) Alex Yanchenko (yanchenko{at}gmail.com), 2007
+# Distributed under GPL v.3 (http://www.gnu.org/licenses/gpl-3.0.txt)
+#
+# The plugin can utilize automatic configuration,
+# here are the basic steps (require root privileges):
+# 1. Copy it as /usr/share/munin/plugins/if_uptime
+# 2. Customize interfaces to monitor
+# 3. Make executable: "chmod 755 /usr/share/munin/plugins/if_uptime"
+# 4. Run "munin-node-configure --shell", you should see smth like
+# "ln -s /usr/share/munin/plugins/if_uptime /etc/munin/plugins/if_uptime"
+# Multiple interface monitoring is supported as well. Customize below.
+# 5. Run the proposed command to create a link.
+# 6. To verify, run "munin-node-configure", you should notice the "if_uptime" record
+#
+# Plugin                     | Used | Suggestions
+# ------                     | ---- | -----------
+# if_uptime                  | yes  | 
+#
+# 7. Restart munin: "/etc/init.d/munin-node restart"
+# 8. Hold on for 5 minutes at most and watch the graph appear.
+#
+#%# family=contrib
+#%# capabilities=autoconf
+
+#----- PROPERTIES START -----#
+# An array of external interfaces to monitor, space-separated.
+# In case vnstat is installed, interface names will be fetced
+# from it, 'nicknames'included.
+INTERFACES=(ppp0)
+
+# Uptime metrics.
+# Literals of seconds, minutes, hours and days are accepted.
+METRICS=minutes
+#----- PROPERTIES END -----#
+
+# Function to get interface name from vnstat if it's available.
+# Accepts interface name as the only argument.
+function IF_NAME() {
+	ARG=$1
+	if [[ $(which vnstat &>/dev/null; echo $?) == 0 ]]
+		then
+			IF_NAME="$(vnstat | grep "$ARG" | cut -d" " -f2,3 | cut -d":" -f1)"
+		else
+			IF_NAME="$ARG"
+	fi
+	echo $IF_NAME
+}
+
+# Converts seconds (uptime value) into desired metrics value.
+# Accepts uptime value as the only argument. Relies on the
+# METRICS variable set above.
+function SECONDS_CONVERTER() {
+	ARG=$1
+		case $METRICS in
+	seconds)
+		echo "$ARG"
+		;;
+	minutes)
+		echo $((ARG / 60))
+		;;
+	days)
+		echo $((ARG / 86400))
+		;;
+	hours)
+		echo $((ARG / 3600))
+		;;
+	*)
+		echo "value value"
+		exit 1
+		;;
+	esac
+}
+
+# Helper function that collects and stores data.
+# Accepts interface name as the only argument.
+function FETCH_DATA() {
+
+IF="$1"
+# File to store data between rounds. Per-line values:
+# bytes received
+# timestamp
+# total uptime
+FILE=/tmp/if_uptime_"$IF"
+
+if [[ !(-e "$FILE") ]]
+	then
+		cat > $FILE << EOF
+0
+$(date +%s)
+0
+EOF
+fi
+# Read previous values
+		previous_received=$(head -n 1 < $FILE)
+		previous_timestamp=$(head -n 2 < $FILE | tail -n 1)
+		previous_uptime=$(tail -n 1 < $FILE)
+# Get current values
+		current_received=$(grep "$IF" < /proc/net/dev | sed 's|: *|:|g' | cut -d":" -f2 | cut -d" " -f1)
+		current_timestamp=$(date +%s)
+# Evaluate whether interface went down
+		if [[ $current_received -gt $previous_received ]]
+			then
+				current_uptime=$(( $previous_uptime+($current_timestamp-$previous_timestamp) ))
+			else
+				current_uptime="0"
+		fi
+# Write new values
+		cat > $FILE << EOF
+$current_received
+$current_timestamp
+$current_uptime
+EOF
+
+}
+# Munin routines 
+	case "$1" in
+		autoconf)
+			if [[ $(ifconfig &> /dev/null; echo "$?") == 0 ]]; then
+				echo yes
+				exit 0
+			else
+				echo "no (ifconfig doesn't work out)"
+				exit 1
+			fi
+			exit 0
+		;;
+		config)
+cat << EOM
+graph_title Interface Uptime Meter
+graph_category network
+graph_info Get to know how often your ISP violates SLA.
+graph_vlabel Interface uptime, $METRICS
+graph_args --base 1000 --lower-limit 0
+EOM
+			for (( i=0; i<"${#INTERFACES[*]}"; i++ ))
+				do
+cat << EOM
+${INTERFACES[$i]}.draw LINE3
+${INTERFACES[$i]}.label $(IF_NAME ${INTERFACES[$i]})
+EOM
+				done
+			exit 0
+		;;
+			*)	
+# Print data for Munin
+			for (( i=0; i<"${#INTERFACES[*]}"; i++ ))
+				do
+					FETCH_DATA ${INTERFACES[$i]}
+					echo "${INTERFACES[$i]}.value $(SECONDS_CONVERTER $current_uptime)"
+				done
+			exit 0
+		;;
+		esac

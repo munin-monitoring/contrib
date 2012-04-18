@@ -1,0 +1,97 @@
+#!/usr/bin/perl -w
+
+# This plugin watches the Linux kernel SMAPS memory usage statistics
+# available in kernel revisions later than 2.6.14. It watches only the
+# Apache 2 processes, and creates averages, maximums and minimums for
+# a given moment in time for the shared size and the virtual size of
+# the processes. This is useful for estimating the constraints to give
+# to Apache2::SizeLimit.
+
+# Author: Kjetil Kjernsmo <kjetilk@opera.com>, based on work by William Viker
+# Copyright (C) 2007 Opera Software ASA 
+#
+# Contibutors: Earle Nietzel <earle.nietzel@gmail.com>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+use strict;
+
+my $ret = undef;
+if (!eval "require Linux::Smaps;") {
+    $ret = "Linux::Smaps not found, fix with cpan -i Linux::Smaps";
+}
+
+# allow process name and process user to be specified
+my $PNAME = exists $ENV{'pname'} ? $ENV{'pname'} : "httpd";
+my $PUSER = exists $ENV{'puser'} ? $ENV{'puser'} : "apache";
+
+if (defined(@ARGV) && ($ARGV[0] eq 'config')) {
+  print "graph_title Apache Smaps\n";
+  print "graph_args --base 1024 -l 0\n";
+  print "graph_vlabel Bytes\n";
+  print "graph_category apache\n";
+  print "graph_info This graph shows memory usage for each given process.\n";
+
+  print "shr_max.label Shared memory max\n";
+  print "shr_max.draw LINE2\n";
+  print "shr_max.info Max shared memory.\n";
+  print "shr_min.label Shared memory min\n";
+  print "shr_min.draw LINE2\n";
+  print "shr_min.info Minimum shared memory.\n";
+  print "shr_avg.label Shared memory average\n";
+  print "shr_avg.draw LINE2\n";
+  print "shr_avg.info Average shared memory.\n";
+
+  print "vsz_max.label Virtual memory max\n";
+  print "vsz_max.draw LINE2\n";
+  print "vsz_max.info Max Virtual memory.\n";
+  print "vsz_min.label Virtual memory min\n";
+  print "vsz_min.draw LINE2\n";
+  print "vsz_min.info Minimum Virtual memory.\n";
+  print "vsz_avg.label Virtual memory avg\n";
+  print "vsz_avg.draw LINE2\n";
+  print "vsz_avg.info Average Virtual memory.\n";
+  exit(0);
+}
+
+my $i = 0;
+my $max_shared = 0;
+my $sum_shared = 0;
+my $min_shared = 1171541713117116171; # An insanely high number
+my $max_virt = 0;
+my $sum_virt = 0;
+my $min_virt = 1171541713117116171; # An insanely high number
+for my $pid (split(/\n/,`pgrep -x $PNAME -u $PUSER`)) {
+  my $map = Linux::Smaps->new($pid);
+  $i++;
+  my $shared = $map->shared_clean + $map->shared_dirty;
+  my $size = $map->size;
+  $sum_shared += $shared;
+  $max_shared = $shared if ($shared > $max_shared);
+  $min_shared = $shared if ($shared < $min_shared);
+  $sum_virt += $size;
+  $max_virt = $size if ($size > $max_virt);
+  $min_virt = $size if ($size < $min_virt);
+}
+
+# if no processes were found prevents divide by 0
+if ($i gt 0) {
+  print "shr_max.value $max_shared\n";
+  print "shr_min.value $min_shared\n";
+  print "shr_avg.value ".$sum_shared/$i."\n";
+  print "vsz_max.value $max_virt\n";
+  print "vsz_min.value $min_virt\n";
+  print "vsz_avg.value ".$sum_virt/$i."\n";
+}
