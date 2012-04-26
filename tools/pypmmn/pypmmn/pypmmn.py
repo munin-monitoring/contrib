@@ -113,7 +113,7 @@ class CmdHandler(object):
             LOG.debug('Executing %r' % cmd)
             output = Popen(cmd, stdout=PIPE).communicate()[0]
         except OSError, exc:
-            LOG.exception()
+            LOG.exception("Unable to execute the command %r" % cmd)
             self.put_fun("# ERROR: %s\n" % exc)
             return
         self.put_fun(output)
