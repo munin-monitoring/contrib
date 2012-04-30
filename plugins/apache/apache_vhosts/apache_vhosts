@@ -1,0 +1,289 @@
+#!/usr/bin/perl
+
+=head1 INSTALLATION
+
+This plugin requires data from apache. You can get at the data in two ways:
+
+1) Install the pipelogger (logs without using disk space, ram only, highly performant)
+  - Install /usr/share/munin/apache_pipelogger as executable for apache/wwwrun
+  - Install logger to httpd.conf
+
+    # Log vhost port method response_bytes response_time_ms httpd_status
+    <IfModule mod_log_config.c>
+      CustomLog "|/usr/share/munin/apache_pipelogger" "$v %p %m %B %D %s"
+    </IfModule>
+
+2) Install the log parser as daemon (watches multiple access logs in a single folder for changes)
+  - the log parser should run as root (can simply be run in background)
+  - slightly less performant, but easier to apply to existing installations
+  - If you want response time stats, you have to log them in apache:
+  <IfModule mod_log_config.c>
+    LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %D" combined-time  
+  </IfModule>
+  - Configure the log parser to match your installation regarding naming and log folders
+    
+You can use both solutions simultaneously, the data will be merged. 
+Be aware that a apache log CustomLog directive in the master config will only log those vhosts that have no directive of their own.
+  
+Install plugin conf (after [apache_*])
+
+[apache_vhosts]
+user root
+env.subgraphs requests bytes time
+env.checks requests bytes time
+
+# user		- probably necessary for shared memory IPC
+# subgraphs 	- create multigraph subgraphs (watch your graphing performance...), default 0
+# checks	- enable stats on bytes and response times per request, you have to log these in apache
+
+A word on performance: 
+Requests/sec should not be much of a problem.  Pipelogger and Logparser should not have man performance problems, as the apply one regex per line and add some stats.
+Stats are saved every n seconds (default: 7) to shared mem in serialized format. That should be ok on the most loaded servers (unless you watch cache logs). 
+I would estimate that > 10k log lines/sec could start becoming a problem, you might have to start tuning there or use a dedicated system. 
+You might think about splitting the logs over multiple Logparser scripts to parallelize and merge in larger intervals.
+
+Graphing is another matter, the more vhosts you have. 
+With subgraphs off, you do 3 main graphs * 4 timescales (day, week, month, year). 
+With subgraphs on, you get 2 checks * (1 + 6 * #vhosts) + 1 check * (1 + #vhosts * #statuscodes * 4)
+With hundreds of vhosts that becomes a problem, as munin-update and munin-html do not scale well.
+
+Timeouts are another matter, munin-updates calls for the plugin-data and works on the received lines while the network timeout is running.
+So expect to set your timeouts to 120s with a hundred vhosts.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+
+my %checks = map {$_=>1} ( ($ENV{'checks'}) ? split(/ /,$ENV{'checks'}) : qw(requests bytes time) );
+my %subgraphs= map {$_=>1} ( ($ENV{'subgraphs'}) ? split(/ /,$ENV{'subgraphs'}) : () );
+
+use strict;
+#use warnings;
+use Munin::Plugin;
+use IPC::ShareLite ':lock';
+use Storable qw(freeze thaw);
+
+my $share = IPC::ShareLite->new(
+	-key     => 'mapl',
+	-create  => 0,
+	-destroy => 0,
+	-exclusive => 0,
+	-mode => '0744'
+) or die $!;
+
+
+my %data=%{thaw $share->fetch};
+
+if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
+  if (scalar(keys %data)>0) {
+    print "yes\n";
+    exit 0;
+  } else {
+    print "no data available, apache_pipelogger not installed\n";
+    exit 0;
+  }
+}
+
+need_multigraph();
+
+
+my ($config,$values);
+
+
+#
+# config
+#
+
+if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
+  foreach my $check (keys %checks) {
+  next if ($check eq 'requests'); # requests are special
+  my $order=join("_$check ",sort keys %data)."_$check";
+
+#
+# config: bytes / time + subgraphs
+#
+
+    print <<END;
+
+multigraph apache_vhosts_$check
+graph_title average $check on all active vhosts
+graph_args --base 1000
+graph_vlabel average $check per response
+graph_category apache_vhosts
+graph_period minute
+graph_order $order
+END
+
+    foreach my $site (keys %data) {
+      print <<END;
+${site}_$check.label $data{$site}{'label'}
+${site}_$check.info average $check per response on $data{$site}{'label'}
+${site}_$check.draw LINE1
+${site}_$check.type GAUGE
+END
+    } # end sites
+
+    if ($subgraphs{'$check'}) {
+      foreach my $site (keys %data) {
+      print <<END;
+
+multigraph apache_vhosts_$check.$site
+graph_title average $check on $data{$site}{'label'}
+graph_args --base 1000
+graph_vlabel average response in $check
+graph_category apache_vhosts
+graph_period minute
+END
+
+        foreach my $graph ("avg","max") {
+          print <<END;
+${site}_${graph}_$check.label $graph$check
+${site}_${graph}_$check.info $graph$check per response on $data{$site}{'label'}
+${site}_${graph}_$check.draw LINE1
+${site}_${graph}_$check.type GAUGE
+END
+        } # end graph
+      } # end sites
+    } # end subgraph	
+  } # end checks
+
+
+
+#
+# config: requests + subgraphs
+#
+my $order=join("_requests ",sort keys %data)."_requests";
+
+  print <<END;
+
+multigraph apache_vhosts_requests
+graph_title requests by vhost
+graph_args --base 1000
+graph_vlabel requests / \${graph_period}
+graph_category apache_vhosts
+graph_period minute
+graph_order $order
+END
+  foreach my $site (keys %data) {
+  
+    print <<END;
+${site}_requests.label $data{$site}{'label'}
+${site}_requests.info $site
+${site}_requests.draw LINE1
+${site}_requests.type GAUGE
+END
+
+  } # end site
+
+  if ($subgraphs{'requests'}) {
+
+#  multigraphs multivalue (status codes)
+    foreach my $site (keys %data) {
+      print <<END;
+
+multigraph apache_vhosts_requests.$site
+graph_title status codes on $data{$site}{'label'}
+graph_args --base 1000
+graph_vlabel status codes / \${graph_period}
+graph_category apache_vhosts
+graph_period minute
+END
+      my $draw='AREA';
+      foreach my $status (sort keys %{$data{$site}{'status'}}) {
+            print <<END;
+${site}_s${status}.label status $status
+${site}_s${status}.info status $status
+${site}_s${status}.draw $draw
+${site}_s${status}.type GAUGE
+END
+        $draw='STACK';
+      } # end status
+    } # end sites
+  } # end multigraph
+
+  exit 0;
+} # end if config
+
+
+
+
+#
+# values: bytes / time + subgraphs
+#
+
+foreach my $check (keys %checks) {
+  next if ($check eq 'requests'); # requests are special
+
+  # main graphs values
+  print "\nmultigraph apache_vhosts_$check\n";
+  foreach my $site (keys %data) {
+    $data{$site}{$check}||=0;
+    print "${site}_$check.value $data{$site}{'avg_'.$check}\n";
+  } # end sites
+
+  if ($subgraphs{$check}) {
+    # subgraph values 
+    foreach my $site (keys %data) {
+      print "\nmultigraph apache_vhosts_$check.$site\n";
+      foreach my $graph ("avg","max") {
+        $data{$site}{$check}||=0;
+        print "${site}_${graph}_$check.value ".$data{$site}{$graph."_".$check}."\n";
+      } # end graph
+    } # end sites
+  } # end subgraph
+} # end checks
+
+
+
+
+#
+# values: requests + subgraphs
+#
+
+print "\nmultigraph apache_vhosts_requests\n";
+foreach my $site (keys %data) {
+  $data{$site}{'requests'}||=0;
+  print "${site}_requests.value $data{$site}{'requests'}\n";
+} # end sites
+
+if ($subgraphs{'requests'}) {
+  # multigraphs multivalue (status codes)
+  foreach my $site (keys %data) {
+    print "\nmultigraph apache_vhosts_requests.$site\n";
+    foreach my $status (sort keys %{$data{$site}{'status'}}) {
+      $data{$site}{'status'}{$status}||=0;
+      print "${site}_${status}.value ".($data{$site}{'status'}{$status}||0)."\n";
+    }# end status
+  } # end sites
+} # end subgraph
+
+
+
+
+#
+# clear data after poll
+#
+
+foreach my $site (keys %data) {
+  foreach my $check ( qw(requests bytes time max_bytes avg_bytes max_time avg_time) ) {
+    $data{$site}{$check}=0;
+  }
+  foreach my $val (keys %{$data{$site}{'status'}}) {
+     $data{$site}{'status'}{$val}=0;
+  }
+};
+
+$share->lock(LOCK_EX);
+$share->store( freeze \%data );
+$share->unlock();
+
+exit 0;
+# vim:syntax=perl
