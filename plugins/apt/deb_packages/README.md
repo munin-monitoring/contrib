@@ -8,7 +8,7 @@ packages come from, how old or new your installation is. Furtermore it tells
 you how many updates you should have been installed, how many packages are
 outdated and where they come from.
 
-![A week of upgradable packages](/Farom/munin-debian-packages/raw/master/example/packages_label_archive_upgradable-week.png)
+![A week of upgradable packages](/munin-monitoring/contrib/raw/master/plugins/apt/deb_packages/example/packages_label_archive_upgradable-week.png)
 
 You can sort installed or upgradable Packages by 'archive', 'origin', 'site',
 'label' and 'component' and even some of them at once.
@@ -27,8 +27,8 @@ shoud run past python-apt 0.7 and python 2.5.
 check out this git repository from 
    
     aptitude install python-apt
-    git clone git://github.com/Farom/munin-debian-packages.git
-    cd munin-debian-packages
+    git clone git://github.com/munin-monitoring/contrib.git
+    cd contrib/plugins/apt/deb_packages
     sudo cp deb_packages.py /etc/munin/plugins
     sudo cp deb_packages.munin-conf /etc/munin/plugin-conf.d/deb_packages
 
