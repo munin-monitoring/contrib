@@ -8,13 +8,19 @@
 #
 # Magic markers
 #%# capabilities=autoconf
-#%# family=nova
+#%# family=auto
 
-from nova import context
-from nova import db
-from nova import flags
-from nova import utils
 import sys
+
+try:
+    from nova import context
+    from nova import db
+    from nova import flags
+    from nova import utils
+except ImportError:
+    succesful_import = False
+else:
+    succesful_import = True
 
 services = ['nova-compute', 'nova-volume', 'nova-scheduler', 'nova-vncproxy', 'nova-network', 'nova-cert', 'nova-console', 'nova-consoleauth']
 
@@ -70,8 +76,11 @@ if __name__ == '__main__':
         if sys.argv[1] == "config":
             print_config()
         elif sys.argv[1] == "autoconf":
-            print "yes"
-    else:
+            if not succesful_import:  
+                print 'no (failed import nova module]'
+            else:
+                print 'yes'
+    elif succesful_import:
         utils.default_flagfile()
         flags.FLAGS(sys.argv)
         print_values()
