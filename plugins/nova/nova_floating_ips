@@ -12,21 +12,28 @@
 #
 # Magic markers
 #%# capabilities=autoconf
-#%# family=nova
+#%# family=auto
 
-from nova import context
-from nova import db
-from nova import flags
-from nova import utils
 import sys
 
-states = ['total', 'allocated', 'associated']
+try:
+    from nova import context
+    from nova import db
+    from nova import flags
+    from nova import utils
+except ImportError:
+    succesful_import = False
+else:
+    succesful_import = True
 
+
+
+states = ['total', 'allocated', 'associated']
 
 def print_config():
     global states
     print 'graph_title Nova Floating IPs'
-    print 'graph_vlabel %'
+    print 'graph_vlabel IPs'
     print 'graph_args --base 1000 --lower-limit 0'
     print 'graph_category nova'
     print 'graph_scale no'
@@ -65,8 +72,12 @@ if __name__ == '__main__':
         if sys.argv[1] == "config":
             print_config()
         elif sys.argv[1] == "autoconf":
-            print "yes"
-    else:
+            if not succesful_import:  
+                print 'no (failed import nova module)'
+                sys.exit(0)
+            else:
+                print 'yes'
+    elif succesful_import:
         utils.default_flagfile()
         flags.FLAGS(sys.argv)
         print_values()

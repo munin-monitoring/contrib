@@ -8,14 +8,21 @@
 #
 # Magic markers
 #%# capabilities=autoconf
-#%# family=keystone
+#%# family=auto
 
 import sys
+import traceback
 
-from keystone.common import utils
-from keystone import config
-from keystone import exception
-from keystone import identity
+try:
+    from keystone.common import utils
+    from keystone import config
+    from keystone import exception
+    from keystone import identity
+except ImportError:
+    succesful_import = False
+else:
+    succesful_import = True
+
 
 CONF = config.CONF
 
@@ -78,14 +85,26 @@ def print_values():
         for (field, value) in stats[state].iteritems():
             print "%s_%s.value %s" % (field, state, value)
 
+def load_conf():
+    CONF(config_files=[utils.find_config('keystone.conf')])
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         if sys.argv[1] == "config":
             print_config()
         elif sys.argv[1] == "autoconf":
-            print "yes"
-    else:
-        CONF(config_files=[utils.find_config('keystone.conf')])
+            if not succesful_import:  
+                print 'no (failed import keystone module)'
+                sys.exit(0)
+            try:
+                load_conf()
+                identity.Manager()
+            except:
+                print 'no (failed to connect keystone backend: %s'%traceback.format_exc()
+                sys.exit(0)
+            print 'yes'
+
+    elif succesful_import:
+        load_conf()
         print_values()
 
