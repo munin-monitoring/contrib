@@ -11,14 +11,21 @@
 #   user nova
 #
 # Magic markers
-#%# capabilities=autoconf
-#%# family=nova
+#%# capabilities=autoconf suggest
+#%# family=auto
 
-from nova import context
-from nova import db
-from nova import flags
-from nova import utils
 import sys
+
+try:
+    from nova import context
+    from nova import db
+    from nova import flags
+    from nova import utils
+    from nova.compute import power_state
+except ImportError:
+    succesful_import = False
+else:
+    succesful_import = True
 
 
 class InstanceState(object):
@@ -33,11 +40,8 @@ class InstanceState(object):
         instances = db.instance_get_all(ctxt)
         cls.instance_counts = {}
         instance_types = {}
-        for it in db.instance_type_get_all(ctxt, True).values():
+        for it in db.instance_type_get_all(ctxt, True):
             instance_types[it['id']] = it['name']
-
-        if metric == 'state':
-            metric = 'state_description'
 
         for instance in instances:
             i = dict(instance)
@@ -58,17 +62,24 @@ class InstanceState(object):
         InstanceState.init(metric)
         return cls.instance_counts
 
+def get_name(metric, code):
+    if metric == "power_state":
+        return power_state.name(code)
+    elif metric in ["root_gb", "ephemeral_gb"]:
+        return "%d_gb", code
+    else:
+        return code
 
 def print_config(metric):
     states = InstanceState.get_states(metric)
-    print 'graph_title Nova Instance States'
+    print 'graph_title Nova Instance %s' % metric
     print 'graph_vlabel instances'
     print 'graph_args --base 1000 --lower-limit 0'
     print 'graph_category nova'
     print 'graph_scale no'
-    print 'graph_info This graph shows the number of instances by state'
+    print 'graph_info This graph shows the number of instances by %s' % metric
     for state in states:
-        print '%s.label %s' % (state, state)
+        print '%s.label %s' % (state, get_name(state))
         print '%s.draw LINE2' % state
         print '%s.info %s IPs' % (state, state)
 
@@ -78,17 +89,35 @@ def print_values(metric):
     for (state, value) in status.iteritems():
         print '%s.value %s' % (state, value)
 
+def print_suggest():
+    suggest = [ "vm_state",
+                "vcpus",
+                "task_state",
+                "root_gb",
+                "ephemeral_gb",
+                "power_state",
+                "memory_mb",
+                "instance_type_id",
+                ]
+    print "\n".join(suggest)
+
 
 if __name__ == '__main__':
     argv = sys.argv[:]
     utils.default_flagfile()
     flags.FLAGS(sys.argv)
-    metric = argv[0].split('nova_instance_').pop() or 'state'
+    metric = argv[0].split('nova_instance_').pop() or 'vm_state'
 
     if len(argv) > 1:
         if argv[1] == 'config':
             print_config(metric)
+        elif argv[1] == 'suggest':
+            print_suggest()
         elif argv[1] == 'autoconf':
-            print 'yes'
-    else:
+            if not succesful_import:  
+                print 'no (failed import nova module)'
+                sys.exit(0)
+            else:
+                print 'yes'
+    elif succesful_import:
         print_values(metric)

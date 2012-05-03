@@ -12,14 +12,20 @@
 #
 # Magic markers
 #%# capabilities=autoconf
-#%# family=nova
+#%# family=auto
 
-from nova import context
-from nova import db
-from nova import flags
-from nova import utils
-from nova.db.sqlalchemy.session import get_session
 import sys
+
+try:
+    from nova import context
+    from nova import db
+    from nova import flags
+    from nova import utils
+    from nova.db.sqlalchemy.session import get_session
+except ImportError:
+    succesful_import = False
+else:
+    succesful_import = True
 
 
 def print_config():
@@ -58,8 +64,12 @@ if __name__ == '__main__':
         if sys.argv[1] == "config":
             print_config()
         elif sys.argv[1] == "autoconf":
-            print "yes"
-    else:
+            if not succesful_import:  
+                print 'no (failed import nova module)'
+                sys.exit(0)
+            else:
+                print 'yes'
+    elif succesful_import:
         utils.default_flagfile()
         flags.FLAGS(sys.argv)
         print_values()
