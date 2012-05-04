@@ -1,0 +1,121 @@
+#!/usr/bin/perl
+# -*- perl -*-
+
+=head1 NAME
+
+Munin plugin to monitor the usage of memory on Voxtrot Sip Server (Kamailio + Freeswitch + RTPproxy).
+
+=head1 CONFIGURATION
+
+No configuration
+
+=head1 AUTHOR
+
+ Copyright 2012 - Voxtrot <www.voxtrot.com>
+ Oussama Hammami <oussamacvoxtrot.com>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 VERSION
+
+  $Id: kamailio_memory 2012-04-19 15:09 $
+
+=head1 MAGIC MARKERS
+
+  #%# family=manual
+  #%# capabilities=autoconf
+
+=cut
+
+use strict;
+
+my %WANTED = ( "kamailio"  => "ram_total", 
+			   "rtpproxy"  => "ram_rtpproxy",
+               "freeswitch"  => "ram_freeswitch", 
+             );
+
+my %VALUE = ( "ram_total" => 0,
+              "ram_rtpproxy" => 0,
+              "ram_freeswitch" => 0,
+            );
+
+my $arg = shift();
+
+if ($arg eq 'config') {
+    print_config();
+    exit();
+} elsif ($arg eq 'autoconf') {
+    unless (test_service() ) {
+        print "yes\n";
+    } else {
+        print "no\n";
+    }
+    exit 0;
+}
+
+for my $key (keys %WANTED) {
+	$VALUE{$WANTED{$key}}=get_memory($key);
+	}
+
+$VALUE{"ram_total"}+=$VALUE{"ram_rtpproxy"}+$VALUE{"ram_freeswitch"};
+
+for my $key (keys %VALUE) {
+    print ("$key.value $VALUE{$key}\n");
+}
+
+sub print_config {
+    print ("graph_title Voxtrot SIP Server Memory\n");
+    # Arguments to "rrdtool graph". In this case, tell it that the
+    # lower limit of the graph is '0', and that 1k=1000 (not 1024).
+    print("graph_args --base 1024 --lower-limit 0\n");
+    print("graph_vlabel MB\n");
+    print("graph_scale no\n");
+    print("graph_category kamailio\n");
+    print("graph_info The graph describes the usage of memory in Voxtrot Sip Server.\n");
+    print("ram_total.label total (kam+fs+rtp)\n");
+    print("ram_freeswitch.label freeswitch\n");
+    print("ram_rtpproxy.label rtpproxy\n");
+    print("ram_total.info Average total memory used by kamailio, freeswitch and rtpproxy for the five minutes.\n");
+    print("ram_freeswitch.info Average used memory by freeswitch for the five minutes.\n");
+    print("ram_rtpproxy.info Average real used memory by rtpproxy for the five minutes.\n");
+    print("graph_order ram_total ram_freeswitch ram_rtpproxy\n");
+    print("ram_total.type GAUGE\n");
+    print("ram_freeswitch.type GAUGE\n");
+    print("ram_rtpproxy.type GAUGE\n");
+    print("ram_total.draw AREA\n");
+    print("ram_freeswitch.draw AREA\n");
+    print("ram_rtpproxy.draw LINE1\n");
+    print("ram_total.colour 6699FF\n");
+    print("ram_freeswitch.colour FF6633\n");
+    print("ram_rtpproxy.colour 993399\n");
+    # Ensure min values (useful when using 'DERIVE' as 'type').
+    print("ram_total.min 0\n");
+    print("ram_freeswitch.min 0\n");
+    print("ram_rtpproxy.min 0\n");
+    # Divide the got value by 1048576 to get MB.
+    print("ram_total.cdef ram_total,1048576,/\n");
+    print("ram_freeswitch.cdef ram_freeswitch,1048576,/\n");
+    print("ram_rtpproxy.cdef ram_rtpproxy,1048576,/\n");
+}
+
+
+sub test_service {
+    print "yes\n";
+    exit 0;
+}
+
+#########################
+# function Get Memory
+
+sub get_memory {
+    my $proc=shift;
+    my $i = 0;
+    my @cmd = `ps auwx | grep $proc | grep -v grep | grep -v kamailio_memory`;
+    foreach (@cmd) {
+        my @return = split(/ +/, $_);
+        $i += @return[5]*1024;
+        }
+    return $i;
+}
