@@ -5,8 +5,8 @@ if [ "$1" == "config" ] ; then
 	echo "graph_vlabel speed"
 	echo "graph_category environment"
 	echo "graph_info This graph shows the speed of the system fans"
-	echo 'processor_zone_fan.label Processor Zone fan speed'
-	echo 'system_board_fan.label System Board fan speed'
+
+	hplog -f | perl -ne 'if ( m/(System|Processor)/) { $t=lc($1); $count[$t]++; print $t."_".$count[$t] . ".label " . $t . " fan speed $count[$t] \n"  }'
 	exit 0
 fi
 
@@ -14,15 +14,5 @@ fi
 #1  Var. Speed   Processor Zone  Normal     N/A     Low    ( 10)
 #2  Var. Speed   System Board    Normal     N/A     Low    ( 10)
 
-/sbin/hplog -f | ( while read a b c d e f g h i j k l m
-do
-	if [ "$d" == "Processor" ] ; then
-		echo -n "processor_zone_fan.value "
-		echo $j | sed 's/)//'
-	elif [ "$d" == "System" ] ; then
-		echo -n "system_board_fan.value "
-		echo $j | sed 's/)//'
-	fi
-	
-done
-)
+
+hplog -f | perl -ne 'if ( m/(System|Processor)/) { $t=lc($1); $count[$t]++; m/\( *(\d+)\)/; print $t."_".$count[$t] . " " . $1 . "\n"  }'
