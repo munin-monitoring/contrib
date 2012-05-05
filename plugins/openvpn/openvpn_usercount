@@ -1,0 +1,73 @@
+#!/bin/bash
+##
+## Munin plugin to return how many OpenVPN sessions are currently connected to
+## an OpenVPN server.
+##
+## The 'openvpn_usercount' config stanza for munin-node looks like:
+##
+### [openvpn_usercount]
+### user root
+### env.statusfile "/var/log/openvpn-status.log"
+##
+## You can watch mutiple OpenVPN networks by aliasing openvpn_usercount script
+## to "openvpn_usercount_network.vpn" where "network.vpn" is the OpenVPN
+## network name.
+##
+### [openvpn_usercount_network.vpn]
+### user root
+### env.statusfile "/var/log/openvpn/network.vpn/openvpn-status.log"
+##
+## Original Author: Jeffrey Forman ( https://github.com/jforman )
+## Enhanced by : Pierre-Yves Landuré for Biapy ( https://github.com/biapy )
+##
+
+# Compute statusfile option.
+OPENVPN_STATUS_FILE="/var/log/openvpn-status.log"
+if [ -n "${statusfile}" ]; then
+  OPENVPN_STATUS_FILE="${statusfile}"
+fi
+
+# Check for status log existance.
+if [ ! -e "${OPENVPN_STATUS_FILE}" ]; then
+  echo "Error: OpenVPN status file '${OPENVPN_STATUS_FILE}' does not exist"
+  exit 1
+fi
+
+# Detect VPN network name from script name.
+NETWORK_NAME="$(command basename "${0}" \
+    | command sed -e 's/openvpn_usercount[_]\{0,1\}//')"
+if [ -n "${NETWORK_NAME}" ]; then
+  NETWORK_NAME=" (${NETWORK_NAME})"
+fi
+
+case "${1}" in
+
+  "config" )
+    # Display munin-node plugin configuration.
+    echo "graph_title OpenVPN Users${NETWORK_NAME}
+graph_vlabel User Count
+graph_category openvpn
+user.label Logged In Users"
+    exit 0
+    ;;
+
+  * )
+    # Default action.
+
+    # This compute the number of connected clients for all
+    # status-version values.
+    CLIENT_LIST_START="$(command grep --max-count=1 --line-number \
+          "Connected Since" "${OPENVPN_STATUS_FILE}" \
+        | command cut --delimiter=":" --field="1")"
+    CLIENT_LIST_END="$(command grep --max-count=1 --line-number \
+          "ROUTING[ _]TABLE" "${OPENVPN_STATUS_FILE}" \
+        | command cut --delimiter=":" --field="1")"
+
+    USER_COUNT=$((${CLIENT_LIST_END} - ${CLIENT_LIST_START} - 1))
+
+    echo "user.value ${USER_COUNT}"
+    exit 0;
+    ;;
+esac
+
+

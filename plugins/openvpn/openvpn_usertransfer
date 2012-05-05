@@ -1,0 +1,132 @@
+#!/bin/bash
+##
+## Munin plugin to return the transfer in bytes of each user.
+##
+## The 'openvpn_usertransfer' config stanza for munin-node looks like:
+##
+### [openvpn_usertransfer]
+### user root
+### env.statusfile "/var/log/openvpn-status.log"
+##
+## You can watch mutiple OpenVPN networks by aliasing openvpn_usertranfer script
+## to "openvpn_usertransfer_network.vpn" where "network.vpn" is the OpenVPN
+## network name.
+##
+### [openvpn_usertransfer_network.vpn]
+### user root
+### env.statusfile "/var/log/openvpn/network.vpn/openvpn-status.log"
+##
+## Original Author: Jeffrey Forman ( https://github.com/jforman )
+## Enhanced by : Pierre-Yves Landuré for Biapy ( https://github.com/biapy )
+##
+
+# Compute statusfile option.
+OPENVPN_STATUS_FILE="/var/log/openvpn-status.log"
+if [ -n "${statusfile}" ]; then
+  OPENVPN_STATUS_FILE="${statusfile}"
+fi
+
+# Check for status log existance.
+if [ ! -e "${OPENVPN_STATUS_FILE}" ]; then
+  echo "Error: OpenVPN status file '${OPENVPN_STATUS_FILE}' does not exist"
+  exit 1
+fi
+
+# Detect VPN network name from script name.
+NETWORK_NAME="$(command basename "${0}" \
+    | command sed -e 's/openvpn_usertransfer[_]\{0,1\}//')"
+if [ -n "${NETWORK_NAME}" ]; then
+  NETWORK_NAME=" (${NETWORK_NAME})"
+fi
+
+# Detect status log version.
+STATUS_LOG_VERSION="3"
+if [ -n "$(command grep "CLIENT LIST" "${OPENVPN_STATUS_FILE}")" ]; then
+  STATUS_LOG_VERSION="1"
+elif [ -n "$(command grep "HEADER,CLIENT_LIST," "${OPENVPN_STATUS_FILE}")" ]; then
+  STATUS_LOG_VERSION="2"
+fi
+
+
+case "${1}" in
+
+  "config" )
+    # Display munin-node plugin configuration.
+    echo "graph_title OpenVPN User Transfer Rate${NETWORK_NAME}
+graph_vlabel Bytes Received / Bytes Sent
+graph_category openvpn
+graph_info Show the data transfer over the VPN per user."
+    case "${STATUS_LOG_VERSION}" in
+        "1" )
+          CLIENT_LIST="$(command sed -e '0,/Common Name/d' \
+              -e '/ROUTING TABLE/,/END/d' \
+              -e 's/^\([^,]*\),.*$/\1/' \
+              "${OPENVPN_STATUS_FILE}")"
+          ;;
+        "2" | "3" )
+          CLIENT_LIST="$(command grep "^CLIENT_LIST" ${OPENVPN_STATUS_FILE} \
+              | command sed -e 's/^CLIENT_LIST[,\t]\([^,\t]*\)[\t,].*$/\1/')"
+          ;;
+        * )
+          CLIENT_LIST=""
+          ;;
+    esac
+    for CLIENT in ${CLIENT_LIST}; do
+        CLIENT_CODE="${CLIENT//[^0-9A-Za-z]/_}"
+        echo "${CLIENT_CODE}_received.label ${CLIENT}
+${CLIENT_CODE}_received.type DERIVE
+${CLIENT_CODE}_received.min 0
+${CLIENT_CODE}_received.graph no
+${CLIENT_CODE}_received.draw LINE2
+${CLIENT_CODE}_sent.label ${CLIENT}
+${CLIENT_CODE}_sent.type DERIVE
+${CLIENT_CODE}_sent.min 0
+${CLIENT_CODE}_sent.negative ${CLIENT_CODE}_received
+${CLIENT_CODE}_sent.draw LINE2"
+    done
+    exit 0
+    ;;
+
+
+  * )
+    # Default action.
+    case "${STATUS_LOG_VERSION}" in
+        "1" )
+          CLIENT_LIST="$(command sed -e '0,/Common Name/d' \
+              -e '/ROUTING TABLE/,/END/d' \
+              "${OPENVPN_STATUS_FILE}")"
+          ;;
+        "2" | "3" )
+          CLIENT_LIST="$(command grep "^CLIENT_LIST" ${OPENVPN_STATUS_FILE} \
+              | command tr "\t" ",")"
+          ;;
+        * )
+          CLIENT_LIST=""
+          ;;
+    esac
+
+    # exit if no data.
+    test -z "${CLIENT_LIST}" && exit 0
+
+    echo "${CLIENT_LIST}" | while read LINE; do
+      case "${STATUS_LOG_VERSION}" in
+          "1" )
+            CLIENT="$(command echo "${LINE}" | command cut --delimiter="," --field="1")"
+            RECEIVED="$(command echo "${LINE}" | command cut --delimiter="," --field="3")"
+            SENT="$(command echo "${LINE}" | command cut --delimiter="," --field="4")"
+            ;;
+          "2" | "3" )
+            CLIENT="$(command echo "${LINE}" | command cut --delimiter="," --field="2")"
+            RECEIVED="$(command echo "${LINE}" | command cut --delimiter="," --field="5")"
+            SENT="$(command echo "${LINE}" | command cut --delimiter="," --field="6")"
+            ;;
+      esac
+      CLIENT_CODE="${CLIENT//[^0-9A-Za-z]/_}"
+
+      echo "${CLIENT_CODE}_received.value ${RECEIVED}
+${CLIENT_CODE}_sent.value ${SENT}"
+    done
+    ;;
+esac
+
+
