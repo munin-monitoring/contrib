@@ -1,0 +1,57 @@
+#!/bin/sh
+# -*- sh -*-
+
+: <<EOF
+
+=head1 NAME
+
+ntp_kernel_pll_prec - Plugin to monitor the kernel's PLL precision for
+the NTP status
+
+=head1 CONFIGURATION
+
+No configuration
+
+=head1 AUTHORS
+
+Original authors unknown
+ntp_kernel_pll_freq patched for PLL precision support by azet@azet.org
+
+=head1 LICENSE
+
+Unknown
+
+=head1 BUGS
+
+None Known
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+EOF
+
+if [ "$1" = "autoconf" ]; then
+    ntpdc -c kern 2>/dev/null | 
+    awk 'BEGIN { ev=1; }
+         /^precision:/ { ev=0; } 
+         END { if (ev == 0) { print "yes";} else { print "no"; } exit ev; }'
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    echo 'graph_title NTP kernel PLL precision'
+    echo 'graph_args --alt-autoscale'
+    echo 'graph_vlabel PLL precision'
+    echo 'graph_category time'
+    echo 'graph_info The precision of the kernel phase-locked loop used by NTP'
+    echo 'ntp_pll_prec.label pll-precision'
+    echo 'ntp_pll_prec.info Phase-locked loop precision in seconds'
+    exit 0
+fi
+
+echo -n 'ntp_pll_prec.value '
+ntpdc -c kern | awk '/^precision:/ { print $2 }'
