@@ -159,8 +159,20 @@ sub cache_is_too_old {
 } ## cache_is_too_old
 
 sub du_not_running {
-	return 0 if (-e $LOCKFILE);
-	return 1;
+    if (-e $LOCKFILE) {
+        my ($time) = `cat $TIMEFILE`;
+        chomp $time;
+        if ( (time - $time) > ($ENV{interval}*60*60) ) {
+            # The cache is really old (60xinterval) => Maybe the lockfile wasn't properly deleted.
+            # Let's delete it.
+            system("rm $LOCKFILE;");
+            return 1;
+        } else {
+	        return 0;
+        }
+    } else {
+        return 1;
+    }
 }
 
 sub munin_exit_done {
