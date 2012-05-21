@@ -34,6 +34,13 @@ This serves as a repository for examples of various configs. You know, the ''lea
 
 ## Notes to contributors
 
-We like to have ''elementary'' commits (a good rationale is : one per Changelog entry), as it is much easier to manage for reviewing. Debugging is also usually easier that way.
+We like to have ''elementary'' commits as it is much easier to manage for reviewing and debugging. 
+So please **don't** be afraid to make **as many** commits as needed. Merging many commits is as easy
+as merging one, if not easier.
 
-So please **don't** be afraid to make as many commits as needed.
+A good rationale is that each commit shall have a one-liner commit comment as its first line. 
+Next lines are optional and should only explain the ''why'' it is done this particular way.
+
+On the other side, pull requests can regroup many commits at once.
+Just try to explain in the pull comment the ''why'' we should merge it (if it's not obvious).
+
