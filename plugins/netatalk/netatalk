@@ -1,0 +1,159 @@
+#!/bin/bash
+
+: << =cut
+
+=head1 NAME
+
+netatalk - Plugin to monitor number of files held open by the Netatalk/AFP clients
+
+=head1 CONFIGURATION
+
+This plugin uses the following configuration variables
+
+  [netatalk]
+  user root		- Plugin must run under root for lsof
+  env.afpd		- Path to "afpd" executable (defaults to what afpd -v says, usually "/usr/sbin/afpd")
+  env.afpdconf	- Path to "afpd.conf" file (defaults to what afpd -v says, usually "/etc/netatalk/afpd.conf")
+
+=head1 VERSION
+
+0.1 (2012-05-23)
+
+=head1 AUTHOR
+
+DUVERGIER Claude (http://claude.duvergier.fr)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 BUGS
+
+Known bugs:
+* A bug can occur if a shared path is located inside another shared path (eg. "/mnt/afpShares/foo" and  "/mnt/afpShares/foo/subFoo/bar").
+  Depending of the order the shares are found, the script might say the less-deeper one is opened whereas he is processing the other one.
+
+=head1 TODO
+
+Features to-do list:
+* Support multiple servers
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=autoconf
+
+=cut
+
+# Find "afpd" location:
+afpdPath=${afpd:-`which afpd`}
+afpdPath=${afpdPath:-/usr/sbin/afpd}
+
+
+
+#####
+## Munin configuration ("autoconf" and "config")
+#####
+
+if [ "$1" = "autoconf" ]; then
+	if [ -x $afpdPath ]; then
+		echo yes
+		exit 0
+	else
+		echo no '(afpd not found)'
+		exit 0
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title Netatalk status'
+	echo 'graph_args --logarithmic --lower-limit 0.1'
+	echo 'graph_vlabel Number'
+	echo 'graph_category netatalk'
+	echo 'proc.label Running processes'
+	echo 'proc.info Number of running afpd processes'
+	echo 'proc.min 0'
+	echo 'user.label Connected users'
+	echo 'user.info Number of users connected to netatalk service'
+	echo 'user.min 0'
+	echo 'lock.label Locked files'
+	echo 'lock.info Number of files locked by afpd'
+	echo 'lock.min 0'
+	echo 'share.label Open shares'
+	echo 'share.info Number of open netatalk shares'
+	echo 'share.min 0'
+	exit 0
+fi
+
+##########
+
+
+
+#####
+## Script environment
+#####
+
+# Find "afpd.conf" location:
+afpdConfPath=${afpdconf:-`$afpdPath -v 2>/dev/null | grep "afpd.conf" | awk '{print $2}'`}
+
+baseLsofCommand="lsof -a -c $(basename $afpdPath) -d ^DEL,^err,^jld,^ltx,^Mxx,^m86,^mem,^mmap,^pd,^rtd,^tr,^txt,^v86"
+
+#TODO: Support multiple servers
+defaultServer_defaultVolConfigLine=$(cat $afpdConfPath | grep "^[^#]" | grep "\-defaultvol")
+if [ -z "$defaultServer_defaultVolConfigLine" ]; then
+	defaultServer_volumesFile=`$afpdPath -v 2>/dev/null | grep "AppleVolumes.default" | awk '{print $2}'` # Default location "AppleVolumes.default"
+else
+	defaultVol_pathIsQuoted="-defaultvol ('|\")"
+	defaultVol_quotedPattern="-defaultvol ('|\")([^\1]*)\1"
+	# Following regex is from http://stackoverflow.com/questions/537772/what-is-the-most-correct-regular-expression-for-a-unix-file-path
+	defaultVol_nonQuotedPattern='-defaultvo(l) (([^\0 !$`&*()+]|\\( |!|$|`|&|\*|\(|\)|\+))+)'
+	defaultVol_pathPattern=$defaultVol_nonQuotedPattern
+	[[ $defaultServer_defaultVolConfigLine =~ $defaultVol_pathIsQuoted ]] && defaultVol_pathPattern=$defaultVol_quotedPattern
+	[[ $defaultServer_defaultVolConfigLine =~ $defaultVol_pathPattern ]] && defaultServer_volumesFile = ${BASH_REMATCH[2]}
+fi
+
+##########
+
+
+
+#####
+## Actual monitoring
+#####
+
+# Running processes (proc):
+echo "proc.value" $(ps ax --no-headers -o command | grep "^$afpdPath" | wc -l)
+
+# Connected users (user):
+# We will ignore root (having UID=0 it's line will be first) (assomption done: there will have only one line corresponding to root in `ps` output)
+connectedUsers=$(ps anx --no-headers -o uid,command | sed 's/^ *//g' | grep "^[0-9]* $afpdPath" | sort -n | tail -n +2 | awk '{print $1}')
+echo "user.value" `echo $connectedUsers | wc -w`
+
+# Locked files (lock):
+echo "lock.value" $($baseLsofCommand -F l | grep "^l[rRwWu]" | wc -l)
+
+# Open shares (share):
+openShares=0
+
+#TOFIX: A bug can occur if a shared path is located inside another shared path (eg. "/mnt/afpShares/foo" and  "/mnt/afpShares/foo/subFoo/bar"):
+#       Depending of the order the shares are found, the script might say the less-deeper one is opened whereas he is processing the other one
+#       Solution: sort shares per descending depth
+
+# Following regex is from http://stackoverflow.com/questions/10134129/generic-shell-bash-method-to-parse-string-for-possibly-quoted-fields
+for shareName in `cat $defaultServer_volumesFile | grep "^[^#:]" | grep -oP "^(['\"]).*?\1|^(\\\\ |[^ '\"])*"`; do
+	if [[ "$shareName" =~ "~" ]]; then
+		for currentUid in $connectedUsers; do # For each connected users
+			currentUserHomeDir=`getent passwd $currentUid | cut -d ':' -f6` # Fetch it's the home directory
+			currentUserHomeDir=`readlink -f "$currentUserHomeDir"` # We want the realpath (resolves symbolic links and normalize the path)
+			
+			#FIX: We use pipe `lsof` outputs to `echo -e` with `xargs` because lsof "displays only printable ASCII characters" (cf. http://ftp.cerias.purdue.edu/pub/tools/unix/sysutils/lsof/00FAQ #14.5)
+			#     Then if a share with non-ASCII characters in it's path were to be opened, lsof would return them on \xNN form and grep wouldn't match: `echo -e /the/path` fixes this
+			[ `$baseLsofCommand -F n | xargs -0 echo -e | grep "^n$currentUserHomeDir" | wc -l` -gt 0 ] && let openShares++ # If found in lsof output: increment the openShares counter
+		done
+	else
+		shareName=`readlink -f "$shareName"` # We want the realpath (resolves symbolic links and normalize the path)
+		[ `$baseLsofCommand -F n | xargs -0 echo -e | grep "^n$shareName" | wc -l` -gt 0 ] && let openShares++ # If found in lsof output: increment the openShares counter
+	fi
+done
+echo "share.value" $openShares
+
+##########
