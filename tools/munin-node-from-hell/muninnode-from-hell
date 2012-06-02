@@ -22,6 +22,10 @@ VERSION = "muninnode-from-hell v0.1"
 modules = {}
 
 class MuninPlugin:
+    def __init__(self):
+        self.current_load = None
+        self.current_locks = None
+
     def sleep_fetch(self, conf):
         period = None
         if conf.get("mode") == "sleepy" and conf.get("sleepyness"):
@@ -36,14 +40,26 @@ class MuninPlugin:
     def sleep_config(self, conf):
         return self.sleep_fetch(conf)
 
+    def find_load(self):
+        # At about a thousand node instances you get this:
+        #IOError: [Errno 24] Too many open files: '/proc/loadavg'
+        # cache it for a bit..
+        if (not self.current_load) or random.randint(0,100) == 1:
+            load = open("/proc/loadavg", "r").read()
+            load, rest = load.split(" ", 1)
+            self.current_load = float(load)
+        return self.current_load
+            
+    def find_locks(self):
+        if (not self.current_locks) or random.randint(0,100) == 1:
+            fp = open("/proc/locks", "r")
+            self.current_locks = len(fp.readlines())
+        return self.current_locks 
 
 class load(MuninPlugin):
     def fetch(self, conf):
         self.sleep_fetch(conf)
-        load = open("/proc/loadavg", "r").read()
-        load, rest = load.split(" ", 1)
-        load = float(load)
-        return "load.value %.2f" % load
+        return "load.value %.2f" % self.find_load()
 
     def config(self, conf):
         self.sleep_config(conf)
@@ -60,9 +76,7 @@ modules["load"] = load()
 class locks(MuninPlugin):
     def fetch(self, conf):
         self.sleep_fetch(conf)
-        fp = open("/proc/locks", "r")
-        fdata = fp.readlines()
-        return "locks.value %i" % len(fdata)
+        return "locks.value %i" % self.find_locks()
 
     def config(self, conf):
         self.sleep_config(conf)
@@ -171,10 +185,7 @@ modules["graph_area"] = graph_area()
 class utf8_graphcat(MuninPlugin):
     "A plugin with a graph category which has UTF-8 in it"
     def fetch(self, conf):
-        load = open("/proc/loadavg", "r").read()
-        load, rest = load.split(" ", 1)
-        load = float(load)
-        return "apples.value %.2f" % load
+        return "apples.value %.2f" % self.find_load()
 
     def config(self, conf):
         return """graph_title Example UTF-8 graph
@@ -188,10 +199,7 @@ modules["utf8_graphcat"] = utf8_graphcat()
 class utf8_graphname(MuninPlugin):
     "A plugin with a UTF-8 name"
     def fetch(self, conf):
-        load = open("/proc/loadavg", "r").read()
-        load, rest = load.split(" ", 1)
-        load = float(load)
-        return "apples.value %.2f" % load
+        return "apples.value %.2f" % self.find_load()
 
     def config(self, conf):
         return """graph_title Example UTF-8 graph
