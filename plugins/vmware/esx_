@@ -1,37 +1,101 @@
 #!/usr/bin/perl -w
-#
-# -== Munin plugin for VMware ESXi/vSphere monitoring ==-
-#
-# Copyright (c) 2012 - Stefan Seidel <munin@stefanseidel.info>
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU General Public License as published by
-#    the Free Software Foundation, either version 3 of the License, or
-#    (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU General Public License for more details.
-#
-#    You should have received a copy of the GNU General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-#
-# This plugin uses the vSphere SDK for Perl available at
-# http://www.vmware.com/support/developer/viperltoolkit/
-# or included in the vSphere CLI available at
-# http://www.vmware.com/support/developer/vcli/
-# The use of the SDK is subject to the terms and condition
-# of VMware, Inc. to which you must agree upon installation.
-#
+=HEADER
+        -== Munin plugin for VMware ESXi/vSphere monitoring ==-
+
+ Copyright (c) 2012 - Stefan Seidel <munin@stefanseidel.info>
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-#
-# -== Usage ==-
-# Put this file in /usr/share/munin/plugins, `chmod +x` it and
-# `ln -s` it to /etc/munin/plugins/esx_<hostname of server to monitor>
-#
+ This plugin uses the vSphere SDK for Perl available at
+ http://www.vmware.com/support/developer/viperltoolkit/
+ or included in the vSphere CLI available at
+ http://www.vmware.com/support/developer/vcli/
+ The use of the SDK is subject to the terms and condition
+ of VMware, Inc. to which you must agree upon installation.
+=cut
+
+=USAGE
+       -== Usage ==-
+Put this file in /usr/share/munin/plugins, `chmod +x` it and
+`ln -s` it to /etc/munin/plugins/esx_<hostname of server to monitor>
+Add a file "esx_" /etc/munin/plugin-conf.d with content like this
+(omit the "# " at the beginning of each line)
+
+---- snip ----
+[esx_*]
+timeout 60
+env.user <username on ESX server or vCenter>
+env.password <password of user on ESX server or vCenter>
+---- snip ----
+
+Then you need to add this host to your munin.conf on the munin server
+(often this is the same as your munin node, i.e. this host) and restart
+munin-node, and wait for the data to populate.
+
+
+       -== Graphs don't render ==-
+Munin 1.4 has a bug with complex multigraphs like this, see
+http://munin-monitoring.org/ticket/1224 for details and a fix if
+your graphs don't render!
+
+
+       -== Option flatview ==-
+There is an option to render all VMs and Host Systems in a flat
+structure, i.e. not rendering VMs as sub-items of their host.
+This is useful if you frequently move VMs between hosts and want to
+keep the VM graphs running. To activate this option, add
+
+---- snip ----
+env.flatview top_level_entry
+---- snip ----
+
+to the entry in your config file in /etc/munin/plugin-conf.d (see above).
+Be aware that this has some drawbacks:
+ - you cannot have the same VM name in two hosts you monitor
+   (the VM name is the unique identifier for the graphs)
+ - you will only indirectly be able to see which VM is on which host
+   (running VMs will appear in the CPU graphs of their hosts)
+ - it's a flat structure, so it can become quite a long list
+ - because of the way Munin works, all hosts will be queried serially,
+   not in parallel as it would be the case without "flat view" - this
+   MAY lead to timing problems if you have a large number of hosts or VMs
+
+
+       -== Option vCenter ==-
+If you wish to access the host system indirectly through a vCenter, just
+specify this parameter:
+
+---- snip ----
+env.vCenter <address or hostname of the vCenter>
+---- snip ----
+
+This option can be used with or without the "flatview" option. Make sure your
+password and username are valid on the vCenter. The plugin name will still have
+to contain the hostname of the host you want to monitor - be aware that you have
+to use the hostname exactly as it is registered in the vCenter, so IPs and
+hostnames are NOT interchangeable.
+=cut
+
+=ACK
+     -== Ackknowledgements ==-
+I would like to thank VMware for their SDK and the good documentation.
+
+Special thanks go to MEGABIT Informationstechnik GmbH (www.megabit.net)
+who graciously sponsored the development of the "flat view" option
+and the ability to access hosts via vCenter.
+=cut
 
 use strict;
 use sort 'stable'; # guarantee stability
@@ -45,34 +109,58 @@ use DateTime::Format::ISO8601; # may need to install "libdatetime-format-iso8601
 use List::Util qw(sum max);
 use List::MoreUtils qw(all);
 use Munin::Plugin;
+use Time::HiRes qw(time);
+my $DEBUG = ${Munin::Plugin::DEBUG};
+
+# Important: this is needed if you do not use a "proper" SSL certificate
+# on your vSphere/vCenter/ESX(i) server (which is the default)
+$ENV{PERL_LWP_SSL_VERIFY_HOSTNAME} = 0;
 
 # get hostname from filename and blurt it out immediately
 # so that when something goes wrong, at least the plugin
 # output is linked with the right host
 $0 =~ /esx_(.+)$/;
 my $host_name = $1;
-print "host_name $host_name\n";
 
-# env.user and env.password need to be set in plugin-conf/munin-node
+if ((defined $ARGV[0]) and ($ARGV[0] eq "config")) {
+    if ($ENV{flatview}) {
+        print "host_name $ENV{flatview}\n";
+        print "# for host $host_name\n" if $DEBUG;
+    } else {
+        print "host_name $host_name\n";
+    }
+}
+
+# env.user and env.password need to be set in plugin-conf.d
 Opts::set_option ('username', $ENV{user} || 'root');
 Opts::set_option ('password', $ENV{password} || '');
-Opts::set_option ('url',"https://$host_name/sdk/webService");
+if ($ENV{vCenter}) {
+    print "# vCenter: $ENV{vCenter} - host $host_name\n" if $DEBUG;
+    Opts::add_options ( (vihost => { alias => "h", type => "=s", required => 0 }) );
+    Opts::set_option ('vihost',"$host_name");
+    Opts::set_option ('url',"https://$ENV{vCenter}/sdk/webService");
+} else {
+    Opts::set_option ('url',"https://$host_name/sdk/webService");
+}
+
 
 # plugin needs Munin 1.4 or later
 need_multigraph();
 
 # for datetime parsing later on
 my $iso8601 = DateTime::Format::ISO8601->new;
+my $sstarttime = time();
 
 # connect to vSphere host
 Util::connect();
 
 # central object host_view holds all relevant items (VMs, network, etc.)
-my $host_view = VIExt::get_host_view(1, ['summary', 'network', 'datastore', 'vm', 'runtime', 'configManager.networkSystem']);
+my $host_view = VIExt::get_host_view(1, ['summary', 'network', 'datastore', 'vm', 'runtime', 'configManager.networkSystem', 'configManager.dateTimeSystem']);
 Opts::assert_usage(defined($host_view), "Invalid host.");
 
+my $serviceInst = Vim::get_view (mo_ref => ManagedObjectReference->new(type => 'ServiceInstance', value => 'ServiceInstance'));
 # Performance Manager for getting the actual values
-my $perfMan = Vim::get_view (mo_ref => ManagedObjectReference->new(type => 'PerformanceManager', value => 'ha-perfmgr'));
+my $perfMan = Vim::get_view (mo_ref => $serviceInst->content->perfManager);
 Opts::assert_usage(defined($perfMan), "No PerformanceManager.");
 
 # may be needed later
@@ -81,8 +169,10 @@ Opts::assert_usage(defined($perfMan), "No PerformanceManager.");
 
 # used for getting the current vSphere server time and then
 # defining the (now - 5minutes) interval
-my $dtsys = Vim::get_view(mo_ref => ManagedObjectReference->new(type => 'HostDateTimeSystem', value => 'dateTimeSystem'));
+my $dtsys = Vim::get_view(mo_ref => $host_view->{'configManager.dateTimeSystem'});
 Opts::assert_usage(defined($dtsys), "No DateTimeSystem.");
+
+print "# time to connect and get objects: ", time() - $sstarttime, "\n" if $DEBUG;
 
 # enumerate all performance counters by their IDs
 my %perfCounter = map { $_->key => $_ } @{$perfMan->perfCounter};
@@ -93,6 +183,7 @@ my @all_vms = ();
 # IDs/UUIDs to human readable names
 my $resolveNames;
 
+$host_view->update_view_data();
 # retrieve performance counters for host
 push @all_perf_data, get_perf_data($host_view);
 # manually set UF name for host system
@@ -115,6 +206,7 @@ for ($host_view->datastore) {
         my $datastore = Vim::get_view (mo_ref => $_);
         # update freeSpace values (doesn't work on free ESXi)
         eval { $datastore->RefreshDatastore(); };
+        $datastore->update_view_data();
         my $uuid =$datastore->summary->url;
         $uuid =~ s!.+/!!;
         $resolveNames->{datastore}->{$uuid} = $datastore->name;
@@ -152,11 +244,13 @@ for ($host_view->datastore) {
 for ($host_view->vm) {
     for (@$_) {
         my $vm = Vim::get_view (mo_ref => $_);
+        $vm->update_view_data();
         # store VM id for later iteration
         my $vmId = $_->{value};
         push @all_vms, $vmId;
         # ID to VM name
         $resolveNames->{vm}->{$vmId} = "VM ".$vm->summary->config->name;
+        $resolveNames->{vmuuid}->{$vmId} = $vm->summary->config->uuid;
         # fetch disk space usage per datastore
         for (@{$vm->storage->perDatastoreUsage}) {
             my $uuid = Vim::get_view(mo_ref => $_->datastore)->summary->url;
@@ -233,11 +327,11 @@ for (keys %sensorCount) {
                     unit => "Numbers" });
 }
 
-# -> DEBUG
-foreach (sort { $a->{group} cmp $b->{group} || $a->{instance} cmp $b->{instance} || $a->{name} cmp $b->{name} || $a->{rollup} cmp $b->{rollup} || $a->{vm} cmp $b->{vm} } @all_perf_data) {
-   print "# $_->{vm}\t$_->{rollup}\t$_->{group}\t$_->{instance}\t$_->{name}\t$_->{value}\t$_->{unit}\n";
+if ($DEBUG) {
+    foreach (sort { $a->{group} cmp $b->{group} || $a->{instance} cmp $b->{instance} || $a->{name} cmp $b->{name} || $a->{rollup} cmp $b->{rollup} || $a->{vm} cmp $b->{vm} } @all_perf_data) {
+        print "# $_->{vm}\t$_->{rollup}\t$_->{group}\t$_->{instance}\t$_->{name}\t$_->{value}\t$_->{unit}\n";
+    }
 }
-# <- DEBUG
 
 # which graphs to draw
 my @all_graphs = ();
@@ -245,34 +339,37 @@ my @all_graphs = ();
 # host system
 push @all_graphs, (
     {   selector => { group => qr/^cpu$/i, name => qr/^usagemhz$/i, instance => qr/^$/ },
-          config => { groupBy => "group", graphName => "usage_", graphTitle => "CPU usage per " }
+          config => { groupBy => "group", graphName => "host_cpu", graphTitle => "CPU usage per " }
     },
     {   selector => { group => qr/^disk$/i, name => qr/^(read|usage|write)$/i, instance => qr/.+/ },
-          config => { groupBy => "group", graphName => "transfer_", graphTitle => "Disk Transfer Rates per " }
+          config => { groupBy => "group", graphName => "host_disk_transfer", graphTitle => "Disk Transfer Rates per " }
     },
     {   selector => { group => qr/^disk$/i, name => qr/^.+Averaged$/i, instance => qr/.+/ },
-          config => { groupBy => "group", graphName => "iops_", graphTitle => "Disk I/O operations per " }
+          config => { groupBy => "group", graphName => "host_disk_iops", graphTitle => "Disk I/O operations per " }
     },
     {   selector => { group => qr/^disk$/i, name => qr/^.+Latency$/i, instance => qr/.+/, vm => qr/^$/ },
-          config => { groupBy => "vm", graphName => "latency_disk", graphTitle => "Disk latency for " }
+          config => { groupBy => "vm", graphName => "host_disk_latency", graphTitle => "Disk latency for " }
     },
     {   selector => { group => qr/^mem$/i, unit => qr/^KB$/i, rollup => qr/^none$/, vm => qr/^$/ },
-          config => { groupBy => "vm", graphName => "mem_host", graphTitle => "Memory usage for " }
+          config => { groupBy => "vm", graphName => "host_memory", graphTitle => "Memory usage for " }
     },
     {   selector => { group => qr/^datastore$/i, unit => qr/^Bytes$/i, vm => qr/^$/ },
           config => { groupBy => "vm", graphName => "usage_datastore", graphTitle => "Disk space usage for ", graphArgs => "--lower-limit 10737418240 --logarithmic --alt-autoscale-min --units=si" }
     },
     {   selector => { group => qr/^net$/i, unit => qr/^KBps$/i, vm => qr/^$/ },
-          config => { groupBy => "vm", graphName => "traffic_net", graphTitle => "Network traffic for " }
+          config => { groupBy => "vm", graphName => "host_traffic_net", graphTitle => "Network traffic for " }
     },
     {   selector => { group => qr/^net$/i, unit => qr/^Number$/i, vm => qr/^$/ },
-          config => { groupBy => "vm", graphName => "packets_net", graphTitle => "Network packets for " }
+          config => { groupBy => "vm", graphName => "host_packets_net", graphTitle => "Network packets for " }
+    },
+    {   selector => { group => qr/^power$/i, name => qr/^power$/i },
+          config => { groupBy => "group", graphName => "power_usage", graphTitle => "Host System and VM " }
     },
     {   selector => { group => qr/^sys$/i, name => qr/^diskUsage$/i },
-          config => { groupBy => "name", graphName => "host_", graphTitle => "Host System " }
+          config => { groupBy => "name", graphName => "host_disk_usage", graphTitle => "Host System " }
     },
     {   selector => { group => qr/^sys$/i, name => qr/^uptime$/i },
-          config => { groupBy => "name", graphName => "host_", graphTitle => "Host System and VM ", graphArgs => "--lower-limit 1000 --logarithmic --alt-autoscale-min" }
+          config => { groupBy => "name", graphName => "uptimes", graphTitle => "Host System and VM ", graphArgs => "--lower-limit 1000 --logarithmic --alt-autoscale-min" }
     }
 );
 
@@ -281,31 +378,31 @@ foreach (@all_vms) {
     my $vmName = clean_fieldname($resolveNames->{vm}->{$_});
     push @all_graphs, (
         {   selector => { group => qr/^cpu$/i, name => qr/^usagemhz$/i, vm => qr/^$_$/ },
-              config => { groupBy => "vm", graphName => "$vmName.cpu_", graphTitle => "CPU usage for " }
+              config => { groupBy => "vm", graphName => "$vmName.vm_cpu", graphTitle => "CPU usage for " }
         },
         {   selector => { group => qr/^mem$/i, unit => qr/^KB$/i, rollup => qr/^none$/, vm => qr/^$_$/ },
-              config => { groupBy => "vm", graphName => "$vmName.memory_", graphTitle => "Memory usage for " }
+              config => { groupBy => "vm", graphName => "$vmName.vm_memory", graphTitle => "Memory usage for " }
         },
         {   selector => { group => qr/^datastore$/i, unit => qr/^Bytes$/i, vm => qr/^$_$/ },
-              config => { groupBy => "vm", graphName => "$vmName.datastore_", graphTitle => "Disk space usage for ", graphArgs => "--lower-limit 10485760 --logarithmic --alt-autoscale-min --units=si" }
+              config => { groupBy => "vm", graphName => "$vmName.vm_datastore", graphTitle => "Disk space usage for ", graphArgs => "--lower-limit 10485760 --logarithmic --alt-autoscale-min --units=si" }
         },
         {   selector => { group => qr/^virtualDisk$/i, unit => qr/^Millisecond$/i, vm => qr/^$_$/ },
-              config => { groupBy => "vm", graphName => "$vmName.disklat_", graphTitle => "Disk latency for " }
+              config => { groupBy => "vm", graphName => "$vmName.vm_disklat", graphTitle => "Disk latency for " }
         },
         {   selector => { group => qr/^virtualDisk$/i, unit => qr/^Number$/i, vm => qr/^$_$/ },
-              config => { groupBy => "vm", graphName => "$vmName.diskiops_", graphTitle => "Disk I/O operations for " }
+              config => { groupBy => "vm", graphName => "$vmName.vm_diskiops", graphTitle => "Disk I/O operations for " }
         },
         {   selector => { group => qr/^virtualDisk$/i, unit => qr/^KBps$/i, vm => qr/^$_$/ },
-              config => { groupBy => "vm", graphName => "$vmName.disktrans_", graphTitle => "Disk transfer rates for " }
+              config => { groupBy => "vm", graphName => "$vmName.vm_disktrans", graphTitle => "Disk transfer rates for " }
         },
         {   selector => { group => qr/^net$/i, unit => qr/^KBps$/i, vm => qr/^$_$/ },
-              config => { groupBy => "vm", graphName => "$vmName.traffic_net_", graphTitle => "Network traffic for " }
+              config => { groupBy => "vm", graphName => "$vmName.vm_traffic_net", graphTitle => "Network traffic for " }
         },
         {   selector => { group => qr/^net$/i, unit => qr/^Number$/i, vm => qr/^$_$/ },
-              config => { groupBy => "vm", graphName => "$vmName.packets_net_", graphTitle => "Network packets for " }
+              config => { groupBy => "vm", graphName => "$vmName.vm_packets_net", graphTitle => "Network packets for " }
         },
         {   selector => { group => qr/^sys$/i, name => qr/^uptime$/i, vm => qr/^$_$/ },
-              config => { groupBy => "vm", graphName => "$vmName.uptime_", graphTitle => "VM uptime " }
+              config => { groupBy => "vm", graphName => "$vmName.vm_uptime", graphTitle => "VM uptime " }
         }
     );
 }
@@ -313,9 +410,10 @@ foreach (@all_vms) {
 # sensor graphs
 push @all_graphs, (
     {   selector => { group => qr/^sensors$/i },
-          config => { groupBy => "unit", graphName => "sensor_", graphTitle => "Sensors " }
+          config => { groupBy => "unit", graphName => "sensor_", graphTitle => "Sensors ", multiGraph => 1 }
     });
 
+print "# time to collect all data: ", time() - $sstarttime, "\n" if $DEBUG;
 
 # actual processing
 foreach (@all_graphs) {
@@ -326,6 +424,8 @@ foreach (@all_graphs) {
         munin_print("values", \@all_perf_data, $_);
     }
 }
+
+print "# time of the script: ", time() - $sstarttime, "\n" if $DEBUG;
 
 0;
 
@@ -350,6 +450,7 @@ sub process_value_array {
 sub get_perf_data {
     my $entity = shift;
     my @ret = ();
+    my $gathstart = time();
     # get the current server time
     my $curtime = $iso8601->parse_datetime($dtsys->QueryDateTime());
     # and subtract 5 minutes to get all values for the last period
@@ -375,12 +476,16 @@ sub get_perf_data {
                            unit => $perfDesc->unitInfo->label };
         }
     }
+    print "# time to gather info for $entity :", time() - $gathstart, "\n" if $DEBUG;
     return @ret;
 }
 
 # generate a munin-friendly and unique field name
 sub gen_dp_name {
-    return clean_fieldname("$_[0]->{name}v$_[0]->{vm}i$_[0]->{instance}");
+    my $fname = $_[0]->{name};
+    $fname .= "v".$resolveNames->{vmuuid}->{$_[0]->{vm}} unless $_[1] eq "vm" or $_[0]->{vm} eq "";
+    $fname .= "i$_[0]->{instance}" unless $_[1] eq "instance" or $_[0]->{instance} eq "";
+    return clean_fieldname($fname);
 }
 
 # trim white spaces
@@ -403,19 +508,23 @@ sub munin_print {
     $par = $par->{selector};
     my $oldGroup = "_-_";
     my $factor;
+    if ($ENV{flatview}) {
+        $cfg->{graphName} = clean_fieldname("Host_$host_name").".".$cfg->{graphName} unless $cfg->{graphName} =~ m/\./;
+    }
 
     # find values according to criteria in $par and sort by grouping parameter
-    foreach (sort { $a->{$cfg->{groupBy}} cmp $b->{$cfg->{groupBy}} } grep { my $d = $_; all { (not exists $d->{$_}) || $d->{$_} =~ /$par->{$_}/ } keys %$par; } @$arr) {
-        my $groupCrit = $cfg->{groupBy};
-        my $curGroup = $_->{$groupCrit};
+    #foreach (sort { $a->{$cfg->{groupBy}} cmp $b->{$cfg->{groupBy}} } grep { my $d = $_; all { (not exists $d->{$_}) || $d->{$_} =~ /$par->{$_}/ } keys %$par; } @$arr) {
+     foreach (sort { $a->{$cfg->{groupBy}} cmp $b->{$cfg->{groupBy}} } grep { my $d = $_; all { (not exists $d->{$_}) || $d->{$_} =~ /$par->{$_}/ } keys %$par; } @$arr) {
+        my $groupCrit = $cfg->{groupBy} || "";
+        my $curGroup = $_->{$groupCrit} || "";
 
         if (!($curGroup eq $oldGroup)) {
             # we're in a new group, meaning a new graph starts
             $factor = 0;
             # clean up group name for multigraph name
             my $ccurGroup = $curGroup;
-    	    $ccurGroup =~ s/ |\./_/g;
-            print "multigraph ",$cfg->{graphName},$ccurGroup,"\n";
+            $ccurGroup =~ s/ |\./_/g;
+            print "multigraph ",$cfg->{graphName},(exists $cfg->{multiGraph}?$ccurGroup:""),"\n";
 
             if ("config" eq $act) {
                 # want configuration
@@ -457,7 +566,7 @@ sub munin_print {
 
         }
         $oldGroup = $curGroup;
-        my $dpName = gen_dp_name($_);
+        my $dpName = gen_dp_name($_, $groupCrit);
         if ("config" eq $act) {
             # want configuration
             # get instance and VM names and UF names, if applicable
@@ -485,7 +594,7 @@ sub munin_print {
             }
         } else {
             # just print value
-            print gen_dp_name ($_), ".value $_->{value}\n";
+            print "$dpName.value $_->{value}\n";
         }
     }
 }
