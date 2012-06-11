@@ -173,19 +173,20 @@ if ($0 =~ /vcenter_(.+)$/) {
 my @returns = ();
 
 foreach $host_name (@host_names) {
+    # make sure we only print one host_name statement per plugin
+    if ((@returns == 0) and (defined $ARGV[0]) and ($ARGV[0] eq "config")) {
+        if ($ENV{flatview}) {
+            print "host_name $ENV{flatview}\n";
+            print "# for host $host_name\n" if $DEBUG;
+        } else {
+            print "host_name $host_name\n";
+        }
+    }
     local *FH;
     my $pid = open(FH, "-|");
     if ($pid == 0) {
         # CHILD
 
-        if ((defined $ARGV[0]) and ($ARGV[0] eq "config")) {
-            if ($ENV{flatview}) {
-                print "host_name $ENV{flatview}\n";
-                print "# for host $host_name\n" if $DEBUG;
-            } else {
-                print "host_name $host_name\n";
-            }
-        }
 
         # env.user and env.password need to be set in plugin-conf.d
         Opts::set_option ('username', $ENV{user} || 'root');
