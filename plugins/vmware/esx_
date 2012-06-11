@@ -94,7 +94,8 @@ I would like to thank VMware for their SDK and the good documentation.
 
 Special thanks go to MEGABIT Informationstechnik GmbH (www.megabit.net)
 who graciously sponsored the development of the "flat view" option
-and the ability to access hosts via vCenter.
+and the ability to access hosts via vCenter as well as the feature to
+query all hosts on the vCenter.
 =cut
 
 use strict;
@@ -116,11 +117,53 @@ my $DEBUG = ${Munin::Plugin::DEBUG};
 # on your vSphere/vCenter/ESX(i) server (which is the default)
 $ENV{PERL_LWP_SSL_VERIFY_HOSTNAME} = 0;
 
-# get hostname from filename and blurt it out immediately
-# so that when something goes wrong, at least the plugin
-# output is linked with the right host
-$0 =~ /esx_(.+)$/;
-my $host_name = $1;
+# for datetime parsing later on
+my $iso8601 = DateTime::Format::ISO8601->new;
+my @host_names = ();
+my $host_name;
+my $host_view;
+my $dtsys;
+my $perfMan;
+my %perfCounter;
+# IDs/UUIDs to human readable names
+my $resolveNames;
+
+if ($0 =~ /vcenter_(.+)$/) {
+    $ENV{vCenter} = $1;
+    $ENV{flatview} = $ENV{flatview} || $ENV{vCenter};
+    my $vpid = open(FH, "-|");
+    if ($vpid == 0) {
+        Opts::set_option ('username', $ENV{user} || 'root');
+	Opts::set_option ('password', $ENV{password} || '');
+        Opts::set_option ('server', $ENV{vCenter});
+	Util::connect();
+	foreach (@{Vim::find_entity_views(view_type => 'HostSystem', properties => ['name'])}) {
+	    print $_->{name}, "\n";
+	}
+	Util::disconnect();
+	exit 0;
+    } else {
+	while (<FH>) {
+	    push @host_names, trim($_);
+	    print "# found host ",trim($_)," on vCenter\n" if $DEBUG;
+	}
+	close FH;
+    }
+} else {
+    # get hostname from filename and blurt it out immediately
+    # so that when something goes wrong, at least the plugin
+    # output is linked with the right host
+    $0 =~ /esx_(.+)$/;
+    push @host_names, $1;
+}
+
+my @returns = ();
+
+foreach $host_name (@host_names) {
+    local *FH;
+    my $pid = open(FH, "-|");
+    if ($pid == 0) {
+######################## CHILD
 
 if ((defined $ARGV[0]) and ($ARGV[0] eq "config")) {
     if ($ENV{flatview}) {
@@ -137,30 +180,28 @@ Opts::set_option ('password', $ENV{password} || '');
 if ($ENV{vCenter}) {
     print "# vCenter: $ENV{vCenter} - host $host_name\n" if $DEBUG;
     Opts::add_options ( (vihost => { alias => "h", type => "=s", required => 0 }) );
-    Opts::set_option ('vihost',"$host_name");
-    Opts::set_option ('url',"https://$ENV{vCenter}/sdk/webService");
+    Opts::set_option ('vihost',$host_name);
+    Opts::set_option ('server',$ENV{vCenter});
 } else {
-    Opts::set_option ('url',"https://$host_name/sdk/webService");
+    Opts::set_option ('server',$host_name);
 }
 
 
 # plugin needs Munin 1.4 or later
 need_multigraph();
 
-# for datetime parsing later on
-my $iso8601 = DateTime::Format::ISO8601->new;
 my $sstarttime = time();
 
 # connect to vSphere host
 Util::connect();
 
 # central object host_view holds all relevant items (VMs, network, etc.)
-my $host_view = VIExt::get_host_view(1, ['summary', 'network', 'datastore', 'vm', 'runtime', 'configManager.networkSystem', 'configManager.dateTimeSystem']);
+$host_view = VIExt::get_host_view(1, ['summary', 'network', 'datastore', 'vm', 'runtime', 'configManager.networkSystem', 'configManager.dateTimeSystem']);
 Opts::assert_usage(defined($host_view), "Invalid host.");
 
 my $serviceInst = Vim::get_view (mo_ref => ManagedObjectReference->new(type => 'ServiceInstance', value => 'ServiceInstance'));
 # Performance Manager for getting the actual values
-my $perfMan = Vim::get_view (mo_ref => $serviceInst->content->perfManager);
+$perfMan = Vim::get_view (mo_ref => $serviceInst->content->perfManager);
 Opts::assert_usage(defined($perfMan), "No PerformanceManager.");
 
 # may be needed later
@@ -169,19 +210,17 @@ Opts::assert_usage(defined($perfMan), "No PerformanceManager.");
 
 # used for getting the current vSphere server time and then
 # defining the (now - 5minutes) interval
-my $dtsys = Vim::get_view(mo_ref => $host_view->{'configManager.dateTimeSystem'});
+$dtsys = Vim::get_view(mo_ref => $host_view->{'configManager.dateTimeSystem'});
 Opts::assert_usage(defined($dtsys), "No DateTimeSystem.");
 
 print "# time to connect and get objects: ", time() - $sstarttime, "\n" if $DEBUG;
 
 # enumerate all performance counters by their IDs
-my %perfCounter = map { $_->key => $_ } @{$perfMan->perfCounter};
+%perfCounter = map { $_->key => $_ } @{$perfMan->perfCounter};
 # holds all performance data
 my @all_perf_data = ();
 # store VM ids for iteration later on
 my @all_vms = ();
-# IDs/UUIDs to human readable names
-my $resolveNames;
 
 $host_view->update_view_data();
 # retrieve performance counters for host
@@ -427,7 +466,21 @@ foreach (@all_graphs) {
 
 print "# time of the script: ", time() - $sstarttime, "\n" if $DEBUG;
 
-0;
+exit 0;
+} else {
+################################ PARENT
+push @returns, *FH;
+}
+}
+
+foreach my $fh (@returns) {
+    while (<$fh>) {
+	print $_;
+    }
+    close ($fh);
+}
+
+exit 0;
 
 ####################################################################
 
@@ -509,7 +562,7 @@ sub munin_print {
     my $oldGroup = "_-_";
     my $factor;
     if ($ENV{flatview}) {
-        $cfg->{graphName} = clean_fieldname("Host_$host_name").".".$cfg->{graphName} unless $cfg->{graphName} =~ m/\./;
+        $cfg->{graphName} = clean_fieldname("Host_".$host_view->name).".".$cfg->{graphName} unless $cfg->{graphName} =~ m/\./;
     }
 
     # find values according to criteria in $par and sort by grouping parameter
