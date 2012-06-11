@@ -28,6 +28,10 @@
 ## 2. Create 3 symlinks at the directory that us used by munin for plugins detection (e.g. /etc/munin/plugins): redis_connected_clients, redis_per_sec and and redis_used_memory
 ## 3. Edit plugin-conf.d/munin-node if it is needed (env.host and  env.port variables are accepted; set env.password for password protected Redis server)
 ## 4. Restart munin-node service
+##
+## Magic Markers
+#%# family=auto
+#%# capabilities=autoconf suggest
 
 use strict;
 use IO::Socket::INET;
@@ -37,15 +41,30 @@ my $HOST = exists $ENV{'host'} ? $ENV{'host'} : "127.0.0.1";
 my $PORT = exists $ENV{'port'} ? $ENV{'port'} : 6379;
 my $PASSWORD = exists $ENV{'password'} ? $ENV{'password'} : undef;
 
-my $server = "$HOST:$PORT";
-my $sock = IO::Socket::INET->new(
-    PeerAddr => $server,
-    Proto => 'tcp'
-);
-
-if ( defined( $PASSWORD )  ) {
-    print $sock "AUTH ", $PASSWORD, "\r\n";
-    my $result = <$sock> || die "can't read socket: $!";
+my $sock = &get_conn();
+my $config = ( defined $ARGV[0] and $ARGV[0] eq "config" );
+my $autoconf = ( defined $ARGV[0] and $ARGV[0] eq "autoconf" );
+if ( $autoconf ) {
+    if ( defined( $sock ) ) {
+        print "yes\n";
+        exit 0;
+    } else {
+        print "no (unable to connect to $HOST\[:$PORT\])\n";
+        exit 0;
+    }
+}
+my $suggest = ( defined $ARGV[0] and $ARGV[0] eq "suggest" );
+if ( $suggest ) {
+    if ( defined( $sock ) ) {
+        my @plugins = ('connected_clients', 'key_ratio', 'keys_per_sec', 'per_sec', 'used_keys', 'used_memory');
+        foreach my $plugin (@plugins) {
+            print "$plugin\n";
+        }
+        exit 0;
+    } else {
+        print "no (unable to connect to $HOST\[:$PORT\])\n";
+        exit 0;
+    }
 }
 
 print $sock "INFO\r\n";
@@ -61,9 +80,6 @@ foreach (split(/\r\n/, $rep)) {
 }
 close ($sock);
 
-my $config = ( defined $ARGV[0] and $ARGV[0] eq "config" );
-
-
 $0 =~ s/(.+)redis_//g;
 
 switch ($0) {
@@ -71,12 +87,57 @@ switch ($0) {
         if ( $config ) {
             print "graph_title Connected clients\n";
             print "graph_vlabel Connected clients\n";
-            print "connected_clients.label connected clients\n";
             print "graph_category redis\n";
+            print "graph_args -l 0\n";
+            print "connected_clients.label connected clients\n";
             exit 0;
         }
 
         print "connected_clients.value " . $hash->{'connected_clients'} . "\n";
+    }
+
+
+    case "keys_per_sec" {
+        if ( $config ) {
+            print "graph_title Keys Per Second\n";
+            print "graph_vlabel per \${graph_period}\n";
+            print "graph_category redis\n";
+            print "graph_args -l 0\n";
+            print "hits.label hits\n";
+            print "hits.type COUNTER\n";
+            print "misses.label misses\n";
+            print "misses.type COUNTER\n";
+            print "expired.label expirations\n";
+            print "expired.type COUNTER\n";
+            print "evictions.label evictions\n";
+            print "evictions.type COUNTER\n";
+            exit 0;
+        }
+
+        print "hits.value " . $hash->{'keyspace_hits'} . "\n";
+        print "misses.value " . $hash->{'keyspace_misses'} . "\n";
+        print "expired.value " . $hash->{'expired_keys'} . "\n";
+        print "evictions.value " . $hash->{'evicted_keys'} . "\n";
+    }
+
+    case "key_ratio" {
+        if ( $config ) {
+            print "graph_title Key Hit vs Miss Ratio\n";
+            print "graph_vlabel per \${graph_period}\n";
+            print "graph_category redis\n";
+            print "graph_args -u 100 -l 0 -r --base 1000\n";
+            print "hitratio.label hit ratio\n";
+            print "hitratio.type GAUGE\n";
+            print "hitratio.draw AREA\n";
+            print "missratio.label miss ratio\n";
+            print "missratio.type GAUGE\n";
+            print "missratio.draw STACK\n";
+            exit 0;
+        }
+            
+        my $total = $hash->{'keyspace_hits'} + $hash->{'keyspace_misses'};
+        printf("hitratio.value %.2f\n", $hash->{'keyspace_hits'} / $total * 100);
+        printf("missratio.value %.2f\n", $hash->{'keyspace_misses'} / $total * 100);
     }
 
 
@@ -85,6 +146,7 @@ switch ($0) {
             print "graph_title Per second\n";
             print "graph_vlabel per \${graph_period}\n";
             print "graph_category redis\n";
+            print "graph_args -l 0\n";
             print "requests.label requests\n";
             print "requests.type COUNTER\n";
             print "connections.label connections\n";
@@ -101,8 +163,10 @@ switch ($0) {
         if ( $config ) {
             print "graph_title Used memory\n";
             print "graph_vlabel Used memory\n";
-            print "used_memory.label used memory\n";
             print "graph_category redis\n";
+            print "graph_args -l 0\n";
+            print "used_memory.label used memory\n";
+            print "used_memory.draw AREA\n";
             exit 0;
         }
 
@@ -121,6 +185,7 @@ switch ($0) {
             print "graph_title Used keys\n";
             print "graph_vlabel Used keys\n";
             print "graph_category redis\n";
+            print "graph_args -l 0\n";
 
             foreach my $db (keys %{$dbs}) {
                 printf "%s_keys.label %s keys\n", $db, $db;
@@ -135,6 +200,20 @@ switch ($0) {
             printf "%s_expires.value %d\n", $db, $dbs->{$db}[1];
         }
     }
+}
+
+sub get_conn {
+    my $sock = IO::Socket::INET->new(
+        PeerAddr => $HOST,
+        PeerPort => $PORT,
+        Timeout => 10,
+        Proto => 'tcp'
+    );
+    if ( defined( $PASSWORD )  ) {
+        print $sock "AUTH ", $PASSWORD, "\r\n";
+        my $result = <$sock> || die "can't read socket: $!";
+    }
+    return $sock;
 }
 
 # vim: ft=perl ai ts=4 sw=4 et:
