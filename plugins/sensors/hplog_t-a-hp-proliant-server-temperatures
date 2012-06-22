@@ -1,0 +1,99 @@
+#!/usr/bin/perl -w 
+
+=head hplog_t
+
+DL 380 G6
+ID     TYPE        LOCATION      STATUS    CURRENT  THRESHOLD 
+ 1  Basic Sensor Ambient         Normal    68F/ 20C 105F/ 41C 
+ 2  Basic Sensor CPU (1)         Normal   104F/ 40C 179F/ 82C 
+ 3  Basic Sensor CPU (2)         Normal   104F/ 40C 179F/ 82C 
+ 4  Basic Sensor Memory Board    Normal   105F/ 41C 188F/ 87C 
+ 5  Basic Sensor Memory Board    Normal   105F/ 41C 188F/ 87C 
+ 6  Basic Sensor Memory Board    Normal   100F/ 38C 188F/ 87C 
+ 7  Basic Sensor Memory Board    Normal    98F/ 37C 188F/ 87C 
+ 8  Basic Sensor Pwr. Supply Bay Normal   123F/ 51C 194F/ 90C 
+ 9  Basic Sensor Pwr. Supply Bay Normal   105F/ 41C 149F/ 65C 
+10  Basic Sensor I/O Zone        Normal   125F/ 52C 194F/ 90C 
+11  Basic Sensor I/O Zone        Normal   114F/ 46C 158F/ 70C 
+12  Basic Sensor I/O Zone        Normal   131F/ 55C 194F/ 90C 
+13  Basic Sensor I/O Zone        Normal   ---F/---C 158F/ 70C 
+14  Basic Sensor I/O Zone        Normal   ---F/---C 158F/ 70C 
+15  Basic Sensor I/O Zone        Normal   ---F/---C 158F/ 70C 
+16  Basic Sensor I/O Zone        Normal   ---F/---C 158F/ 70C 
+17  Basic Sensor I/O Zone        Normal   ---F/---C 158F/ 70C 
+18  Basic Sensor I/O Zone        Normal   ---F/---C 158F/ 70C 
+19  Basic Sensor Processor Zone  Normal    95F/ 35C 158F/ 70C 
+20  Basic Sensor Processor Zone  Normal    95F/ 35C 158F/ 70C 
+21  Basic Sensor Processor Zone  Normal   105F/ 41C 176F/ 80C 
+22  Basic Sensor Processor Zone  Normal   102F/ 39C 176F/ 80C 
+23  Basic Sensor I/O Zone        Normal   118F/ 48C 170F/ 77C 
+24  Basic Sensor Memory Board    Normal   109F/ 43C 158F/ 70C 
+25  Basic Sensor Memory Board    Normal    98F/ 37C 158F/ 70C 
+26  Basic Sensor Memory Board    Normal    98F/ 37C 158F/ 70C 
+27  Basic Sensor I/O Zone        Normal   ---F/---C 158F/ 70C 
+28  Basic Sensor I/O Zone        Normal   ---F/---C 158F/ 70C 
+29  Basic Sensor System Board    Normal   109F/ 43C 140F/ 60C 
+30  Basic Sensor I/O Zone        Normal   168F/ 76C 230F/110C 
+
+
+=cut 
+
+use strict;
+
+
+
+
+open (HPLOGT,"/sbin/hplog -t |");
+#open (HPLOGT,"<hplog_t-example");
+my @hplog_t=<HPLOGT>;
+close HPLOGT;
+my %hplog;
+
+#print "@hplog_t";
+
+if($ARGV[0] and $ARGV[0] eq "config") {
+        
+
+	print "graph_title HP server temperatures\n";
+	print "graph_vlabel celsius\n";
+	print "graph_category sensors\n";
+	print "graph_info temperatures read using hplog -t\n";
+        
+}
+
+
+foreach (@hplog_t)
+{
+    
+    #print;
+    chomp;
+    # will weed out ---C
+    if (m@^\s*(\d+)\s+Basic Sensor\s+(\S+[\S\s]+?\S+)\s+(\S+)\s+\S+?/\s*(\d+)C\s+\S+?/\s*(\d+)C@)
+    {
+                
+        my $id=$1;
+        my $label=$2;
+        my $status=$3;
+        my $temp=$4;
+        my $maxtemp=$5;
+        #print "$id $_\n";
+        
+        #print "$id.label $label $id\n";
+
+        if($ARGV[0] and $ARGV[0] eq "config") {
+            
+            print "id_$id.label $id:$label\n";
+            print "id_$id.critical $maxtemp\n";
+        }
+        else
+        {
+            
+            print "id_$id.value $temp\n";
+        }
+        
+    }
+    
+}
+
+
+
