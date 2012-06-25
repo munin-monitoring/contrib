@@ -1,9 +1,9 @@
 #!/usr/bin/perl
 # -*- perl -*-
-# 
+#
 # Copyright 2009 by the Regents of the University of Minnesota
 # Written by Munir Nassar <nassarmu@msi.umn.edu>
-#
+# Rewrite contribution by TSUCHIYA Masatoshi <tsuchiya@namazu.org>
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
@@ -19,131 +19,129 @@
 #
 # The Minnesota Supercomputing Institute http://www.msi.umn.edu sponsored
 #	the development of this software.
-# 
+#
 # Requirements:
 #	- lmstat
 #
 # Note:
 #	- You must provide the daemon name as it is listed in the flexlm license
 #    if you want it displayed differently use the LMDISPLAYNAME variable
-# 
+#
 # Parameters supported:
 #  - config
 #  - autoconf
-# 
+#
 # Configuration variables
-#  - LMFEATURES:		The individual features of each vendor daemon to graph
+#  - LMFEATURES:	The individual features of each vendor daemon to graph.
+#			If no features are given, all features
+#			reported by vendor daemon are treated to graph.
 #  - LMDISPLAYNAME:	use the LMDISPLAYNAME instead of the daemon name when
-#							generating graph names
-#	- LMGRAPHISSUED:	If set generate a graph of the number of licenses issued for 
-#							each feature.
-#  - LMSTAT:			The path to the lmstat binary
+#			generating graph names
+#  - LMGRAPHISSUED:	If set generate a graph of the number of licenses issued for
+#			each feature.
+#  - LMSTAT:		The path to the lmstat binary
 #  - LMLICFILE:		The path to the FlexLM License File
 #  - LMLOGARITHMIC	If set then graph use a logarithmic scale
 #  
 # $Log$
 # Revision 1.00	20090807	nassarmu
 # Initial public release.
+# 
+# Revision 1.10 20120625 nassarmu@msi.umn.edu
+# incorporate the rewrite by TSUCHIYA Masatoshi <tsuchiya@namazu.org>
 #
 # Magic markers:
 #%# family=licensing
 #%# capabilities=autoconf
 
+use Class::Struct;
+use English qw/ $PROGRAM_NAME /;
 use strict;
 use warnings;
-use Munin::Plugin;
-
 
 # What daemon are we going to graph? if none specified exit.
-$0 =~ /flexlm_(.+)*$/;   
-my $daemon = $1;
-exit 2 unless defined $daemon;
-
-# LMFEATURES should be provided by plugin-conf.d space delimited 
-if ( ! $ENV{'LMFEATURES'} ) {
-	print "You must provide a list of FlexLM features to monitor via the LMFEATURES variable.\n";
-	exit 1
-}
+$PROGRAM_NAME =~ /flexlm_(.+)*$/;
+our $DAEMON = $1;
+exit 2 unless defined $DAEMON;
+our $munincommand;
 
 # This section is for some optional values, the defaults may work for you
 # if not then i recommend setting these option via plugin-conf.d
-# This would also allow you to theoretically support multiple flexlmds 
+# This would also allow you to theoretically support multiple flexlmds
 # via different license files.
-our $lmstat;
-our $lmlicfile;
-our $lmdisplayname;
-if ( $ENV{'LMSTAT'} ) {
-	$lmstat = $ENV{'LMSTAT'};
-} else {
-	$lmstat = "/opt/local/flexlm/bin/lmstat";
-}
-if ( $ENV{'LMLICFILE'} ) {
-	$lmlicfile = $ENV{'LMLICFILE'};
-} else {
-	$lmlicfile = "/opt/local/flexlm/license/license.dat";
-}
-if ( $ENV{'LMDISPLAYNAME'} ) {
-	$lmdisplayname = $ENV{'LMDISPLAYNAME'};
-} else {
-	$lmdisplayname = $daemon;
+our $LMSTAT = $ENV{'LMSTAT'} || '/opt/local/flexlm/bin/lmstat';
+our $LMLICFILE = $ENV{'LMLICFILE'} || '/opt/local/flexlm/license/license.dat';;
+
+&struct( feature => { name => '$', cleanname => '$', max => '$', used => '$' } );
+
+sub lmstat {
+    my @feature;
+    open( my $ph, sprintf('%s -c %s -S %s|', $LMSTAT, $LMLICFILE, $DAEMON) ) or exit 2;
+    while( <$ph> ){
+	if( my( $name ) = m/\AUsers of ([^:]+):/ ){
+	    my $x = feature->new( name => $name, max => 0, used => 0 );
+	    $name =~ s/^[^A-Za-z_]+/_/;
+	    $name =~ s/[^A-Za-z0-9_]/_/g;
+	    $x->cleanname( $name );
+	    m/Total of (\d+) licenses? issued/ and $x->max( $1 );
+	    m/Total of (\d+) licenses? in use/ and $x->used( $1 );
+	    push( @feature, $x );
+	}
+	elsif( m/\A\s+(\d+) RESERVATIONs? for / ){
+	    $feature[-1]->used( $feature[-1]->used - $1 );
+	}
+    }
+    if( $ENV{'LMFEATURES'} ){
+	my %table;
+	for( split( /\s+/, $ENV{'LMFEATURES'} ) ){
+	    $table{$_}++;
+	}
+	grep( $table{$_->name}, @feature );
+    } else {
+	@feature;
+    }
 }
 
-# Parse LMFEATURES
-my @features = split(/\s+/, $ENV{'LMFEATURES'});
-
-# try and recommend autoconf (this will most likely result in a yes)
-if ( $ARGV[0] and $ARGV[0] eq "autoconf" ) {
-	if ( scalar @features >= 1 ) {
-		print "yes\n";
-		exit 0;
-	}
-	else {
-		print "no\n";
-		exit 1;
-	}
+if ( $ARGV[0] ) {
+	$munincommand = $ARGV[0];
+}
+else {
+	$munincommand = 'none';
 }
 
-# print out a config screen when asked.
-if ( $ARGV[0] and $ARGV[0] eq "config" ) {
-	print "graph_title FlexLM License usage for $lmdisplayname\n";
-	if ( $ENV{'LMLOGARITHMIC'} ) {
-		print "graph_args --base 1000 --vertical-label licenses --lower-limit 0.01 --logarithmic\n";
-	}
-	else {
-		print "graph_args --base 1000 --vertical-label licenses -l 0\n";
-	}
-	print "graph_category licensing\n";
-	print "graph_period minute\n";
-	foreach my $feature (@features) {
-		my $clean_feature = clean_fieldname($feature);
-		print "$clean_feature".".label $feature\n";
-		print "$clean_feature".".draw LINE2\n";
-		print "$clean_feature".".info The number of $feature licenses checked out\n";
-		if ( $ENV{'LMGRAPHISSUED'} ) {
-			print "$clean_feature"."max.label $feature max\n";
-			print "$clean_feature"."max.draw LINE3\n";
-			print "$clean_feature"."max.info The total number of $feature licenses available\n";
-		}
-	}
-	exit 0
+if( $munincommand eq 'autoconf' ){
+    if( &lmstat > 0 ){
+	print "yes\n";
+    } else {
+	print "no\n";
+    }
 }
-
-my @results = `$lmstat -c $lmlicfile -S $daemon`;
-
-# pull the info from lmstat and print the results
-foreach my $feature (@features) {
-	my @results = grep(/Users of $feature/, @results);
-	
-	foreach my $result (@results) {
-		if ($result =~ m/Users of $feature\:/ ) {
-			chomp ($result);
-			my (@fields) = split( m/\s+/, $result);
-	
-			my $clean_feature = clean_fieldname($feature);
-			print "$clean_feature".".value $fields[10]\n";
-			if ( $ENV{'LMGRAPHISSUED'} ) {
-				print "$clean_feature"."max.value $fields[5]\n";
-			}
-		}
+elsif( $munincommand eq 'config' ){
+    printf "graph_title FlexLM License usage for %s\n", $ENV{'LMDISPLAYNAME'} || $DAEMON;
+    if( $ENV{'LMLOGARITHMIC'} ){
+	print "graph_args --base 1000 --vertical-label licenses --lower-limit 0.01 --logarithmic\n";
+    } else {
+	print "graph_args --base 1000 --vertical-label licenses -l 0\n";
+    }
+    print "graph_category licensing\n";
+    print "graph_period minute\n";
+    for my $x ( &lmstat ){
+	printf "%s.label %s\n", $x->cleanname, $x->name;
+	printf "%s.draw LINE2\n", $x->cleanname;
+	printf "%s.info The number of %s licenses checked out\n", $x->cleanname, $x->name;
+	if( $ENV{'LMGRAPHISSUED'} ){
+	    printf "%smax.label %s max\n", $x->cleanname, $x->name;
+	    printf "%smax.draw LINE3\n", $x->cleanname;
+	    printf "%smax.info The total number of %s licenses available\n", $x->cleanname, $x->name;
 	}
+    }
 }
+else {
+    for my $x ( &lmstat ){
+	printf "%s.value %d\n", $x->cleanname, $x->used;
+	if( $ENV{'LMGRAPHISSUED'} ){
+	    printf "%smax.value %d\n", $x->cleanname, $x->max;
+	}
+    }
+}
+exit 0;
