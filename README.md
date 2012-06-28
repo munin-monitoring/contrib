@@ -46,6 +46,8 @@ Next lines are optional and should only explain the ''why'' it is done this part
 On the other side, pull requests can regroup many commits at once.
 Just try to explain in the pull comment the ''why'' we should merge it (if it's not obvious).
 
+Tim Pope wrote a [very nice tuto](http://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html) on making good commit comments.
+
 ### Licenses
 
 All the code here is licensed with the same terms as munin itself (GPLv2), unless specified otherwise inside a file.
