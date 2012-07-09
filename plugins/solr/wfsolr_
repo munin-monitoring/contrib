@@ -1,27 +1,31 @@
 #!/usr/bin/php
 <?php
 /**
- * Wfsolr Plugin (https://github.com/lexsimon/contrib/master/plugins/solr/wfsolr_)
+ * Wfsolr Plugin https://github.com/lexsimon/contrib/master/plugins/solr/wfsolr_
  * "Wf" stands for "RBS Web Factory" (http://www.rbs.fr.fr/webfactory/)
- * author : alexandre.simon@rbs.fr
+ * @author : alexandre.simon@rbs.fr
+ *
  * Derived from nicolas.moussikian@shopbot-inc.com's plugin (https://raw.github.com/munin-monitoring/contrib/master/plugins/solr/solr-stats)
 
- * This plugin allows to graph any data present in the stats report on a multi core Solr instance
+ * This plugin allows to graph any data present in the stats report on a
+ * multi-core Solr instance
  * AKA : http://127.0.0.1:8080/solr/[name of the core]/admin/stats.jsp
  * Verify the server where the munin-node instance is can access that URL
  *
- * You need to have a PHP 5.2.6+ CLI installed too, allow_url_open directive on
+ * You need to have a PHP 5.2.6+ CLI installed too with curl extension or
+ * allow_url_fopen directive on
  * 
  * Once the plugin is available you can symlink it with the following naming convention :
- * solr-[name of the core]-[name of the stats section - ex.: CORE]-[name of the entry in the xml - ex.: searcher]-[name of the stat to graph - ex.: numDocs]
+ * wfsolr-[name of the core]-[name of the stats section - ex.: CORE]-[name of the entry in the xml - ex.: searcher]-[name of the stat to graph - ex.: numDocs]
  *
- * Alexandre SIMON additions :
- * - solr-[name of the core]-alias
+ * Alexandre SIMON additions:
+ * - wfsolr-<coreName>-alias ; use suggest to get the list of available aliases
  * - suggest implementation
  * - support for solr_(host|port|webapp) environment variables
  * - default core handling
  * - error handling
- * - TODO: use curl to make requests
+ * - unit conversion
+ * - use curl to get URL contents instead of relying on allow_url_fopen
  */
 
 $action = isset($argv[1]) ? $argv[1] : '';
@@ -45,6 +49,10 @@ $pathAliases = array("numDocs" => array("CORE", "searcher", "numDocs"),
 		"documentCacheHitRatio" => array("CACHE", "documentCache", "hitratio"),
 		"documentCacheLookups" => array("CACHE", "documentCache", "lookups"),
 		"documentCacheWarmupTime" => array("CACHE", "documentCache", "warmupTime"),
+		"fieldValueCacheSize" => array("CACHE", "fieldValueCache", "size"),
+		"fieldValueCacheHitRatio" => array("CACHE", "fieldValueCache", "hitratio"),
+		"fieldValueCacheLookups" => array("CACHE", "fieldValueCache", "lookups"),
+		"fieldValueCacheWarmupTime" => array("CACHE", "filterCache", "warmupTime"),
 		"filterCacheSize" => array("CACHE", "filterCache", "size"),
 		"filterCacheHitRatio" => array("CACHE", "filterCache", "hitratio"),
 		"filterCacheLookups" => array("CACHE", "filterCache", "lookups"),
@@ -100,12 +108,12 @@ function getSolrAdminUrl($core = null)
 	{
 		$url .= "$core/";
 	}
-	$url .= "/admin";
+	$url .= "admin";
 	return $url;
 }
 
 /**
- * Assure some conversions. KB and GB converted to MB
+ * Assure some conversions. KB, MB and GB are converted to Bytes
  */
 function wffloatval($val)
 {
@@ -113,88 +121,133 @@ function wffloatval($val)
 	$valEnd = substr($val, -2);
 	if ($valEnd == "KB")
 	{
-		$fVal = $fVal / 1024;
+		$fVal = $fVal * 1024;
+	}
+	elseif ($valEnd == "MB")
+	{
+		$fVal = $fVal * 1048576;
 	}
 	elseif ($valEnd == "GB")
 	{
-		$fVal = $fVal * 1024;
+		$fVal = $fVal * 1073741824;
 	}
 	return $fVal;
 }
 
-if ("config" == $action)
+function wfGetUrl($url)
 {
-	echo 'graph_category Solr ' . $core . "\n";
-	echo 'graph_title ' . $item . ' ' . $property . "\n";
-	echo 'graph_vlabel ' . $property . "\n";
-	if ($core !== null)
+	if (extension_loaded("curl"))
 	{
-		echo $core;
+		$ch = curl_init();
+
+                $options = array(CURLOPT_URL => $url);
+                $options[CURLOPT_TIMEOUT] = 5;
+                $options[CURLOPT_CONNECTTIMEOUT] = 5;
+		$options[CURLOPT_RETURNTRANSFER] = true;
+
+                curl_setopt_array($ch, $options);
+
+                $content = curl_exec($ch);
+                curl_close($ch);
 	}
 	else
 	{
-		echo "Default_core";
+		$content = file_get_contents($url);
 	}
-	echo $item . $property . 'solr.label ' . $property . "\n";
+	if ($content === false)
+	{
+		throw new Exception("Could not get $url", 8);
+	}
+
+	return $content;
 }
-elseif ("suggest" == $action)
+
+try
 {
-	$url = getSolrAdminUrl()."/cores?action=STATUS";
-	$doc = new DOMDocument();
-	if (!$doc->load($url))
+	if ("config" == $action)
 	{
-		echo "Could not load $url as XML\n";
-		exit(4);
-	}
-	$xpath = new DOMXpath($doc);
-	$names = $xpath->query("/response/lst[@name='status']/lst/str[@name='name']");
-	$aliases = array_keys($pathAliases);
-	foreach ($names as $nameAttr)
-	{
-		$coreName = trim($nameAttr->textContent);
-		foreach ($aliases as $alias)
+		if ($property == "indexSize")
 		{
-			if ($coreName)
+			echo "graph_args --base 1024 -l 0\n";
+		}
+		echo "graph_category Solr $core\n";
+		echo "graph_title $item $property\n";
+		echo "graph_vlabel $property\n";
+		if ($core !== null)
+		{
+			echo $core;
+		}
+		else
+		{
+			echo "Default_core";
+		}
+		echo $item . $property . 'solr.label ' . $property . "\n";
+	}
+	elseif ("suggest" == $action)
+	{
+		$url = getSolrAdminUrl()."/cores?action=STATUS";
+		$doc = new DOMDocument();
+		if (!$doc->loadXML(wfGetUrl($url)))
+		{
+			echo "Could not load $url as XML\n";
+			exit(4);
+		}
+		$xpath = new DOMXpath($doc);
+		$names = $xpath->query("/response/lst[@name='status']/lst/str[@name='name']");
+		$aliases = array_keys($pathAliases);
+		foreach ($names as $nameAttr)
+		{
+			$coreName = trim($nameAttr->textContent);
+			foreach ($aliases as $alias)
 			{
-				echo "$coreName-";
+				if ($coreName)
+				{
+					echo "$coreName-";
+				}
+				echo "$alias\n";
 			}
-			echo "$alias\n";
 		}
 	}
-}
-else
-{
-	if ($category === null)
+	else
 	{
-		echo "No core defined\n";
-		exit(5);
-	}
-	$url = getSolrAdminUrl($core)."/stats.jsp";
-	$doc = new DOMDocument();
-	if (!$doc->load($url))
-	{
-		echo "Could not load $url as XML\n";
-		exit(6);
-	}
-
-	$xpath = new DOMXpath($doc);
-	$elements = $xpath->query('/solr/solr-info/' . $category . '/entry');
-
-	foreach($elements as $element)
-	{
-		if($item == trim($element->getElementsByTagName('name')->item(0)->textContent))
+		if ($category === null)
 		{
-			$stats = $element->getElementsByTagName('stat');
-			foreach($stats as $stat)
+			echo "No core defined\n";
+			exit(5);
+		}
+		$url = getSolrAdminUrl($core)."/stats.jsp";
+		$doc = new DOMDocument();
+		if (!$doc->loadXML(wfGetUrl($url)))
+		{
+			echo "Could not load $url as XML\n";
+			exit(6);
+		}
+
+		$xpath = new DOMXpath($doc);
+		$elements = $xpath->query('/solr/solr-info/' . $category . '/entry');
+
+		foreach($elements as $element)
+		{
+			if($item == trim($element->getElementsByTagName('name')->item(0)->textContent))
 			{
-				if($property == trim($stat->getAttribute('name')))
+				$stats = $element->getElementsByTagName('stat');
+				foreach($stats as $stat)
 				{
-					echo $core . $item . $property . 'solr.value ' . wffloatval(trim($stat->textContent)) . "\n";
-					exit(0);
+					if($property == trim($stat->getAttribute('name')))
+					{
+						echo $core . $item . $property . 'solr.value ' . wffloatval(trim($stat->textContent)) . "\n";
+						exit(0);
+					}
 				}
 			}
 		}
+		echo "Bad path: $category | $item | $property\n";
+		exit(7);
 	}
-	echo "Bad path: $category | $item | $property\n";
-	exit(7);
+}
+catch (Exception $e)
+{
+	echo "ERROR: ".$e->getMessage()."\n";
+	$exitCode = ($e->getCode() != 0) ? $e->getCode() : 1;
+	exit($exitCode);
 }
