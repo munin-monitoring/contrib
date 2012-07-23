@@ -1,0 +1,98 @@
+#!/bin/bash
+
+# ping revision 2 (Jul 2012)
+#
+# This plugin shows ping statistics for several hosts on a single graph
+#
+# Configuration:
+#   Add [ping] section with 'hosts' set to space-separated list of hostnames or addresses.
+#   You can prefix host name with '<type>:' to change IP resolution mode,
+#   e.g. 'AAAA:domain.tld' will request IPv6 record.
+#   Always prefix IPv6 addresses with 'AAAA:' (internal limitation).
+#
+# Dependencies:
+# 	host util is required
+#
+# OS:
+# 	Linux
+#
+# Author: Artem Sheremet <dot.doom@gmail.com>
+#
+
+function normalize() {
+	echo ${1//[^a-zA-Z0-9]/_}
+}
+
+function host_type() {
+	case $1 in
+		*:*)
+			echo ${1/:*/}
+			;;
+		*)
+			echo A
+			;;
+	esac
+}
+
+function host_name() {
+	echo "${1/*:/}"
+}
+
+function ipof() {
+	host -t $(host_type $1) $(host_name $1) |
+		sort | grep -Eo 'address .*' | cut -d' ' -f2 | head -1
+}
+
+if [[ "$1" == "config" ]]; then
+	echo 'graph_title Ping statistics
+graph_vlabel Time,ms
+graph_category network
+graph_info ping statistics for several hosts'
+	for host in $hosts; do
+		echo "$(normalize $host).label $(host_name $host) ($(ipof $host))"
+	done
+	exit 0
+fi
+
+SYNC_FILE=/tmp/munin-ping-sync
+echo -n >"$SYNC_FILE"
+
+COUNT=0
+for host in $hosts; do
+	{
+		case $(host_type $host) in
+			AAAA)
+				PING=ping6
+				;;
+			*)
+				PING=ping
+				;;
+		esac
+		TIME=$($PING -w 1 -c 1 `host_name $host` | awk '
+			BEGIN {
+				found = 0
+				t = 0
+			}
+
+			$1 == "rtt" { found = 1; t = $4; }
+
+			END {
+				if (found == 1) {
+					split(t, parts, "/");
+					print parts[1]
+				} else {
+					print "U"
+				}
+			}
+		')
+
+		echo $(normalize $host).value $TIME
+		echo ok >>"$SYNC_FILE"
+	} &
+	let COUNT=$COUNT+1
+done
+
+# wait for background processes to finish
+while [ $(wc -l <"$SYNC_FILE") -lt $COUNT ]; do
+	sleep 0.2
+done
