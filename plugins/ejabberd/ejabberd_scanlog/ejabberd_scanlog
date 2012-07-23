@@ -42,6 +42,11 @@ else
 	end
 end
 
+if ARGV.first == 'reset'
+	log_info = { :start => File.size(LOG_FILE)-1 }
+	puts 'Log reset'
+end
+
 new_data = ''
 File.open(LOG_FILE, 'r') do |flog|
 	flog.seek(log_info[:start])
@@ -72,6 +77,7 @@ LABELS = {
 	:vcard_error =>                 'Strange vCard error (vhost)',
 	:mnesia_overload =>             'Mnesia is overloaded',
 	:mysql_init_recv_failed =>      'MySQL: init failed recv data',
+	:tcp_failed =>                  'TCP Error',
 	:UNKNOWN =>                     'Unknown error/warning'
 }
 def log_type(text)
@@ -125,6 +131,8 @@ def log_type(text)
 		:mnesia_overload
 	elsif text.include?('mysql_conn: init failed receiving data')
 		:mysql_init_recv_failed
+	elsif text.include?('Failed TCP')
+		:tcp_failed
 	else
 		warn "Cannot parse text: #{text}" if $debug_mode
 		:UNKNOWN
