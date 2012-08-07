@@ -1,0 +1,104 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+
+=head1 NAME
+
+snmp__apc - SNMP plugin to monitor APC metered and managed PDUs.
+
+=head1 APPLICABLE SYSTEMS
+
+This has been tested with AP7830 metered PDUs, but should work with
+most other PDUs that follow the PowerNet-MIB published by APC.
+
+=head1 CONFIGURATION
+
+Most likely you want to use SNMP version 3 to connect to the PDUs, as
+they don't support version 2 (only 1 or 3). This can be achieved by
+using:
+
+   [snmp_*_apc]
+	env.version 3
+
+Please see 'perldoc Munin::Plugin::SNMP' for further configuration
+information.
+
+=head1 MIB INFORMATION
+
+This plugin requires the PowerNet-MIB from APC.
+
+=head1 MAGIC MARKERS
+
+  #%# family=snmpauto
+  #%# capabilities=snmpconf
+
+=head1 BUGS
+
+None known.
+
+=head1 AUTHOR
+
+Copyright (C) 2012 Diego Elio Pettenò.
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+use strict;
+use Munin::Plugin;
+use Munin::Plugin::SNMP;
+
+# This is the data we care about:
+# PowerNet-MIB::rPDUIdentModelNumber.0  -> .1.3.6.1.4.1.318.1.1.12.1.5.0
+# PowerNet-MIB::rPDUIdentSerialNumber.0 -> .1.3.6.1.4.1.318.1.1.12.1.6.0
+# PowerNet-MIB::rPDULoadDevNumPhases.0 -> .1.3.6.1.4.1.318.1.1.12.2.1.2.0
+# PowerNet-MIB::rPDULoadPhaseConfigNearOverloadThreshold.phase1 -> .1.3.6.1.4.1.318.1.1.12.2.2.1.1.3.1
+# PowerNet-MIB::rPDULoadPhaseConfigOverloadThreshold.phase1 -> .1.3.6.1.4.1.318.1.1.12.2.2.1.1.4.1
+# PowerNet-MIB::rPDULoadStatusLoad.1 -> .1.3.6.1.4.1.318.1.1.12.2.3.1.1.2.1
+
+if (defined $ARGV[0] and $ARGV[0] eq "snmpconf") {
+    print "index 1.3.6.1.4.1.318.1.1.12.2.2.1.1.1.\n";
+    print "require 1.3.6.1.4.1.318.1.1.12.2.3.1.1.2.[1-9]"; # Load
+}
+
+my $oidModelNo               = '1.3.6.1.4.1.318.1.1.12.1.5.0';
+my $oidSerialNo              = '1.3.6.1.4.1.318.1.1.12.1.6.0';
+my $oidNumPhases             = '1.3.6.1.4.1.318.1.1.12.2.1.2.0';
+my $oidNearOverloadThreshold = '1.3.6.1.4.1.318.1.1.12.2.2.1.1.3.';
+my $oidOverloadThreshold     = '1.3.6.1.4.1.318.1.1.12.2.2.1.1.4.';
+my $oidPhaseLoad             = '1.3.6.1.4.1.318.1.1.12.2.3.1.1.2.';
+
+# SNMP needed for both config and fetch.
+my $session = Munin::Plugin::SNMP->session();
+my $numPhases = $session->get_single($oidNumPhases);
+
+if ($ARGV[0] and $ARGV[0] eq "config") {
+    my ($host,undef,$version) = Munin::Plugin::SNMP->config_session();
+
+    print "host_name $host\n" unless $host eq 'localhost';
+
+    my $modelNo   = $session->get_single($oidModelNo);
+    my $serialNo  = $session->get_single($oidSerialNo);
+
+    print "graph_title PDU $modelNo ($serialNo)\n";
+    print "graph_vlabel Current drained (A)\n";
+    print "graph_category Sensors\n";
+
+    for( my $phaseIndex = 1; $phaseIndex <= $numPhases; $phaseIndex++ ) {
+	my $nearOverloadThreshold = $session->get_single($oidNearOverloadThreshold . $phaseIndex);
+	my $overloadThreshold = $session->get_single($oidOverloadThreshold . $phaseIndex);
+	print "phase$phaseIndex.label Phase $phaseIndex load\n";
+	print "phase$phaseIndex.warning $nearOverloadThreshold\n";
+	print "phase$phaseIndex.critical $overloadThreshold\n";
+	print "phase$phaseIndex.min 0\n";
+    }
+
+    exit 0;
+}
+
+for( my $phaseIndex = 1; $phaseIndex <= $numPhases; $phaseIndex++ ) {
+    # the phaseLoad value is defined in dA — we might as well convert to full Amperes
+    my $phaseLoad = $session->get_single($oidPhaseLoad . $phaseIndex) / 10.0;
+    print "phase$phaseIndex.value $phaseLoad\n";
+}
