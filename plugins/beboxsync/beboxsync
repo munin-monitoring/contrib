@@ -1,0 +1,50 @@
+#!/usr/bin/perl -w
+
+# (C) Alex Dekker <me@ale.cx>
+# License is GPL
+
+use strict;
+
+my ($Args) = @ARGV;
+
+my $expecter = "/home/alex/bin/beboxstats.expect";
+
+if ($Args) {
+
+        # work out line to grab
+        if ($Args eq 'autoconf') {
+                # Check the expect script that polls the router exists
+		unless ( -e $expecter ) {
+			print "no (Can't find expect script. Check value of \$expecter: $expecter)\n";
+		} else {
+                	print "yes\n";
+		}
+        } elsif ($Args eq 'config') { # print out plugin parameters
+                printf("
+graph_title bebox sync stats
+graph_vlabel ATM kbps
+graph_category other
+graph_info This graph shows line sync speed
+syncdownstream.label Downstream Sync Speed
+syncupstream.label Upstream Sync Speed
+syncdownstream.type GAUGE
+syncupstream.type GAUGE
+                ");
+                # .label is the Key on the graph
+        } else {
+                printf("Usage: $0
+                        No arguments: print line stats
+                        autoconf: print 'yes'
+                        config: print config info for Munin\n");
+        }
+
+} else {
+        # if no arguments, just fetch the data and print it out
+
+my @insplitted = split(' ', `$expecter | grep stream`);
+
+print "syncdownstream.value $insplitted[11]\n";
+print "syncupstream.value $insplitted[15]\n";
+}
+
+
