@@ -21,16 +21,49 @@ exit 0
 fi
 
 if [ "$1" = "config" ]; then
-echo 'graph_title Number of php-cgi processes'
-echo 'graph_args --base 1000 -l 0 '
-echo 'graph_vlabel number of php-cgi processes'
-echo 'graph_category apache'
-echo 'graph_info This graph shows the number of php-cgi processes in the system.'
-echo 'php_processes.label php-cgi'
-echo 'php_processes.draw LINE2'
-echo 'php_processes.info The current number of php-cgi processes.'
+  echo "graph_title PHP CGI Memory";
+  echo "graph_vlabel PHP CGI Memory usage in GB";
+  echo "graph_category apache";
+  echo "graph_args -l 0";
+  echo "php_cgi_ram.label PHP CGI Used RAM";
+  echo "php_cgi_ram.draw LINE2";
+  echo "php_cgi_processes.info Number of PHP CGI processes";
+  echo "php_cgi_processes.label processes";
 exit 0
 fi
 
-echo -n "php_processes.value "
-/bin/ps ax | /usr/bin/grep -i php-cgi | /usr/bin/grep -v grep | /usr/bin/wc -l | /usr/bin/sed 's/\t +//' | /usr/bin/sed 's/ *//'
+CMD_GREP=`which grep`
+if [ ! -e ${CMD_GREP} ]; then
+  echo "Command grep not found!"
+  exit 1
+fi
+CMD_SED=`which sed`
+if [ ! -e ${CMD_SED} ]; then
+  echo "Command sed not found!"
+  exit 1
+fi
+CMD_WC=`which wc`
+if [ ! -e ${CMD_WC} ]; then
+  echo "Command wc not found!"
+  exit 1
+fi
+CMD_AWK=`which awk`
+if [ ! -e ${CMD_AWK} ]; then
+  echo "Command awk not found!"
+  exit 1
+fi
+CMD_BC=`which bc`
+if [ ! -e ${CMD_BC} ]; then
+  echo "Command bc not found!"
+  exit 1
+fi
+
+echo -n "php_cgi_processes.value "
+ps ax | grep -i php-cgi | grep -v grep | wc -l | sed 's/\t +//' | sed 's/ *//'
+
+MEMORY=0
+for mem in `ps avx | grep -i php-cgi | grep -v grep | grep "Ss" | awk '{ print $7 }'`; do
+  MEMORY=$(($MEMORY + $mem))
+done
+echo -n "php_cgi_ram.value "
+echo "scale=4;${MEMORY}/1024/1024" | bc
