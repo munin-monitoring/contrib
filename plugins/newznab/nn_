@@ -1,0 +1,359 @@
+#!/usr/bin/perl
+
+=encoding utf8
+
+=head1 NAME
+
+nn_ - Munin plugin to display misc newznab stats.
+
+=head1 CONFIGURATION
+
+This script is used to generate data for several graphs. To generate
+data for one specific graph, you need to create a symbolic link with a
+name like nn_<GRAPH> to this script.
+
+To get a graph over numbers of users use nn_users
+=head1 APPLICABLE SYSTEMS
+
+Any MySQL platform, tested by the author on MySQL 5.1.29 and 5.0.51
+
+=head1 CONFIGURATION
+
+This script is used to generate data for several graphs. To generate
+data for one specific graph, you need to create a symbolic link with a
+name like nn_<GRAPH> to this script.
+
+connection parameters - use this in your plugin configuration file.
+
+[nn*]
+env.mysqlconnection DBI:mysql:<yourdatabase>;host=127.0.0.1;port=3306
+env.mysqluser <user>
+env.mysqlpassword <password>
+
+
+=head1 DEPENDENCIES
+
+=over
+
+=item DBD::mysql
+
+=back
+
+=head1 THANKS
+A special thanks to Kjell-Magne Øierud for the mysql_ plugin in munin which
+gave me the inspiration and reusable code to create this plugin.
+
+=head1 LICENSE
+
+Copyright (C) 2012 Jan Astrup (cryzeck@synIRC)
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; version 2 dated June, 1991.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
+USA.
+
+=cut
+
+use warnings;
+use strict;
+use utf8;
+
+use DBI;
+use Data::Dumper;
+use feature 'say';
+use File::Basename;
+
+#-- CONFIG --#
+
+my %config = (
+    'dsn'        => $ENV{'mysqlconnection'} || 'dbi:mysql:newznab',
+    'user'       => $ENV{'mysqluser'}       || 'test1',
+    'password'   => $ENV{'mysqlpassword'}   || 'test',
+);
+
+my %defaults = (
+	global_attrs => {
+		args   => '--base 1000 -l 0',
+		scale  => 'no',
+	},
+	data_source_attrs => {
+		draw  => 'AREA',
+	},
+);
+
+my %graphs = ();
+
+$graphs{releases} = {
+	config => {
+		global_attrs => {
+			title 	=> 'Releases',
+			vlabel	=> 'Releases',
+		},
+		data_source_attrs => {
+			min   => '0',
+			
+		},
+	},
+	data_sources => [
+		{name => 'releases',		label => 'Releases'},
+	],
+};
+$graphs{category} = {
+	config => {
+		global_attrs => {
+			title 	=> 'Releases by category',
+			vlabel	=> 'Releases by category',
+		},
+		data_source_attrs => {
+			min   => '0',
+			draw  => 'LINE2',
+			type  => 'GAUGE',
+		},
+	},
+	data_sources => [
+		{name => '1000', label => 'Console'},
+		{name => '1010', label => 'NDS'},
+		{name => '1020', label => 'PSP'},
+		{name => '1030', label => 'Wii'},
+		{name => '1040', label => 'Xbox'},
+		{name => '1050', label => 'Xbox 360'},
+		{name => '1060', label => 'WiiWare/VC'},
+		{name => '1070', label => 'XBOX 360 DLC'},
+		{name => '1080', label => 'PS3'},
+		{name => '2000', label => 'Movies'},
+		{name => '2010', label => 'Foreign'},
+		{name => '2020', label => 'Other'},
+		{name => '2030', label => 'SD'},
+		{name => '2040', label => 'HD'},
+		{name => '2050', label => 'BluRay'},
+		{name => '2060', label => '3D'},
+		{name => '3000', label => 'Audio'},
+		{name => '3010', label => 'MP3'},
+		{name => '3020', label => 'Video'},
+		{name => '3030', label => 'Audiobook'},
+		{name => '3040', label => 'Lossless'},
+		{name => '4000', label => 'PC'},
+		{name => '4010', label => '0day'},
+		{name => '4020', label => 'ISO'},
+		{name => '4030', label => 'Mac'},
+		{name => '4040', label => 'Mobile-Other'},
+		{name => '4050', label => 'Games'},
+		{name => '4060', label => 'Mobile-iOS'},
+		{name => '4070', label => 'Mobile-Android'},
+		{name => '5000', label => 'TV'},
+		{name => '5020', label => 'Foreign'},
+		{name => '5030', label => 'SD'},
+		{name => '5040', label => 'HD'},
+		{name => '5050', label => 'Other'},
+		{name => '5060', label => 'Sport'},
+		{name => '5070', label => 'Anime'},
+		{name => '5080', label => 'Documentary'},
+		{name => '6000', label => 'XXX'},
+		{name => '6010', label => 'DVD'},
+		{name => '6020', label => 'WMV'},
+		{name => '6030', label => 'XviD'},
+		{name => '6040', label => 'x264'},
+		{name => '6050', label => 'Pack'},
+		{name => '6060', label => 'ImgSet'},
+		{name => '7000', label => 'Other'},
+		{name => '7010', label => 'Misc'},
+		{name => '7020', label => 'Ebook'},
+		{name => '7030', label => 'Comics'},	
+	],
+};
+
+$graphs{api} = {
+	config => {
+		global_attrs => {
+			title 	=> 'API Requests / Downloads',
+			vlabel	=> 'API / DOWNLOAD',
+		},
+		data_source_attrs => {
+			min   	=> '0',
+			draw	=> 'LINE1',
+			type	=> 'GAUGE',
+		},
+	},
+	data_sources => [
+		{name => 'request',		label => 'API Requests'},
+		{name => 'download',		label => 'Downloads'},
+	],
+};
+
+$graphs{users} = {
+	config => {
+		global_attrs => {
+			title 	=> 'Registered Users',
+			vlabel	=> 'Usercount',
+		},
+		data_source_attrs => {
+			min   => '0',
+		},
+	},
+	data_sources => [
+		{name => 'users',		label => 'Users'},
+	],
+};
+our $data;
+sub config {
+    my $graph_name = shift;
+    die 'Unknown graph ' . ($graph_name ? $graph_name : '')
+	unless $graphs{$graph_name};
+
+    my $graph = $graphs{$graph_name};
+
+    my %conf = (%{$defaults{global_attrs}}, %{$graph->{config}{global_attrs}});
+    while (my ($k, $v) = each %conf) {
+	print "graph_$k $v\n";
+    }
+    print "graph_category newznab\n";
+
+    my $i = 0;
+    for my $ds (@{$graph->{data_sources}}) {
+	my %ds_spec = (
+	    %{$defaults{data_source_attrs}},
+	    %{$graph->{config}{data_source_attrs}},
+	    %$ds,
+	);
+	while (my ($k, $v) = each %ds_spec) {
+	    # 'name' is only used internally in this script, not
+	    # understood by munin.
+	    next if ($k eq 'name');
+
+	    if ($k eq 'draw' && $v eq 'AREASTACK') {
+		printf("%s.%s %s\n",
+		       clean_fieldname($ds->{name}), $k, ($i ? 'STACK' : 'AREA'));
+	    }
+	    else {
+		printf("%s.%s %s\n", clean_fieldname($ds->{name}), $k, $v);
+	    }
+	    $i++;
+	}
+    }
+
+    return 0;
+}
+
+sub main {
+	my $graph = substr(basename($0), length('nn_'));
+	my $command = $ARGV[0] || 'show';
+
+	my %commands = (
+		'config'	=>	\&config,
+		'show'		=>	\&show,
+	);
+	
+	die "Unknown command: $command" unless exists $commands{$command};
+	return $commands{$command}->($graph);
+}
+
+sub show {
+	my $graph_name = shift;
+	die 'Unknown graph ' . ($graph_name ? $graph_name : '')
+		unless $graphs{$graph_name};
+
+	my $graph = $graphs{$graph_name};
+	run_queries($graph_name);	
+	for my $ds (@{$graph->{data_sources}}) {
+		printf "%s.value %s\n", clean_fieldname($ds->{name}), ($data->{$ds->{name}} ? $data->{$ds->{name}} : '0');
+	}
+	return 0;
+}
+
+sub db_connect {
+	my $dsn = "$config{dsn};mysql_connect_timeout=5";
+
+	return DBI->connect($dsn, $config{user}, $config{password}, {
+		RaiseError       => 1,
+		PrintError       => 0,
+		FetchHashKeyName => 'NAME_lc',
+	});
+
+}
+
+sub run_queries {
+	my $updater = shift;
+	$data = {};
+	my $dbh = db_connect();
+	my %updaters = (
+		'releases'			=> \&update_releases,
+		'users'				=> \&update_users,
+		'api'				=> \&update_requests,
+		'category'			=> \&update_category,
+	);
+	die "Unknown updater: $updater" unless exists $updaters{$updater};
+	$updaters{$updater}->($dbh);
+}
+
+sub update_requests {
+	my ($dbh) = @_;                                                                                         
+	my %queries = (
+		request => 'select count(*) as requests from userrequests where timestamp > now() - INTERVAL 5 MINUTE;',                 
+		download => 'select count(*) as downloads from userdownloads where timestamp > now() - INTERVAL 5 MINUTE;',                                              
+	); 
+	for my $name ( qw(request download) ) {
+		my $query = $queries{$name};                                                                              
+		my $sth = $dbh->prepare($query);                                                                
+		$sth->execute();                                                                                
+		while (my $row = $sth->fetch) {                                                                 
+			$data->{$name} = $row->[0];
+		}
+		$sth->finish();                                                                                 
+	}       
+}
+      
+sub update_category {
+	my ($dbh) = @_;
+	my $sth = $dbh->prepare('select count(*) as releases, category.title, category.id from releases LEFT JOIN category ON releases.categoryID = category.ID group by releases.categoryID');
+	$sth->execute();
+	if ($@) { die $@; }
+	while (my $row = $sth->fetch) {
+	$data->{$row->[2]} = $row->[0];
+	}
+	
+}
+sub update_releases {
+	my ($dbh) = @_;
+	my $sth = $dbh->prepare('SELECT count(*) as releases from releases');
+	eval {
+		$sth->execute();
+	};
+	if ($@) { die $@; }
+	my $row = $sth->fetchrow_hashref();	
+	$data->{releases} = $row->{'releases'};
+	$sth->finish();
+}
+
+sub update_users {
+	my ($dbh) = @_;
+	my $sth = $dbh->prepare('SELECT count(*) as users from users');
+	eval {
+		$sth->execute();
+	};
+	if ($@) { die $@; }
+	my $row = $sth->fetchrow_hashref();	
+	$data->{users} = $row->{'users'};
+	$sth->finish();
+}
+
+sub clean_fieldname {
+	my $name = shift;
+	$name =~ s/^[^A-Za-z0-9_]+/_/;
+	$name =~ s/^[0-9]+$/a$name/;
+	$name = substr($name,-19);
+	return $name;
+}
+
+exit main() unless caller;
+
+
+1;
