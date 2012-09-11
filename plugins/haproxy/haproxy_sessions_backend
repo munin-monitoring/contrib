@@ -1,0 +1,112 @@
+#!/bin/bash
+# -*- bash -*-
+
+: << =cut
+
+=head1 NAME
+
+haproxy_sessions_backend -Haproxy Sessions Backend
+
+=head1 CONFIGURATION
+
+[haproxy*]
+  user root
+  env.backend backend_name_1 backend_name_2 backend_name_3
+  env.frontend frontend_name_1 frontend_name_2 frontend_name_3
+  env.url  http://user:passwd@IP:port/admin?stats;csv
+
+=head1 AUTHOR
+
+Ricardo Fraile <rfrail3@yahoo.es>
+
+=head1 LICENSE
+
+GNU
+
+=head1 MAGICK MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+function parse_url {
+        # Modify ifs variable
+        OIFS=$IFS;
+        IFS=",";
+        PXNAME="$1"
+        SVNAME="$2"
+        VALUE="$3"
+        LINE1=`curl -s "$url" | head -1 | sed 's/# //'`
+        LINE2=`curl -s "$url" | grep "$PXNAME,$SVNAME"`
+        
+        
+        ARRAY1=($LINE1);
+
+        # Find values
+        for ((i=0; i<${#ARRAY1[@]}; ++i));
+        do
+                # Get data
+                if [[ "${ARRAY1[$i]}" == "${VALUE}" ]]; then
+                        o=$i;
+                        o=`expr $o + 1`
+                        echo ${LINE2} | cut -d" " -f $o
+                fi
+        done
+
+        # Reset ifs
+        IFS=$OIFS;
+}
+
+
+SVNAME='BACKEND'
+LIST="$backend"
+
+
+if [ "$1" = "autoconf" ]; then
+	echo yes 
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+	echo "graph_title Current sessions ${SVNAME}"
+	echo 'graph_args --base 1000 -l 0 '
+	echo 'graph_vlabel Sessions'
+	echo 'graph_scale no'
+	echo 'graph_category haproxy'
+	echo "graph_info Current sessions ${SVNAME}"
+
+
+	for i in ${LIST}; do
+	        echo "scur`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.label Current Sessions $i"
+        	echo "scur`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.type GAUGE"
+	        echo "scur`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.min 0"
+        	echo "scur`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.info Current Sessions $i"
+
+	        #echo "smax`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.label Max $i"
+        	#echo "smax`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.type GAUGE"
+	        #echo "smax`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.min 0"
+        	#echo "smax`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.info Max sessions $i"
+
+	        echo "slim`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.label Limit Sessions  $i"
+        	echo "slim`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.type GAUGE"
+	        echo "slim`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.min 0"
+        	echo "slim`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.info Limit Sessions $i"
+	done
+
+	exit 0
+fi
+	for i in ${LIST}; do
+		SCUR=`parse_url ${i} ${SVNAME} scur`
+		#SMAX=`parse_url ${i} ${SVNAME} smax`
+		SLIM=`parse_url ${i} ${SVNAME} slim`
+
+	        echo "scur`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $SCUR"
+        	#echo "smax`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $SMAX"
+        	echo "slim`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $SLIM"
+	done
+	
+
