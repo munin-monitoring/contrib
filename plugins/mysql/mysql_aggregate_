@@ -14,8 +14,8 @@
 # user: username to access Mysql server (default - empty)
 # password: password of Mysql user (default - empty)
 # database: Mysql database name (default - empty)
-# table: Mysql table name (no defaul, raises exception)
-# field: field name, used in GROUP BY statement (no default, raises exception)
+# table: Mysql table name (no default, raises exception)
+# field: field name, used in GROUP BY statement (default - empty, no group by)
 # where: optional where condition (without "where", default - empty)
 #
 # This plugin shows graphs of Mysql COUNT(*) results.
@@ -88,9 +88,11 @@ else:
     raise Exception("You should provide 'env.table' in configuration file")
 # Mysql group by field
 if "field" in os.environ and os.environ["field"] != None:
-    field = os.environ["field"]
+    groupBy = "GROUP BY %s" % os.environ["field"]
+    field = "%s, " % os.environ["field"]
 else:
-    raise Exception("You should provide 'env.field' in configuration file")
+    groupBy = ""
+    field = ""
 
 # Mysql where condition
 if "where" in os.environ and os.environ["where"] != None:
@@ -102,9 +104,9 @@ else:
 conn = None
 
 # Query to get field values
-valuesQuery = "SELECT DISTINCT %s FROM %s %s" % (field, table, where)
+valuesQuery = "SELECT DISTINCT %s 1 FROM %s %s" % (field, table, where)
 # Query to get graph data
-aggregateQuery = "SELECT %s, COUNT(*) FROM %s %s GROUP BY %s" % (field, table, where, field)
+aggregateQuery = "SELECT %sCOUNT(*) FROM %s %s %s" % (field, table, where, groupBy)
 
 # Connect to mysql
 try:
@@ -115,50 +117,67 @@ except MySQLdb.Error, e:
     sys.exit(1)
 
 # init values tuple
-values = {}
-cursor.execute(valuesQuery)
-results = cursor.fetchall()
-for result in results:
-    values[result[0]] = 0
+if field != "":
+    values = {}
+    cursor.execute(valuesQuery)
+    results = cursor.fetchall()
+    for result in results:
+        values[result[0]] = 0
 
 if len(sys.argv) == 2 and sys.argv[1] == "autoconf":
     print "yes"
 elif len(sys.argv) == 2 and sys.argv[1] == "config":
-    print "multigraph mysql_aggregate_%s" % table
-    print "graph_title Aggregate - %s" % table
-    print "graph_vlabel count(*)"
-    print "graph_category mysql"
-    print ""
-
-    for key in values.keys():
-        print "%s_count.label %s" % (key.replace(".", "_"), key.replace(".", "_"))
-
-    for key in values.keys():
-        print ""
-        print "multigraph mysql_aggregate_%s.%s" % (table, key.replace(".", "_"))
-        print "graph_title Agregate - %s, value %s" % (table, key.replace(".", "_"))
+    if field == "":
+        print "graph mysql_aggregate_%s" % table
+        print "graph_title Aggregate - %s" % table
         print "graph_vlabel count(*)"
         print "graph_category mysql"
         print ""
-        print "%s_count.label %s" % (key.replace(".", "_"), key)
+        print "values_count.label count"
+    else:
+        print "multigraph mysql_aggregate_%s" % table
+        print "graph_title Aggregate - %s" % table
+        print "graph_vlabel count(*)"
+        print "graph_category mysql"
         print ""
 
-else:
-    try:
-        cursor.execute(aggregateQuery)
-        results = cursor.fetchall()
-
-        for result in results:
-            values[result[0]] = result[1]
-        print "multigraph mysql_aggregate_%s" % table
-
         for key in values.keys():
-            print "%s_count.value %s" % (key.replace(".", "_"), values[key])
+            print "%s_count.label %s" % (key.replace(".", "_"), key.replace(".", "_"))
 
         for key in values.keys():
             print ""
             print "multigraph mysql_aggregate_%s.%s" % (table, key.replace(".", "_"))
-            print "%s_count.value %s" % (key.replace(".", "_"), values[key])
+            print "graph_title Agregate - %s, value %s" % (table, key.replace(".", "_"))
+            print "graph_vlabel count(*)"
+            print "graph_category mysql"
+            print ""
+            print "%s_count.label %s" % (key.replace(".", "_"), key)
+            print ""
+
+else:
+    try:
+        cursor.execute(aggregateQuery)
+
+        if field == "":
+            result = cursor.fetchone()
+            count = 0
+            if result[0]:
+                count = count + result[0]
+            print "values_count.value %s" % count
+        else:
+            results = cursor.fetchall()
+
+            for result in results:
+                values[result[0]] = result[1]
+            print "multigraph mysql_aggregate_%s" % table
+
+            for key in values.keys():
+                print "%s_count.value %s" % (key.replace(".", "_"), values[key])
+
+            for key in values.keys():
+                print ""
+                print "multigraph mysql_aggregate_%s.%s" % (table, key.replace(".", "_"))
+                print "%s_count.value %s" % (key.replace(".", "_"), values[key])
 
     except MySQLdb.Error, e:
         print "Error %d: %s" % (e.args[0], e.args[1])
