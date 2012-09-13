@@ -1,5 +1,32 @@
 #! /usr/bin/perl
 ########################################################################
+# Copyright (c) 2012, Adrien Urban
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met: 
+# 
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer. 
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the
+#    distribution. 
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+########################################################################
 #                                                                      #
 #    WARNING    WARNING    WARNING    WARNING    WARNING    WARNING    #
 #                                                                      #
@@ -7,12 +34,11 @@
 #                                                                      #
 ########################################################################
 #
-#
 # multigraph, supersampling, extended cpu informations
 #
 # require: mpstat (to actually collect the data)
 # require linux /proc
-#   (sorry, quick and dirty retrieve the number of cpu from /proc/cpuinfo)
+#   (sorry, quick/dirty retrieve the number of cpu from /proc/cpuinfo)
 #
 #
 # ENV (default):
@@ -24,8 +50,8 @@
 #  MUNIN_MPSTAT - binary to use as mpstat
 #
 #  increase cache flush rate if you have i/o performance issues
-#  warning: increasing flushrate too much might cause partial write, and loss
-#  of data. 0 to disable flush
+#  warning: increasing flushrate too much might cause partial write, and
+#  loss of data. 0 to disable flush
 #
 #
 # Parent graph: cpu usage per core/thread
@@ -50,6 +76,7 @@
 #     The master currently (2.0.6) generate rrd file for aggregate values, and
 #     complains that no data is provided for them (but the graph still works
 #     fine)
+#
 
 #%# family=auto
 #%# capabilities=autoconf
@@ -60,17 +87,18 @@ use warnings;
 my $plugin = $0;
 $plugin =~ s/.*\///;
 
+# quick failsafe
+if (!defined $ENV{MUNIN_PLUGSTATE}) {
+	die "This plugin should be run via munin. Try munin-run $plugin\n");
+}
+
+########################################################################
+# If you want to change something, it's probably doable here
+#
+
 # order to display
 my $fields_order = [
-	'sys',
-	'usr',
-	'nice',
-	'idle',
-	'iowait',
-	'irq',
-	'soft',
-	'steal',
-	'guest',
+	'sys', 'usr', 'nice', 'idle', 'iowait', 'irq', 'soft', 'steal', 'guest',
 ];
 # order is the order given by mpstat
 my $fields_info = [
@@ -113,6 +141,21 @@ my $fields_info = [
 	}
 ];
 
+sub pidfile() { "$ENV{MUNIN_PLUGSTATE}/munin.$plugin.pid" }
+sub cachefile() { "$ENV{MUNIN_PLUGSTATE}/munin.$plugin.cache" }
+
+sub graph_section() { "system:cpu" };
+sub graph_name() { "cpu_extended_multi_1s" };
+sub graph_title() { "CPU usage" };
+sub graph_title_all() { "Overall CPU usage" };
+sub graph_title_n($) { "CPU#" . shift . " usage" };
+sub acquire_name() { "<$plugin> collecting information" }
+
+########################################################################
+# if you need to change something after that line, It should probably be
+# changed to be configurable above it.
+#
+
 # mpstat sampling interval
 my $update_rate = 1;
 if (defined $ENV{MUNIN_UPDATERATE}) {
@@ -140,16 +183,6 @@ if (defined $ENV{MUNIN_MPSTAT}) {
 		$mpstat = defined $ENV{MUNIN_MPSTAT};
 	}
 }
-
-sub pidfile() { "$ENV{MUNIN_PLUGSTATE}/munin.$plugin.pid" }
-sub cachefile() { "$ENV{MUNIN_PLUGSTATE}/munin.$plugin.cache" }
-
-sub graph_section() { "system:cpu" };
-sub graph_name() { "cpu_extended_multi_1s" };
-sub graph_title() { "CPU usage" };
-sub graph_title_all() { "Overall CPU usage" };
-sub graph_title_n($) { "CPU#" . shift . " usage" };
-sub acquire_name() { "<$plugin> collecting information" }
 
 my $cpu_count_cache = undef;
 sub cpu_count() {
