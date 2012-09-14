@@ -1,0 +1,617 @@
+#! /usr/bin/perl
+########################################################################
+# Copyright (c) 2012, Adrien Urban
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met: 
+# 
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer. 
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the
+#    distribution. 
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+########################################################################
+#                                                                      #
+#    WARNING    WARNING    WARNING    WARNING    WARNING    WARNING    #
+#                                                                      #
+#       This plugin does not work properly with multiple master        #
+#                                                                      #
+########################################################################
+#
+# multigraph, supersampling, detailed interfaces statistics
+#
+# require: ifconfig
+#   linux only for now. Would need to implement way to gather the same
+#   data for other ifconfig usage and output.
+# require: Time::HiRes
+#
+# ENV (default):
+#  MUNIN_PLUGSTATE  - pid and cache files gets there
+#
+# ENV (user defined):
+#  MUNIN_UPDATERATE - rate at which to update (default: 1s)
+#  MUNIN_CACHEFLUSH_RATE - flush data every N batch (default: 1)
+#  MUNIN_IFCONFIG - path for ifconfig (default /sbin/ifconfig)
+#
+#  MUNIN_IF_INCLUDE - list of interfaces to graph (all by default)
+#  MUNIN_IF_EXCLUDE - exclude all of those interfaces (none by default)
+#  MUNIN_GRAPH_BYTES - do graph bytes per seconds (default: yes)
+#  MUNIN_GRAPH_PACKETS - do graph packets per seconds (default: yes)
+#  MUNIN_GRAPH_ERRORS - do graph errors (default: yes)
+#
+# Parent graphs: none
+# child graphs: per interface - bytes, packets, errors
+#	interfaces/XXX/{bw,pkt,err}
+#
+# Known bugs:
+#
+#   Multi-Master
+#     If there are many masters, the data is only sent once. Each master will
+#     only have part of the data.
+#
+#   Everlasting
+#     The daemon is launched on first config/fetch. A touch of the pidfile is
+#     done on every following config/fetch. The daemon should check if the
+#     pidfile is recent (configurable) enough, and stop itself if not.
+#
+#   Graph Order
+#     There is currently (2.0.6) noway to order childgraphs.
+#
+#   RRD file
+#     The master currently (2.0.6) generate rrd file for aggregate values, and
+#     complains that no data is provided for them (but the graph still works
+#     fine)
+#
+
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use warnings;
+use Time::HiRes;
+
+my $plugin = $0;
+$plugin =~ s/.*\///;
+
+# quick failsafe
+if (!defined $ENV{MUNIN_PLUGSTATE}) {
+	die "This plugin should be run via munin. Try munin-run $plugin\n";
+}
+
+########################################################################
+# If you want to change something, it's probably doable here
+#
+
+sub pidfile() { "$ENV{MUNIN_PLUGSTATE}/munin.$plugin.pid" }
+sub cachefile() { "$ENV{MUNIN_PLUGSTATE}/munin.$plugin.cache" }
+
+sub graph_section() { "system:network" }
+sub graph_name() { "interfaces" }
+#sub graph_title() { "interfaces" }
+#sub graph_title_all() { "Overall CPU usage" }
+#sub graph_title_n($) { "CPU#" . shift . " usage" }
+sub acquire_name() { "<$plugin> collecting information" }
+
+# Default update rate. Can be changed by configuration.
+my $update_rate = 1;
+# default flush interval. Can be changed by configuration.
+my $flush_interval = 1;
+# default ifconfig command. Can be changed by configuration
+my $ifconfig = '/sbin/ifconfig';
+
+########################################################################
+# if you need to change something after that line, It should probably be
+# changed to be configurable above it.
+#
+
+if (defined $ENV{MUNIN_UPDATERATE}) {
+	if ($ENV{MUNIN_UPDATERATE} =~ /^[1-9][0-9]*$/) {
+		$update_rate = int($ENV{MUNIN_UPDATERATE});
+	} else {
+		print STDERR "Invalid update_rate: $ENV{MUNIN_UPDATERATE}";
+	}
+}
+
+if (defined $ENV{MUNIN_CACHEFLUSH_RATE}) {
+	if ($ENV{MUNIN_CACHEFLUSH_RATE} =~ /^[0-9]+$/) {
+		$update_rate = int($ENV{MUNIN_CACHEFLUSH_RATE});
+	} else {
+		print STDERR "Invalid flush rate: $ENV{MUNIN_CACHEFLUSH_RATE}";
+	}
+}
+
+if (defined $ENV{MUNIN_IFCONFIG}) {
+	if (-f $ENV{MUNIN_IFCONFIG}) {
+		print STDERR "MUNIN_IFCONFIG: file not found: $ENV{MUNIN_IFCONFIG}";
+	} else {
+		$ifconfig = defined $ENV{MUNIN_IFCONFIG};
+	}
+}
+
+my $include_list = undef;
+if (defined $ENV{MUNIN_IF_INCLUDE}) {
+	$include_list = [ split(/[[:space:]]+/, $ENV{MUNIN_IF_INCLUDE}) ];
+	if (0 == scalar (@$include_list)) {
+		$include_list = undef;
+	} elsif ('' eq $include_list->[0]) {
+		shift @$include_list;
+	}
+}
+my $exclude_list = undef;
+if (defined $ENV{MUNIN_IF_INCLUDE}) {
+	$exclude_list = [ split(/[[:space:]]+/, $ENV{MUNIN_IF_INCLUDE}) ];
+	if (0 == scalar (@$exclude_list)) {
+		$exclude_list = undef;
+	} elsif ('' eq $exclude_list->[0]) {
+		shift @$exclude_list;
+	}
+}
+
+sub configbool($) {
+	my $str = shift;
+	if ($str =~ /^(y(es)?|1|t(rue)?)$/i) {
+		return 1;
+	}
+	if ($str =~ /^(no?|0|f(alse)?)$/i) {
+		return 0;
+	}
+	print STDERR "$str: unrecognized bool\n";
+	return 1;
+}
+
+my $should_graph = {
+	'bytes' => 1,
+	'packets' => 1,
+	'errors' => 1,
+};
+if (defined $ENV{MUNIN_GRAPH_BYTES}) {
+	$should_graph->{'bytes'} = configbool($ENV{MUNIN_GRAPH_BYTES});
+}
+if (defined $ENV{MUNIN_GRAPH_PACKETS}) {
+	$should_graph->{'packets'} = configbool($ENV{MUNIN_GRAPH_PACKETS});
+}
+if (defined $ENV{MUNIN_GRAPH_ERRORS}) {
+	$should_graph->{'errors'} = configbool($ENV{MUNIN_GRAPH_ERRORS});
+}
+unless ($should_graph->{bytes} or $should_graph->{packets}
+		or $should_graph->{errors}) {
+	die "Nothing to graph!";
+}
+
+########################################################################
+# Base functions, specific to what we really try to do here.
+#
+sub included_interface($)
+{
+	my $if = shift;
+	if (defined $exclude_list) {
+		foreach my $ifl (@$exclude_list) {
+			return 0 if ($if =~ /^($ifl)$/);
+		}
+	}
+	if (defined $include_list) {
+		foreach my $ifl (@$include_list) {
+			return 1 if ($if =~ /^($ifl)$/);
+		}
+		return 0;
+	}
+	return 1;
+}
+sub if_to_name($)
+{
+	my $if = shift;
+	$if =~ s/[^A-Za-z0-9]/_/g;
+	return $if;
+}
+
+sub get_data()
+{
+	open IFCONFIG, "-|", $ifconfig or
+		die "open: $ifconfig|: $!\n";
+	my $data = {};
+	my $current_if = undef;
+	while (<IFCONFIG>) {
+		if (/^([^[:space:]]+)/) {
+			$current_if = $1;
+			if (!included_interface($current_if)) {
+				$current_if = undef;
+				next
+			}
+			$data->{$current_if} = {};
+			next; # nothing else on that line
+		}
+		next if (!defined $current_if);
+		if (/RX packets:([0-9]+) errors:([0-9]+) dropped:([0-9]+) overruns:([0-9]+) frame:([0-9]+)/) {
+			$data->{$current_if}{'rx_pkt'} = $1;
+			$data->{$current_if}{'rx_err'} = $2;
+			$data->{$current_if}{'rx_drp'} = $3;
+			$data->{$current_if}{'rx_ovr'} = $4;
+			$data->{$current_if}{'rx_frm'} = $5;
+			next;
+		}
+		if (/TX packets:([0-9]+) errors:([0-9]+) dropped:([0-9]+) overruns:([0-9]+) carrier:([0-9]+)/) {
+			$data->{$current_if}{'tx_pkt'} = $1;
+			$data->{$current_if}{'tx_err'} = $2;
+			$data->{$current_if}{'tx_drp'} = $3;
+			$data->{$current_if}{'tx_ovr'} = $4;
+			$data->{$current_if}{'tx_car'} = $5;
+			next;
+		}
+		if (/RX bytes:([0-9]+) \([^)]*\)  TX bytes:([0-9]+) /) {
+			$data->{$current_if}{'rx_byt'} = $1;
+			$data->{$current_if}{'tx_byt'} = $2;
+		}
+	}
+	close IFCONFIG;
+	return $data;
+}
+
+# values names, from a data line
+sub get_data_names($)
+{
+	my $line = shift;
+	my $name = $line->[0];
+	my $count = scalar(@$line) - 2; # 2: name, and timestamp
+	if ($name =~ /\.(bps|pkt)$/ and 2 == $count) {
+		return [ 'rx', 'tx' ];
+	}
+	if ($name =~ /\.err$/ and 8 == $count) {
+		return [ 'rxerr', 'txerr', 'rxdrp', 'txdrp',
+			 'rxovr', 'txovr', 'rxfrm', 'txcar', ];
+	}
+	# no idea what it is ? corrupted data
+	return undef;
+}
+
+sub collect_info_once($$)
+{
+	my $fh = shift;
+	my $now = shift;
+	my $data = get_data();
+	foreach my $if (keys %$data) {
+		my $name = if_to_name($if);
+		my $d = $data->{$if};
+		if ($should_graph->{'bytes'}) {
+			print $fh <<EOF;
+$name.bps $now $d->{'rx_byt'} $d->{'tx_byt'}
+EOF
+#$name.byt $now rx $d->{'rx_byt'}
+#$name.byt $now tx $d->{'tx_byt'}
+		}
+		if ($should_graph->{'packets'}) {
+			print $fh <<EOF;
+$name.pkt $now $d->{'rx_pkt'} $d->{'tx_pkt'}
+EOF
+#$name.pkt $now rx $d->{'rx_pkt'}
+#$name.pkt $now tx $d->{'tx_pkt'}
+		}
+		if ($should_graph->{'errors'}) {
+			print $fh <<EOF;
+$name.err $now $d->{'rx_err'} $d->{'tx_err'} $d->{'rx_drp'} $d->{'tx_drp'} $d->{'rx_ovr'} $d->{'tx_ovr'} $d->{'rx_frm'} $d->{'tx_car'}
+EOF
+#$name.err $now rxerr $d->{'rx_err'}
+#$name.err $now txerr $d->{'tx_err'}
+#$name.err $now rxdrp $d->{'rx_drp'}
+#$name.err $now txdrp $d->{'tx_drp'}
+#$name.err $now rxovr $d->{'rx_ovr'}
+#$name.err $now txovr $d->{'tx_ovr'}
+#$name.err $now rxfrm $d->{'rx_frm'}
+#$name.err $now txcar $d->{'tx_car'}
+		}
+	}
+}
+sub show_config()
+{
+	my $data = get_data();
+	my $graph_order = "graph_order";
+	foreach my $if (sort keys %$data) {
+		my $name = if_to_name($if);
+		$graph_order .= " ${name}_bps=${name}.bps.tx";
+	}
+	print <<EOF;
+multigraph @{[ graph_name() ]}
+graph_category @{[ graph_section() ]}
+graph_title overall bits per seconds
+graph_vlabel bits per seconds
+update_rate 1
+graph_data_size custom 1d, 10s for 1w, 1m for 1t, 5m for 1y
+graph_args --base 1000
+$graph_order
+EOF
+	my $style = 'AREA';
+	foreach my $if (keys %$data) {
+		my $name = if_to_name($if);
+		print <<EOF;
+${name}_bps.label $if bps out
+${name}_bps.draw $style
+${name}_bps.cdef ${name}_bps,8,*
+EOF
+		$style = 'STACK';
+	}
+	foreach my $if (keys %$data) {
+		my $name = if_to_name($if);
+		print <<EOF;
+multigraph @{[ graph_name() ]}.@{[ if_to_name($if) ]}
+graph_title $if traffic
+graph_vlabel kbits/s and pkt/s
+graph_order bpsrx=bps.rx bpstx=bps.tx pktrx=pkt.rx pkttx=pkt.tx
+bpsrx.label $if kbps in
+bpsrx.draw AREA
+bpsrx.cdef bpsrx,-125,/
+bpstx.label $if kbps out
+bpstx.draw AREA
+bpstx.cdef bpstx,125,*
+pktrx.label $if pkt/s in
+pktrx.draw LINE1
+pktrx.cdef pktrx,-1,*
+pkttx.label $if pkt/s out
+pkttx.draw LINE1
+EOF
+#foo.negative bar
+		if ($should_graph->{'bytes'}) {
+			print <<EOF;
+multigraph @{[ graph_name() ]}.@{[ if_to_name($if) ]}.bps
+graph_title $if - bits per seconds
+graph_vlabel bits per seconds
+graph_args --base 1000
+graph_scale no
+update_rate 1
+graph_data_size custom 1d, 10s for 1w, 1m for 1t, 5m for 1y
+rx.label bps received
+rx.type DERIVE
+rx.min 0
+rx.cdef rx,8,*
+tx.label bps sent
+tx.type DERIVE
+tx.min 0
+tx.cdef tx,8,*
+EOF
+		}
+		if ($should_graph->{'packets'}) {
+			print <<EOF;
+multigraph @{[ graph_name() ]}.@{[ if_to_name($if) ]}.pkt
+graph_title $if - packets per seconds
+graph_vlabel packets per seconds
+graph_args --base 1000
+graph_scale no
+update_rate 1
+graph_data_size custom 1d, 10s for 1w, 1m for 1t, 5m for 1y
+rx.label packets per second received
+rx.type DERIVE
+rx.min 0
+tx.label packets per second sent
+tx.type DERIVE
+tx.min 0
+EOF
+		}
+		if ($should_graph->{'errors'}) {
+			print <<EOF;
+multigraph @{[ graph_name() ]}.@{[ if_to_name($if) ]}.err
+graph_title $if - errors
+graph_vlabel errors
+graph_scale no
+update_rate 1
+graph_data_size custom 1d, 10s for 1w, 1m for 1t, 5m for 1y
+graph_order rxerr txerr rxdrp txdrp rxovr txovr rxfrm txcar
+rxerr.label errors per second (in)
+rxerr.type DERIVE
+rxerr.min 0
+txerr.label errors per second (out)
+txerr.type DERIVE
+txerr.min 0
+rxdrp.label drop per second (in)
+rxdrp.type DERIVE
+rxdrp.min 0
+txdrp.label drop per second (out)
+txdrp.type DERIVE
+txdrp.min 0
+rxovr.label overruns per second (in)
+rxovr.type DERIVE
+rxovr.min 0
+txovr.label overruns per second (out)
+txovr.type DERIVE
+txovr.min 0
+rxfrm.label frame per second (in)
+rxfrm.type DERIVE
+rxfrm.min 0
+txcar.label carrier per second (out)
+txcar.type DERIVE
+txcar.min 0
+EOF
+		}
+	}
+}
+sub check_req()
+{
+	my $data = get_data();	
+	if (0 != scalar(keys %$data)) {
+		return 1;
+	}
+	return 0;
+}
+
+
+########################################################################
+# beyond that line, it should be generic stuffs, not dependant on what
+# you are trying to graph
+#
+
+sub check_running() {
+	if (-f pidfile()) {
+		my $pid = undef;
+		if (open FILE, "<", pidfile()) {
+			$pid = <FILE>;
+			close FILE;
+			chomp $pid;
+		}
+		if ($pid) {
+			# does not exist ? kill it
+			if (kill 0, $pid) {
+				return 1;
+			}
+		}
+ 		unlink(pidfile());
+	}
+	return 0;
+}
+
+
+# FIXME: should also trap kill sigint and sigterm
+# FIXME: check pidfile got touched recently
+sub collect_loop() {
+	$0 = acquire_name();
+	$0 = "<$plugin> collecting information";
+	# write our pid
+	open PIDFILE, '>', pidfile() or die "open: @{[ pidfile() ]}: $!\n";
+	print PIDFILE $$, "\n";
+	close PIDFILE;
+	# open cache
+	my $fh_cache;
+	open $fh_cache, ">>", cachefile() or
+			die "open: @{[ cachefile() ]}: $!\n";
+	my @tick = Time::HiRes::gettimeofday();
+	my $flush_count = 0;
+	while (1) {
+		collect_info_once($fh_cache, $tick[0]);
+		if ($flush_interval) {
+			if ($flush_interval == ++$flush_count) {
+				$fh_cache->flush();
+				$flush_count = 0;
+			}
+		}
+		my @now = Time::HiRes::gettimeofday();
+		# when should the next tick be ?
+		$tick[0] += $update_rate;
+		# how long until next tick ?
+		my $diff = ($tick[0] - $now[0]) * 1000000
+				+ $tick[1] - $now[1];
+		if ($diff <= 0) {
+			# next tick already passed ? damn!
+			@tick = @now;
+		} else {
+			# sleep what remains
+			Time::HiRes::usleep($diff);
+		}
+	}
+	unlink(pidfile());
+	unlink(cachefile());
+}
+
+# launch daemon if not running
+# notify the daemon we still need it (touch its pid)
+sub daemon_alive() {
+	if (check_running()) {
+		my $atime;
+		my $mtime;
+		$atime = $mtime = time;
+		utime $atime, $mtime, pidfile();
+	} else {
+		if (0 == fork()) {
+			close(STDIN);
+			close(STDOUT);
+			close(STDERR);
+			open STDIN, "<", "/dev/null";
+			open STDOUT, ">", "/dev/null";
+			open STDERR, ">", "/dev/null";
+			collect_loop();
+			exit(0);
+		}
+	}
+}
+
+
+sub run_autoconf() {
+	if (check_req()) {
+		print "yes\n";
+	} else {
+		print "no\n";
+	}
+}
+
+sub run_config() {
+	daemon_alive();
+	show_config();
+}
+
+sub fetch_showline($) {
+	my $line = shift;
+	my $names = get_data_names($line);
+	# don't display anything if we don't like what it is
+	return unless (defined $names);
+	my $graph = shift @$line;
+	my $time = shift @$line;
+	foreach my $value (@$line) {
+		my $name = shift @$names;
+		print <<EOF;
+$name.value $time:$value
+EOF
+	}
+}
+sub run_fetch() {
+	daemon_alive();
+	if (open CACHE, "+<", cachefile()) {
+		my $data = {};
+		while (<CACHE>) {
+			chomp;
+			my $field = [];
+			@$field = split(/ /);
+			if (not defined $data->{$field->[0]}) {
+				$data->{$field->[0]} = [];
+			}
+			push @{$data->{$field->[0]}}, $field;
+		}
+		# finished reading ? trucate it right away
+		truncate CACHE, 0;
+		close CACHE;
+		foreach my $graph (keys %$data) {
+			print <<EOF;
+multigraph @{[ graph_name() ]}.$graph
+EOF
+			foreach my $line (@{$data->{$graph}}) {
+				fetch_showline($line);
+			}
+		}
+	}
+}
+
+my $cmd = 'fetch';
+if (defined $ARGV[0]) {
+	$cmd = $ARGV[0];
+}
+if ('fetch' eq $cmd) {
+	run_fetch();
+} elsif ('config' eq $cmd) {
+	run_config();
+} elsif ('autoconf' eq $cmd) {
+	run_autoconf();
+} elsif ('daemon' eq $cmd) {
+	run_daemon();
+} else {
+	print STDERR <<EOF;
+$0: unrecognized command
+
+Usage:
+	$0 autoconf - check if we have everything we need
+	$0 config - show plugin configuration
+	$0 fetch - fetch latest data
+	$0 daemon - launch daemon
+EOF
+	exit(1);
+}
+exit(0);
