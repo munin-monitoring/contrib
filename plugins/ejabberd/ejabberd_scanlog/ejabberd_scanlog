@@ -53,90 +53,74 @@ File.open(LOG_FILE, 'r') do |flog|
 	new_data = flog.read
 end
 
-LABELS = {
-	:wait_for =>                    'EJAB-1482 Crash when waiting for item',
-	:ejabberd_odbc_failure =>       'EJAB-1483 ODBC sup failure (wrong PID?)',
-	:ejabberd_odbc_failure_echo =>  'EJAB-1483 ODBC sup wrong PID failure echo',
-	:dns =>                         'DNS failure',
-	:database =>                    'Database unavailable/too slow',
-	:auth_error =>                  'The auth module returned an error',
-	:timeout =>                     'State machine terminated: timeout',
-	:mysql_shutdown =>              'MySQL disconnected',
-	:mysql_refused =>               'Connecting to MySQL: failed',
-	:hook_timeout =>                'Timeout while running a hook',
-	:sql_transactions_exceeded =>   'SQL transaction restarts exceeded',
-	:unexpected_info =>             'Unexpected info',
-	:other_sql_cmd_timeout =>       'Other sql_cmd timeout',
-	:system_ports_limit =>          'System limit hit: ports', # check with length(erlang:ports())., set in ejabberdctl config file
-	:system_limit =>                'Other system limit hit', # processes? check with erlang:system_info(process_count)., erlang:system_info(process_limit)., set in ejabberdctl cfg
-	:generic_server_terminating =>  'Generic server terminating',
-	:mnesia_table_shrinked =>       'Mnesia table shrinked',
-	:admin_access_failed =>         'Admin access failed',
-	:mysql_sock_timedout =>         'MySQL sock timedout',
-	:config_error =>                'Configuration error',
-	:vcard_error =>                 'Strange vCard error (vhost)',
-	:mnesia_overload =>             'Mnesia is overloaded',
-	:mysql_init_recv_failed =>      'MySQL: init failed recv data',
-	:tcp_failed =>                  'TCP Error',
-	:UNKNOWN =>                     'Unknown error/warning'
-}
+KNOWN_LOG_TYPES = [
+	# each element is an instance of Array. 1st item: error description, others: text to search log for
+	['EJAB-1482 Crash when waiting for item',
+		['wait_for_']],
+	['EJAB-1483 ODBC sup failure (wrong PID?)',
+ 		['ejabberd_odbc_sup']],
+	['EJAB-1483 ODBC sup wrong PID failure echo',
+		["mod_pubsub_odbc,'-unsubscribe"]],
+	['DNS failure',
+		['You should check your DNS configuration']],
+	['Database unavailable/too slow',
+		['Database was not available or too slow']],
+	['State machine terminated: timeout',
+		['State machine',
+		'terminating',
+		'Reason for',
+		'timeout']],
+	['The auth module returned an error',
+		['The authentication module',
+		'returned an error']],
+	['MySQL disconnected',
+		['mysql',
+		'Received unknown signal, exiting']],
+	['Connecting to MySQL: failed',
+		['mysql',
+		'Failed connecting to']],
+	['Timeout while running a hook',
+		['ejabberd_hooks',
+		'timeout']],
+	['SQL transaction restarts exceeded',
+		['SQL transaction restarts exceeded']],
+	['Unexpected info',
+		['nexpected info']],
+	['Other sql_cmd timeout',
+		['sql_cmd']],
+	['System limit hit: ports', # check with length(erlang:ports())., set in ejabberdctl config file
+		['system_limit',
+		'open_port']],
+	['Other system limit hit', # processes? check with erlang:system_info(process_count)., erlang:system_info(process_limit)., set in ejabberdctl cfg
+		['system_limit']],
+	['Generic server terminating',
+		['Generic server',
+		'terminating']],
+	['Mnesia table shrinked',
+		['shrinking table']],
+	['Admin access failed',
+		['Access of',
+		'failed with error']],
+	['MySQL sock timedout',
+		['mysql_',
+		': Socket',
+		'timedout']],
+	['Configuration error',
+		['{badrecord,config}']],
+	['Strange vCard error (vhost)',
+		['error found when trying to get the vCard']],
+	['Mnesia is overloaded',
+		['Mnesia is overloaded']],
+	['MySQL: init failed recv data',
+		['mysql_conn: init failed receiving data']],
+	['TCP Error',
+		['Failed TCP']]
+]
+
 def log_type(text)
-	if text.include? 'ejabberd_odbc_sup'
-		:ejabberd_odbc_failure
-	elsif text.include? "mod_pubsub_odbc,'-unsubscribe"
-		:ejabberd_odbc_failure_echo
-	elsif text.include? 'You should check your DNS configuration'
-		:dns
-	elsif text.include? 'Database was not available or too slow'
-		:database
-	elsif text.include? 'wait_for_'
-		:wait_for
-	elsif text.include?('State machine') and
-		text.include?('terminating') and
-		text.include?('Reason for') and
-		text.include?('timeout')
-		:timeout
-	elsif text.include?('The authentication module') and
-		text.include?('returned an error')
-		:auth_error
-	elsif text.include?('mysql') and text.include?('Received unknown signal, exiting')
-		:mysql_shutdown
-	elsif text.include?('mysql') and text.include?('Failed connecting to')
-		:mysql_refused
-	elsif text.include?('ejabberd_hooks') and text.include?('timeout')
-		:hook_timeout
-	elsif text.include?('SQL transaction restarts exceeded')
-		:sql_transactions_exceeded
-	elsif text.include?('nexpected info')
-		:unexpected_info
-	elsif text.include?('timeout') and text.include?('sql_cmd')
-		:other_sql_cmd_timeout
-	elsif text.include?('system_limit') and text.include?('open_port')
-		:system_ports_limit
-	elsif text.include?('system_limit')
-		:system_limit
-	elsif text.include?('Generic server') and text.include?('terminating')
-		:generic_server_terminating
-	elsif text.include?('shrinking table')
-		:mnesia_table_shrinked
-	elsif text.include?('Access of') and text.include?('failed with error')
-		:admin_access_failed
-	elsif text.include?('mysql_') and text.include?(': Socket') and text.include?('timedout')
-		:mysql_sock_timedout
-	elsif text.include?('{badrecord,config}')
-		:config_error
-	elsif text.include?('error found when trying to get the vCard')
-		:vcard_error
-	elsif text.include?('Mnesia is overloaded')
-		:mnesia_overload
-	elsif text.include?('mysql_conn: init failed receiving data')
-		:mysql_init_recv_failed
-	elsif text.include?('Failed TCP')
-		:tcp_failed
-	else
-		warn "Cannot parse text: #{text}" if $debug_mode
-		:UNKNOWN
-	end
+	KNOWN_LOG_TYPES.find_index { |entry|
+		entry[1].all? { |substr| text.include? substr }
+	}
 end
 
 new_data.split("\n=").each { |report|
@@ -148,6 +132,8 @@ new_data.split("\n=").each { |report|
 	log_info[type] = (log_info[type] || 0) + 1
 	if sub_type = log_type(text)
 		log_info[sub_type] = (log_info[sub_type] || 0) + 1
+	elsif $debug_mode
+		warn "Unparsed log entry #{type}: #{text} at #{time}"
 	end
 }
 
@@ -160,37 +146,19 @@ graph_title Ejabberd Log
 graph_vlabel total
 graph_category ejabberd
 graph_args -l 0
-graph_order #{(LABELS.keys + log_info.keys.select { |k| k.is_a? String }.sort).join(' ')}
 CONFIG
 end
 
-first = true
-LABELS.each_pair { |type,label|
+(KNOWN_LOG_TYPES + %w(ERROR WARNING INFO DEBUG)).each.with_index { |log_type, index|
+	label, index = if log_type.is_a? Array
+					   [log_type.first, index]
+				   else
+					   [log_type, log_type]
+				   end
 	if ARGV.first == 'config'
-		puts "#{type}.label #{label}"
-		puts "#{type}.draw #{
-			if first
-				first = false
-				'AREA'
-			else
-				'STACK'
-			end
-			'LINE'
-		}"
+		puts "T#{index}.label #{label}"
+		puts "T#{index}.draw LINE"
 	else
-		puts "#{type}.value #{log_info[type] or 0}"
-	end
-}
-
-log_info.each_pair { |k,value|
-	unless k == :start
-		if k.is_a? String
-			if ARGV.first == 'config'
-				puts "#{k}.label #{k}"
-				puts "#{k}.draw LINE"
-			else
-				puts "#{k}.value #{value}"
-			end
-		end
+		puts "T#{index}.value #{log_info[index] or 0}"
 	end
 }
