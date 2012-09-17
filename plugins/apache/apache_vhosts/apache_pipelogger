@@ -39,7 +39,7 @@ while (<STDIN>) {
  	my ($vhost,$port,$method,$bytes,$time,$status)=split(/\s/,$_);
 
 	# sanity check
-	next unless m/^([\d\w.-_]+\s){5}([\d\w.-_]+$)/;
+	next unless m/^([\d\w\.\-_]+\s){5}([\d\w\.\-_]+$)/;       # escaped "." and "-"
 	$time=sprintf("%d",$time/1000); # microsec to millisec	
 	
 	# sitename to munin fieldname
@@ -85,7 +85,7 @@ sub periodic_write {
         $share->lock(LOCK_EX);
         
         # get data (may be updated by other loggers too)
-        my %old=%{thaw $share->fetch};
+        my %old=eval{%{thaw($share->fetch)}};             # using eval to suppress thaw error on empty string at the first run
 
         foreach my $vpm (keys %temp){
                 # merge values

@@ -1,228 +1,179 @@
-#!/usr/bin/python
-#
-#    Copyright (C) 2011,2012  Andreas Thienemann <andreas@bawue.net>
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU General Public License as published by
-#    the Free Software Foundation, either version 3 of the License, or
-#    (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU General Public License for more details.
-#
-#    You should have received a copy of the GNU General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
+#!/bin/sh
+# -*- sh -*-
 
-"""
+: << =cut
+
 =head1 NAME
 
-freeipmi_ - Munin plugin to retreive temperature and fan speed measurements
-from a local machine via IPMI.
-
-=head1 APPLICABLE SYSTEMS
-
-All machines with an IPMI capable baseboard management controller.
+freeipmi_ - Plugin to monitor temperature or fan speed using FreeIPMI
 
 =head1 CONFIGURATION
 
-On most supported systems this plugin works nearly out of the box as long as
-both Python and the freeipmi binaries in a semi-recent version are installed.
+=head2 ENVIRONMENT VARIABLES
 
-If the machine works out of the box can be tested by calling bmc-info.
-If there's text output, a bmc card was detected. If there's an entry for
-"Sensor Device" visible in the "Additional Device Support" entry you're good.
+When used to monitor a foreign host, this plugins use the variables
+IPMI_USERNAME and IPMI_PASSWORD to log in on the remote system.
 
-If you get a "ipmi_cmd_get_device_id: driver timeout" message you have most
-likely no bmc to query.
+=head2 WILDCARD PLUGIN
 
-In certain cases however bmc-info will just seem to hang for quite some time.
-In this case, autodetection does not work because the smbios table has
-incorrect information. One system known to experience this problem is the
-HP Proliant Microserver.
+You can monitor either the current system (via /dev/ipmi0 and the
+like) or a remote system (via the LAN protocols), and for each of the
+two options you can select your sensors:
 
-Adding env.freeipmi_args "--no-probing --driver-type=KCS --driver-address=0xca2 --register-spacing=1"
-to the munin plugin configuration will make the plugin work. This is the
-specific line for the HP Proliant Microserver mentioned above. Your mileage
-may vary.
+ - fans;
+ - temp;
+ - power;
+ - current;
+ - voltage.
 
-Basic configuration for every system is that the plugin needs to be called as root.
+When used for the local host, the plugin should be linked as, e.g.,
+'ipmi_temp', whereas when used to monitor a foreign host it should be,
+e.g., 'ipmi_192.168.0.253_temp'.
 
-Add the following to your /etc/munin/plugin-conf.d/freeipmi:
-
- [freeipmi_*]
- user root
-
-=head1 INTERPRETATION
-
-The plugin shows the temperature in Celsius or the fanspeed in rotations per minute.
-
-=head1 MAGIC MARKERS
-
-  #%# family=contrib
-  #%# capabilities=autoconf suggest
-
-=head1 VERSION
-
-0.0.1
-
-=head1 BUGS
-
-Only local support for now. Remote could be hacked in via freeipmi_args for now.
+=head1 NOTE
 
 =head1 AUTHOR
 
-Andreas Thienemann <andreas@bawue.net>
+Rewritten by Diego Elio Pettenò <flameeyes@flameeyes.eu>.
+Based on the work of Nicolai Langfeldt <janl@linpro.no>, Logilab and
+Peter Palfrader.
 
 =head1 LICENSE
 
-GPLv3+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
 
 =cut
-"""
 
-import subprocess
-import sys
-import os
-import re
-import pprint
+#### Parse commandline to determine what the job is
 
-# Parse some environment variables
-if os.getenv("freeipmi_args") is not None:
-    freeipmi_args = " %s" % (os.getenv("freeipmi_args"))
-else:
-    freeipmi_args = ""
+_ipmisensors() {
+    params="--quiet-cache --comma-separated-output --no-header-output --ignore-not-available-sensors"
+    if [ "x${hostname}" != "x" ]; then
+	params="${params} --hostname=${hostname}"
+	[ "x${IPMI_USERNAME}" != "x" ] && params="${params} --username=${IPMI_USERNAME}"
+	[ "x${IPMI_PASSWORD}" != "x" ] && params="${params} --password=${IPMI_PASSWORD}"
+    fi
 
-# We are a wildcard plugin, figure out whether we are called for temp or fan
-if sys.argv[0].split("_")[1] == "temp":
-    mode = "Temperature"
-elif sys.argv[0].split("_")[1] == "fan":
-    mode = "Fan"
-else:
-    mode = None
+    if ! ipmi-sensors ${params} --output-sensor-thresholds "$@"; then
+	ipmi-sensors ${params} "$@"
+    fi
+}
 
-def whereis(prog):
-    """Check if prog can be found in the path and if yes, return the full pathname"""
-    prog = os.path.basename(prog)
-    for dir in os.getenv("PATH").split(":"):
-        for root, dirs, files in os.walk(dir):
-            if prog in files:
-                return os.path.join(dir, prog)
-    return None
+# extract and eventual hostname out of the called name; we
+# have to check whether it's set to "u" as that's what happens
+# when the compatibility with ipmi_sensor_ is used.
+hostname1=${0#*_}
+hostname=${hostname1%%_*}
+if [ "x${hostname}" = "xu" -o "x${hostname}" = "x${hostname1}" ]; then
+    hostname=""
+fi
 
-def normalize_sensor(name):
-    name = name.lower().replace("-","M").replace("+","P")
-    name = re.sub("[^a-z0-9A-Z]","_", name)
-    return name
+case $0 in
+    *_temp|*_u_degrees_c)
+	title="Temperatures"
+	vlabel="degrees Celsius"
+	type=Temperature
+	unit=C
+	;;
+    *_fans|*_u_rpm)
+	title="Fan speeds"
+	vlabel="Rotations per Minute (RPM)"
+	type=Fan
+	unit=RPM
+	;;
+    *_power|*_u_watts)
+	title="Power consumption"
+	vlabel="Watts"
+	type=Current
+	unit=W
+	;;
+    *_current|*_u_amps)
+	title="Current drain"
+	vlabel="Amperes"
+	type=Current
+	unit=A
+	;;
+    *_voltage|*_u_volts)
+	title="Voltages"
+	vlabel="Volts"
+	type=Voltage
+	unit=V
+	;;
+    *)
+	if [ x"$1" != x"autoconf" -a x"$1" != x"suggest" ]; then
+	    echo "Please invoke as one of the supported sensors types:" >&2
+	    echo freeipmi_{temp,fans,power,current} >&2
+	    exit 1
+	fi
+esac
 
-# Code sniplet from Philipp Keller
-# http://code.pui.ch/2007/02/19/set-timeout-for-a-shell-command-in-python/
-def timeout_command(command, timeout):
-    """call shell-command and either return its output or kill it
-    if it doesn't normally exit within timeout seconds and return None"""
-    import subprocess, datetime, os, time, signal
-    start = datetime.datetime.now()
-    process = subprocess.Popen(command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    while process.poll() is None:
-        time.sleep(0.1)
-        now = datetime.datetime.now()
-        if (now - start).seconds> timeout:
-            os.kill(process.pid, signal.SIGKILL)
-            os.waitpid(-1, os.WNOHANG)
-            return None
-    return process.stdout.read()
+case $1 in
+    autoconf)
+	if ! command -v ipmi-sensors >/dev/null 2>&1 ; then
+	    echo 'no (missing ipmi-sensors command)'
+	    exit 0
+	fi
 
-def bmc_detect():
-    """Check whether there's a baseboard management controller we can query."""
-    if whereis("bmc-info") is None:
-        print "no (bmc-info not found in path. Please install FreeIPMI.)"
-        sys.exit(0)
-    else:
-        out = timeout_command("bmc-info%s" % (freeipmi_args), 2)
-        if out is not None and "[Sensor Device]" in out:
-            print "yes"
-            sys.exit(0)
-        else:
-            print "no (no supported bmc found)"
-            sys.exit(0)
+	if ! _ipmisensors -t OS_Boot >/dev/null 2>&1 ; then
+	    echo 'no (unable to access IPMI device)'
+	    exit 0
+	fi
 
-def read_sensors():
-    """Return all sensor data as a dict"""
-    out = timeout_command("ipmi-sensors --verbose%s" % (freeipmi_args), 2)
-    sensors = dict()
-    sensor = dict()
-    sensor_id = None
-    for line in out.split("\n"):
-        if ":" in line:
-            k,v = line.split(": ")
-            if k == "Record ID":
-                sensor = dict()
-                sensor_id = int(v)
-                sensor[k] = v
-            else:
-                sensor[k] = v
-        else:
-            sensors[sensor_id] = sensor
-    return sensors
+	echo yes
+	exit 0
+	;;
+    suggest)
+	_ipmisensors | awk -F, '
+$3 == "Temperature" { print "temp"; }
+$3 == "Fan" { print "fans"; }
+$3 == "Current" && $5 == "W" { print "power"; }
+$3 == "Current" && $5 == "A" { print "current"; }
+$3 == "Voltage" { print "voltage"; }
+'
+	exit 0;;
+    config)
+	cat - <<EOF
+graph_title ${title} based on IPMI sensors
+graph_vlabel ${vlabel}
+graph_category Sensors
+EOF
 
-def print_config():
-    """Return configuration arguments for munin"""
-    print "graph_title FreeIPMI Sensors: %s" % (mode)
-    if mode == "Fan":
-        print "graph_vlabel RPM"
-        print "graph_info This graph shows the RPMs of the fans as reported by IPMI"
-    elif mode == "Temperature":
-        print "graph_vlabel Degrees C"
-        print "graph_info This graph shows the temperatures as reported by IPMI"
-    print "graph_category sensors"
-    sensors = read_sensors()
+	if [ "x${hostname}" != "x" ]; then
+	    echo "host_name ${hostname}"
+	fi
+	;;
+esac
 
-    for id in sorted(sensors):
-        if sensors[id]["Group Name"] == mode:
-            label = normalize_sensor(sensors[id]["Sensor Name"])
-            for n in ["Normal Max.", "Normal Min.", "Sensor Reading", "Lower Critical Threshold", "Upper Critical Threshold", "Lower Non-Critical Threshold", "Upper Non-Critical Threshold"]:
-                sensors[id][n] = sensors[id][n].replace("NA","")
-                sensors[id][n] = sensors[id][n].split('.')[0]
+_ipmisensors -t ${type} | awk -F, -v CONFIG=$1 -v UNIT=$unit '
+$5 == UNIT {
+    if ( CONFIG != "config" ) {
+      printf("ipmi%s.value %s\n", $1, $4);
+    } else {
+      printf("ipmi%s.label %s\n", $1, $2);
 
-            print "%s.label %s" % (label, label)
-            print "%s.warning %s:%s" % (label, sensors[id]["Lower Non-Critical Threshold"], sensors[id]["Upper Non-Critical Threshold"])
-            print "%s.critical %s:%s" % (label, sensors[id]["Lower Critical Threshold"], sensors[id]["Upper Critical Threshold"])
-            print "%s.graph_args --base 1000 -l 0" % (label)
-            print "%s.graph_scale no" % (label)
-#            pprint.pprint(sensors[id])
-    sys.exit(0)
+      # This can only happen if FreeIPMI is new enough
+      if ( NF == 12 ) {
+        if ( $8 != "N/A" && $10 != "N/A" )
+          printf("ipmi%s.warning %s:%s\n", $1, $8, $10);
+        else if ( $8 == "N/A" && $10 != "N/A" )
+          printf("ipmi%s.warning :%s\n", $1, $10);
+        else if ( $8 != "N/A" && $10 == "N/A" )
+          printf("ipmi%s.warning %s:\n", $1, $8);
 
-def fetch():
-    sensors = read_sensors()
+        if ( $7 != "N/A" && $11 != "N/A" )
+          printf("ipmi%s.critical %s:%s\n", $1, $7, $11);
+        else if ( $7 == "N/A" && $11 != "N/A" )
+          printf("ipmi%s.critical :%s\n", $1, $11);
+        else if ( $7 != "N/A" && $11 == "N/A" )
+          printf("ipmi%s.critical %s:\n", $1, $7);
+      }
+  }
+}
+'
 
-    for id in sorted(sensors):
-        if sensors[id]["Group Name"] == mode:
-            label = normalize_sensor(sensors[id]["Sensor Name"])
-            print "%s.value %s" % (label, sensors[id]["Sensor Reading"].split(".")[0])
-    sys.exit(0)
-
-
-if "config" in sys.argv[1:]:
-    print_config()
-
-elif "autoconf" in sys.argv[1:]:
-    bmc_detect()
-
-elif "suggest" in sys.argv[1:]:
-    sensors = read_sensors()
-    fan, temperature = [0, 0]
-    for id in sensors:
-        if sensors[id]["Group Name"] == "Fan":
-            fan += 1
-        elif sensors[id]["Group Name"] == "Temperature":
-            temperature += 1
-    if fan > 0:
-        print "fan"
-    if temperature > 0:
-        print "temp"
-    sys.exit(0)
-
-else:
-    fetch()
+# vim: syntax=sh ts=4 et

@@ -25,8 +25,8 @@
 ## Installation process:
 ##
 ## 1. Download the plugin to your plugins directory (e.g. /usr/share/munin/plugins)
-## 2. Create 4 symlinks at the directory that is used by munin for plugins detection (e.g. /etc/munin/plugins): resque_failed, resque_queues, resque_workers_count, resque_workers_working
-## 3. Edit plugin-conf.d/munin-node if it is needed (env.host and env.port variables are accepted)
+## 2. Create 5 symlinks at the directory that is used by munin for plugins detection (e.g. /etc/munin/plugins): resque_failed, resque_queues, resque_queues_size, resque_workers_count, resque_workers_working
+## 3. Edit plugin-conf.d/munin-node if it is needed (env.namespace, env.host and env.port variables are accepted)
 ## 4. Restart munin-node service
 
 use strict;
@@ -34,6 +34,7 @@ use Redis;
 
 my $HOST = exists $ENV{'host'} ? $ENV{'host'} : "127.0.0.1";
 my $PORT = exists $ENV{'port'} ? $ENV{'port'} : 6379;
+my $NAMESPACE = exists $ENV{'namespace'} ? "resque:${ENV{'namespace'}}" : 'resque';
 
 my $server = "$HOST:$PORT";
 my $r = Redis->new( server => sprintf("%s:%d", $HOST, $PORT) );
@@ -56,7 +57,7 @@ if ($opt eq 'failed') {
         print "failed.type COUNTER\n";
     }
     else {
-        my $value = $r->get('resque:stat:failed') || 0;
+        my $value = $r->get("${NAMESPACE}:stat:failed") || 0;
         print "failed.value $value\n";
     }
 }
@@ -68,7 +69,7 @@ elsif ($opt eq 'queues') {
         print "graph_info This graph monitors the in and out rate of the queues\n";
         print "graph_args --lower-limit 0\n";
 
-        my @queues = $r->smembers( 'resque:queues' );
+        my @queues = $r->smembers( "${NAMESPACE}:queues" );
         for my $name (@queues) {
             $name =~ s/:/_/;
 
@@ -80,17 +81,53 @@ elsif ($opt eq 'queues') {
         }
     }
     else {
-        my @queues = $r->smembers( 'resque:queues' );
+        my @queues = $r->smembers( "${NAMESPACE}:queues" );
         for my $queue (@queues) {
             my $name = $queue;
             $name =~ s/:/_/;
 
-            my $pushed = $r->get("resque:stat:${queue}:pushed") || 0;
+            my $pushed = $r->get("${NAMESPACE}:stat:${queue}:pushed") || 0;
             print "${name}_pushed.value ${pushed}\n";
 
-            my $finished = $r->get("resque:stat:${queue}:finished") || 0;
+            my $finished = $r->get("${NAMESPACE}:stat:${queue}:finished") || 0;
             print "${name}_finished.value ${finished}\n";
         }
+    }
+}
+elsif ($opt eq 'queues_size') {
+    if ($config) {
+        print "graph_title Resque queue current size\n";
+        print "graph_category Resque\n";
+        print "graph_vlabel queue size\n";
+        print "graph_info This graph monitors the current queues size\n";
+        print "graph_args --lower-limit 0\n";
+
+        my @queues = $r->smembers( "${NAMESPACE}:queues" );
+        for my $name (@queues) {
+            $name =~ s/:/_/;
+
+            print "${name}_size.label ${name}_size\n";
+            print "${name}_size.type GAUGE\n";
+        }
+
+	print "total.label total\n";
+	print "total.type GAUGE\n";
+    }
+    else {
+        my @queues = $r->smembers( "${NAMESPACE}:queues" );
+	my $total = 0;
+        for my $queue (@queues) {
+            my $name = $queue;
+            $name =~ s/:/_/;
+
+            my $size = $r->llen("${NAMESPACE}:queue:${queue}") || 0; 
+	    
+	    $total += $size;
+
+	    print "${name}_size.value ${size}\n";
+        }
+
+	print "total.value ${total}\n";
     }
 }
 elsif ($opt eq 'workers_count') {
@@ -105,7 +142,7 @@ elsif ($opt eq 'workers_count') {
         print "workers_count.type COUNTER\n";
     }
     else {
-        my @workers = $r->smembers('resque:workers');
+        my @workers = $r->smembers("${NAMESPACE}:workers");
         print "workers_count.value " . (scalar @workers) . "\n";
     }
 }
@@ -121,10 +158,10 @@ elsif ($opt eq 'workers_working') {
         print "workers_working.type GAUGE\n";
     }
     else {
-        my @workers = $r->smembers('resque:workers');
+        my @workers = $r->smembers("${NAMESPACE}:workers");
         my $working = 0;
         for my $worker (@workers) {
-            my $value = $r->get("worker:$worker") || 0;
+            my $value = $r->get("${NAMESPACE}:worker:$worker") || 0;
             $working++ if $value;
         }
         my $value = scalar @workers;

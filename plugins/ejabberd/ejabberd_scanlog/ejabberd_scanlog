@@ -42,6 +42,11 @@ else
 	end
 end
 
+if ARGV.first == 'reset'
+	log_info = { :start => File.size(LOG_FILE)-1 }
+	puts 'Log reset'
+end
+
 new_data = ''
 File.open(LOG_FILE, 'r') do |flog|
 	flog.seek(log_info[:start])
@@ -65,6 +70,14 @@ LABELS = {
 	:system_ports_limit =>          'System limit hit: ports', # check with length(erlang:ports())., set in ejabberdctl config file
 	:system_limit =>                'Other system limit hit', # processes? check with erlang:system_info(process_count)., erlang:system_info(process_limit)., set in ejabberdctl cfg
 	:generic_server_terminating =>  'Generic server terminating',
+	:mnesia_table_shrinked =>       'Mnesia table shrinked',
+	:admin_access_failed =>         'Admin access failed',
+	:mysql_sock_timedout =>         'MySQL sock timedout',
+	:config_error =>                'Configuration error',
+	:vcard_error =>                 'Strange vCard error (vhost)',
+	:mnesia_overload =>             'Mnesia is overloaded',
+	:mysql_init_recv_failed =>      'MySQL: init failed recv data',
+	:tcp_failed =>                  'TCP Error',
 	:UNKNOWN =>                     'Unknown error/warning'
 }
 def log_type(text)
@@ -104,6 +117,22 @@ def log_type(text)
 		:system_limit
 	elsif text.include?('Generic server') and text.include?('terminating')
 		:generic_server_terminating
+	elsif text.include?('shrinking table')
+		:mnesia_table_shrinked
+	elsif text.include?('Access of') and text.include?('failed with error')
+		:admin_access_failed
+	elsif text.include?('mysql_') and text.include?(': Socket') and text.include?('timedout')
+		:mysql_sock_timedout
+	elsif text.include?('{badrecord,config}')
+		:config_error
+	elsif text.include?('error found when trying to get the vCard')
+		:vcard_error
+	elsif text.include?('Mnesia is overloaded')
+		:mnesia_overload
+	elsif text.include?('mysql_conn: init failed receiving data')
+		:mysql_init_recv_failed
+	elsif text.include?('Failed TCP')
+		:tcp_failed
 	else
 		warn "Cannot parse text: #{text}" if $debug_mode
 		:UNKNOWN
@@ -128,7 +157,7 @@ File.open(CACHE_FILE, 'w') { |f| f.write log_info.to_yaml } unless $debug_mode
 if ARGV.first == 'config'
 	puts <<CONFIG
 graph_title Ejabberd Log
-graph_vtitle per period
+graph_vlabel total
 graph_category ejabberd
 graph_args -l 0
 graph_order #{(LABELS.keys + log_info.keys.select { |k| k.is_a? String }.sort).join(' ')}
