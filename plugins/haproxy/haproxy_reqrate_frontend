@@ -13,7 +13,10 @@ haproxy_reqrate_frontend -Haproxy request rate frontend
   user root
   env.backend backend_name_1 backend_name_2 backend_name_3
   env.frontend frontend_name_1 frontend_name_2 frontend_name_3
-  env.url  http://user:passwd@IP:port/admin?stats;csv
+  # You can use url o socket option, use one of them, not both!
+    env.url  http://user:passwd@IP:port/admin?stats;csv
+  #  or
+    env.socket /var/lib/haproxy/stats.socket
 
 =head1 AUTHOR
 
@@ -39,9 +42,16 @@ function parse_url {
         PXNAME="$1"
         SVNAME="$2"
         VALUE="$3"
-        LINE1=`curl -s "$url" | head -1 | sed 's/# //'`
-        LINE2=`curl -s "$url" | grep "$PXNAME,$SVNAME"`
         
+        if [ ! -z "$url" ]; then
+                LINE1=`curl -s "$url" | head -1 | sed 's/# //'`
+                LINE2=`curl -s "$url" | grep "$PXNAME,$SVNAME"`
+        fi
+
+        if [ ! -z "$socket" ]; then
+                LINE1=`echo 'show stat' | socat unix-connect:"$socket" stdio | head -1 | sed 's/# //'`
+                LINE2=`echo 'show stat' | socat unix-connect:"$socket" stdio | grep "$PXNAME,$SVNAME"`
+        fi
         
         ARRAY1=($LINE1);
 
