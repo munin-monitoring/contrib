@@ -13,7 +13,10 @@ haproxy_responses_frontend -Haproxy responses frontend
   user root
   env.backend backend_name_1 backend_name_2 backend_name_3
   env.frontend frontend_name_1 frontend_name_2 frontend_name_3
-  env.url  http://user:passwd@IP:port/admin?stats;csv
+  # You can use url o socket option, use one of them, not both!
+    env.url  http://user:passwd@IP:port/admin?stats;csv
+  #  or
+    env.socket /var/lib/haproxy/stats.socket
 
 =head1 AUTHOR
 
@@ -39,8 +42,16 @@ function parse_url {
 	PXNAME="$1"
 	SVNAME="$2"
 	VALUE="$3"
-	LINE1=`curl -s "$url" | head -1 | sed 's/# //'`
-	LINE2=`curl -s "$url" | grep "$PXNAME,$SVNAME"`
+
+        if [ ! -z "$url" ]; then
+                LINE1=`curl -s "$url" | head -1 | sed 's/# //'`
+                LINE2=`curl -s "$url" | grep "$PXNAME,$SVNAME"`
+        fi
+
+        if [ ! -z "$socket" ]; then
+                LINE1=`echo 'show stat' | socat unix-connect:"$socket" stdio | head -1 | sed 's/# //'`
+                LINE2=`echo 'show stat' | socat unix-connect:"$socket" stdio | grep "$PXNAME,$SVNAME"`
+        fi
 
 	ARRAY1=($LINE1);
 
@@ -119,12 +130,12 @@ fi
 		H3xx=`parse_url ${i} ${SVNAME} hrsp_3xx`
 		H4xx=`parse_url ${i} ${SVNAME} hrsp_4xx`
 		H5xx=`parse_url ${i} ${SVNAME} hrsp_5xx`
-		Hoxx=`parse_url ${i} ${SVNAME} hrsp_other`
+		Hother=`parse_url ${i} ${SVNAME} hrsp_other`
 	        echo "hrsp_1xx`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $H1xx"
 	        echo "hrsp_2xx`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $H2xx"
 	        echo "hrsp_3xx`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $H3xx"
 	        echo "hrsp_4xx`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $H4xx"
 	        echo "hrsp_5xx`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $H5xx"
-	        echo "hrsp_oxx`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $Hoxx"
+	        echo "hrsp_other`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $Hother"
 	done
 	
