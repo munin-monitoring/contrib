@@ -13,7 +13,10 @@ haproxy_queue_backend -Haproxy Queued Requests Backend
   user root
   env.backend backend_name_1 backend_name_2 backend_name_3
   env.frontend frontend_name_1 frontend_name_2 frontend_name_3
-  env.url  http://user:passwd@IP:port/admin?stats;csv
+  # You can use url o socket option, use one of them, not both!
+    env.url  http://user:passwd@IP:port/admin?stats;csv
+  #  or
+    env.socket /var/lib/haproxy/stats.socket
 
 =head1 AUTHOR
 
@@ -39,9 +42,16 @@ function parse_url {
         PXNAME="$1"
         SVNAME="$2"
         VALUE="$3"
-        LINE1=`curl -s "$url" | head -1 | sed 's/# //'`
-        LINE2=`curl -s "$url" | grep "$PXNAME,$SVNAME"`
         
+        if [ ! -z "$url" ]; then
+                LINE1=`curl -s "$url" | head -1 | sed 's/# //'`
+                LINE2=`curl -s "$url" | grep "$PXNAME,$SVNAME"`
+        fi
+
+        if [ ! -z "$socket" ]; then
+                LINE1=`echo 'show stat' | socat unix-connect:"$socket" stdio | head -1 | sed 's/# //'`
+                LINE2=`echo 'show stat' | socat unix-connect:"$socket" stdio | grep "$PXNAME,$SVNAME"`
+        fi
         
         ARRAY1=($LINE1);
 
@@ -63,6 +73,7 @@ function parse_url {
 
 SVNAME='BACKEND'
 LIST=$backend
+WARN_PERCENT="80"
 
 
 
@@ -91,6 +102,20 @@ if [ "$1" = "config" ]; then
         	#echo "qmax`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.type GAUGE"
 	        #echo "qmax`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.min 0"
         	#echo "qmax`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.info Max queued request $i"
+		
+		echo "qlim`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.label Limit request `echo $i | awk -F. '{print $NF}'`"
+                echo "qlim`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.type GAUGE"
+                echo "qlim`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.min 0"
+                echo "qlim`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.info Limit request `echo $i | awk -F. '{print $NF}'`"
+
+		QLIM=`parse_url ${i} ${SVNAME} qlimit`
+                if [[ "$QLIM" =~ ^[0-9]+$ ]] && [[ "$QLIM" != 0 ]]; then
+                        echo "qcur`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.critical $QLIM"
+                fi
+
+                if [[ "$QLIM" =~ ^[0-9]+$ ]] && [[ "$QLIM" != 0 ]]; then
+                        echo "qcur`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.warning $((${QLIM}*${WARN_PERCENT}/100))"
+                fi
 	done
 
 	exit 0
@@ -98,8 +123,10 @@ fi
 	for i in ${LIST}; do
 		QCUR=`parse_url ${i} ${SVNAME} qcur`
 		#QMAX=`parse_url ${i} ${SVNAME} qmax`
+		QLIM=`parse_url ${i} ${SVNAME} qlimit`
 
 	        echo "qcur`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $QCUR"
+		echo "qlim`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $QLIM"
         	#echo "qmax`echo $i | md5sum | cut -d - -f1 | sed 's/ //g'`.value $QMAX"
 	done
 	
