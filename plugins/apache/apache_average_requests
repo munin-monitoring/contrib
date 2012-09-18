@@ -1,0 +1,128 @@
+#!/usr/bin/perl
+# -*- cperl -*-
+
+=head1 NAME
+
+apache_average_request - Munin plugin to monitor the average request to
+Apache servers. It handles a list of ports passed in from a plugin
+configuration file.
+
+=head1 APPLICABLE SYSTEMS
+
+Apache HTTP servers with C</server-status> enabled.
+
+=head1 CONFIGURATION
+
+Enable stats in apache first!:
+
+<VirtualHost 127.0.0.1:80>
+        <Location /server-status>
+         SetHandler server-status
+         AuthUserFile /route/to/auth.file
+         AuthName Login-Stats
+         AuthType Basic
+         require valid-user
+        </Location>
+</VirtualHost>
+
+And now in munin conf:
+
+[apache_*]
+env.url http://USER:PASS@127.0.0.1/server-status?auto
+env.ports 80
+
+=head1 AUTHOR
+
+Ricardo Fraile <rfrail3@yahoo.es>
+Unknown
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=cut
+
+use strict;
+use warnings;
+use Munin::Plugin;
+
+my $ret = undef;
+
+if (! eval "require LWP::UserAgent;")
+{
+	$ret = "LWP::UserAgent not found";
+        if ( ! defined $ARGV[0] ) {
+                die $ret;
+        }
+}
+
+my $URL = exists $ENV{'url'} ? $ENV{'url'} : "http://127.0.0.1:%d/server-status?auto";
+my @PORTS = exists $ENV{'ports'} ? split(' ', $ENV{'ports'}) : (80);
+
+if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" )
+{
+	if ($ret)
+	{
+		print "no ($ret)\n";
+		exit 0;
+	}
+
+	my $ua = LWP::UserAgent->new(timeout => 30);
+
+	foreach my $port (@PORTS) {
+		my $url = sprintf $URL, $port;
+		my $response = $ua->request(HTTP::Request->new('GET',$url));
+                if ($response->is_success) {
+                        if ($response->content =~ /^Total Accesses:/im ){
+                                next;
+                        }
+                        else {
+                                print "no (ExtendedStatus option for apache" 
+				      . " mod_status is missing on port $port)\n";
+                                exit 0;
+                        }
+                }
+                elsif ($response->code == 404)  {
+                        print "no (apache server-status not found. check if mod_status is enabled)\n";
+                        exit 0;
+                }
+                else {
+                        print "no (Port $port: ". $response->message .")\n";
+                        exit 0;
+                }
+	}
+	print "yes\n";
+	exit 0;
+}
+
+if ( defined $ARGV[0] and $ARGV[0] eq "config" )
+{
+
+	print "graph_title Average apache request\n";
+	print "graph_title Average apache Requests per second\n";
+	print "graph_vlabel average reqs/sec\n";
+	print "graph_scale no\n";
+	print "graph_category apache\n";
+	print "request.label Average apache reqs/sec\n";
+        exit 0;
+
+}
+
+my $ua = LWP::UserAgent->new(timeout => 30);
+
+foreach my $port (@PORTS) {
+	my $url = sprintf $URL, $port;
+	my $response = $ua->request(HTTP::Request->new('GET',$url));
+	if ($response->content =~ /^ReqPerSec:\s+(.+)$/im) {
+		print "request.value $1\n";
+	} else {
+		print "request.value U\n";
+	}
+}
+
+# vim:syntax=perl

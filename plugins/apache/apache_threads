@@ -1,0 +1,89 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+apache_threads -Indicate the memdium number of threads for all child process
+
+=head1 CONFIGURATION
+
+[apache_*]
+env.url http://USER:PASS@127.0.0.1/server-status?auto
+env.apuser user_runnin_apache
+env.binname apache_binary_name
+
+=head1 AUTHOR
+
+Ricardo Fraile <rfrail3@yahoo.es>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGICK MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+
+if [ "$1" = "autoconf" ]; then
+	echo yes 
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title Medium number of threads for child process.'
+	echo 'graph_args --base 1000 -l 0 '
+	echo 'graph_vlabel Threads'
+	echo 'graph_scale no'
+	echo 'graph_category apache'
+	echo 'graph_info Indicate the memdium number of threads for all child process.'
+
+
+
+        echo "threads.label threads"
+        echo "threads.type GAUGE"
+        echo "threads.min 0"
+
+	exit 0
+fi
+
+SUM=0
+COUNT=0
+USR=$apuser
+PROCS=$binname
+
+
+# Catch proccess pid
+VAL1=`ps auxf | grep ${PROCS} | grep ${USR} | grep -v grep | awk '{print $2}' `
+
+# Count pids
+COUNT=`ps auxf | grep ${PROCS} | grep ${USR} | grep -v grep | wc -l`
+
+# Read threads per pid
+for i in $VAL1; do
+
+        VAL2="$VAL2 `cat /proc/$i/status | grep 'Threads:' | awk '{print $2}'`"
+done
+
+# Sun threads
+for z in ${VAL2}; do
+
+        SUM=`expr $SUM + $z`
+
+done
+
+
+echo "threads.value `echo $((SUM /  $COUNT))`"
+
+
+
+	
+

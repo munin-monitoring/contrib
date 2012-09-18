@@ -1,0 +1,65 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+apache_tmemmory -Indicate the total memory used by apache
+
+=head1 CONFIGURATION
+
+[apache_*]
+env.url http://USER:PASS@127.0.0.1/server-status?auto
+env.binname apache_binary_name
+
+=head1 AUTHOR
+
+Ricardo Fraile <rfrail3@yahoo.es>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGICK MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+
+USR=$apuser
+PROCS=$binname
+
+
+if [ "$1" = "autoconf" ]; then
+	echo yes 
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title Total memory used by apache'
+	echo 'graph_args --base 1000 -l 0 '
+	echo 'graph_vlabel Mb'
+	echo 'graph_scale no'
+	echo 'graph_category apache'
+	echo 'graph_info Indicate the total memory used by apache.'
+
+        echo "servers.label servers"
+        echo "servers.type GAUGE"
+        echo "servers.min 0"
+
+	exit 0
+fi
+
+VAL1=`ps auxf | grep ${PROCS} | grep -v grep | awk '{s+=$6} END {print s}'`
+
+VAL2=`expr $VAL1 / 1024`
+
+echo "servers.value $VAL2"
+	
+
