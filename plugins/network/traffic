@@ -1,0 +1,74 @@
+#!/bin/bash
+# -*- bash -*-
+
+: << =cut
+
+=head1 NAME
+
+traffic - Plugin to monitor the traffic (throughput) by IP protocols.
+
+=head1 CONFIGURATION
+
+No special configuration is needed.
+
+If trouble reading files, use:
+
+ [traffic]
+ user root
+
+=head1 AUTHORS
+
+=over
+
+=item 2012.09.20: Initial version by Arturo Borrero Gonzalez <aborrero@cica.es>
+
+=back
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+
+if [ "$1" == "config" ]
+then
+        cat <<'EOF'
+graph_title Throughput by IP protocol
+graph_vlabel bits per ${graph_period}
+graph_category network
+graph_args --base 1000 --upper-limit 100 -l 0
+IPv4.label IPv4 bps
+IPv4.min 0
+IPv4.type DERIVE
+IPv4.draw AREA
+IPv6.label IPv6 bps
+IPv6.min 0
+IPv6.type DERIVE
+IPv6.draw STACK
+EOF
+        exit 0
+fi
+
+if [ -r /proc/net/dev ]
+then
+        echo "IPv4.value $(( `egrep -v bond\|lo /proc/net/dev | awk -F' ' '{print $2"+"$10}' | grep [0-9] | paste -sd+ | bc` * 8 ))"
+else
+        echo "IPv4.value 0"
+        echo "W: Unable to read /proc/net/dev" >&2
+fi
+
+if [ -r /proc/net/snmp6 ]
+then
+        echo "IPv6.value $(( `egrep Ip6InOctets\|Ip6OutOctets /proc/net/snmp6 | awk -F' ' '{print $2}' | paste -sd+ | bc` * 8 ))"
+else
+        echo "IPv6.value 0"
+        echo "W: Unable to read /proc/net/snmp6" >&2
+fi
+
+exit 0
