@@ -51,24 +51,33 @@ IPv6.label IPv6 bps
 IPv6.min 0
 IPv6.type DERIVE
 IPv6.draw STACK
+total.label Total bps
+total.min 0
+total.type DERIVE
+total.draw LINE1
 EOF
         exit 0
 fi
 
+
 if [ -r /proc/net/dev ]
 then
-        echo "IPv4.value $(( `egrep -v bond\|lo /proc/net/dev | awk -F' ' '{print $2"+"$10}' | grep [0-9] | paste -sd+ | bc` * 8 ))"
+	ipv4=$(( `egrep -v bond\|lo /proc/net/dev | awk -F' ' '{print $2+$10}' | paste -sd+ | bc` * 8 ))
+	echo "IPv4.value $ipv4"
 else
-        echo "IPv4.value 0"
-        echo "W: Unable to read /proc/net/dev" >&2
+	echo "IPv4.value 0"
+	echo "W: Unable to read /proc/net/dev" >&2
 fi
 
 if [ -r /proc/net/snmp6 ]
 then
-        echo "IPv6.value $(( `egrep Ip6InOctets\|Ip6OutOctets /proc/net/snmp6 | awk -F' ' '{print $2}' | paste -sd+ | bc` * 8 ))"
+	ipv6=$(( `egrep Ip6InOctets\|Ip6OutOctets /proc/net/snmp6 | awk -F' ' '{print $2}' | paste -sd+ | bc` * 8 ))
+	echo "IPv6.value $ipv6"
 else
-        echo "IPv6.value 0"
-        echo "W: Unable to read /proc/net/snmp6" >&2
+	echo "IPv6.value 0"
+	echo "W: Unable to read /proc/net/snmp6" >&2
 fi
+echo "total.value $( echo $ipv4 + $ipv6 | bc )"
 
 exit 0
+
