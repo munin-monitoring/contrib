@@ -1,0 +1,65 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+apache_servers -Indicate the number of apache servers running (child process)
+
+=head1 CONFIGURATION
+
+[apache_*]
+env.url http://USER:PASS@127.0.0.1/server-status?auto
+env.apuser user_runnin_apache
+env.binname apache_binary_name
+
+=head1 AUTHOR
+
+Ricardo Fraile <rfrail3@yahoo.es>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGICK MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+USR=$apuser
+PROCS=$binname
+
+if [ "$1" = "autoconf" ]; then
+	echo yes 
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title Number of apache servers running.'
+	echo 'graph_args --base 1000 -l 0 '
+	echo 'graph_vlabel servers'
+	echo 'graph_scale no'
+	echo 'graph_category apache'
+	echo 'graph_info Indicate the number of apache servers running (child process).'
+
+
+
+        echo "servers.label servers"
+        echo "servers.type GAUGE"
+        echo "servers.min 0"
+        echo "servers.info I/O on nfs"
+
+	exit 0
+fi
+
+VAL1=`ps auxf | grep ${PROCS} | grep ^${USR} | grep -v grep | wc -l`
+
+echo "servers.value $VAL1"
+
+
