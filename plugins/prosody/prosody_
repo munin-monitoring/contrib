@@ -19,16 +19,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
-#
-#
-# Changelog:
-# 2011-09-30: Christian Bendt (mail@m3d1c5.org)
-#             Added "uptime" and "users"
-#             To read the number of registered users, add the following lines
-#             in /etc/munin/plugin-conf.d/munin-node on debian
-#             [prosody_*]
-#             user prosody
-#             group prosody
 
 import sys
 import os
@@ -67,7 +57,7 @@ def main():
         else:
             connection_count_re = re.compile(r"Total:\s(\d+)\s")
             telnet = telnetlib.Telnet(host, port)
-            telnet.write("c2s:show_secure()")
+            telnet.write("c2s:show_secure()\n")
             telnet_response = telnet.read_until("secure client connections",
                                                 5)
             parsed_info = connection_count_re.findall(telnet_response)
@@ -75,7 +65,7 @@ def main():
             print "secure_client_connections.value %s" % \
                   (secure_client_connections)
             
-            telnet.write("c2s:show_insecure()")
+            telnet.write("c2s:show_insecure()\n")
             telnet_response = telnet.read_until("insecure client connections",
                                                 5)
             parsed_info = connection_count_re.findall(telnet_response)
@@ -85,6 +75,7 @@ def main():
             all_client_connections = secure_client_connections + \
                                      insecure_client_connections
             print "all_client_connections.value %s" % (all_client_connections)
+            telnet.write("quit")
             
     elif wildcard == "s2s":
         if mode == "config":
@@ -99,11 +90,12 @@ def main():
         else:   
             server_connections_re = re.compile(r"(\d+) outgoing, (\d+)")
             telnet = telnetlib.Telnet(host, port)
-            telnet.write("s2s:show()")
+            telnet.write("s2s:show()\n")
             telnet_response = telnet.read_until("connections", 5)
             parsed_info = server_connections_re.findall(telnet_response)
             print "outgoing_connections.value %s" % (parsed_info[0][0])
             print "incoming_connections.value %s" % (parsed_info[0][1])
+            telnet.write("quit")
             
     elif wildcard == "presence":
         if mode == "config":
@@ -121,7 +113,7 @@ def main():
         else:   
             client_presence_re = re.compile(r"- (.*?)\(\d+\)")
             telnet = telnetlib.Telnet(host, port)
-            telnet.write("c2s:show()")
+            telnet.write("c2s:show()\n")
             telnet_response = telnet.read_until("clients", 5)
             parsed_info = client_presence_re.findall(telnet_response)
             print "available.value %s" % (parsed_info.count("available"))
@@ -129,6 +121,7 @@ def main():
             print "away.value %s" % (parsed_info.count("away"))
             print "xa.value %s" % (parsed_info.count("xa"))
             print "dnd.value %s" % (parsed_info.count("dnd"))
+            telnet.write("quit")
 
     elif wildcard == "uptime":
         if mode == "config":
@@ -148,11 +141,13 @@ def main():
         else:
             uptime_re = re.compile(r"\d+")
             telnet = telnetlib.Telnet(host, port)
-            telnet.write("server:uptime()")
+            telnet.write("server:uptime()\n")
             telnet_response = telnet.read_until("minutes (", 5)
             parsed_info = uptime_re.findall(telnet_response)
-            uptime_value = float(parsed_info[0]) + float(parsed_info[1])/24 + float(parsed_info[2])/60/24
+            uptime_value = float(parsed_info[0]) + float(parsed_info[1])/24 +\
+                           float(parsed_info[2])/60/24
             print "uptime.value %s" % (uptime_value)
+            telnet.write("quit")
 
     elif wildcard == "users":
         if mode == "config":
@@ -160,26 +155,29 @@ def main():
             print "graph_vlabel users"
             print "graph_category Prosody"
 
-        basedir = "/var/lib/prosody"
-        if os.path.exists(basedir):
-            vhosts = listdirs(basedir)
+        base_dir = os.environ.get('internal_storage_path', "/var/lib/prosody")
+        if os.path.isdir(base_dir):
+            vhosts = listdirs(base_dir)
             for vhost in vhosts:
-                accountdir = basedir + os.sep + vhost + os.sep + "accounts"
-                if os.path.exists(accountdir):
-                    accounts = listfiles(accountdir)
-                    headcount = 0
-                    for account in accounts:
-                        headcount += 1
+                account_dir = os.path.join(base_dir, vhost, "accounts")
+                if os.path.isdir(account_dir):
+                    vhost = vhost.replace("%2e",".")
+                    munin_var = vhost.replace(".","_")
                     if mode == "config":
-                        print vhost.replace("%2e","_") + ".label %s" % (vhost.replace("%2e","."))
+                        print "%s.label %s" % (munin_var, vhost)
                     else:
-                        print vhost.replace("%2e","_") + ".value %s" % (headcount)
+                        accounts = len([listfiles(account_dir)])
+                        print "%s.value %s" % (munin_var, accounts)
 
 def listdirs(folder):
-    return [d for d in os.listdir(folder) if os.path.isdir(os.path.join(folder, d))]
+    for x in os.listdir(folder):
+        if os.path.isdir(os.path.join(folder, x)):
+            yield x
 
 def listfiles(folder):
-    return [d for d in os.listdir(folder) if os.path.isfile(os.path.join(folder, d))]
-    
+    for x in os.listdir(folder):
+        if os.path.isfile(os.path.join(folder, x)):
+            yield x
+
 if __name__ == '__main__':
     main()
