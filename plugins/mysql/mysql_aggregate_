@@ -1,0 +1,199 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# vim: set fileencoding=utf-8
+#
+# Munin plugin to show Mysql COUNT(*) results for multiple values
+#
+# Copyright Igor Borodikhin
+#
+# License : GPLv3
+#
+# parsed environment variables:
+# host: hostname or ip-address of Mysql server (default - localhost)
+# port: port number of Mysql server (default - 3306)
+# user: username to access Mysql server (default - empty)
+# password: password of Mysql user (default - empty)
+# database: Mysql database name (default - empty)
+# table: Mysql table name (no default, raises exception)
+# field: field name, used in GROUP BY statement (default - empty, no group by)
+# where: optional where condition (without "where", default - empty)
+#
+# This plugin shows graphs of Mysql COUNT(*) results.
+#
+# ## Requirements
+# This plugin requires pythons MySQLdb module which can be installed via easy_install.
+#
+# ## Installation
+# Copy file to directory /usr/share/munin/pligins/ and create symbolic links for each table you wish to monitor.
+# For example, if you wish to monitor how many users Mysql has per host create this symlink:
+#
+#     ln -s /usr/share/munin/plugins/mysql_aggregate_ /etc/munin/plugins/mysql_aggregate_user
+#
+# And specify some options in munin-node.conf:
+#
+#     [mysql_aggregate_*]
+#     env.host 10.216.0.141
+#     env.port 3306
+#     env.user root
+#     env.password vErYsEcReT
+#     env.database mysql
+#     env.table user
+#     env.field Host
+#     env.label Mysql users
+#     env.vlabel users
+#
+#%# capabilities=autoconf
+#%# family=contrib
+
+import os, sys, MySQLdb, MySQLdb.cursors
+
+progName = sys.argv[0]
+
+# Parse environment variables
+# Mysql host
+if "host" in os.environ and os.environ["host"] != None:
+    server = os.environ["host"]
+else:
+    server =  "localhost"
+
+# Mysql port
+if "port" in os.environ and os.environ["port"] != None:
+    try:
+        port = int(os.environ["port"])
+    except ValueError:
+        port = 3306
+else:
+    port = 3306
+
+# Mysql username
+if "user" in os.environ and os.environ["user"] != None:
+    login = os.environ["user"]
+else:
+    login = ""
+
+# Mysql password
+if "password" in os.environ and os.environ["password"] != None:
+    passw = os.environ["password"]
+else:
+    passw = ""
+
+# Mysql database
+if "database" in os.environ and os.environ["database"] != None:
+    db = os.environ["database"]
+else:
+    db = ""
+
+# Mysql table name
+if "table" in os.environ and os.environ["table"] != None:
+    table = os.environ["table"]
+else:
+    raise Exception("You should provide 'env.table' in configuration file")
+# Mysql group by field
+if "field" in os.environ and os.environ["field"] != None:
+    groupBy = "GROUP BY %s" % os.environ["field"]
+    field = "%s, " % os.environ["field"]
+else:
+    groupBy = ""
+    field = ""
+
+# Mysql where condition
+if "where" in os.environ and os.environ["where"] != None:
+    where = "WHERE %s" % os.environ["where"]
+else:
+    where = ""
+
+# Mysql connection handler
+conn = None
+
+# Query to get field values
+valuesQuery = "SELECT DISTINCT %s 1 FROM %s %s" % (field, table, where)
+# Query to get graph data
+aggregateQuery = "SELECT %sCOUNT(*) FROM %s %s %s" % (field, table, where, groupBy)
+
+# Connect to mysql
+try:
+    conn = MySQLdb.connect(host=server, user=login, passwd=passw, db=db)
+    cursor = conn.cursor()
+except MySQLdb.Error, e:
+    print "Error %d: %s" % (e.args[0], e.args[1])
+    sys.exit(1)
+
+# init values tuple
+if field != "":
+    values = {}
+    cursor.execute(valuesQuery)
+    results = cursor.fetchall()
+    for result in results:
+        values[result[0]] = 0
+
+if len(sys.argv) == 2 and sys.argv[1] == "autoconf":
+    print "yes"
+elif len(sys.argv) == 2 and sys.argv[1] == "config":
+
+    if "label" in os.environ:
+        label = os.environ["label"]
+    else:
+        label = "Aggregate - %s" % table
+
+    if "vlabel" in os.environ:
+        vlabel = os.environ["vlabel"]
+    else:
+        vlabel = "count(*)"
+
+    if field == "":
+        print "graph mysql_aggregate_%s" % table
+        print "graph_title %s" % label
+        print "graph_vlabel %s" % vlabel
+        print "graph_category mysql"
+        print ""
+        print "values_count.label count"
+    else:
+        print "multigraph mysql_aggregate_%s" % table
+        print "graph_title %s" % label
+        print "graph_vlabel %s" % vlabel
+        print "graph_category mysql"
+        print ""
+
+        for key in values.keys():
+            print "%s_count.label %s" % (key.replace(".", "_"), key.replace(".", "_"))
+
+        for key in values.keys():
+            print ""
+            print "multigraph mysql_aggregate_%s.%s" % (table, key.replace(".", "_"))
+            print "graph_title %s, value %s" % (label, key.replace(".", "_"))
+            print "graph_vlabel %s" % vlabel
+            print "graph_category mysql"
+            print ""
+            print "%s_count.label %s" % (key.replace(".", "_"), key)
+            print ""
+
+else:
+    try:
+        cursor.execute(aggregateQuery)
+
+        if field == "":
+            result = cursor.fetchone()
+            count = 0
+            if result[0]:
+                count = count + result[0]
+            print "values_count.value %s" % count
+        else:
+            results = cursor.fetchall()
+
+            for result in results:
+                values[result[0]] = result[1]
+            print "multigraph mysql_aggregate_%s" % table
+
+            for key in values.keys():
+                print "%s_count.value %s" % (key.replace(".", "_"), values[key])
+
+            for key in values.keys():
+                print ""
+                print "multigraph mysql_aggregate_%s.%s" % (table, key.replace(".", "_"))
+                print "%s_count.value %s" % (key.replace(".", "_"), values[key])
+
+    except MySQLdb.Error, e:
+        print "Error %d: %s" % (e.args[0], e.args[1])
+
+if conn:
+    conn.close()
