@@ -104,6 +104,9 @@ use strict;
 use warnings;
 use Munin::Plugin;
 
+$0 =~ /apache_status(?:_(.+))$/;
+my $HOSTNAME = $1;
+
 my $ret = undef;
 
 if (! eval "require LWP::UserAgent;") {
@@ -113,7 +116,17 @@ if (! eval "require LWP::UserAgent;") {
   }
 }
 
-my $URL = exists $ENV{'url'} ? $ENV{'url'} : "http://127.0.0.1:%d/server-status?auto";
+if ( exists $ENV{'hostname'} ) {
+  $HOSTNAME = $ENV{'hostname'};
+}
+
+my $URL = "http://127.0.0.1:%d/server-status?auto";
+if ( exists $ENV{'url'} ) {
+  $URL = $ENV{'url'};
+} elsif ( defined $HOSTNAME ) {
+  $URL = "http://$HOSTNAME:%d/server-status?auto"
+}
+
 my @PORTS = exists $ENV{'ports'} ? split(' ', $ENV{'ports'}) : (80);
 my $UA = LWP::UserAgent->new(timeout => 30,
 			     agent => sprintf("munin/%s (libwww-perl/%s)", $Munin::Common::Defaults::MUNIN_VERSION, $LWP::VERSION));
@@ -148,6 +161,10 @@ if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
 }
 
 if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
+  if ( defined $HOSTNAME ) {
+    print "host_name $HOSTNAME\n";
+  }
+
   print <<END;
 
 multigraph apache_accesses
