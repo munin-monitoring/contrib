@@ -11,8 +11,7 @@ This plugin will produce multiple graphs showing:
 
  - the number of accesses to Apache servers;
  - the number of apache processes running on the machine;
- - the volume of data sent from Apache servers;
- - the average requests per second to Apache servers.
+ - the volume of data sent from Apache servers.
 
 =head1 APPLICABLE SYSTEMS
 
@@ -217,29 +216,13 @@ END
     print_thresholds("volume$port");
   }
 
-  print <<END;
-
-multigraph apache_average_requests
-graph_title Average Apache requests per second
-graph_args --base 1000 -l 0
-graph_vlabel average reqs/sec
-graph_category apache
-END
-
-  foreach my $port (@PORTS) {
-    print <<END;
-average$port.label port $port
-END
-  }
-
   exit 0;
 }
 
 my %multigraphs = (
 		   accesses => "multigraph apache_accesses\n",
 		   processes => "multigraph apache_processes\n",
-		   volume => "multigraph apache_volume\n",
-		   average => "multigraph apache_average_requests\n"
+		   volume => "multigraph apache_volume\n"
 		  );
 
 foreach my $port (@PORTS) {
@@ -273,12 +256,6 @@ foreach my $port (@PORTS) {
     $multigraphs{volume} .= "volume$port.value $1\n";
   } else {
     $multigraphs{volume} .= "volume$port.value U\n";
-  }
-
-  if ($response->content =~ /^ReqPerSec:\s+(.+)$/im) {
-    $multigraphs{average} .= "average$port.value $1\n";
-  } else {
-    $multigraphs{average} .= "average$port.value U\n";
   }
 }
 
