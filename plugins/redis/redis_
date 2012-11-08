@@ -76,7 +76,9 @@ read($sock, $rep, substr($result,1)) || die "can't read from socket: $!";
 my $hash;
 foreach (split(/\r\n/, $rep)) {
     my ($key,$val) = split(/:/, $_, 2);
-    $hash->{$key} = $val;
+    if (defined($key)) {
+        $hash->{$key} = $val;
+    }
 }
 close ($sock);
 
@@ -136,8 +138,14 @@ switch ($0) {
         }
             
         my $total = $hash->{'keyspace_hits'} + $hash->{'keyspace_misses'};
-        printf("hitratio.value %.2f\n", $hash->{'keyspace_hits'} / $total * 100);
-        printf("missratio.value %.2f\n", $hash->{'keyspace_misses'} / $total * 100);
+        my $hitratio = 0;
+        my $missratio = 0;
+        if ($total > 0) {
+            $hitratio = $hash->{'keyspace_hits'} / $total * 100;
+            $missratio = $hash->{'keyspace_misses'} / $total * 100;
+        }
+        printf("hitratio.value %.2f\n", $hitratio);
+        printf("missratio.value %.2f\n", $missratio);
     }
 
 
