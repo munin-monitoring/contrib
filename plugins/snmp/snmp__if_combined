@@ -87,11 +87,12 @@ Should support indexing by
   - ifIndex
   - ifName
   - ifDescr
+  - ifAlias
   - mac-address
 
 (and anything else MRTG can index by) in addition to OID-index as now.
 
-Pulling in a user definable set of ifName/ifDescr for textual
+Pulling in a user definable set of ifName/ifDescr/ifAlias for textual
 description and even graph_title would also be nice.
 
 IFF we get a patch to support the .oldname attribute then we may use
@@ -468,6 +469,7 @@ sub do_collect {
 	{ 6  => 'ifHCInOctets',
 	  10 => 'ifHCOutOctets',
 	  15 => 'ifHighSpeed',
+	  18 => 'ifAlias',
 	});
 }
 
@@ -601,7 +603,7 @@ END
     print "\n";
 
     foreach my $if (sort {$a <=> $b} keys %{$snmpinfo}) {
-      my $alias = $snmpinfo->{$if}->{ifDescr} || "Interface $if";
+      my $alias = $snmpinfoX->{$if}->{ifAlias} || $snmpinfo->{$if}->{ifDescr} || "Interface $if";
 
       if (! ($alias =~ /\d+/) ) {
 	# If there are no numbers in the $alias add the if index
@@ -620,7 +622,7 @@ END
 sub do_config_if {
     my ($host,$version,$if) = @_;
 
-    my $alias = $snmpinfo->{$if}->{ifDescr} || "Interface $if";
+    my $alias = $snmpinfoX->{$if}->{ifAlias} || $snmpinfo->{$if}->{ifDescr} || "Interface $if";
 
     if (! ($alias =~ /\d+/) ) {
 	# If there are no numbers in the $alias add the if index
