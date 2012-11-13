@@ -454,7 +454,11 @@ sub do_collect {
 	  # 7) lowerLayerDown
 	  8  => 'ifOperStatus',
 	  10 => 'ifInOctets',
+	  13 => 'ifInDiscards',
+	  14 => 'ifInErrors',
 	  16 => 'ifOutOctets',
+	  19 => 'ifOutDiscards',
+	  20 => 'ifOutErrors',
 	});
 
     # ifXEntry - SNMP v2 and up only - on some devices
@@ -580,6 +584,37 @@ send$if.label $alias
 send$if.negative recv$if
 END
     }
+
+    print <<END;
+
+multigraph snmp_if_combined_err
+graph_title $host interfaces errors
+graph_args --base 1000
+graph_vlabel errors in (-) / out (+) per \${graph_period}
+graph_category network
+END
+
+    print "graph_order";
+    foreach my $if (sort {$a <=> $b} keys %{$snmpinfo}) {
+      print " recv$if=snmp_if_combined_err.$if.recv send$if=snmp_if_combined_err.$if.send";
+    }
+    print "\n";
+
+    foreach my $if (sort {$a <=> $b} keys %{$snmpinfo}) {
+      my $alias = $snmpinfo->{$if}->{ifDescr} || "Interface $if";
+
+      if (! ($alias =~ /\d+/) ) {
+	# If there are no numbers in the $alias add the if index
+	$alias .=" (if $if)";
+      }
+
+      print <<END;
+recv$if.label $alias
+recv$if.graph no
+send$if.label $alias
+send$if.negative recv$if
+END
+    }
 }
 
 sub do_config_if {
@@ -644,9 +679,22 @@ END
       printf("recv.warning %s\nsend.warning %s\n", $warn, $warn);
     }
 
-    if ( $ENV{MUNIN_CAP_DIRTYCONFIG} == 1 ) {
-      do_fetch_if($if);
-    }
+    print <<END;
+multigraph snmp_if_combined_err.$if
+graph_title $alias errors
+graph_args --base 1000
+graph_vlabel errors in (-) / out (+) per \${graph_period}
+graph_category network
+
+recv.label recv
+recv.type DERIVE
+recv.graph no
+recv.min 0
+send.label Errors
+send.type DERIVE
+send.negative recv
+send.min 0
+END
 }
 
 sub do_fetch_if {
@@ -660,12 +708,14 @@ sub do_fetch_if {
     # 2 means set to down
     # Everything else we ignore.
 
+    print "multigraph snmp_if_combined.$if\n";
+
     if ($status == 2) {
 	# Interface is down
 	print "recv.value U\n";
 	print "send.value U\n";
 	print "send.extinfo This interface is currently down.\n";
-	return;
+	goto if_errors;
     }
 
     if (defined ($response = $snmpinfoX->{$if}->{ifHCInOctets} ||
@@ -683,6 +733,27 @@ sub do_fetch_if {
 	# No response...
 	print "send.value U\n";
     }
+
+  if_errors:
+
+    print "multigraph snmp_if_combined_err.$if\n";
+
+    if ($status == 2) {
+	print "recv.value U\n";
+	print "send.value U\n";
+	print "send.extinfo This interface is down\n";
+	return;
+    }
+
+    $response = ( $snmpinfo->{$if}->{ifInErrors} || 0 ) +
+      ( $snmpinfo->{$if}->{ifInDiscards} || 0 );
+
+    print "recv.value $response\n";
+
+    $response = ( $snmpinfo->{$if}->{ifOutErrors} || 0 ) +
+      ( $snmpinfo->{$if}->{ifOutDiscards} || 0 );
+
+    print "send.value $response\n";
 }
 
 
@@ -710,7 +781,5 @@ if ($ARGV[0] and $ARGV[0] eq "config") {
 }
 
 foreach my $if (sort {$a <=> $b} keys %{$snmpinfo}) {
-    print "multigraph snmp_if_combined.$if\n";
-
     do_fetch_if($if);
 }
