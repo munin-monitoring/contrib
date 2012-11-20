@@ -613,10 +613,8 @@ END
       print <<END;
 recv$if.label $alias
 recv$if.graph no
-recv$if.cdef recv$if,8,*
 send$if.label $alias
 send$if.negative recv$if
-send$if.cdef send$if,8,*
 END
     }
 }
@@ -666,12 +664,10 @@ graph_category network
 recv.label bps
 recv.type DERIVE
 recv.graph no
-recv.cdef recv,8,*
 recv.min 0
 send.label bps
 send.type DERIVE
 send.negative recv
-send.cdef send,8,*
 send.min 0
 END
 
@@ -722,21 +718,11 @@ sub do_fetch_if {
 	goto if_errors;
     }
 
-    if (defined ($response = $snmpinfoX->{$if}->{ifHCInOctets} ||
-		 $snmpinfo->{$if}->{ifInOctets})) {
-	print "recv.value $response\n";
-    } else {
-	# No response...
-	print "recv.value U\n";
-   }
+    $response = $snmpinfoX->{$if}->{ifHCInOctets} || $snmpinfo->{$if}->{ifInOctets};
+    printf("recv.value %s\n", defined($response) ? ($response * 8) : "U");
 
-    if (defined ($response = $snmpinfoX->{$if}->{ifHCOutOctets} ||
-		 $snmpinfo->{$if}->{ifOutOctets})) {
-	print "send.value $response\n";
-    } else {
-	# No response...
-	print "send.value U\n";
-    }
+    $response = $snmpinfoX->{$if}->{ifHCOutOctets} || $snmpinfo->{$if}->{ifOutOctets};
+    printf("send.value %s\n", defined($response) ? ($response * 8) : "U");
 
   if_errors:
 
