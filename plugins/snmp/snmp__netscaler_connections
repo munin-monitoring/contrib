@@ -121,9 +121,9 @@ if ($ARGV[0] and $ARGV[0] eq "autoconf") {
 }
 
 if (! defined $o_host ) {
-	$0 =~ /netscaler_conn_(.+)*$/;
+	$0 =~ /.*onnections?_(.+)*$/;
 	$o_host = $1;
-	die "No host provided" unless defined $o_host;
+	die "No host provided or unabled to extract hostname from $0" unless defined $o_host;
 }
 
 if ($ARGV[0] and $ARGV[0] eq "config") {
@@ -134,19 +134,19 @@ if ($ARGV[0] and $ARGV[0] eq "config") {
     print "graph_period second\n";
     print "graph_info This graph shows the netscaler TCP connections.\n";
     print "graph_order ",
-      "client ",
-		  "server ",
-		  "ssl ",
-	    "\n";
+	"client ",
+	"server ",
+	"ssl ",
+	"\n";
     print "client.label client\n";
     print "client.draw AREA\n";
     print "client.info Client connections.\n";
     print "server.label server\n";
     print "server.draw STACK\n";
     print "server.info Server connections.\n";
-	  print "ssl.label SSL sessions\n";
-	  print "ssl.draw LINE2\n";
-  	print "ssl.info Currently active SSL sessions.\n";
+    print "ssl.label SSL sessions\n";
+    print "ssl.draw LINE2\n";
+    print "ssl.info Currently active SSL sessions.\n";
 
     for my $field qw(client server ssl) {
         print_thresholds($field);
@@ -163,14 +163,13 @@ if (!defined($session)) {
 
 my $counter1;
 # TCP
-$counter1 = &get_client_conn($session);
+$counter1 = &get_oid_values($session,$oid_client_conn);
 $return_str .= "client.value $counter1\n";
-$counter1 = &get_server_conn($session);
+$counter1 = &get_oid_values($session,$oid_server_conn);
 $return_str .= "server.value $counter1\n";
 # SSL
-$counter1 = &get_ssl_sessions($session);
+$counter1 = &get_oid_values($session,$oid_ssl_session);
 $return_str .= "ssl.value $counter1\n";
-
 
 &close_session($session);
 
@@ -218,54 +217,20 @@ sub get_buildversion {
 	}
 }
 
-sub get_ssl_sessions {
-	my ($session) = @_;
-	my $ssl_session;
+sub get_oid_values {
+        my ($session,$oid_string) = @_;
+        my $return_value;
 
-	my $result = $session->get_request(
-		-varbindlist => [$oid_ssl_session]
+        my $result = $session->get_request(
+                -varbindlist => [$oid_string]
         );
 
-	if (!defined($result)) {
-		return "na";
-	}
-	else {
-		$ssl_session = $result->{$oid_ssl_session};
-		return $ssl_session;
-	}
-}
-
-sub get_client_conn {
-	my ($session) = @_;
-	my $client_conn;
-
-	my $result = $session->get_request(
-		-varbindlist => [$oid_client_conn]
-        );
-
-	if (!defined($result)) {
-		return "na";
-	}
-	else {
-		$client_conn = $result->{$oid_client_conn};
-		return $client_conn;
-	}
-}
-
-sub get_server_conn {
-	my ($session) = @_;
-	my $server_conn;
-
-	my $result = $session->get_request(
-		-varbindlist => [$oid_server_conn]
-        );
-
-	if (!defined($result)) {
-		return "na";
-	}
-	else {
-		$server_conn = $result->{$oid_server_conn};
-		return $server_conn;
-	}
+        if (!defined($result)) {
+                return "na";
+        }
+        else {  
+                $return_value = $result->{$oid_string};
+                return $return_value;
+        }
 }
 
