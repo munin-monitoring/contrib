@@ -1,0 +1,58 @@
+#!/bin/sh
+
+# © 2012 - Stig Sandbeck Mathisen <ssm@fnord.no>
+#
+# varnish_devicedetect - Plugin to graph the device usage ratio of website
+# visitors
+#
+# This plugin reads data from the Varnish shared memory log, and presents a
+# stacked percentage graph of the device types of your website visitors for all
+# entries present in the log.
+#
+# Requires:
+#
+#  * Varnish
+#
+#  * varnish-devicedect from https://github.com/varnish/varnish-devicedetect
+#
+
+print_config() {
+    printf "graph_title Varnish device detection\n"
+    printf "graph_vlabel percent\n"
+    printf "graph_category varnish\n"
+    printf "graph_args --lower-limit 0 --upper-limit 100\n"
+
+    for device in bot mobile-android mobile-iphone pc tablet-android tablet-ipad; do
+        printf "%s.label %s\n" $device $device
+        printf "%s.type GAUGE\n" $device
+        printf "%s.draw AREASTACK\n" $device
+    done
+}
+
+print_values() {
+    varnishlog -d -m 'TxHeader:X-UA-Device:' -I X-UA-Device \
+        | awk '
+  $4 == "X-UA-Device:" {
+    total++;
+    devices[$5]++
+  }
+
+  END {
+    for (device in devices)
+      printf "%s.value %f\n", device, devices[device] / total * 100.0
+  }
+'
+}
+
+case $1 in
+    autoconf)
+        printf "no\n"
+        exit 1
+        ;;
+    config)
+        print_config
+        ;;
+    *)
+        print_values
+        ;;
+esac
