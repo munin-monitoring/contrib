@@ -1,0 +1,147 @@
+#!/bin/bash
+
+# Copyright (C) 2009 Andreas Thienemann <andreas@bawue.net>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Library General Public License as published by
+# the Free Software Foundation; version 2 only
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Library General Public License for more details.
+#
+# You should have received a copy of the GNU Library General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
+
+# 
+# Plugin to monitor an smstools installation
+#
+# Usage: Link or copy into the munin-node plugin directory, name it according
+# to your SMS Modem as known to smsd. e.g. smstools_GSM1
+#
+#
+# Installation:
+#
+# SMSD:
+# Configure smsd to output his statistics by adding the following to /etc/smsd.conf:
+#
+# stats = /var/log/smsd_stats
+# stats_interval = 300
+#
+#
+# Munin:
+# If your statistics directory is non-standard, configure it as
+# statsdir in the munin-plugin configuration
+# In case you do not want your statistics-dump from smsd deleted after reading,
+# set env.cleanup to false. If you want cleanup to work, run the plugin as root.
+#
+# [smstools*]
+# user root
+# env.statsdir /var/log/smsd_stats
+# env.cleanup true
+#
+#
+# Magic markers (optional - only used by munin-config and some
+# installation scripts):
+#
+#%# family=contrib
+#%# capabilities=autoconf suggest
+#
+
+STATSDIR=${statsdir:-/var/log/smsd_stats}
+CLEANUP=${cleanup:-false}
+MODEM=`basename $0 | sed 's/^smstools_//g'`
+
+if [ "$1" = "autoconf" ]; then
+        if [ -d $STATSDIR ]; then
+                echo yes
+                exit 0
+        else
+                echo "no ($STATSDIR not found)"
+                exit 1
+        fi
+fi
+
+if [ "$1" = "suggest" ]; then
+        if [ -d $STATSDIR ]; then
+		# Find the newest statistics file
+		FILE=$(ls -rt ${STATSDIR}/[0-9]*.[0-9]* | tail -n 1)
+
+		awk '
+			FS="," {
+				if (NR > 4) {
+					print $1
+				}
+			}
+		' < $FILE
+                exit 0
+        else
+                exit 1
+        fi
+fi
+
+
+# If run with the "config"-parameter, give out information on how the
+# graphs should look. 
+ 
+if [ "$1" = "config" ]; then
+	echo 'graph_title SMSTools Report for '${MODEM}
+	echo 'graph_args --base 1000 -l 0'
+	echo 'graph_vlabel '
+	echo 'graph_scale no'
+	echo 'graph_category SMSTools'
+	echo 'graph_info SMSTools Statistics'
+	echo 'graph_oder succeeded received failed multiple_failed rejected'
+	echo 'rejected.label Rejected'
+	echo 'rejected.info Number of rejected SMS'
+	echo 'succeeded.label Succeeded'
+	echo 'succeeded.info Number of sucessfully sent SMS'
+	echo 'failed.label Failed'
+	echo 'failed.info Number of failed SMS'
+	echo 'received.label Received'
+	echo 'received.info Number of received SMS'
+	echo 'multiple_failed.label Consecutive failures'
+	echo 'multiple_failed.info Number of consecutive failures'
+#	echo 'usage_s.label Time sent'
+#	echo 'usage_s.info Modem time sending'
+#	echo 'usage_r.label Time sent'
+#	echo 'usage_r.info Modem time receiving'
+
+	# Last, if run with the "config"-parameter, quit here (don't
+	# display any data)
+	exit 0
+fi
+
+# Find the newest statistics file
+FILE=$(ls -rt ${STATSDIR}/[0-9]*.[0-9]* | tail -n 1)
+
+awk '
+FS="," {
+	if (NR == 2)
+		a[0] = "rejected.value " $2
+
+	if (NR > 4 && $1 == "'$MODEM'") {
+		a[1] = "succeeded.value " $2
+		a[2] = "failed.value " $3
+		a[3] = "received.value " $4
+		a[4] = "multiple_failed.value " $5
+		a[5] = "usage_s.value " $6
+		a[6] = "usage_r.value " $7
+	}
+
+	# Did we actually get more then just the rejected.value line?
+	# Then we must have parsed the right modem, output everything
+	if (1 in a) {
+		for (i = 0; i < 7; i++) {
+			print a[i]
+		}
+	}
+}
+' < $FILE
+
+if [ ${CLEANUP} == "true" ]; then
+	rm -f $FILE
+fi

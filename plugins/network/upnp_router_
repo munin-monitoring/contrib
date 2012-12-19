@@ -1,0 +1,120 @@
+#!/usr/bin/php
+<?php
+/**
+ * Plugin: UPNP router
+ * Author: Sebastian S. (scitor@@el337.de)
+ * Version: 0.1 (TESTING)
+ *
+ * Munin (http://munin.projects.linpro.no/) plugin for monitoring traffic on UPNP enabled routers.
+ *
+ * Requirements:
+ ***************
+ * - PHP (translate it for performance gain)
+ * - upnpc (MiniUPnP client: http://miniupnp.tuxfamily.org/)
+ *
+ * Usage:
+ ********
+ * Copy to upnp_router_ your munin plugins directory (/usr/share/munin/plugins) and execute:
+ *
+ * $ munin-node-configure --shell
+ *
+ * Don't forget to enable UPNP on your router, the script should find any connections automatically.
+ * Change the path of your upnpc binary if you didn't make install it.
+ *
+ ********************
+ * TESTING VERSION! *
+ ********************
+ * Please Note: This version was only tested on one single router so far.
+ * I tried to make the router detection pretty general, but you never know.
+ * If you have a router with enabled upnp not beeing detected by this script
+ * feel free to send me an email with your output of:
+ *
+ * $ upnpc -s
+ *
+ * command.
+ *
+ * Changelog:
+ ************
+ * version 0.1 - 26 Aug, 2009
+ * Sebastian S. <scitor@@el337.de>
+ * - initial author
+ *
+ **/
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+        $result = explode("\n",shell_exec('/usr/bin/upnpc -s'));
+
+        foreach($result as $line)
+        {
+                switch(true)
+                {
+                        case preg_match('%Found .* IGD : http://([^/]+):\d+(?:/[^/]+)*/([^/]+)\b%', $line,$regs):
+                                $IGD = $regs[1].'_'.$regs[2];
+                                $routers[$IGD]['ip'] = $regs[1];
+                                $routers[$IGD]['name'] = $regs[2];
+                         break;
+
+                        case preg_match('/ExternalIPAddress = \b((?:[0-9]{1,3}\.){3}[0-9]{1,3})\b/', $line, $regs):
+                                $routers[$IGD]['ext_ip'] = $regs[1];
+                         break;
+
+                        case preg_match('/Status : ([^,]+),/', $line, $regs):
+                                $routers[$IGD]['status'] = $regs[1];
+                         break;
+
+                        case preg_match('/Bytes:\s*Sent:\s*(\d+)\s*Recv:\s*(\d+)\s*/', $line, $regs):
+                                $routers[$IGD]['bytes_in']  = $regs[2];
+                                $routers[$IGD]['bytes_out'] = $regs[1];
+                         break;
+
+                        case preg_match('/Packets:\s*Sent:\s*(\d+)\s*Recv:\s*(\d+)\s*/', $line, $regs):
+                                $routers[$IGD]['pkts_in']  = $regs[2];
+                                $routers[$IGD]['pkts_out'] = $regs[1];
+                         break;
+                }
+        }
+
+        $param_IGD = pathinfo($argv[0],PATHINFO_BASENAME);
+        if (preg_match('/upnp_router_(bytes|pkts)_((?:[0-9]{1,3}\.){3}[0-9]{1,3})_(.+)/i', $param_IGD, $regs))
+        {
+                $param_IGD = $regs[2].'_'.$regs[3];
+                $param_type = $regs[1];
+        }
+
+        switch($argv[1])
+        {
+                case 'suggest':
+                        echo 'bytes_'.implode("\nbytes_",array_keys($routers))."\n";
+                        echo 'pkts_'.implode("\npkts_",array_keys($routers))."\n";
+                 break;
+
+                case 'autoconf':
+                        echo (count($routers)>0?'yes':'no (no routers found)')."\n";
+                 break;
+
+                case 'config':
+        echo "graph_order down up\n";
+        echo "graph_title UPNP $param_IGD $param_type traffic\n";
+        echo "graph_args --base 1000\n";
+        echo "graph_vlabel $param_type in (-) / out (+) per \${graph_period}\n";
+        echo "graph_category network\n";
+        echo "graph_info This graph shows the incoming and outgoing $param_type of the UPNP router found at $param_IGD.\n";
+        echo "down.label received\n";
+        echo "down.type COUNTER\n";
+        echo "down.graph no\n";
+        //echo "down.cdef down,8,*\n";
+        echo "up.label bps\n";
+        echo "up.type COUNTER\n";
+        echo "up.negative down\n";
+        //echo "up.cdef up,8,*\n";
+                 break;
+
+                default:
+                        if (isset($routers[$param_IGD]))
+                        {
+                                echo 'up.value '.$routers[$param_IGD][$param_type.'_out']."\n";
+                                echo 'down.value '.$routers[$param_IGD][$param_type.'_in']."\n";
+                        }
+                 break;
+        }

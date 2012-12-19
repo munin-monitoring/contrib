@@ -1,0 +1,123 @@
+#!/usr/bin/perl
+# -*- perl -*-
+
+# Author Rodolphe Quiédeville <rodolphe@quiedeville.org>
+# Licence : GPLv2
+# Code based on tomcat_volume plugin by 
+# Rune Nordbøe Skillingstad <runesk@linpro.no>
+
+=head1 NAME
+
+geowebcache_bandwidth - Plugin to monitor the bandwidth of GeoWebCache
+servers.
+
+version 1.0.1
+
+=head1 CONFIGURATION
+
+The following environment variables are used by this plugin
+
+=over 4
+
+=item timeout
+
+Connection timeout
+
+=item url
+
+Override default status-url
+
+=item ports
+
+HTTP port numbers
+
+=back
+
+=head2 CONFIGURATION EXAMPLE
+
+ [geowebcache_bandwidth]
+  env.url      localhost:%d/geoserver/gwc
+  env.ports    8081
+
+=head1 AUTHOR
+
+Rodolphe Quiédeville <rodolphe@quiedeville.org>
+
+=head1 USAGE
+
+Needs access to http://localhost:8080/gwc (or
+modify the address for another host).
+
+If geowebcache is used inside GeoServer the url will be
+ http://localhost:8080/geoserver/gwc
+
+GeoWebCache 1.2 or higher.
+
+Tip: To see if it's already set up correctly, just run this plugin
+with the parameter "autoconf". If you get a "yes", everything should
+work like a charm already.
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=autoconf
+
+=cut
+
+use strict;
+
+my $ret = undef;
+
+if(!eval "require LWP::UserAgent;") {
+    $ret = "LWP::UserAgent not found";
+}
+
+my $URL      = exists $ENV{'url'}      ? $ENV{'url'}      : "http://127.0.0.1:%d/geowebcache/home";
+my $PORT     = exists $ENV{'ports'}    ? $ENV{'ports'}    : 8080;
+my $TIMEOUT  = exists $ENV{'timeout'}  ? $ENV{'timeout'}  : 30;
+
+my $url = sprintf $URL, $PORT;
+
+if(exists $ARGV[0] and $ARGV[0] eq "autoconf") {
+    if($ret) {
+	print "no ($ret)\n";
+	exit 0;
+    }
+    my $au = LWP::UserAgent->new(timeout => $TIMEOUT);
+    my $response = $au->request(HTTP::Request->new('GET',$url));
+    if($response->is_success and $response->content =~ /GWC Home/im) {
+	print "yes\n";
+	exit 0;
+    } else {
+	print "no geowebcache found\n";
+	exit 0;
+    }
+}
+
+if(exists $ARGV[0] and $ARGV[0] eq "config") {
+    print "graph_title GeoWebCache bandwidth\n";
+    print "graph_args --base 1024\n";
+    print "graph_vlabel bit/s\n";
+    print "graph_category geowebcache\n";
+    print "graph_info Bandwidth graph is an average on the last 60 seconds\n";
+    print "bandw.draw LINE1\n";
+    print "bandw.label bandwidth bit/s\n";
+    print "bandw.type GAUGE\n";
+    print "bandw.max 1000000000\n";
+    print "bandw.min 0\n";
+    exit 0;
+}
+
+my $ua = LWP::UserAgent->new(timeout => $TIMEOUT);
+my $response = $ua->request(HTTP::Request->new('GET',$url));
+
+if ($response->content =~ '<tr><td>60 seconds</td><td>\d+</td><td>\d+.\d+ /s</td><td>\d+</td><td>(\d+\.\d+) ([km]?)bps') {
+    my $value = $1;
+    $value = $value * 1024 if ($2 eq 'k');
+    $value = $value * 1024 * 1024 if ($2 eq 'm');
+    print "bandw.value " . $value;
+} else {
+    print "bandw.value U\n";
+}
+
+# vim:syntax=perl

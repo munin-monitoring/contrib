@@ -1,0 +1,109 @@
+#!/bin/sh
+
+PRINTER_IP=${host:-"10.10.10.10"}
+TMP_DIR=${tmp:-"/tmp"}
+
+: << =cut
+
+=head1 NAME
+
+Xerox-WC7232-consumables - Plugin to monitor consumables level and status on Xerox WorkCentre 7232
+
+=head1 CONFIGURATION
+
+PRINTER_IP
+
+=head1 AUTHOR
+
+Oleksiy Kochkin
+
+=head1 LICENSE
+
+As is.
+
+=back
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=autoconf
+  
+=cut
+
+case $1 in
+config)
+
+echo "graph_title Consumables level @ $PRINTER_IP"
+echo 'graph_vlabel %'
+echo 'graph_category printers'
+echo 'graph_scale no'
+echo 'cyan.label Cyan toner level'
+echo 'cyan.draw LINE2'
+echo 'cyan.type GAUGE'
+echo 'cyan.colour 1921B1'
+echo 'cyan.warning 5:'
+echo 'cyan.critical 1:'
+echo 'cyan.min 0'
+echo 'cyan.max 100'
+echo 'magenta.label Magenta toner level'
+echo 'magenta.draw LINE2'
+echo 'magenta.type GAUGE'
+echo 'magenta.colour C00086'
+echo 'magenta.warning 5:'
+echo 'magenta.critical 1:'
+echo 'magenta.min 0'
+echo 'magenta.max 100'
+echo 'yellow.label Yellow toner level'
+echo 'yellow.draw LINE2'
+echo 'yellow.type GAUGE'
+echo 'yellow.colour FECD00'
+echo 'yellow.warning 5:'
+echo 'yellow.critical 1:'
+echo 'yellow.min 0'
+echo 'yellow.max 100'
+echo 'black.label Black toner level'
+echo 'black.draw LINE2'
+echo 'black.type GAUGE'
+echo 'black.colour 000000'
+echo 'black.warning 5:'
+echo 'black.critical 1:'
+echo 'black.min 0'
+echo 'black.max 100'
+echo 'drum.label Drum unit resource left'
+echo 'drum.draw LINE2'
+echo 'drum.type GAUGE'
+echo 'drum.colour 00C12B'
+echo 'drum.warning 5:'
+echo 'drum.critical 1:'
+echo 'drum.min 0'
+echo 'drum.max 100'
+exit 0;;
+esac
+
+wget -q -o /dev/null -O $TMP_DIR/$PRINTER_IP-stsply.htm http://$PRINTER_IP/stsply.htm
+
+#toner and drum cartriges have both status and percentage
+
+TONER_STR=$(grep Toner "$TMP_DIR/$PRINTER_IP-stsply.htm") 
+#info=info.concat([['Toner Cartridges',[['Cyan Toner [C]',0,77],['Magenta Toner [M]',7,1],['Yellow Toner [Y]',7,1],['Black Toner [K]',0,39]],3]]);
+
+DRUM_STR=$(grep Drum "$TMP_DIR/$PRINTER_IP-stsply.htm") 
+#info=info.concat([['Drum Cartridges',[['Drum Cartridges',0,79]],1]]);
+
+echo -n "cyan.value "
+echo $TONER_STR | egrep -o "C]',[0-9],[0-9]{1,2}" | egrep -o "[0-9]{1,2}$"
+
+echo -n "magenta.value "
+echo $TONER_STR | egrep -o "M]',[0-9],[0-9]{1,2}" | egrep -o "[0-9]{1,2}$"
+
+echo -n "yellow.value "
+echo $TONER_STR | egrep -o "Y]',[0-9],[0-9]{1,2}" | egrep -o "[0-9]{1,2}$"
+
+echo -n "black.value "
+echo $TONER_STR | egrep -o "K]',[0-9],[0-9]{1,2}" | egrep -o "[0-9]{1,2}$"
+
+echo -n "drum.value "
+echo $DRUM_STR | egrep -o "s',[0-9],[0-9]{1,2}" | egrep -o "[0-9]{1,2}$"
+
+rm $TMP_DIR/$PRINTER_IP-stsply.htm
+           

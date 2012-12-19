@@ -1,0 +1,37 @@
+#!/bin/sh
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title zpool list'
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_vlabel zpool list'
+        echo 'graph_category zfs'
+        echo 'graph_scale no'
+        echo 'graph_info This graph shows zpool list on the server.'
+	zlist=`/sbin/zpool list -H|awk '{print $1}'`
+	first=`echo $zlist | tr ' ' '\n' | head -1`
+	echo $zlist | tr ' ' '\n' | while read i; do
+                case $i in
+                *) name=`echo $i | awk '{ gsub("[^a-zA-Z0-9_]", "_", $1); print }'` ;;
+                esac
+                echo "$name.label $i"
+                echo "$name.info $i"
+                echo "$name.draw STACK"
+        done
+        echo $first'.draw AREA'
+        echo 'total.label Total'
+        echo 'total.info Summ'
+        echo 'total.draw LINE1'
+        exit 0
+
+fi
+
+/sbin/zpool list -H | while read i; do
+	case $i in
+	*) name=`echo $i | awk '{ gsub("[^a-zA-Z0-9_]", "_", $1); print $1 }'` ;;
+	esac
+	echo -n "$name.value " 
+	echo $i|awk '{ print $4}' | awk ' /T/ {print $1*1000000}; /G/ {print $1*1000}; /M/ {print "777"}; /K/ {print "1"}' | sed 's/^\$name.value //'
+done
+
+tzl=`/sbin/zpool list -H | awk '{ print $4}' | awk ' /T/ {print $1*1000000}; /G/ {print $1*1000}; /M/ {print "777" }; /K/ {print "1"}' | awk '{ x+=$1 } END { print x }'`
+echo 'total.value' $tzl

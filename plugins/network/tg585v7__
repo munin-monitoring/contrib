@@ -1,0 +1,1558 @@
+#!/usr/bin/perl
+# -*- cperl -*-
+
+=head1 NAME
+
+TG585v7_ - Munin plugin to monitor the stats of a Thomson TG585 v7.
+
+=head1 APPLICABLE SYSTEMS
+
+Any system with access to a Thomson TG585 v7 ADSL router.
+Requires perl and either WWW::Mechanize or Net::Telnet.
+
+=head1 CONFIGURATION
+
+The plugin needs HTML access to the router. If you can get to http://YOUR_ROUTER/,
+and are greeting with a page titled "THOMSON TG585 v7", then you can probably use this plugin. 
+
+This is a wildcard plugin, so you will need to create symlinks to this plugin (or create copies if your filesystem doesn't support linking). Links should be of the form:
+
+  TG585v7_<hostname of router>_<mode>
+
+where "<mode>" is one of "bandwidth", "power", "errors" or "uptime" (thus you probably want 4 symlinks in total.
+
+In addition, you may set the following environment variables:
+
+=over 4
+
+=item user
+
+The username to login to the router as (Default: Administrator)
+
+=item pass
+
+The password to login to the router with (Default: Blank)
+
+=item mode
+
+How to connect to the router. Should be either C<http> or C<telnet>. (Default: C<http>).
+
+=back
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 BUGS
+
+Please report bugs to L<darac+munin@darac.org.uk>.
+
+=head1 AUTHOR
+
+Darac Marjal <darac+munin@darac.org.uk>
+
+=head1 VERSION
+
+2.0
+
+=head1 CHANGELOG
+
+=over 4
+
+=item 1.0
+
+=over 4
+
+=item *
+
+First release
+
+=back
+
+=item 2.0
+
+=over 4
+
+=item *
+
+Allowed connectiosndn via telnet, for when the webpage is unavailable.
+
+=back
+
+=back
+
+=head1 LICENSE
+
+GPL
+
+=cut
+
+use strict;
+use warnings;
+
+use lib $ENV{'MUNIN_LIBDIR'};
+use Munin::Plugin;
+
+# Get configuration from environment
+my $USER        = $ENV{user}        || 'Administrator';
+my $PASS        = $ENV{pass}        || '';
+my $ACCESS_MODE = $ENV{mode}        || 'telnet';
+my $MUNIN_DEBUG = $ENV{MUNIN_DEBUG} || 0;
+my $ret;
+if ( $ACCESS_MODE eq 'http' and !eval "require WWW::Mechanize;" ) {
+    $ret = "Could not load WWW::Mechanize";
+}
+if ( $ACCESS_MODE eq 'telnet' and !eval "require Net::Telnet;" ) {
+    $ret = "Could not load Net::Telnet";
+}
+
+print "# Access Mode is: $ACCESS_MODE\n" if $MUNIN_DEBUG;
+
+if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
+    if ($ret) {
+        print "no ($ret)\n";
+        exit 1;
+    }
+    print "yes\n";
+    exit 0;
+}
+
+if ( defined $ARGV[0] and $ARGV[0] eq "suggest" ) {
+    print join " ",
+      sort
+      qw(bandwidth power errors uptime firewall ids atm conntrack dhcpclient dhcprelay dhcpserver dns igmphost igmpproxy protoip prototcp protoudp protoicmp),
+      "\n";
+    exit 0;
+}
+
+our @name_fields = split /_/, $0;
+if ( scalar @name_fields == 3 ) {
+    if ( $name_fields[1] eq '' or $name_fields[2] eq '' ) {
+        print "Misconfigured symlink. See Documentation\n";
+        exit 1;
+    }
+}
+else {
+    print "Misconfigured symlink. See Documentation\n";
+    exit 1;
+}
+my $host = $name_fields[1];
+my $mode = $name_fields[2];
+
+if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
+    if ($ret) {
+        print $ret;
+        exit 1;
+    }
+    print "host_name $host\n" unless $host eq 'localhost';
+    if ( $mode eq 'bandwidth' ) {
+        print <<EOF;
+graph_vlabel bps down (-) / up (+)
+graph_category Network
+graph_title ADSL Bandwidth
+graph_info Sync rates for your ADSL line on $host
+down.label Bandwidth
+down.type GAUGE
+down.graph no
+down.min 0
+down.cdef down,1024,*
+down.draw AREA
+down.colour 00CC00CC
+up.label Bandwidth
+up.type GAUGE
+up.negative down
+up.min 0
+up.info This is your ADSL sync rate. Actual throughput is likely to be lower.
+up.cdef up,1024,*
+up.draw AREA
+up.colour 00CC00CC
+EOF
+        if ( $ACCESS_MODE eq 'telnet' ) {
+            print <<EOF
+downrate.label Actual rate
+downrate.type DERIVE
+downrate.graph no
+downrate.min 0
+downrate.cdef downrate,8,*
+uprate.label Actual rate
+uprate.type DERIVE
+uprate.negative downrate
+uprate.min 0
+uprate.cdef uprate,8,*
+uprate.info This is the actual throughput of data.
+EOF
+        }
+    }
+    elsif ( $mode eq 'power' ) {
+        print <<EOF;
+graph_vlabel dB down (-) / up (+)
+graph_category Network
+graph_title ADSL Strength
+graph_info Signal Strengths for your ADSL line on $host
+downout.label Output Power
+downout.type GAUGE
+downout.graph no
+upout.label Output Power
+upout.type GAUGE
+upout.negative downout
+downline.label Line Atten.
+downline.type GAUGE
+downline.graph no
+upline.label Line Atten.
+upline.type GAUGE
+upline.negative downline
+downsn.label SN Margin
+downsn.type GAUGE
+downsn.graph no
+upsn.label SN Margin
+upsn.type GAUGE
+upsn.negative downsn
+EOF
+    }
+    elsif ( $mode eq 'errors' ) {
+        print <<EOF;
+graph_vlabel Errors down (-) / up (+) per \${graph_period}
+graph_category Network
+graph_title ADSL Errors
+graph_info Errors on your ADSL line on $host
+downFEC.label FEC Errors
+downFEC.type DERIVE
+downFEC.min 0
+downFEC.graph no
+upFEC.label FEC Errors
+upFEC.type DERIVE
+upFEC.min 0
+upFEC.negative downFEC
+downCRC.label CRC Errors
+downCRC.type DERIVE
+downCRC.min 0
+downCRC.graph no
+upCRC.label CRC Errors
+upCRC.type DERIVE
+upCRC.min 0
+upCRC.negative downCRC
+downHEC.label HEC Errors
+downHEC.type DERIVE
+downHEC.min 0
+downHEC.graph no
+upHEC.label HEC Errors
+upHEC.type DERIVE
+upHEC.min 0
+upHEC.negative downHEC
+EOF
+    }
+    elsif ( $mode eq 'uptime' ) {
+        print <<EOF;
+graph_vlabel uptime in days
+graph_category System
+graph_title Uptime
+graph_info Uptime for your ADSL line and Router on $host
+Box.label Router
+Box.type GAUGE
+DSL.label DSL
+DSL.type GAUGE
+iNet.label Internet
+iNet.type GAUGE
+EOF
+    }
+    elsif ( $mode eq 'firewall' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF;
+graph_vlabel Packets per \${graph_period}
+graph_category network
+graph_title Firewall Statistics
+graph_info Firewall statistics for your Router on $host
+ParsedInput.label INPUT Parsed
+ParsedInput.type DERIVE
+ParsedInput.min 0
+ParsedOutput.label OUTPUT Parsed
+ParsedOutput.type DERIVE
+ParsedOutput.min 0
+ParsedForward.label FORWARD Parsed
+ParsedForward.type DERIVE
+ParsedForward.min 0
+DroppedInput.label INPUT Dropped
+DroppedInput.type DERIVE
+DroppedInput.min 0
+DroppedOutput.label OUTPUT Dropped
+DroppedOutput.type DERIVE
+DroppedOutput.min 0
+DroppedForward.label FORWARD Dropped
+DroppedForward.type DERIVE
+DroppedForward.min 0
+EOF
+        }
+    }
+    elsif ( $mode eq 'ids' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF;
+graph_vlabel Patterns per \${graph_period}
+graph_category network
+graph_title IDS Statistics
+graph_info Intrusion Detection Statistics for your Router on $host
+Active.label Active
+Active.type GAUGE
+Recycled.label Recycled
+Recycled.type GAUGE
+Searches.label Searches
+Searches.type GAUGE
+New.label New
+New.type GAUGE
+Collisions.label Collisions
+Collisions.type GAUGE
+EOF
+        }
+    }
+    elsif ( $mode eq 'atm' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF;
+graph_vlabel Number Recv (-) / Sent (+) per \${graph_period}
+graph_category network
+graph_title ATM Global Statistics
+graph_info ATM Global Statistic for your Router on $host
+RxOctets.label Octets
+RxOctets.type DERIVE
+RxOctets.min 0
+RxOctets.graph no
+TxOctets.label Octets
+TxOctets.type DERIVE
+TxOctets.min 0
+TxOctets.negative RxOctets
+RxCells.label Cells
+RxCells.type DERIVE
+RxCells.min 0
+RxCells.graph no
+TxCells.label Cells
+TxCells.type DERIVE
+TxCells.min 0
+TxCells.negative RxCells
+RxErrors.label Errors
+RxErrors.type DERIVE
+RxErrors.min 0
+RxErrors.graph no
+TxErrors.label Errors
+TxErrors.type DERIVE
+TxErrors.min 0
+TxErrors.negative RxErrors
+EOF
+        }
+    }
+    elsif ( $mode eq 'conntrack' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF;
+graph_vlabel Connections
+graph_category network
+graph_title Tracked Connections
+graph_info Tracked Connection Statistics for your Router on $host
+active.label Active
+active.type GAUGE
+halfopen.label Half-Open
+halfopen.type GAUGE
+expected.label Expected
+expected.type GAUGE
+loose.label Loose
+loose.type GAUGE
+closing.label Closing
+closing.type GAUGE
+idle.label Idle
+idle.type GAUGE
+mcast.label Multicast
+mcast.type GAUGE
+TCP.label TCP
+TCP.type GAUGE
+UDP.label UDP
+UDP.type GAUGE
+ICMP.label ICMP
+ICMP.type GAUGE
+non.label non TCP/UDP/ICMP
+non.type GAUGE
+TCPopen.label TCP Open
+TCPopen.type GAUGE
+TCPestablished.label TCP Established
+TCPestablished.type GAUGE
+TCPclosing.label TCP Closing
+TCPclosing.type GAUGE
+EOF
+        }
+    }
+    elsif ( $mode eq 'dhcpclient' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF;
+graph_vlabel Packets per \${graph_period}
+graph_category network
+graph_title DHCP Client
+graph_info DHCP Client Statistic for your Router on $host
+Corrupted.label Corrupted packet recv
+Corrupted.type DERIVE
+Corrupted.min 0
+OFFERs.label OFFERs recv
+OFFERs.type DERIVE
+OFFERs.min 0
+ACKs.label ACKs recv
+ACKs.type DERIVE
+ACKs.min 0
+NAKs.label NAKs recv
+NAKs.type DERIVE
+NAKs.min 0
+REPLIES.label Pure BOOTP Replies
+REPLIES.type DERIVE
+REPLIES.min 0
+Other.label Other message types
+Other.type DERIVE
+Other.min 0
+DISCOVERs.label DISCOVERs sent
+DISCOVERs.type DERIVE
+DISCOVERs.min 0
+REQUESTs.label REQUESTs sent
+REQUESTs.type DERIVE
+REQUESTs.min 0
+DECLINEs.label DECLINEs sent
+DECLINEs.type DERIVE
+DECLINEs.min 0
+RELEASEs.label RELEASEs sent
+RELEASEs.type DERIVE
+RELEASEs.min 0
+INFORMs.label INFORMs sent
+INFORMs.type DERIVE
+INFORMs.min 0
+failures.label Packet sent failures
+failures.type DERIVE
+failures.min 0
+EOF
+        }
+    }
+    elsif ( $mode eq 'dhcprelay' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF;
+graph_vlabel Packets per \${graph_period}
+graph_category network
+graph_title DHCP Relay
+graph_info DHCP Relay statistics for your Router on $host
+clientp.label Client packets relayed
+clientp.type DERIVE
+clientp.min 0
+serverp.label Server packets relayed
+serverp.type DERIVE
+serverp.min 0
+packets.label Packet sent failures
+packets.type DERIVE
+packets.min 0
+bogusr.label Bogus relay agent
+bogusr.type DERIVE
+bogusr.min 0
+bogusg.label Bogus giaddr recv
+bogusg.type DERIVE
+bogusg.min 0
+corrupta.label Corrupt agent option
+corrupta.type DERIVE
+corrupta.min 0
+missinga.label Missing agent option
+missinga.type DERIVE
+missinga.min 0
+badc.label Bad circuit id
+badc.type DERIVE
+badc.min 0
+missingc.label Missing circuit id
+missingc.type DERIVE
+missingc.min 0
+EOF
+        }
+    }
+    elsif ( $mode eq 'dhcpserver' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF;
+graph_vlabel Packets per \${graph_period}
+graph_category network
+graph_title DHCP Server
+graph_info DHCP Server statistics for your Router on $host
+Corrupted.label Corrupted packet recv
+Corrupted.type DERIVE
+Corrupted.min 0
+DISCOVER.label DISCOVERs recv
+DISCOVER.type DERIVE
+DISCOVER.min 0
+REQUEST.label REQUESTs recv
+REQUEST.type DERIVE
+REQUEST.min 0
+DECLINE.label DECLINEs recv
+DECLINE.type DERIVE
+DECLINE.min 0
+RELEASE.label RELEASEs recv
+RELEASE.type DERIVE
+RELEASE.min 0
+INFORM.label INFORMs recv
+INFORM.type DERIVE
+INFORM.min 0
+BOOTP.label Pure BOOTP REQUESTS
+BOOTP.type DERIVE
+BOOTP.min 0
+Other.label Other message types
+Other.type DERIVE
+Other.min 0
+OFFERs.label OFFERs sent
+OFFERs.type DERIVE
+OFFERs.min 0
+ACKs.label ACKs sent
+ACKs.type DERIVE
+ACKs.min 0
+NAKs.label NAKs sent
+NAKs.type DERIVE
+NAKs.min 0
+failures.label Packet sent failures
+failures.type DERIVE
+failures.min 0
+dropped.label Relay agent options dropped
+dropped.type DERIVE
+dropped.min 0
+EOF
+        }
+    }
+    elsif ( $mode eq 'dns' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF
+graph_vlabel Packets/Queries per \${graph_period}
+graph_category network
+graph_title DNS Server
+graph_info DNS Server statistics for your Router on $host
+corrupted.label Corrupted packets received
+corrupted.type DERIVE
+corrupted.min 0
+resolved.label Local questions resolved
+resolved.type DERIVE
+resolved.min 0
+negative.label Local negative answers sent
+negative.type DERIVE
+negative.min 0
+forwarded.label Total forwarded
+forwarded.type DERIVE
+forwarded.min 0
+external.label External answers received
+external.type DERIVE
+external.min 0
+spoofed.label Spoofed responses
+spoofed.type DERIVE
+spoofed.min 0
+discard.label Forward table full, discard
+discard.type DERIVE
+discard.min 0
+spurious.label Spurious answers
+spurious.type DERIVE
+spurious.min 0
+unknown.label Unknown query types
+unknown.type DERIVE
+unknown.min 0
+EOF
+        }
+    }
+    elsif ( $mode eq 'igmphost' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF
+graph_vlabel Messages/Queries per \${graph_period}
+graph_category Network
+graph_title IGMP Host
+graph_info IGMP Host statistics for your Router on $host
+toosmall.label Too small
+toosmall.info Too small IGMP messages received
+toosmall.type DERIVE
+toosmall.min 0
+toolong.label Too long
+toolong.info Too long IGMP messages received
+toolong.type DERIVE
+toolong.min 0
+badchecksum.label Bad Checksum
+badchecksum.info IGMP messages with bad checksum received
+badchecksum.type DERIVE
+badchecksum.min 0
+badttl.label Bad TTL
+badttl.info IGMP messages with bad TTL received
+badttl.type DERIVE
+badttl.min 0
+norouter.label No Router
+norouter.info IGMP messages with no router alert IP option received
+norouter.type DERIVE
+norouter.min 0
+v1membershipq.label v1 membership queries
+v1membershipq.info IGMPv1 membership queries received
+v1membershipq.type DERIVE
+v1membershipq.min 0
+v2membershipq.label v2 membership queries
+v2membershipq.info IGMPv2 membership queries received
+v2membershipq.type DERIVE
+v2membershipq.min 0
+v3membershipq.label v3 membership queries
+v3membershipq.info IGMPv3 membership queries received
+v3membershipq.type DERIVE
+v3membershipq.min 0
+badqueries.label Bad queries
+badqueries.info IGMP bad queries received
+badqueries.type DERIVE
+badqueries.min 0
+failing.label Failing queries
+failing.info IGMP failing membership queries
+failing.type DERIVE
+failing.min 0
+reportsreceived.label v1/v2 membership reports
+reportsreceived.info IGMPv1/v2 membership reports received
+reportsreceived.type DERIVE
+reportsreceived.min 0
+invalidmembership.label v1/v2 invalid membership
+invalidmembership.info IGMPv1/v2 invalid membership reports received
+invalidmembership.type DERIVE
+invalidmembership.min 0
+receivedforour.label v1/v2 membership reports for us
+receivedforour.info IGMPv1/v2 membership reports received for our groups
+receivedforour.type DERIVE
+receivedforour.min 0
+reportstransmitted.label v1/v2 membership reports sent
+reportstransmitted.info IGMPv1/v2 membership reports transmitted
+reportstransmitted.type DERIVE
+reportstransmitted.min 0
+v3membershipr.label v3 membership reports sent
+v3membershipr.info IGMPv3 membership reports transmitted
+v3membershipr.type DERIVE
+v3membershipr.min 0
+EOF
+        }
+    }
+    elsif ( $mode eq 'igmpproxy' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF
+graph_vlabel Messages/Queries per \${graph_period}
+graph_category Network
+graph_title IGMP Proxy
+graph_info IGMP Proxy statistics for your Router on $host
+tooshort.label Too short IGMP packets recv
+tooshort.type DERIVE
+tooshort.min 0
+toolong.label Too long IGMP packets recv
+toolong.type DERIVE
+toolong.min 0
+badchecksum.label IGMP packets with bad checksum recv
+badchecksum.type DERIVE
+badchecksum.min 0
+badttl.label IGMP packets with bad ttl recv
+badttl.type DERIVE
+badttl.min 0
+noroute.label IGMP packets with no route alert option recv
+noroute.type DERIVE
+noroute.min 0
+v1queriesr.label IGMPv1 queries recv
+v1queriesr.type DERIVE
+v1queriesr.min 0
+v2queriesr.label IGMPv2 queries recv
+v2queriesr.type DERIVE
+v2queriesr.min 0
+v3queriesr.label IGMPv3 queries recv
+v3queriesr.type DERIVE
+v3queriesr.min 0
+badqueries.label IGMP bad queries recv
+badqueries.type DERIVE
+badqueries.min 0
+queriesfail.label IGMP queries fail
+queriesfail.type DERIVE
+queriesfail.min 0
+v1reportsr.label IGMPv1 reports recv
+v1reportsr.type DERIVE
+v1reportsr.min 0
+v2reportsr.label IGMPv2 reports recv
+v2reportsr.type DERIVE
+v2reportsr.min 0
+v3reportsr.label IGMPv3 reports recv
+v3reportsr.type DERIVE
+v3reportsr.min 0
+badreports.label IGMP bad reports recv
+badreports.type DERIVE
+badreports.min 0
+igmpleavereports.label IGMP leave reports recv
+igmpleavereports.type DERIVE
+igmpleavereports.min 0
+badleavereports.label IGMP bad leave reports recv
+badleavereports.type DERIVE
+badleavereports.min 0
+v1queriess.label IGMPv1 queries sent
+v1queriess.type DERIVE
+v1queriess.min 0
+v2queriess.label IGMPv2 queries sent
+v2queriess.type DERIVE
+v2queriess.min 0
+v3queriess.label IGMPv3 queries sent
+v3queriess.type DERIVE
+v3queriess.min 0
+election.label IGMP query election switch
+election.type DERIVE
+election.min 0
+mrdsolicits.label MRD solitcits recv
+mrdsolicits.type DERIVE
+mrdsolicits.min 0
+mrdbad.label MRD bad solicits recv
+mrdbad.type DERIVE
+mrdbad.min 0
+mrdadvertise.label MRD advertise sent
+mrdadvertise.type DERIVE
+mrdadvertise.min 0
+mrdterminate.label MRD terminate sent
+mrdterminate.type DERIVE
+mrdterminate.min 0
+EOF
+        }
+    }
+    elsif ( $mode eq 'protoip' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF
+graph_vlabel Datagrams per \${graph_period}
+graph_category Network
+graph_title IP protocol
+graph_info IP protocol statistics for your Router on $host
+herrors.label IP header errors
+herrors.type DERIVE
+herrors.min 0
+forwarded.label Datagrams forwarded
+forwarded.type DERIVE
+forwarded.min 0
+fwderrors.label Datagram forwarding errors
+fwderrors.type DERIVE
+fwderrors.min 0
+reserrors.label Datagram forwarding resource errors
+reserrors.type DERIVE
+reserrors.min 0
+noroute.label Datagram dropped due to no route
+noroute.type DERIVE
+noroute.min 0
+fragments.label Total fragments received
+fragments.type DERIVE
+fragments.min 0
+droppedfrags.label Fragments dropped due to resources or timeouts
+droppedfrags.type DERIVE
+droppedfrags.min 0
+reassembled.label Datagrams reassembled
+reassembled.type DERIVE
+reassembled.min 0
+hostrec.label Host datagrams received
+hostrec.type DERIVE
+hostrec.min 0
+hostfwd.label Host datagrams forwarded
+hostfwd.type DERIVE
+hostfwd.min 0
+hostdrop.label Host datagrams dropped due to unknown proto
+hostdrop.type DERIVE
+hostdrop.min 0
+fragged.label Datagrams fragmented successfully
+fragged.type DERIVE
+fragged.min 0
+fragerrs.label Datagram fragmentation errors
+fragerrs.type DERIVE
+fragerrs.min 0
+totfrags.label Total Datagram fragments created successfully
+totfrags.type DERIVE
+totfrags.min 0
+EOF
+        }
+    }
+    elsif ( $mode eq 'prototcp' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF
+graph_vlabel Packets/Conections per \${graph_period}
+graph_category Network
+graph_title TCP protocol
+graph_info TCP protocol statistics for your Router on $host
+attempts.label TCP connection attempts
+attempts.type DERIVE
+attempts.min 0
+accepts.label TCP connection accepts
+accepts.type DERIVE
+accepts.min 0
+drops.label TCP connection drops
+drops.type DERIVE
+drops.min 0
+established.label TCP connections established
+established.type GAUGE
+received.label TCP packets recieved
+received.type DERIVE
+received.min 0
+transmitted.label TCP packets transmitted
+transmitted.type DERIVE
+transmitted.min 0
+retransmitted.label TCP packets retransmitted
+retransmitted.type DERIVE
+retransmitted.min 0
+errors.label TCP packet errors
+errors.type DERIVE
+errors.min 0
+EOF
+        }
+    }
+    elsif ( $mode eq 'protoudp' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF
+graph_vlabel Datagrams per \${graph_period}
+graph_category Network
+graph_title UDP protocol
+graph_info UDP protocol statistics for your Router on $host
+received.label Total UDP datagrams received
+received.type DERIVE
+received.min 0
+transmitted.label Total UDP datagrams transmitted
+transmitted.type DERIVE
+transmitted.min 0
+dropped.label UDP datagrams dropped due to no port
+dropped.type DERIVE
+dropped.min 0
+errors.label UDP datagram errors
+errors.type DERIVE
+errors.min 0
+EOF
+        }
+    }
+    elsif ( $mode eq 'protoicmp' ) {
+        if ( $ACCESS_MODE eq 'http' ) {
+            print "# Can't graph $mode stats unless by 'telnet'\n";
+            exit 1;
+        }
+        else {
+            print <<EOF
+graph_vlabel Datagrams recv (-) / sent (+) per \${graph_period}
+graph_category Network
+graph_title ICMP protocol
+graph_info ICMP protocol statistics for your Router on $host
+errorsr.label Packet errors
+errorsr.type DERIVE
+errorsr.min 0
+errorsr.graph no
+errorss.label Packet errors
+errorss.type DERIVE
+errorss.min 0
+errorss.negative errorsr
+unreachabler.label Dest. unreach.
+unreachabler.type DERIVE
+unreachabler.min 0
+unreachabler.graph no
+unreachables.label Dest. unreach.
+unreachables.type DERIVE
+unreachables.min 0
+unreachables.negative unreachabler
+timeexceedr.label Time exceeded
+timeexceedr.type DERIVE
+timeexceedr.min 0
+timeexceedr.graph no
+timeexceeds.label Time exceeded
+timeexceeds.type DERIVE
+timeexceeds.min 0
+timeexceeds.negative timeexceedr
+paramr.label Param problem
+paramr.type DERIVE
+paramr.min 0
+paramr.graph no
+params.label Param problem
+params.type DERIVE
+params.min 0
+params.negative paramr
+quenchr.label Source quench
+quenchr.type DERIVE
+quenchr.min 0
+quenchr.graph no
+quenchs.label Source quench
+quenchs.type DERIVE
+quenchs.min 0
+quenchs.negative quenchr
+redirectr.label Redirect
+redirectr.type DERIVE
+redirectr.min 0
+redirectr.graph no
+redirects.label Redirect
+redirects.type DERIVE
+redirects.min 0
+redirects.negative redirectr
+echor.label Echo
+echor.type DERIVE
+echor.min 0
+echor.graph no
+echos.label Echo
+echos.type DERIVE
+echos.min 0
+echos.negative echor
+echorepr.label Echo reply
+echorepr.type DERIVE
+echorepr.min 0
+echorepr.graph no
+echoreps.label Echo reply
+echoreps.type DERIVE
+echoreps.min 0
+echoreps.negative echorepr
+timestampr.label Timestamp req.
+timestampr.type DERIVE
+timestampr.min 0
+timestampr.graph no
+timestamps.label Timestamp req.
+timestamps.type DERIVE
+timestamps.min 0
+timestamps.negative timestampr
+timestamprepr.label Timestamp reply
+timestamprepr.type DERIVE
+timestamprepr.min 0
+timestamprepr.graph no
+timestampreps.label Timestamp reply
+timestampreps.type DERIVE
+timestampreps.min 0
+timestampreps.negative timestamprepr
+maskr.label Mask request
+maskr.type DERIVE
+maskr.min 0
+maskr.graph no
+masks.label Mask request
+masks.type DERIVE
+masks.min 0
+masks.negative maskr
+maskrepr.label Mask reply
+maskrepr.type DERIVE
+maskrepr.min 0
+maskrepr.graph no
+maskreps.label Mask reply
+maskreps.type DERIVE
+maskreps.min 0
+maskreps.negative maskrepr
+EOF
+        }
+    }
+
+    else {
+        print "Don't know how to graph $mode\n";
+        exit 1;
+    }
+    exit 0;
+}
+
+sub Uptime2Days {
+    my $uptime = shift;
+    my $days;
+    if ( $uptime =~ m{(\d+) days?, (\d+):(\d+):(\d+)}i ) {
+        $days =
+          int($1) + ( int($2) / 24 ) + ( int($3) / 1440 ) + ( int($4) / 86400 );
+    }
+    else {
+        $days = 'U';
+    }
+    print "# Uptime of '$uptime' becomes $days days\n" if $MUNIN_DEBUG;
+    return $days;
+}
+
+# Fetch
+if ( $ACCESS_MODE eq 'http' ) {
+    my $mech = WWW::Mechanize->new();
+    $mech->credentials( $USER, $PASS );
+    if ( $mode eq 'bandwidth' or $mode eq 'power' or $mode eq 'errors' ) {
+        print "# Fetching http://$host/cgi/b/dsl/dt/?be=0&l0=1&l1=0\n"
+          if $MUNIN_DEBUG;
+        $mech->get("http://$host/cgi/b/dsl/dt/?be=0&l0=1&l1=0");
+    }
+    elsif ( $mode eq 'uptime' ) {
+        print "# Fetching http://$host/cgi/b/bb/?be=0&l0=2&l1=-1\n"
+          if $MUNIN_DEBUG;
+        $mech->get("http://$host/cgi/b/bb/?be=0&l0=2&l1=-1");
+    }
+    if ( $mech->success() ) {
+        my $page = $mech->content;
+        if ( $mode eq 'bandwidth' ) {
+            $page =~ m{Bandwidth \(Up/Down\).*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+            my $upBW   = $1;
+            my $downBW = $2;
+            $upBW   =~ s/,//;
+            $downBW =~ s/,//;
+            print "down.value $downBW\n";
+            print "up.value $upBW\n";
+        }
+        elsif ( $mode eq 'power' ) {
+            $page =~ m{Output Power.*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+            my $upOUT   = $1;
+            my $downOUT = $2;
+            $upOUT   =~ s/,//;
+            $downOUT =~ s/,//;
+
+            $page =~ m{Line Attenuation.*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+            my $upLINE   = $1;
+            my $downLINE = $2;
+            $upLINE   =~ s/,//;
+            $downLINE =~ s/,//;
+
+            $page =~ m{SN Margin.*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+            my $upSN   = $1;
+            my $downSN = $2;
+            $upSN   =~ s/,//;
+            $downSN =~ s/,//;
+            print "downout.value $downOUT\n";
+            print "upout.value $upOUT\n";
+            print "downline.value $downLINE\n";
+            print "upline.value $upLINE\n";
+            print "downsn.value $downSN\n";
+            print "upsn.value $upSN\n";
+        }
+        elsif ( $mode eq 'errors' ) {
+            $page =~ m{FEC Errors.*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+            my $upFEC   = $1;
+            my $downFEC = $2;
+            $upFEC   =~ s/,//g;
+            $downFEC =~ s/,//g;
+
+            $page =~ m{CRC Errors.*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+            my $upCRC   = $1;
+            my $downCRC = $2;
+            $upCRC   =~ s/,//g;
+            $downCRC =~ s/,//g;
+
+            $page =~ m{HEC Errors.*<td[^>]+>([\d,\.]+) / ([\d,\.]+)};
+            my $upHEC   = $1;
+            my $downHEC = $2;
+            $upHEC   =~ s/,//g;
+            $downHEC =~ s/,//g;
+
+            print "downFEC.value $downFEC\n";
+            print "upFEC.value $upFEC\n";
+            print "downCRC.value $downCRC\n";
+            print "upCRC.value $upCRC\n";
+            print "downHEC.value $downHEC\n";
+            print "upHEC.value $upHEC\n";
+        }
+        elsif ( $mode eq 'uptime' ) {
+            my ( $DSLRaw, $DSLUp, $iNetRaw, $iNetUp, $BoxRaw, $BoxUp );
+            if ( $page =~ m{Uptime:.*<td[^>]+>(.*)</td>}g ) {
+                $DSLRaw = $1;
+                $DSLUp  = Uptime2Days($DSLRaw);
+            }
+            else {
+                $DSLUp = 'U';
+            }
+            if ( $page =~ m{Uptime:.*<td[^>]+>(.*)</td>}g ) {
+                $iNetRaw = $1;
+                $iNetUp  = Uptime2Days($iNetRaw);
+            }
+            else {
+                $iNetUp = 'U';
+            }
+
+            print "# Fetching http://$host/cgi/b/cfg/ov/?be=0&l0=1&l1=1\n"
+              if $MUNIN_DEBUG;
+            $mech->get("http://$host/cgi/b/cfg/ov/?be=0&l0=1&l1=1");
+            $page = $mech->content;
+            if ( $page =~ m{Time Since Power-on:.*<td[^>]+>(.*)</td>} ) {
+                $BoxRaw = $1;
+                $BoxUp  = Uptime2Days($BoxRaw);
+            }
+            else {
+                $BoxUp = 'U';
+            }
+
+            print "Box.value $BoxUp\n";
+            print "Box.extinfo $BoxRaw\n";
+            print "DSL.value $DSLUp\n";
+            print "DSL.extinfo $DSLRaw\n";
+            print "iNet.value $iNetUp\n";
+            print "iNet.extinfo $iNetRaw\n";
+        }
+        else {
+            print "Don't know how to graph $mode\n";
+            exit 1;
+        }
+        exit 0;
+    }
+}
+else {
+    our $telnet;
+
+    sub TelnetError {
+        my $errmsg = shift;
+        my %parts  = (
+            'atm' => [qw(RXCells RxErrors RxOctets TxCells TxErrors TxOctets)],
+            'bandwidth' => [qw(down downrate up uprate)],
+            'conntrack' =>
+              [qw(Active closing expected halfopen ICMP idle loose mcast non TCP TCPclosing TCPestablished TCPopen UDP)],
+            'dhcpclient' =>
+              [qw(ACKs Corrupted DECLINEs DISCOVERs failures INFORMs NAKs OFFERs Other RELEASEs REPLIES REQUESTs)],
+            'dhcprelay' =>
+              [qw(badc bogusg bogusr clientp corrupta missinga missingc packets serverp)],
+            'dhcpserver' =>
+              [qw(ACKs BOOTP Corrupted DECLINE DISCOVER dropped failures INFORM NAKs OFFERs Other RELEASE REQUEST)],
+            'dns' =>
+              [qw(corrupted discard external forwarded negative resolved spoofed spurious unknown)],
+            'errors' => [qw(downCRC downFEC downHEC upCRC upFEC upHEC)],
+            'firewall' =>
+              [qw(DroppedForward DroppedInput DroppedOutput ParsedForward ParsedInput ParsedOutput)],
+            'ids' => [qw(Active Collisions New Recycled Searches)],
+            'igmphost' =>
+              [qw(badchecksum badqueries badttl failing invalidmembership norouter receivedforour reportsreceived reportstransmitted toolong toosmall v1membershipq v2membershipq v3membershipq v3membershipr)],
+            'igmpproxy' =>
+              [qw(badchecksum badleavereports badqueries badreports badttl election igmpleavereports mrdadvertise mrdbad mrdsolicits mrdterminate noroute queriesfail toolong tooshort v1queriesr v1queriess v1reportsr v2queriesr v2queriess v2reportsr v3queriesr v3queriess v3reportsr)],
+            'power' => [qw(downline downout downsn upline upout upsn)],
+            'protoicmp' =>
+              [qw(echor echorepr echoreps echos errorsr errorss maskr maskrepr maskreps masks paramr params quenchr quenchs redirectr redirects timeexceedr timeexceeds timestampr timestamprepr timestampreps timestamps unreachabler unreachables)],
+            'protoip' =>
+              [qw(droppedfrags forwarded fragerrs fragged fragments fwderrors herrors hostdrop hostfwd hostrec noroute reassembled reserrors totfrags)],
+            'prototcp' =>
+              [qw(accepts attempts drops errors established received retransmitted transmitted)],
+            'protoudp' => [qw(dropped errors received transmitted)],
+            'uptime'   => [qw(Box DSL iNet)]
+        );
+
+        foreach ( @{$parts{$mode}} ) {
+            print "$_.value U\n";
+            print "$_.extinfo $errmsg\n";
+        }
+        print "# Sending \"exit\"\n" if $MUNIN_DEBUG;
+        if ( defined $telnet ) {
+            $telnet->errmode('return');
+            $telnet->print('exit');
+            $telnet->close;
+        }
+        exit 1;
+    }
+
+    print "# Connecting to $host:23...\n" if $MUNIN_DEBUG;
+    $telnet = new Net::Telnet(
+        Host    => $host,
+        Prompt  => '/{.*}.*=>$/',
+        ErrMode => \&TelnetError,
+        Timeout => 10
+    );
+
+    print "# Logging in...\n" if $MUNIN_DEBUG;
+    $telnet->login(
+        Name     => $USER,
+        Password => $PASS
+    );
+
+    if ( $mode eq 'bandwidth' ) {
+        print "# Sending \"xdsl info expand enabled\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'xdsl info expand enabled' );
+        foreach (@lines) {
+            if (/Payload rate .*:\s+(\d+)\s+(\d+)/) {
+                print "down.value $1\n";
+                print "up.value $2\n";
+            }
+        }
+        print "# Sending \"ip iflist\"\n" if $MUNIN_DEBUG;
+        @lines = $telnet->cmd( String => 'ip iflist' );
+        foreach (@lines) {
+            if (/.*wan\s+\d+\s+(\d+)\s+(\d+)/) {
+                print "downrate.value $1\n";
+                print "uprate.value $2\n";
+            }
+        }
+    }
+    elsif ( $mode eq 'power' ) {
+        print "# Sending \"xdsl info expand enabled\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'xdsl info expand enabled' );
+        foreach (@lines) {
+            if (/Attenuation.*:\s+([0-9\.]+)\s+([0-9\.]+)/) {
+                print "downline.value $1\n";
+                print "upline.value $2\n";
+            }
+            elsif (/Margins.*:\s+([0-9\.]+)\s+([0-9\.]+)/) {
+                print "downsn.value $1\n";
+                print "upsn.value $2\n";
+            }
+            elsif (/Output power.*:\s+([0-9\.]+)\s+([0-9\.]+)/) {
+                print "downout.value $1\n";
+                print "upout.value $2\n";
+            }
+        }
+    }
+    elsif ( $mode eq 'errors' ) {
+        print "# Sending \"xdsl info expand enabled\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'xdsl info expand enabled' );
+        my $state = 0;
+        foreach (@lines) {
+            if (/G.997.1 Statistics \(Current\)/) {
+                $state = 1;
+            }
+            elsif (/G.997.1 Statistics \(last/) {
+                $state = 0;
+            }
+            if ( $state == 1 and /Code Violation.*:\s+(\d+)/ ) {
+                print "downCRC.value $1\n";
+                print "upCRC.value U\n";
+            }
+            elsif ( $state == 1 and /FEC.*:\s+(\d+)/ ) {
+                print "downFEC.value $1\n";
+                print "upFEC.value U\n";
+            }
+            elsif ( $state == 1 and /HEC violation.*:\s+(\d+)\s+(\d+)/ ) {
+                print "downHEC.value $1\n";
+                print "upHEC.value $2\n";
+            }
+        }
+    }
+    elsif ( $mode eq 'uptime' ) {
+        my ( $DSLRaw, $DSLUp, $iNetRaw, $iNetUp, $BoxRaw, $BoxUp );
+        $DSLUp  = 'U';
+        $iNetUp = 'U';
+        $BoxUp  = 'U';
+        print "# Sending \"xdsl info expand enabled\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'xdsl info expand enabled' );
+        foreach (@lines) {
+            if (/Up time.*:\s+(.*)$/) {
+                $DSLRaw = $1;
+                $DSLUp  = Uptime2Days($DSLRaw);
+            }
+        }
+        print "# Sending \"system settime\"\n" if $MUNIN_DEBUG;
+        @lines = $telnet->cmd( String => 'system settime' );
+        foreach (@lines) {
+            if (/uptime = (.*)$/) {
+                $BoxRaw = $1;
+                $BoxUp  = Uptime2Days($BoxRaw);
+            }
+        }
+
+        print "# Sending \"ppp iflist\"\n" if $MUNIN_DEBUG;
+        @lines = $telnet->cmd( String => 'ppp iflist' );
+        foreach (@lines) {
+            if (/\[(\d+:\d+:\d+)\]/) {
+                $iNetRaw = $1;
+                $iNetUp  = Uptime2Days("0 days, $iNetRaw");
+            }
+        }
+        print "Box.value $BoxUp\n";
+        print "Box.extinfo $BoxRaw\n";
+        print "DSL.value $DSLUp\n";
+        print "DSL.extinfo $DSLRaw\n";
+        print "iNet.value $iNetUp\n";
+        print "iNet.extinfo $iNetRaw\n";
+    }
+    elsif ( $mode eq 'firewall' ) {
+        my ( $PI, $PO, $PF, $DI, $DO, $DF ) = ( 'U', 'U', 'U', 'U', 'U', 'U' );
+        print "# Sending \"firewall debug stats\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'firewall debug stats' );
+        foreach (@lines) {
+            $PI = $1 if (/Packets parsed in hook sink\s+:\s+(\d+)/);
+            $PO = $1 if (/Packets parsed in hook source\s+:\s+(\d+)/);
+            $PF = $1 if (/Packets parsed in hook forward\s+:\s+(\d+)/);
+            $DI = $1 if (/Packets dropped in hook sink\s+:\s+(\d+)/);
+            $DO = $1 if (/Packets dropped in hook source\s+:\s+(\d+)/);
+            $DF = $1 if (/Packets dropped in hook forward\s+:\s+(\d+)/);
+        }
+        print "ParsedInput.value $PI\n";
+        print "ParsedOutput.value $PO\n";
+        print "ParsedForward.value $PF\n";
+        print "DroppedInput.value $DI\n";
+        print "DroppedOutput.value $DO\n";
+        print "DroppedForward.value $DF\n";
+    }
+    elsif ( $mode eq 'ids' ) {
+        my ( $Active, $Recycled, $Searches, $New, $Collisions ) =
+          ( 'U', 'U', 'U', 'U', 'U' );
+        print "# Sending \"ids pattern stats\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'ids pattern stats' );
+        foreach (@lines) {
+            $Active     = $1 if (/number of active patterns\s+:\s+(\d+)/);
+            $Recycled   = $1 if (/number of recycled patterns\s+:\s+(\d+)/);
+            $Searches   = $1 if (/number of pattern searches\s+:\s+(\d+)/);
+            $New        = $1 if (/number of new patterns\s+:\s+(\d+)/);
+            $Collisions = $1 if (/number of hash collisions\s+:\s+(\d+)/);
+        }
+        print "Active.value $Active\n";
+        print "Recycled.value $Recycled\n";
+        print "Searches.value $Searches\n";
+        print "New.value $New\n";
+        print "Collisions.value $Collisions\n";
+    }
+    elsif ( $mode eq 'atm' ) {
+        my ( $RxO, $RxC, $RxE, $TxO, $TxC, $TxE ) =
+          ( 'U', 'U', 'U', 'U', 'U', 'U' );
+        print "# Sending \"atm debug gstats\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'atm debug gstats' );
+        foreach (@lines) {
+            $RxO = $1 if (/received octets\s+=\s+(\d+)/);
+            $RxC = $1 if (/received cells\s+=\s+(\d+)/);
+            $RxE = $1 if (/errors on the input\s+=\s+(\d+)/);
+            $TxO = $1 if (/transmitted octets\s+=\s+(\d+)/);
+            $TxC = $1 if (/transmitted cells\s+=\s+(\d+)/);
+            $TxE = $1 if (/errors on output\s+=\s+(\d+)/);
+        }
+        print "RxOctets.value $RxO\n";
+        print "RxCells.value $RxC\n";
+        print "RxErrors.value $RxE\n";
+        print "TxOctets.value $TxO\n";
+        print "TxCells.value $TxC\n";
+        print "TxErrors.value $TxE\n";
+    }
+    elsif ( $mode eq 'conntrack' ) {
+        print "# Sending \"connection stats\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'connection stats' );
+        foreach (@lines) {
+            if (/^Number of (.*) connections\s+:\s+(\d+)/) {
+                my $field = $1;
+                my $value = $2;
+                $field =~ s/\s+//g;
+                $field = 'non' if ( $field eq "nonTCP/UDP/ICMP" );
+                print "$field.value $value\n";
+            }
+        }
+    }
+    elsif ( $mode eq 'dhcpclient' ) {
+        print "# Sending \"dhcp client debug stats\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'dhcp client debug stats' );
+        foreach (@lines) {
+            chomp;
+            print "# Got '$_'\n" if $MUNIN_DEBUG;
+            if (   /(Corrupted) packet recv\s+:\s+(\d+)/
+                or /(\S+)\s+recv\s+:\s+(\d+)/
+                or /(\S+)\s+sent\s+:\s+(\d+)/
+                or /Pure BOOTP (REPLIES)\s+:\s+(\d+)/
+                or /(Other) message types\s+:\s+(\d+)/
+                or /Packet\s+sent (failures)\s+:\s+(\d+)/ )
+            {
+                print "$1.value $2\n";
+            }
+        }
+    }
+    elsif ( $mode eq 'dhcprelay' ) {
+        print "# Sending \"dhcp relay debug stats\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'dhcp relay debug stats' );
+        foreach (@lines) {
+            if (/(\S+\s+\S).*:\s+(\d+)/) {
+                my $field = $1;
+                my $value = $2;
+                $field =~ s/\s+//g;
+                $field = lc $field;
+                print "$field.value $value\n";
+            }
+        }
+    }
+    elsif ( $mode eq 'dhcpserver' ) {
+        print "# Sending \"dhcp server debug stats\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'dhcp server debug stats' );
+        foreach (@lines) {
+            print "# Got '$_'\n" if $MUNIN_DEBUG;
+            if (   /(Corrupted) packet recv\s+:\s+(\d+)/
+                or /^(\S+)\s+:\s+(\d+)/
+                or /Pure (BOOTP) REQUESTS\s+:\s+(\d+)/
+                or /(Other) message types\s+:\s+(\d+)/
+                or /(\S+) sent\s+:\s+(\d+)/
+                or /Packet sent (failures)\s+:\s+(\d+)/
+                or /Relay agent options (dropped)\s+:\s+(\d+)/ )
+            {
+                print "$1.value $2\n";
+            }
+        }
+    }
+    elsif ( $mode eq 'dns' ) {
+        print "# Sending \"dns server debug stats\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'dns server debug stats' );
+        my @kw =
+          qw(corrupted resolved negative forwarded external spoofed discard spurious unknown);
+        foreach (@lines) {
+            foreach my $kw (@kw) {
+                if (/$kw.*:\s+(\d+)/i) {
+                    print "$kw.value $1\n";
+                }
+            }
+        }
+    }
+    elsif ( $mode eq 'igmphost' ) {
+        print "# Sending \"igmp host debug stats\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'igmp host debug stats' );
+        my @kw = qw(toosmall toolong badchecksum badttl norouter
+          v1membershipq v2membershipq v3membershipq
+          badqueries failing reportsreceived
+          invalidmembership receivedforour
+          reportstransmitted v3membershipr);
+        foreach (@lines) {
+            chomp;
+            print "# Got '$_'\n" if $MUNIN_DEBUG;
+            if (/(.*)\s+:\s+(\d+)/) {
+                my $field = lc $1;
+                my $value = $2;
+                $field =~ s/\s+//g;
+                foreach my $kw (@kw) {
+                    if ( $field =~ /$kw/ ) {
+                        print "$kw.value $value\n";
+                    }
+                }
+            }
+        }
+    }
+    elsif ( $mode eq 'igmpproxy' ) {
+        print "# Sending \"igmp proxy debug stats\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'igmp proxy debug stats' );
+        my @kw = qw(tooshort toolong badchecksum badttl noroute
+          v1queriesr v2queriesr v3queriesr badqueries
+          queriesfail v1reportsr v2reportsr v3reportsr
+          badreports igmpleavereports badleavereports
+          v1queriess v2queriess v3queriess election
+          mrdsolicits mrdbad mrdadvertise mrdterminate);
+
+        foreach (@lines) {
+            chomp;
+            print "# Got '$_'\n" if $MUNIN_DEBUG;
+            if (/(.*)\s*:\s+(\d+)/) {
+                my $field = lc $1;
+                my $value = $2;
+                $field =~ s/\s+//g;
+                foreach my $kw (@kw) {
+                    if ( $field =~ /$kw/ ) {
+                        print "$kw.value $value\n";
+                    }
+                }
+            }
+        }
+    }
+    elsif ( $mode eq 'protoip' ) {
+        print "# Sending \"ip debug stats proto=ip\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'ip debug stats proto=ip' );
+        my %kws = (
+            herrors      => 'IP header errors',
+            forwarded    => 'Datagrams forwarded',
+            fwderrors    => 'Datagram forwarding errors',
+            reserrors    => 'Datagram forwarding resource errors',
+            noroute      => 'Datagram dropped due to no route',
+            fragments    => 'Total Fragments received',
+            droppedfrags => 'Fragments dropped due to resources or timeouts',
+            reassembled  => 'Datagrams reassembled',
+            hostrec      => 'Host datagrams received',
+            hostfwd      => 'Host datagrams forwarded',
+            hostdrop     => 'Host datagrams dropped due to unknown proto',
+            fragged      => 'Datagrams fragmented successfully',
+            fragerrs     => 'Datagram fragmentation errors',
+            totfrags     => 'Total Datagram fragments created successfully'
+        );
+        foreach (@lines) {
+            chomp;
+            print "# Got '$_'\n" if $MUNIN_DEBUG;
+            if (/(.*)\s+:\s+(\d+)/) {
+                my $field = $1;
+                my $value = $2;
+                foreach my $kw ( keys %kws ) {
+                    if ( $field =~ /$kws{$kw}/ ) {
+                        print "$kw.value $value\n";
+                    }
+                }
+            }
+        }
+    }
+    elsif ( $mode eq 'prototcp' ) {
+        print "# Sending \"ip debug stats proto=tcp\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'ip debug stats proto=tcp' );
+        my @kw = qw(attempts accepts drops established received
+          transmitted retransmitted errors);
+        foreach (@lines) {
+            chomp;
+            print "# Got '$_'\n" if $MUNIN_DEBUG;
+            foreach my $kw (@kw) {
+                if (/\b$kw\b.*:\s+(\d+)/) {
+                    print "$kw.value $1\n";
+                }
+            }
+        }
+    }
+    elsif ( $mode eq 'protoudp' ) {
+        print "# Sending \"ip debug stats proto=udp\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'ip debug stats proto=udp' );
+        my @kw = qw(received transmitted dropped errors);
+        foreach (@lines) {
+            foreach my $kw (@kw) {
+                if (/$kw.*:\s+(\d+)/) {
+                    print "$kw.value $1\n";
+                }
+            }
+        }
+    }
+    elsif ( $mode eq 'protoicmp' ) {
+        print "# Sending \"ip debug stats proto=icmp\"\n" if $MUNIN_DEBUG;
+        my @lines = $telnet->cmd( String => 'ip debug stats proto=icmp' );
+        my %kws = (
+            errors       => 'packet errors',
+            unreachable  => 'destination unreachable',
+            timeexceed   => 'time exceeded',
+            param        => 'param problem',
+            quench       => 'source quench',
+            redirect     => 'redirect',
+            echo         => 'echo',
+            echorep      => 'echo reply',
+            timestamp    => 'timestamp request',
+            timestamprep => 'timestamp reply',
+            mask         => 'mask request',
+            maskrep      => 'mask reply'
+        );
+        my $sentrecv = 'U';
+        foreach (@lines) {
+            chomp;
+            print "# Got '$_'\n" if $MUNIN_DEBUG;
+            if (/Total ICMP datagrams received/) {
+                print "# SentRecv => r\n" if $MUNIN_DEBUG;
+                $sentrecv = 'r';
+                next;
+            }
+            if (/Total ICMP datagrams transmitted/) {
+                print "# SentRecv => s\n" if $MUNIN_DEBUG;
+                $sentrecv = 's';
+                next;
+            }
+            if (/ICMP\s+(.*)\s+:\s+(\d+)/) {
+                my $field = $1;
+                my $value = $2;
+                foreach my $kw ( keys %kws ) {
+                    if ( $field =~ /^\s*$kws{$kw}\s*$/ ) {
+                        print "${kw}${sentrecv}.value $value\n";
+                    }
+                }
+            }
+        }
+    }
+
+    print "# Sending \"exit\"\n" if $MUNIN_DEBUG;
+    $telnet->print('exit');
+    $telnet->close;
+    exit 0;
+}
+

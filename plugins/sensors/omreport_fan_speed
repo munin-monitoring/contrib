@@ -1,0 +1,114 @@
+#! /usr/bin/perl -w
+#
+# Copyright (C) 2008 Rackspace US, Inc. <http://www.rackspace.com>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, see http://www.gnu.org/licenses/gpl.txt
+#
+#
+# This plugin will graph the chassis fan sensors on a Dell PowerEdge Server
+# via the omreport tool. It has been tested on the following chassis:
+#
+#   PE2650/6650
+#   PE2850/6850
+#   PE2950
+#
+# To enable, link omreport_fan_speed to this file. E.g.
+#
+#   ln -s /usr/share/node/node/plugins/omreport_fan_speed /etc/munin/plugins/omreport_fan_speed
+#
+# Configuration parameters for /etc/munin/plugin-conf.d/munin-node
+#
+# [omreport_*]
+#   user         - User that has permissions to run the omreport binary
+#   env.omreport - Path to the omreport binary
+#
+# Parameters:
+#
+#   config
+#   autoconf
+#
+# Author: Justin Shepherd <galstrom21@gmail.com>
+# Revision: 1.5  2008/10/22
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+
+my $omreport = $ENV{"omreport"} || "/usr/bin/omreport";
+
+if ($ARGV[0] && $ARGV[0] eq "autoconf") {
+        if (-f $omreport) {
+                print "yes\n";
+        }
+        else {
+                print "no ($omreport does not exist)\n";
+                exit(1);
+        }
+} # end if
+else {
+        my $cmd = "$omreport chassis fans";
+        my @result = `$cmd`;
+        my (%val, $index);
+        foreach my $line (@result) {
+                $line =~ s/\s+/ /g;
+                $line =~ s/\s$//g;
+                next if ($line eq "");
+                my ($field, $value) = split(/ \: /, $line);
+                if ($field eq "Index") {
+                        $val{$value} = {};
+                        $index = $value;
+                }
+                elsif ($field eq "Probe Name") {
+                        $value =~ s/ RPM//g;
+                        $val{$index}{$field} = "$value";
+                }
+                elsif ($field eq "Reading") {
+                        $value =~ s/ RPM//g;
+                        $val{$index}{"$field"} = "$value";
+                }
+                elsif ($field eq "Maximum Warning Threshold") {
+                        $value =~ s/ RPM//g;
+                        $val{$index}{"Warning Threshold"} = "$value";
+                }
+                elsif ($field eq "Maximum Failure Threshold") {
+                        $value =~ s/ RPM//g;
+                        $val{$index}{"Critical Threshold"} = "$value";
+                }
+        }
+
+        if ($ARGV[0] && $ARGV[0] eq "config") {
+                print "graph_title OpenManage - Fan Probes\n";
+                print "graph_args --base 1000 -l 0\n";
+                print "graph_vlabel Speed in RPMs\n";
+                print "graph_category Sensors\n";
+                foreach my $j (sort keys %val) {
+                        print "fan_$j.label $val{$j}{\"Probe Name\"}\n";
+                        if ($val{$j}{"Warning Threshold"} !~ m/\[N\/A\]/i) {
+                                print "fan_$j.warning " .
+                                      "$val{$j}{\"Warning Threshold\"}\n";
+                        }
+                        if ($val{$j}{"Critical Threshold"} !~ m/\[N\/A\]/i) {
+                                print "fan_$j.critical " .
+                                      "$val{$j}{\"Critical Threshold\"}\n";
+                        }
+                }
+        }
+        else {
+                foreach my $j (sort keys %val) {
+                        print "fan_$j.value $val{$j}{\"Reading\"}\n";
+                }
+        }
+}
+exit(0);

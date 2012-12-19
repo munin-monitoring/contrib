@@ -1,0 +1,110 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+
+=head1 NAME
+
+dar_vmstat - Munin plugin to monitor darwin virtual memory usage.
+
+=head1 APPLICABLE SYSTEMS
+
+Should work on any darwin (Mac OS X) system with the 'vm_stat' command.
+
+=head1 CONFIGURATION
+
+None needed
+
+=head1 INTERPRETATION
+
+The plugin runs the vm_stat command a shows the results.  Consult the
+vm_stat man page for more information on the output.
+
+=head1 BUGS
+
+None right now.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+  v.0.0.1
+
+=head1 AUTHOR
+
+Copyright (C) 2010.
+
+Original version by J.T.Sage (at) gmail (dot) com.
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+use Munin::Plugin;
+
+if ( defined($ARGV[0])) {
+    if ($ARGV[0] eq 'autoconf') {
+	$uname = `uname`;
+	if ( not ( $uname =~ /Darwin/ ) ) { print "no (not a Darwin System)\n"; }
+	else {
+		if ( not -x "/usr/bin/vm_stat" ) { print "no (vm_stat not found)\n"; }
+		else {
+			print "yes\n";
+		}
+	}
+	exit 0;
+    }
+
+    if ( $ARGV[0] eq "config" ) {
+	print "graph_title Virtual Memory Statiscs\n";
+	print "graph_args --base 1000 -l 0\n";
+	print "graph_vlabel bytes\n";
+	print "graph_scale yes\n";
+	print "graph_category system\n";
+	@vmstat = `vm_stat`;
+	for ( $i = 1;  $i < $#vmstat; $i++ ) {
+		$line = $vmstat[$i];
+		$label = $line;
+		$label =~ s/"//g;
+		$label =~ s/(\w+)\:.+$/$1/;
+		$label =~ s/\n//g;
+		$name = $label;
+		$name =~ tr/A-Z/a-z/;
+		$name =~ s/[^A-Za-z0-9_]/_/g;
+		if ( $name eq "pages_free" || $name eq "pages_active" || $name eq "pages_inactive" || $name eq "pages_speculative" || $name eq "pages_wired_down" ) {
+			$label =~ s/Pages //;
+			print $name, ".label ", $label, "\n";
+			print $name, ".type GAUGE\n";
+			print $name, ".cdef ", $name, ",4096,*\n";
+		}
+	}
+	exit 0;
+    }
+}
+
+@vmstat = `vm_stat`;
+for ( $i = 1;  $i < $#vmstat; $i++ ) {
+	$line = $vmstat[$i];
+	$label = $line;
+	$label =~ s/"//g;
+	$label =~ s/(\w+)\:.+$/$1/;
+	$label =~ s/\n//g;
+	$name = $label;
+	$name =~ tr/A-Z/a-z/;
+	$name =~ s/[^A-Za-z0-9_]/_/g;
+	$data = $line;
+	$data =~ s/.+?(\d+)\./$1/;
+	$data =~ s/\n//g;
+	#$data = int(($data / 1000) + .5);
+	if ( $name eq "pages_free" || $name eq "pages_active" || $name eq "pages_inactive" || $name eq "pages_speculative" || $name eq "pages_wired_down" ) {
+		print $name, ".value ", $data, "\n";
+	}
+
+}
+
+
+
+# vim:syntax=perl

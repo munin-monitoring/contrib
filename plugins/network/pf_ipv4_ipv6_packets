@@ -1,0 +1,41 @@
+#!/bin/sh
+pfctl='/sbin/pfctl'
+
+if [ "$1" = "config" ]; then
+    cat <<EOF
+graph_title OpenBSD pf packets ipv4/ipv6
+graph_vlabel packets numbers
+graph_scale no
+graph_category network
+graph_args -l 0
+graph_info OpenBSD pf packets ipv4/ipv6
+EOF
+    cat <<EOF
+ipv4in.label ipv4 IN
+ipv4in.min 0
+ipv4in.type DERIVE
+ipv4out.label ipv4 OUT
+ipv4out.min 0
+ipv4out.type DERIVE
+ipv6in.label ipv6 IN
+ipv6in.min 0
+ipv6in.type DERIVE
+ipv6out.label ipv6 OUT
+ipv6out.min 0
+ipv6out.type DERIVE
+EOF
+exit 0
+fi
+if [ "$1" = "autoconf" ]; then
+    echo yes
+    exit 0
+fi
+
+ipv4_in=$(/sbin/pfctl -si 2>/dev/null | grep 'Bytes In' | awk '{print $3}')
+ipv6_in=$(/sbin/pfctl -si 2>/dev/null  | grep 'Bytes In' | awk '{print $4}')
+ipv4_out=$(/sbin/pfctl -si 2>/dev/null  | grep 'Bytes Out' | awk '{print $3}')
+ipv6_out=$(/sbin/pfctl -si 2>/dev/null  | grep 'Bytes Out' | awk '{print $4}')
+echo "ipv4in.value $ipv4_in"
+echo "ipv4out.value $ipv4_out"
+echo "ipv6in.value $ipv6_in"
+echo "ipv6out.value $ipv6_out"

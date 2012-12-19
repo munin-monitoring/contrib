@@ -1,0 +1,66 @@
+#!/bin/sh
+#
+# Plugin to count specific log categories for courier servers (pop3/imap)
+#
+# Magic markers - optional - used by installation scripts and
+# munin-config:
+#
+#%# family=manual
+#%# capabilities=suggest
+
+CATEGORIES="peer_reset Reset_by_peer Connection reset by peer
+	conn_timeout Connection_timeout Connection timed out
+	disconnected Disconnected DISCONNECTED
+	timeout Timeout TIMEOUT
+	login Login LOGIN
+	logout Logout LOGOUT
+	mem_full FAM_needs_restart malloc: Input/output error
+	conn_full Connection_limit_reached malloc: Input/output error"
+LOG_FILE=${LOG_FILE:-/var/log/mail.info}
+SUGGESTIONS="pop3d pop3d-ssl imapd imapd-ssl"
+
+
+# "autoconf" and "suggest" only work reliably if the mail server already
+# contains some log entries.
+
+if [ "$1" = "autoconf" ]; then
+	[ ! -e "$LOG_FILE" ] && echo "no (no log file found: $LOG_FILE)" && exit 0
+	for suggestion in $SUGGESTIONS; do
+		grep -q " $suggestion: " "$LOG_FILE" && echo "yes" && exit 0
+	 done
+	# no suitable line found in the log file
+	echo "no (no courier pop3d/imapd lines in $LOG_FILE found)"
+        exit 0
+fi
+
+if [ "$1" = "suggest" ]; then
+	for suggestion in $SUGGESTIONS; do
+		grep -q " $suggestion: " "$LOG_FILE" && echo "$suggestion"
+	 done
+	exit 0
+fi
+
+
+type=$(basename "$0" | tr "_" "\n" | tail -1)
+
+
+if [ "$1" = "config" ]; then
+	cat <<EOT
+graph_title Courier log ($type)
+graph_args --base 1000 -l 0 
+graph_vlabel events per second
+graph_category Mail
+EOT
+echo "$CATEGORIES" | while read field label match; do
+	echo "${field}.label $(echo "$label" | tr "_" " ")"
+	echo "${field}.type DERIVE"
+	echo "${field}.min 0"
+ done
+exit 0
+fi
+
+echo "$CATEGORIES" | while read field label match; do
+	echo -n "${field}.value "
+	grep " $type: " "$LOG_FILE" | grep "$match" | wc -l
+ done
+

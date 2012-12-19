@@ -1,0 +1,118 @@
+#!/bin/bash
+
+#%# family=manual
+#%# capabilities=autoconf
+
+# this munin plugin monitors the icecast server specified in RADIO. for each stream,
+# the stream name, number of current listeners, and peak number of listeners are
+# passed to munin.
+# dependencies on external program:  (either program or program combination will work):
+#   dog  + html2text
+#   curl + html2text
+#   wget + html2text
+#   links
+#   lynx
+
+
+# yyyy/mm/dd   v     author        changelog:
+# 2008/01/15 v0.02 Lothar Schmidt  added alternetive retrievers, stream name substitution
+# 2008/01/15 v0.01 Lothar Schmidt  initial version, email: l.make.a.noise.here@scarydevilmonastery.net
+
+
+
+
+
+# ----------------------------------------------------------------------------------
+#
+#                           CONFIGURATION DEPARTMENT
+#
+# ----------------------------------------------------------------------------------
+
+
+#RADIO="http://localhost:8000"                   # query this server on this port
+RADIO="http://scarydevilmonastery.net:8000"
+STYLE=LINE2                                      # graph style for number of listeners
+PEAKSTYLE=LINE                                   # graph style for peak listeners
+GRAPH="listeners"                                # graph name, labels
+SECTION="Trial"                                  # graph section
+
+
+# stream name substitution. stream name left of = will use description right of = for labels
+stream1="No Noise No Fun"
+stream2="Radio Sueno"
+stream3="Don't Panic"
+stream4="Project Bluebird"
+
+
+# fetch and render status info, choose one. top to bottom order of my personal preference.
+# chose exactly one.
+retriever() {
+     dog $RADIO | html2text -nobs                # using dog and html2text
+#     curl $RADIO 2>/dev/null|html2text -nobs    # using curl and html2text
+#     wget -qFO - $RADIO | html2text -nobs       # using wget and html2text
+#     links -dump $RADIO                         # using links
+#     lynx -dump $RADIO                          # using lynx
+}
+
+
+# -------------------------------------------------------------------------------------
+
+
+
+
+# --- retrieve stream name, listeners and peak listeners from server ---
+STREAMS=( $( retriever | sed -n 's/^ *\(Stream URL\|Current Listeners\|Peak Listeners\): *//p' ) )
+LASTSTREAM=${#STREAMS[*]}
+
+
+
+
+
+# --- check whether any stream found ---
+run_autoconf() {
+   if (( $LASTSTREAM )) ; then  echo yes ;  exit 0 ;  fi      # found streams
+   echo U ; exit 1 ; }                                        # no radio or streams
+
+
+
+
+
+#--- guess ---
+run_config() {
+cat << EOF
+graph_title ${GRAPH}
+graph_category ${SECTION}
+graph_args --base 1000 -l 0
+graph_vlabel ${GRAPH}
+EOF
+for (( I=2 ; I<LASTSTREAM ; I+=3 )) ; do
+   STREAM="${STREAMS[I]##*/}"                                 # stream name
+   STREAMNAME="${!STREAM:-$STREAM}"                           # substitute against our own desciption, if available
+cat << EOF
+${STREAM}.label $STREAMNAME
+${STREAM}.draw $STYLE
+${STREAM}.info $STREAMNAME
+${STREAM}peak.label $STREAMNAME peak
+${STREAM}peak.draw $PEAKSTYLE
+${STREAM}peak.info $STREAMNAME peak
+EOF
+done
+}
+
+
+
+
+
+# --- current listeners and peak listeners for each stream ---
+run_()  {
+   for (( I=0 ; I<LASTSTREAM ; I+=3 )) ; do
+      STREAM="${STREAMS[I+2]##*/}"
+      echo ${STREAM}.value ${STREAMS[I]}
+      echo ${STREAM}peak.value ${STREAMS[I+1]}
+   done
+}
+
+
+# plugin entry point:
+run_$1
+

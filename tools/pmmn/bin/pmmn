@@ -1,0 +1,144 @@
+#! /usr/bin/perl
+# Poor man's Munin Node
+# Usable with as little as Perl 5 core
+#(c) 2012 LGPL - Steve Schnepp <steve.schnepp@pwkf.org>
+
+use warnings;
+use strict;
+use Carp;
+use Data::Dumper;
+
+use Getopt::Long;
+use Pod::Usage;
+
+$| = 1;
+
+my $VERSION = "1.0.0";
+
+my $port; # Default is stdin/stdout
+my $verbose;
+my $host;
+my $plugin_dir = "plugins";
+my $spoolfetch_dir;
+
+{
+	my $man = 0;
+	my $help = 0;
+
+	GetOptions(
+		'port|p=i' => \$port, 
+		'verbose|v' => \$verbose, 
+		'plugin-dir|d=s' => \$plugin_dir, 
+		'host|h=s' => \$host, 
+
+		'spoolfetch-dir|s=s' => \$spoolfetch_dir,
+
+		'help|?' => \$help, 
+		man => \$man,
+	) or pod2usage(2);
+	pod2usage(1) if $help;
+	pod2usage(-exitstatus => 0, -verbose => 2) if $man;
+}
+
+# Handle $port
+if ($port) {
+	die ("--port is not yet supported");
+}
+
+$host ||= `hostname`;
+chomp($host);
+print "# munin node at $host\n";
+while(my $line = <>) {
+	chomp($line);
+	my ($cmd, $arg) = split(/ /, $line, 2);
+	$arg ||= "";
+	my $plugin_filename = $plugin_dir . "/" . $arg;
+	if (! $cmd) { next; }
+	if ($cmd eq "version") {
+		print "munins node on $host version: $VERSION";
+		next;
+	} elsif ($cmd eq "nodes") {
+		print "$host\n";
+		print ".";
+		next;
+	} elsif ($cmd eq "quit") {
+		exit(0);
+	} elsif ($cmd eq "list") {
+		opendir(PLUGIN_DIR, $plugin_dir) or die("cannot open: $@");
+		while(my $plugin = readdir(PLUGIN_DIR)) {
+			chomp($plugin);
+			if ($plugin =~ m/^\./) { next; }
+			next unless (-x "$plugin_dir/$plugin");
+			print "$plugin ";
+		}
+		closedir(PLUGIN_DIR);
+		next;
+	} elsif ($cmd eq "config" || $cmd eq "alert" || $cmd eq "fetch") {
+		if (-d $plugin_filename || ! -x $plugin_filename) {
+			print "# Unknown plugin [$arg] for $cmd";
+			next;
+		}
+		my $arg_plugin = ($cmd eq "fetch") ? "" : $cmd;
+		system($plugin_filename, $arg_plugin);
+		print ".";
+		next;
+	} elsif ($cmd eq "cap") {
+		print "cap ";
+		print "spool " if $spoolfetch_dir;
+		next;
+	} elsif ($cmd eq "spoolfetch" && $spoolfetch_dir) {
+		system("$spoolfetch_dir/spoolfetch_$host", $arg);
+		print ".";
+		next;
+	}
+        
+	# Arriving here is not a good sign
+	print "# Unknown command. Try list, nodes, config, fetch, version, alert or quit";
+} continue {
+	print "\n";
+};
+
+
+__END__
+
+=head1 NAME
+
+pmmn - Poor man's Munin Node
+
+=head1 SYNOPSIS
+
+pmmn [options]
+
+Options:
+
+	--port			Port to listen to (default is stdin/stdout)
+	--verbose		Verbose mode
+	--plugin-dir		Plugin directory (default is current dir)
+	--host			Host name (default is /bin/hostname)
+
+	--spoolfetch-dir        Spoolfetch plugin dirs (default is disabled)
+
+	--help			brief help message
+	--man			full documentation
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<-help>
+
+Print a brief help message and exits.
+
+=item B<-man>
+
+Prints the manual page and exits.
+
+=back
+
+=head1 DESCRIPTION
+
+B<This program> emulates a poor man's munin-node. It can listen on a port or,
+most frequently read its commands from stdin, sending output on stdout. This is
+in order to be managed by inetd or a custom SSH vehicule.
+
+=cut

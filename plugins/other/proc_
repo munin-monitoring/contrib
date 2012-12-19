@@ -1,0 +1,433 @@
+#!/usr/bin/perl 
+# -*- perl -*-
+#
+# proc_ - Munin plugin to for Process information
+# Copyright (C) 2009  Redpill Linpro AS
+# Copyright (C) 2010  Trygve Vea
+#
+# Author: Kristian Lyngstøl <kristian@redpill-linpro.com>
+# Author: Trygve Vea <tv@redpill-linpro.com>
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+=head1 NAME
+
+proc_ - Munin plugin to monitor various aspects of named processes
+
+=head1 APPLICABLE SYSTEMS
+
+Processes running under Linux
+
+=head1 CONFIGURATION
+
+The plugin needs to be able to parse the /proc-filesystem.
+
+The configuration section shows the defaults
+  [proc_*]
+     env.procname init
+     env.category Process Info
+
+env.procname defines the processname as seen inside the paranthesis of the 
+second column in /proc/pid/stat. If you don't get the data you expect, you
+can check if the value is what you expect here.
+
+env.category is used to override the default category the plugin will show
+up in.
+
+=head1 INTERPRETATION
+
+Each graph uses data from the proc filesystem.
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=head1 VERSION
+
+ $Id$
+
+=head1 BUGS
+
+The CPU usage graph will be misleading in an event where you have multiple
+processes monitored, but less then all of them is restarted (or exits). This
+is due to the nature of counters, and I need to track state of individual
+processes to do this in a reliable way. It's on my TODO.
+
+=head1 PATCHES-TO
+
+Dunno.
+
+=head1 AUTHOR
+
+Kristian Lyngstol <kristian@redpill-linpro.com>
+Trygve Vea <tv@redpill-linpro.com>
+
+=head1 THANKS
+
+Thanks to Kristian Lyngstol, I stole most of the code in this plugin from his
+varnish_-plugin, which is a really nice outline of how a wildcardplugin should
+look like.
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+use strict;
+
+# Set to 1 to enable output when a variable is defined in a graph but
+# omitted because it doesn't exist in varnishstat.
+my $DEBUG = 0;
+
+# Set to 1 to ignore 'DEBUG' and suggest all available aspects.
+my $FULL_SUGGEST = 0;
+
+# You should set the env-var "procname" to filter processes of their name.
+# This will default to "init" unless you specify anything else.
+my $procname = exists $ENV{'procname'} ? $ENV{'procname'} : "init";
+
+# You can set the env-var "procargs" to filter processes of their running
+# arguments.
+my $args = exists $ENV{'procargs'} ? $ENV{'procargs'} : undef;
+
+# You can set the env-var "category" to override the default category.
+my $category = exists $ENV{'category'} ? $ENV{'category'} : "Process info";
+
+my %procstats = ();
+my $self;
+
+
+# Parameters that can be defined on top level of a graph. Config will print
+# them as "graph_$foo $value\n"
+my @graph_parameters = ('title','total','order','scale','vlabel','args');
+
+# Parameters that can be defined on a value-to-value basis and will be
+# blindly passed to config. Printed as "$fieldname.$param $value\n".
+my @field_parameters = ('graph', 'min', 'max', 'draw', 'cdef', 'warning',
+                        'colour', 'info', 'type');
+# Data structure that defines all possible graphs (aspects) and how they
+# are to be plotted. Every top-level entry is a graph/aspect. Each top-level graph
+# MUST have title set and 'values'. 
+# 
+# Graphs with 'DEBUG' set to anything is omitted from 'suggest'.
+# 
+# 'rpn' on values allows easy access to graphs consisting of multiple
+# values from procstats. (Reverse polish notation). The RPN
+# implementation only accepts +-*/ and procstats-values.
+#
+# Any value left undefined will be left up to Munin to define/ignore/yell 
+# about.
+#
+# See munin documentation or rrdgraph/rrdtool for more information.
+my %ASPECTS = (
+    'cpu' => {
+        'title' => "CPU Usage: $procname",
+        'order' => 'stime utime',
+        'args' => '-l 0',
+        'values' => {
+            'utime' => {
+                'type' => 'COUNTER',
+                'label' => 'User time',
+                'draw' => 'STACK'
+            },
+            'stime' => {
+                'type' => 'COUNTER',
+                'label' => 'System time',
+                'draw' => 'AREA'
+            }
+        }
+    },
+    'ctxt_switches' => {
+        'title' => "Context switches: $procname",
+        'values' => {
+            'voluntary_ctxt_switches' => {
+                'type' => 'COUNTER',
+                'label' => 'Voluntary Context Switches'
+            },
+            'nonvoluntary_ctxt_switches' => {
+                'type' => 'COUNTER',
+                'label' => 'Nonvoluntary Context Switches'
+            }
+        }
+    },
+    'threads' => {
+        'title' => "Thread count: $procname",
+        'values' => {
+            'threads' => {
+                'type' => 'GAUGE',
+                'label' => 'Number of threads'
+            }
+        }
+    },
+    'processes' => {
+        'title' => "Process count: $procname",
+        'values' => {
+            'processes' => {
+                'type' => 'GAUGE',
+                'label' => 'Number of processes'
+            }
+        }
+    },
+    'memory' => {
+        'title' => "Memory usage: $procname",
+        'vlabel' => 'bytes',
+        'order' => 'VmStk VmExe VmLib VmData VmRSS VmSize',
+        'args' => '-l 0',
+        'values' => {
+            'VmSize' => {
+                'type' => 'GAUGE',
+                'label' => 'Virtual Memory Size'
+            },
+            'VmRSS' => {
+                'type' => 'GAUGE',
+                'label' => 'Resident set size',
+            },
+            'VmData' => {
+                'type' => 'GAUGE',
+                'label' => 'Data size',
+            },
+            'VmStk' => {
+                'type' => 'GAUGE',
+                'label' => 'Stack size',
+            },
+            'VmExe' => {
+                'type' => 'GAUGE',
+                'label' => 'Segments size',
+            },
+            'VmLib' => {
+                'type' => 'GAUGE',
+                'label' => 'Shared library size',
+            }
+        }
+    }
+);
+
+# Populate %procstats with values.
+sub populate_stats
+{
+    foreach my $line(`grep -h \\\($procname\\\) /proc/*/stat`) {
+        if ($line =~ /^(\d+) \((.*)\) (.) \-?\d+ \-?\d+ \-?\d+ \-?\d+ \-?\d+ \d+ \d+ \d+ \d+ \d+ (\d+) (\d+) \d+ \d+ \d+ \d+ (\d+) \-?\d+ \d+ (\d+) (\d+)/) {
+            $procstats{"utime"} += $4;
+            $procstats{"stime"} += $5;
+            $procstats{"threads"} += $6;
+            $procstats{"vsize"} += $7;
+            $procstats{"rss"} += $8;
+            $procstats{"processes"} += 1;
+            foreach my $line(`cat /proc/$1/status`){
+                if ($line =~ /^Vm(.*):\s+(\d+) kB$/){
+                    $procstats{"Vm$1"} += ($2*1024);
+                }
+                if ($line =~ /^(.*)_ctxt_switches:\s+(\d+)$/){
+                    $procstats{"$1_ctxt_switches"} += $2;
+                }
+            }
+        }
+    }
+}
+
+# Bail-function.
+sub usage
+{
+    if (defined(@_) && "@_" ne "") {
+        print STDERR "@_" . "\n\n";
+    }
+    print STDERR "Known arguments: suggest, config, autoconf.\n";
+    print STDERR "Run with suggest to get a list of known aspects.\n";
+    exit 1;
+}
+
+# Print 'yes' and exit true if it's reasonable to use this plugin.
+# Otherwise exit with false and a human-readable reason.
+sub autoconf
+{
+    print "no (Probably a yes, read about the plugin!)\n";
+    exit 0;
+}
+
+# Suggest relevant aspects/values of $self. 
+# 'DEBUG'-graphs are excluded.
+sub suggest
+{
+    foreach my $key (keys %ASPECTS) {
+        if (defined($ASPECTS{$key}{'DEBUG'}) && $FULL_SUGGEST != 1) {
+            next;
+        }
+        print "$key\n";
+    }
+}
+
+# Print the value of a two-dimensional hash if it exist.
+# Returns false if non-existant.
+#
+# Output is formatted for plugins if arg4 is blank, otherwise arg4 is used
+# as the title/name of the field (ie: arg4=graph_title).
+sub print_if_exist
+{
+    my %values = %{$_[0]};
+    my $value = $_[1];
+    my $field = $_[2];
+    my $title = "$value.$field";
+    if (defined($_[3])) {
+        $title = $_[3];
+    }
+    if (defined($values{$value}{$field})) {
+        print "$title $values{$value}{$field}\n";
+    } else {
+        return 0;
+    }
+}
+
+# Walk through the relevant aspect and print all top-level configuration
+# values and value-definitions. 
+sub get_config
+{
+    my $graph = $_[0];
+
+    # Need to double-check since set_aspect only checks this if there
+    # is no argument (suggest/autoconf doesn't require a valid aspect)
+    if (!defined($ASPECTS{$graph})) {
+        usage "No such aspect";
+    }
+    my %values = %{$ASPECTS{$graph}{'values'}};
+
+    print "graph_category $category\n";
+    foreach my $field (@graph_parameters) {
+        print_if_exist(\%ASPECTS,$graph,$field,"graph_$field");
+    }
+
+    foreach my $value (keys %values) {
+        # Need either RPN definition or a procstats value.
+        if (!defined($procstats{$value}) &&
+            !defined($values{$value}{'rpn'})) {
+                if ($DEBUG) {
+                    print "ERROR: $value not part of procstats.\n"
+                }
+                next;
+        }
+
+        if (!print_if_exist(\%values,$value,'label')) {
+            print "$value.label ".$ASPECTS{$self}{'values'}{$value}{'label'}."\n";
+        }
+        foreach my $field (@field_parameters) {
+            print_if_exist(\%values,$value,$field);
+        }
+    }
+}
+
+# Read and verify the aspect ($self). 
+sub set_aspect
+{
+    $self = $0;
+    $self =~ s/^.*proc_//;
+    if (!defined($ASPECTS{$self}) && @ARGV == 0) {
+        usage "No such aspect";
+    }
+}
+
+# Handle arguments (config, autoconf, suggest)
+# Populate stats for config is necessary, but we want to avoid it for
+# autoconf as it would generate a nasty error.
+sub check_args
+{
+    if (@ARGV && $ARGV[0] eq '') {
+        shift @ARGV;
+    }
+    if (@ARGV == 1) {
+        if ($ARGV[0] eq "config") {
+            populate_stats;
+            get_config($self);
+            exit 0;
+        } elsif ($ARGV[0] eq "autoconf") {
+            autoconf($self);
+            exit 0;
+        } elsif ($ARGV[0] eq "suggest") {
+#            suggest;
+            exit 0;
+        }
+        usage "Unknown argument";
+    }
+}
+
+# Braindead RPN: +,-,/,* will pop two items from @stack, and perform
+# the relevant operation on the items. If the item in the array isn't one
+# of the 4 basic math operations, a value from procstats is pushed on to
+# the stack. IE: 'client_req','client_conn','/' will leave the value of
+# "client_req/client_conn" on the stack.
+#
+# If only one item is left on the stack, it is printed. Otherwise, an error
+# message is printed.
+sub rpn
+{
+    my @stack;
+    my $left;
+    my $right;
+    foreach my $item (@{$_[0]}) {
+        if ($item eq "+") {
+            $right = pop(@stack);
+            $left = pop(@stack);
+            push(@stack,$left+$right);
+        } elsif ($item eq "-") {
+            $right = pop(@stack);
+            $left = pop(@stack);
+            push(@stack,$left-$right);
+        } elsif ($item eq "/") {
+            $right = pop(@stack);
+            $left = pop(@stack);
+            push(@stack,$left/$right);
+        } elsif ($item eq "*") {
+            $right = pop(@stack);
+            $left = pop(@stack);
+            push(@stack,$left*$right);
+        } else {
+            push(@stack,int($procstats{$item}));
+        }
+    }
+    if (@stack > 1)
+    {
+        print STDERR "RPN error: Stack has more than one item left.\n";
+        print STDERR "@stack\n";
+        exit 255;
+    }
+    print "@stack";
+    print "\n";
+}
+
+################################
+# Execution starts here        #
+################################
+
+set_aspect;
+check_args;
+populate_stats;
+
+# We only get here if we're supposed to.
+
+# Walks through the relevant values and either prints the procstat, or
+# if the 'rpn' variable is set, calls rpn() to execute ... the rpn.
+foreach my $value (keys %{$ASPECTS{$self}{'values'}}) {
+    if (defined($ASPECTS{$self}{'values'}{$value}{'rpn'})) {
+        print "$value.value ";
+        rpn($ASPECTS{$self}{'values'}{$value}{'rpn'});
+    } else {
+        print "$value.value ";
+        if (!defined($procstats{$value})) {
+            print "0\n";
+            next;
+        }
+        print "$procstats{$value}\n";
+    }
+}

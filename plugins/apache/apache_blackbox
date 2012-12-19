@@ -1,0 +1,84 @@
+#!/usr/bin/perl
+#
+# apache http status code monitoring
+#
+# luis peralta - luis@11870.com
+# http://www.ziritione.org
+#
+# Installing: configure apache blackbox and set the logfile to /var/log/blackbox.log 
+# or change the BLACKBOXLOG setting bellow.
+#
+# Dependencies: apache mod_logio, apache blackbox 
+# http://www.devco.net/archives/2008/03/05/detailed_apache_stats.php
+#
+# Last version available at: http://www.ziritione.org/http_status
+#
+# Parameters:
+#
+#   config
+#   autoconf
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+
+my $BLACKBOXLOG    =  "/var/log/blackbox.log"; 
+
+my %WANTED = ( 	"apache.status.200"  => "_200", 
+		"apache.status.301"  => "_301", 
+		"apache.status.302"  => "_302", 
+		"apache.status.404"  => "_404", 
+		"apache.status.5xx"  => "_5xx", 
+             );
+
+my $arg = shift();
+
+if ($arg eq 'config') {
+    print_config();
+    exit();
+} elsif ($arg eq 'autoconf') {
+    print "yes\n";
+    exit();
+}
+
+
+open(SERVICE, "<$BLACKBOXLOG")
+  or die("Could not open '$BLACKBOXLOG': $!");
+
+while (<SERVICE>) {
+    my ($k, $v) = (m/(apache.status.*)=(\d+)/);
+    next unless ($k);
+    if (exists $WANTED{$k} ) {
+	print("$WANTED{$k}.value $v\n");
+    }
+}
+
+close(SERVICE);
+
+
+sub print_config {
+
+    my $num = 0;
+
+    print("graph_title HTTP requests status
+graph_args --base 1000
+graph_vlabel requests / second
+graph_category Network
+graph_total total\n");
+
+    for my $key (sort { $WANTED{$a} cmp $WANTED{$b} } (keys %WANTED)) {
+        my $title = $WANTED{$key};
+        print("$title.label ${title}\n",
+              "$title.min 0\n",
+              "$title.type DERIVE\n",
+              "$title.max 500000\n",
+              #"$title.draw ", ($num) ? "STACK" : "AREA" ,  "\n",
+              "$title.draw ", ($num) ? "AREA" : "AREA" ,  "\n",
+             );
+        $num++;
+    }
+    
+}
+
+

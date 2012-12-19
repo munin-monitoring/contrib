@@ -1,0 +1,45 @@
+#!/bin/bash
+#
+# Made by Stefan Bühler, Switzerland
+# Monitor blocked Mails during Postfix RBL Scan, included Spamhaus, Spamcop, Manitu, MSRBL, NJABL
+
+
+LOGFILE=${logfile:-/var/log/mail.log}	# Allow user to specify logfile through env.logfile
+DATE=`date '+%b %e %H'`
+MAXLABEL=20
+
+if [ "$1" = "autoconf" ]; then
+	if [[ -r $LOGFILE ]]; then
+	        echo yes
+	else
+		echo no
+	fi
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+        echo 'graph_title RBL Counter'
+        echo 'graph_category mail'
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_vlabel block during RBL'
+        echo 'spamhaus.label Blocked by Spamhaus.org'
+	echo 'spamcop.label Blocked by Spamcop'
+        echo 'manitu.label Blocked by manitu.net'
+	echo 'msrbl.label Blocked by msrbl.net'
+	echo 'njabl.label Blocked by njabl.org'
+	exit 0
+fi
+
+
+echo -en "spamhaus.value "
+echo $(grep "blocked using sbl-xbl.spamhaus.org" $LOGFILE | grep "$DATE" | wc -l)
+echo -en "spamcop.value "
+echo $(grep "blocked using bl.spamcop.net" $LOGFILE | grep "$DATE" | wc -l)
+echo -en "manitu.value "
+echo $(grep "blocked using ix.dnsbl.manitu.net" $LOGFILE | grep "$DATE" | wc -l)
+echo -en "msrbl.value "
+echo $(grep "blocked using combined.rbl.msrbl.net" $LOGFILE | grep "$DATE" | wc -l)
+echo -en "njabl.value "
+echo $(grep "blocked using combined.njabl.org" $LOGFILE | grep "$DATE" | wc -l)
+

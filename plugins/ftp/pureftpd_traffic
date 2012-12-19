@@ -1,0 +1,123 @@
+#!/usr/bin/perl
+
+use HTTP::Date;
+use Date::Manip;
+
+ $logfile="/var/log/pure-ftpd/transfer.log";
+ $ts="/tmp/munin_pureftpd_traffic_plugin_ts";
+
+if ($ARGV[0] eq "test") {
+    $handle = open LOG,"<$logfile";
+    if(!$handle) {
+     print "Can't open logfile!\n";
+     exit -1;
+    }
+    $handle = open TS,"<$ts";
+    if(!$handle) {
+     print "Can't open lockfile!\n";
+     exit -1;
+    }
+    print "OK\n";
+    exit 0;
+}
+
+if ($ARGV[0] eq "config") {
+ $out.="graph_title pureftpd traffic
+graph_category PureFTPd
+graph_info This graph shows pureftpd traffic.
+graph_vlabel Bytes
+get.label Get
+get.type COUNTER
+get.draw LINE1
+get.colour ff0000
+put.label Put
+put.type COUNTER
+put.draw LINE1
+put.colour 00ff00
+mti.label MTI
+mti.type COUNTER
+mti.draw LINE1
+mti.colour 0000ff
+dsm.label DSM
+dsm.type COUNTER
+dsm.draw LINE1
+dsm.colour 009999
+";
+ print $out;
+ exit 0;
+}
+
+if (!(-e $logfile)) {
+  die "No transfer.log available!";
+ }
+ if (!(-e $ts)) {
+  open LOG, "<$logfile" or print "Can't open logfile!\n";
+  my $last_line;
+  while(<LOG>) {
+   $last_line = $_ if eof; 
+  }
+  close LOG;
+  @em = split(/ /,$last_line);
+  $curr_ts = "$em[3] $em[4]";
+  $curr_ts =~ s/\[//g;
+  $curr_ts =~ s/\]//g;
+
+  open TS, ">$ts";
+  print TS $curr_ts;
+  close TS;
+  $last_ts=$curr_ts;
+ } else {
+  open TS, "<$ts";
+  @l=<TS>;
+  close TS;
+  $last_ts=$l[0];
+ }
+
+ my $get=0,
+    $put=0,
+    $mti=0,
+    $dsm=0;
+       
+ open LOG, "<$logfile";
+ @log=<LOG>;
+ foreach $row (@log) {
+   @parts=split(/ /,$row);
+   $curr_ts = "$parts[3] $parts[4]";
+   $curr_ts =~ s/\[//g;
+   $curr_ts =~ s/\]//g; 
+
+   if ( Date_Cmp($curr_ts,$last_ts) > 0 ) {
+      if ( $parts[5]=~ /GET/ ) {
+          $get+=int($parts[8]);
+          if ($parts[2] eq "mti") {
+	      $mti+=int($parts[8]);
+	     }	 
+          if ($parts[2] eq "dsm") {
+	      $dsm+=int($parts[8]);
+	     }	 
+         }
+      if ( $parts[5]=~ /PUT/ ) {
+          $put-=int($parts[8]);
+          if ($parts[2] eq "mti") {
+	      $mti-=int($parts[8]);
+	     }	 
+          if ($parts[2] eq "dsm") {
+	      $dsm-=int($parts[8]);
+	     }	 
+         }
+     }
+ }
+
+ open TS, ">$ts";
+ print TS $curr_ts;
+ close TS;
+ close LOG;
+ $out="get.value $get
+put.value $put
+mti.value $mti
+dsm.value $dsm
+";
+ print $out;
+ exit (0);
+
+__END__

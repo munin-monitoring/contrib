@@ -1,0 +1,33 @@
+#!/bin/sh
+# @author northox <northox@mantor.org>
+# Mantor Organization
+#
+if [ "$1" = "config" ]; then
+  echo "graph_title Swap usage (in MB)"
+  echo 'graph_category system'
+  echo "swap.label Swap used"
+  echo "swapt.label Swap total"
+  exit 0
+fi
+
+# Memory: Real: 14M/69M act/tot  Free: 173M  Swap: 0K/612M used/tot
+
+top -un | nawk '
+function scale(v) {
+  if (value ~ /G$/) { sub("G", "", v); v *= 1024 }
+  else if (v ~ /M$/) sub("M", "", v)
+  else if (v ~ /K$/) { sub("K", "", v); v /= 1024 }
+  else v /= 1024 * 1024;
+  return v;
+}
+function spliter(v, i) {
+  split(v,a,"/");
+  return(a[i]);
+}
+/^Memory/ {
+  swap  = scale(spliter($8,1));
+  swapt = scale(spliter($8,2));
+
+  print "swap.value", swap
+  print "swapt.value", swapt
+}'

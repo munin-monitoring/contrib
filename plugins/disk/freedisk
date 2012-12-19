@@ -1,0 +1,35 @@
+#!/bin/bash
+#
+# Wildcard-plugin to monitor free disk.
+#
+#    ln -s /usr/share/munin/plugins/freedisk_ /etc/munin/plugins/freedisk_hda1
+#
+# ...will monitor /dev/hda1.
+#
+# $Log$
+# Revision 0.1	2010/11/01	guenter@grodotzki.ph
+# init
+
+# parse wildcard config
+DISK=`basename $0 | sed 's/^freedisk_//g'`
+
+# output config
+if [ "$1" = "config" ]; then
+	echo "graph_title Free Disk on /dev/$DISK"
+        echo "graph_args --base 1024"
+        echo "graph_vlabel Free Disk in Bytes"
+        echo "graph_category disk"
+        echo "freedisk.label free Bytes"
+	echo "freedisk.draw LINE3"
+	echo "freedisk.cdef freedisk,1024,*"
+	echo "totaldisk.label total Bytes"
+        echo "totaldisk.draw AREA"
+        echo "totaldisk.cdef totaldisk,1024,*"
+	exit 0
+fi
+
+# get data
+OUTPUT=`df -P | grep "$DISK"`
+
+echo "freedisk.value `echo $OUTPUT | cut -d ' ' -f 4`"
+echo "totaldisk.value `echo $OUTPUT | cut -d ' ' -f 2`"

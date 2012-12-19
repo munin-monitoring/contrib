@@ -1,0 +1,59 @@
+#!/usr/bin/python
+
+# Revision 1.0  2008/05/16 - Steven Wagner 
+# First functional release. Works for me.
+#
+# Revision 0.5  2008/05/01  - Julien Rottenberg
+# initial display of variables from libvirt
+
+#python-libvirt is required
+
+import libvirt
+import sys
+
+conn = libvirt.openReadOnly("qemu:///system")
+if conn == None:
+    print 'Failed to open connection to the hypervisor'
+    sys.exit(1)
+
+try:
+    (model, memory, cpus, mhz, nodes, socket, cores, threads) = conn.getInfo()
+except:
+    print 'getInfo failed'
+    sys.exit(1)
+
+#print
+#print "KVM running on %d %s %d mhz CPUs w/ %d MB RAM." % (cpus, model, mhz, memory)
+#print
+
+ids = conn.listDomainsID()
+if ids == None or len(ids) == 0:
+    print 'No running domains found.'
+    sys.exit(1)
+
+
+if len(sys.argv) == 2:
+    if sys.argv[1] == "config":
+        print "graph_title KVM Domain CPU Utilization"
+        print "graph_vlabel CPU use in seconds"
+        print "graph_args --base 1000"
+        print "graph_category kvm"
+
+        for id in ids:
+            dom = conn.lookupByID(id)
+            nodeName = dom.name()
+            print "%s.type COUNTER" %(nodeName)
+            print "%s.label %s" %(nodeName, nodeName)
+        sys.exit(1)
+        
+for id in ids:
+    dom = conn.lookupByID(id)
+    state, maxMem, memory, numVirtCpu, cpuTime = dom.info()
+    nodeName = dom.name()
+#    uuid = dom.UUID()
+#    ostype = dom.OSType()
+#    print """Domain: %s, %s state (%s), %d CPUs, %d seconds, %d milliseconds, mem/max (%d/%d) """ \
+#          % (nodeName, ostype, state, numVirtCpu, cpuTime/float(1000000000), cpuTime/float(1000000), memory, maxMem )
+    print "%s.value %d" % (nodeName, cpuTime/float(1000000))
+
+

@@ -1,0 +1,91 @@
+#!/usr/bin/env ruby
+#
+# Plugin to monitor the number of connections blocked by moblock.
+#
+# Requirements:
+#
+#       Moblock up and runing with generated log files going to /var/log/moblock
+#
+# Parameters supported:
+#
+#       config
+#       autoconf
+#
+# Configurable variables
+#
+#       logfile  - Override default moblock logfile
+# 
+# Magic markers
+#
+#%# family=auto 
+#%# capabilities=autoconf
+
+#
+# Initialize vars
+#
+$logfile = ENV['logfile'] || "/var/log/moblock.log"
+
+#
+# Configure generated graph
+#
+def config
+  puts "graph_args --base 1000 -r --lower-limit 0"
+  puts "graph_title Moblock"
+  puts "graph_vlabel Blocked Connections"
+  puts "graph_category moblock"
+  puts "graph_info This graph shows the number of connections blocked by Moblock"
+
+  puts "blocked_in.label Blocked In"
+  puts "blocked_in.draw LINE1"
+  puts "blocked_in.info Number of blocked incoming connections"
+  puts "blocked_in.type GAUGE"
+
+  puts "blocked_out.label Blocked Out"
+  puts "blocked_out.draw LINE1"
+  puts "blocked_out.info Number of blocked outgoing connections"
+  puts "blocked_out.type GAUGE"
+
+  puts "blocked_total.label Total Blocked"
+  puts "blocked_total.draw LINE1"
+  puts "blocked_total.info Total Number of blocked connections"
+  puts "blocked_total.type GAUGE"
+end
+
+#
+# Grep moblock logs for stats
+#
+def fetch(debug=false)
+  num_in = %x{cat #{$logfile} | grep --extended-regexp 'IN: ' | wc -l}
+  num_out = %x{cat #{$logfile} | grep --extended-regexp 'OUT: ' | wc -l}
+  num_total = num_in.to_i + num_out.to_i
+
+  puts "blocked_in.value #{num_in}"
+  puts "blocked_out.value #{num_out}"
+  puts "blocked_total.value #{num_total}"
+end
+	  
+#
+# If moblock executable on path then allow autoconfiguration
+#
+def autoconf
+  moblock_path = %x{which moblock}
+  if moblock_path.index('moblock')
+    puts "yes"
+  else
+    puts "no"
+  end
+end
+
+#
+# Handle command line args
+#
+case ARGV.first
+  when 'config'
+    config
+  when 'debug'
+    fetch true
+  when 'autoconf'
+    autoconf
+  else
+    fetch
+end

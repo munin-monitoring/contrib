@@ -1,0 +1,161 @@
+#!/bin/sh
+#
+# Plugin to graph numeric result of the specified MySQL queries.
+#
+# Parameters:
+#
+#       config   (required)
+#       autoconf (optional - used by lrrd-config)
+#
+# Configuration example
+#
+# [mysql_report]
+# env.names query1 query2
+# env.hostname www.example.com
+# env.database mysql
+# env.username report
+# env.password secret
+# env.errorvalue 60
+# env.max 120
+#
+# env.label_query1 Example query#1 (number of users)
+# env.hostname_query1 www1.example.com
+# env.draw_query1 AREA
+# env.colour_query1 FF0000
+# env.database_query1 mysql
+# env.username_query1 user1
+# env.password_query1 secret1
+# env.query_query1 select count(*) from `exampledb`.`users`
+# env.warning_query1 5
+# env.critical_query1 8
+#
+# env.label_query2 Example query#2 (number of successful logins)
+# env.query_query2 select count(*) from `exampledb`.`login_log`
+# env.type_query2 DERIVE
+# env.draw_query2 LINE2
+# env.colour_query2 000080
+# env.mysqlopts_query2 --defaults-extra-file=/etc/mysql/debian.cnf --port=4507
+#
+# env.cdefnames cdef1
+# env.cdef_cdef1 result1,result2,+
+# env.cdeflbl_cdef1 Users and successful logins sum
+
+#
+# $Log$
+#
+# Revision 1.0  2010/04/19 14:18:32 muzso@muzso.hu
+# Initial version
+#
+# Revision 1.01 2010/7/14 oded@pageonce.com
+#%# family=auto
+#%# capabilities=autoconf
+
+mysqlbin=$(which mysql)
+
+default_errorvalue=30
+default_title="Results from MySQL queries"
+default_category="mysql"
+default_vlabel="value / sec"
+default_info="This graph shows results of one or more SQL queries."
+default_args="--base 1000 -l 0"
+default_scale="no"
+
+if [ "${1}" = "autoconf" ]; then
+  result=0
+  if [ -z "${mysqlbin}" ]; then
+    echo "no"
+  else
+    echo "yes"
+  fi
+  exit $result
+fi
+
+if [ -z "${names}" ]; then
+  echo "Configuration required"
+  exit 1
+fi
+
+[ -n "${errorvalue}" ] || errorvalue=${default_errorvalue}
+[ -n "${title}" ] || title="${default_title}"
+[ -n "${category}" ] || category="${default_category}"
+[ -n "${vlabel}" ] || vlabel="${default_vlabel}"
+[ -n "${info}" ] || info="${default_info}"
+[ -n "${args}" ] || args="${default_args}"
+[ -n "${scale}" ] || scale="${default_scale}"
+
+if [ "${1}" = "config" ]; then
+  cat << EOH1
+graph_title ${title}
+graph_args ${args}
+graph_scale ${scale}
+graph_vlabel ${vlabel}
+graph_category ${category}
+graph_info ${info}
+EOH1
+  [[ -n "${period}" ]] && echo "graph_period ${period}"
+  I=1
+  for name in ${names}; do
+    eval iquery='${query_'${name}'}'
+    if [ -n "${iquery}" ]; then
+      eval ilabel='${label_'${name}':-host${I}}'
+      eval iwarning='${warning_'${name}':-${warning}}'
+      eval icritical='${critical_'${name}':-${critical}}'
+      eval imax='${max_'${name}':-${max}}'
+      eval itype='${type_'${name}':-${type}}'
+      eval idraw='${draw_'${name}':-${draw}}'
+      eval icolour='${colour_'${name}':-${colour}}'
+      iquery=$(echo "${iquery}" | tr '\n\r' '  ')
+      cat << EOH2
+result${I}.label ${ilabel}
+result${I}.info Result of the query: ${iquery}
+result${I}.min 0
+EOH2
+      [ -n "${imax}" ] && echo "result${I}.max ${imax}"
+      [ -n "${itype}" ] && echo "result${I}.type ${itype}"
+      [ -n "${idraw}" ] && echo "result${I}.draw ${idraw}"
+      [ -n "${icolour}" ] && echo "result${I}.colour ${icolour}"
+      [ -n "${iwarning}" ] && echo "result${I}.warning ${iwarning}"
+      [ -n "${icritical}" ] && echo "result${I}.critical ${icritical}"
+      I=$((I+1))
+    fi
+  done
+  for cdefname in ${cdefnames} ;do
+    eval icdef='${cdef_'${cdefname}'}'
+    if [ -n "${icdef}" ]; then
+      eval icdeflbl='${cdeflbl_'${cdefname}':-${cdeflbl}}'
+      cat << EOH4
+${cdefname}.cdef ${icdef}
+${cdefname}.label ${icdeflbl}
+EOH4
+    fi
+  done
+  exit 0
+fi
+
+I=1
+for name in ${names}; do
+  eval iquery='${query_'${name}'}'
+  if [ -n "${iquery}" ]; then
+		eval ihostname='${hostname_'${name}':-${hostname}}'
+		[ -n "${ihostname}" ] && opts="${opts} --host=${ihostname}"
+		eval idatabase='${database_'${name}':-${database}}'
+		eval iusername='${username_'${name}':-${username}}'
+		[ -n "${iusername}" ] && opts="${opts} --user=${iusername}"
+    eval ipassword='${password_'${name}':-${password}}'
+    [ -n "${ipassword}" ] && opts="${opts} --password=${ipassword}"
+    eval ierrorvalue='${errorvalue_'${name}':-${errorvalue}}'
+    eval imysqlopts='${mysqlopts_'${name}':-${mysqlopts}}'
+    iquery=$(echo "${iquery}" | tr '\n\r' '  ')
+    #echo "The command to be executed: echo \"${iquery}\" | ${mysqlbin} ${imysqlopts} --batch --skip-column-names ${opts} ${idatabase} 2>&1"
+    output=$(echo "${iquery}" | ${mysqlbin} ${imysqlopts} --batch --skip-column-names ${opts} ${idatabase} 2>&1)
+    if [ $? -ne 0 -a ${ierrorvalue} -ne 0 ]; then
+      result=${ierrorvalue}
+    else
+      result=$(echo "${output}" | head -n 1 | sed 's/^\([0-9]\+\).*/\1/')
+    fi
+    echo "result${I}.value ${result}"
+    I=$((I+1))
+  fi
+done
+
+	

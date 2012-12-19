@@ -1,0 +1,41 @@
+#!/bin/sh
+#
+# Plugin to monitor the number of vulnerabilities on the machine using portaudit.
+#
+# Parameters:
+#
+# 	config   (required)
+# 	autoconf (optional - used by munin-config)
+#
+# Magick markers (optional - used by munin-config and som installation
+# scripts):
+#%# family=auto
+#%# capabilities=autoconf
+
+PORTAUDIT=/usr/local/sbin/portaudit
+
+if [ "$1" = "autoconf" ]; then
+	if [ -x $PORTAUDIT ]; then
+		echo yes 
+		exit 0
+	else
+		echo no '(portaudit not found)'
+		exit 0
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title Number of Vulnerabilities'
+	echo 'graph_args --base 1000 -l 0 '
+	echo 'graph_vlabel number of vulnerabilities'
+	echo 'graph_category audit'
+	echo 'graph_info This graph shows the number of vulnerabilities in the system.'
+	echo 'vulnerabilities.label vulnerabilities'
+	echo 'vulnerabilities.info The current number of vulnerabilities.'
+	echo 'vulnerabilities.draw LINE2'
+	exit 0
+fi
+
+echo -n "vulnerabilities.value "
+$PORTAUDIT -qa | /usr/bin/wc -l

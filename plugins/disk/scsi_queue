@@ -1,0 +1,246 @@
+#!/usr/bin/env python
+
+"""
+Munin plugin which reports queue busy-values per online SCSI 
+device on Linux, as seen in /proc/scsi/sg/devices
+
+If the busy-values often reach the queue depth of the device,
+one might consider increasing the queue depth. Hence, this
+plugin.
+
+Wildcard use:
+If your system has many SCSI-like devices, filtering may be needed
+to make the resulting graphs readable.
+If you symlink the plugin, so that it's executed as 
+  scsi_queue_X_through_Y
+then the plugin will only look at devices
+  /dev/sdX .. /dev/sdY
+X and Y may only be one-character values.
+X and Y are translated into a regular expression like:
+  sd[X-Y]
+"""
+
+# Author: Troels Arvin <tra@sst.dk>
+# See http://troels.arvin.dk/code/munin/ for latest version.
+
+# Only tested with Red Hat Enterprise Linux 5 / CentOS 5, currently.
+
+# Released according to the "New BSD License" AKA the 3-clause
+# BSD License:
+# ==================================================================== 
+# Copyright (c) 2010, Danish National Board of Health.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the  the Danish National Board of Health nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY the Danish National Board of Health ''AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL the Danish National Board of Health BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# ==================================================================== 
+
+# $Id: scsi_queue 13630 2010-08-31 15:29:14Z tra $
+
+# Note to self:
+# The fields in /proc/scsi/sg/devices are:
+# host chan id lun type opens qdepth busy online
+
+# TODO:
+#  - Make it possible to group by multipath group. Might be
+#    hard, though, because determining path groups seems
+#    to require root privileges.
+#  - Support autoconf
+#  - How to support filtering on installations which have
+#    many SCSI devices, beyond /dev/sdz?
+
+import os, sys, re
+
+procfile          = '/proc/scsi/sg/devices'
+sysfs_base        = '/sys/bus/scsi/devices'
+
+my_canonical_name = 'scsi_queue'         # If called as - e.g. - scsi_queue_foo, then
+                                         # foo will be interpreted as a device filter.
+                                         # For this, we need a base name.
+
+def bailout(msg):
+    sys.stderr.write(msg+"\n")
+    sys.exit(1)
+
+def print_config(devices,filter_from,filter_through):
+
+    title_qualification = ''
+    if filter_from and filter_through:
+        title_qualification = ' for devices sd%s through sd%s' % (filter_from,filter_through)
+
+    print 'graph_title SCSI queue busy values' + title_qualification
+    print 'graph_vlabel busy count'
+    print 'graph_args --base 1000 -l 0'
+    print 'graph_category disk'
+    print 'graph_info This graph shows the queue busy values, as seen in /prod/scsi/sg/devices'
+
+    keys = devices.keys()
+    keys.sort()
+    for key in keys:
+        qdepth = devices[key]['qdepth']
+        print '%s.min 0' % key
+        print '%s.type GAUGE' % key
+        print '%s.label %s (%s %s); qdepth=%s' % (
+            key,
+            key,
+            devices[key]['vendor'],
+            devices[key]['model'],
+            qdepth
+        )
+        print '%s.max %s' % (key,qdepth)
+
+# Return a list of lists representing interesting parts from procfile
+def parse_procfile():
+    retval = []
+    try:
+        fh = open(procfile)
+        for line in fh:
+            retval.append(line.split())
+
+    except IOError, e:
+        bailout('IO error: '+str(e))
+    return retval
+
+# Try to read a file's content. If any I/O problem: return empty string
+def readfile(path):
+    try:
+        f = open(path)
+        retval = f.read().rstrip()
+        f.close()
+    except IOError, e:
+        return ''
+    return retval
+
+# Return dict of dicts, indexed by device name
+def map_procentries_to_devices(list_of_dicts,devfilter_regex):
+    device_dict={}
+
+    if devfilter_regex:
+        regex_compiled = re.compile(devfilter_regex)
+
+    for elem in list_of_dicts:
+        # In /sys/bus/scsi/devices we see a number of directory
+        # entries, such as:
+        # 0:0:0:0
+        # 2:0:0:0
+        # 3:0:0:0
+        #
+        # The colon-separated values map to the first four parts 
+        # of /proc/scsi/sg/devices
+        # And the directory entries are symlinks which point to directories 
+        # in /sys/devices. By following a symlink, we may end up in 
+        # a directory which contains directory entries like:
+        #  - block:sdb
+        # ...
+        #  - model
+        # ...
+        #  - vendor
+        sys_pathname = sysfs_base + '/' + ':'.join(elem[:4]) # isolate stuff like 2:0:0:0
+
+        # Should actually not happen, but nontheless:
+        if not os.path.islink(sys_pathname):
+            continue
+
+        # Search for dirent called block:SOMETHING
+        # Put SOMETHING into blockdev_name
+        # Couldn't make glob.glob() work: The length of the result 
+        # of glob() returned TypeError: len() of unsized object on
+        # RHEL 5's python...
+        dirents = os.listdir(sys_pathname)
+        num_blocklines=0
+        for dirent in dirents:
+            if dirent.startswith('block:'):
+                block_line = dirent
+                num_blocklines += 1
+        if num_blocklines == 0:
+            continue
+        if num_blocklines > 1:
+            bailout("Got more than one result when globbing for '%s'" % glob_for)
+        blockdev_name = block_line.split(':')[1]
+
+        # If device filtering is active, filter now
+        if devfilter_regex:
+            if not regex_compiled.match(blockdev_name):
+                continue
+
+        # Merge info from the /proc and /sys sources
+        device_dict[blockdev_name] = {
+            'model' : readfile(sys_pathname+'/model'),
+            'vendor': readfile(sys_pathname+'/vendor'),
+            'qdepth': elem[6],
+            'busy'  : elem[7]
+        }
+    return device_dict
+
+def print_values(devices):
+    devnames = devices.keys()
+    devnames.sort()
+    retval = ''
+    for devname in devnames:
+        print "%s.value %s" % (
+            devname,
+            devices[devname]['busy']
+        )
+
+
+
+
+# Initial sanity check
+n_args=len(sys.argv)
+if n_args > 2:
+    # At most one arg expected
+    print '%d arguments given - expecting only one' % n_args
+    sys.exit(1)
+
+# See if we were called with a Munin wildcard-style 'arg0-argument'
+# E.g., if called as scsi_queue_a_through_c, then consider only
+# devices sda, sdb, sdc.
+devfilter_regex = None
+called_as = os.path.basename(sys.argv[0])
+match = re.match(my_canonical_name+'_([^_])_through_([^_])', called_as)
+filter_from = None
+filter_through = None
+if match:
+    filter_from    = match.group(1)
+    filter_through = match.group(2)
+    devfilter_regex = 'sd['+filter_from+'-'+filter_through+']'
+
+# Perform main piece of work
+devices = map_procentries_to_devices(
+    parse_procfile(),
+    devfilter_regex
+)
+
+# See how we were called
+if n_args == 2:
+    # An argument was given, so let's not simply print
+    # values.
+    arg = sys.argv[1]
+    if arg == 'config':
+        print_config(devices,filter_from,filter_through)
+        sys.exit(0)
+    else:
+        print "Unknown argument '%s'" % arg
+        sys.exit(1)
+
+# No arguments given; print values
+print_values(devices)

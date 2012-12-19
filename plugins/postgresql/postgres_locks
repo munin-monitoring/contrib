@@ -1,0 +1,48 @@
+#!/usr/bin/perl -w
+use strict;
+use DBI;
+
+my $dbhost = $ENV{'dbhost'} || '127.0.0.1';
+my $dbname = $ENV{'dbname'} || 'template1';
+my $dbuser = $ENV{'dbuser'} || 'postgres';
+my $dbpass = $ENV{'dbpass'} || '';
+
+if ($ARGV[0] && $ARGV[0] eq "config") {
+    print <<EOF;
+graph_title Postgres locks
+graph_args -l 0 --base 1000
+graph_vlabel Locks
+graph_category Postgresql
+graph_info Shows Postgresql locks
+locks.label Locks
+locks.info Locks (more info here, please... :)
+locks.type GAUGE
+locks.warning 5
+locks.critical 10
+exlocks.label Exclusive locks
+exlocks.info Exclusive locks (here too, please... :)
+exlocks.type GAUGE
+exlocks.warning 5
+exlocks.critical 10
+EOF
+} else {
+    my $Con = "DBI:Pg:dbname=$dbname;host=$dbhost";
+    my $Dbh = DBI->connect ($Con,
+                            $dbuser,
+			    $dbpass,
+			    {RaiseError =>1}) || die "Unable to access Database $dbname on host $dbhost as user $dbuser.\nError returned was: ". $DBI::errstr;
+
+    my $sql="SELECT mode,COUNT(mode) FROM pg_locks GROUP BY mode ORDER BY mode;";
+    my $sth = $Dbh->prepare ($sql);
+    $sth->execute ();
+    my $locks = 0;
+    my $exlocks = 0;
+    while (my ($mode, $count) = $sth->fetchrow ()) {
+	if ($mode =~ /exclusive/i) {
+	    $exlocks = $exlocks + $count;
+	}
+	$locks = $locks+$count;
+    }
+    print "locks.value $locks\n";
+    print "exlocks.value $exlocks\n";
+}

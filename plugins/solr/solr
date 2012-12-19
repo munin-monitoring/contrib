@@ -1,0 +1,111 @@
+#!/usr/bin/python
+import sys, os 
+import urllib2
+try:
+    from xml.etree import cElementTree as ET
+except ImportError:
+    try:
+        import cElementTree as ET
+    except ImportError:
+        sys.exit(1)
+
+SOLR_PORT=8389
+SOLR_HOST="localhost"
+# Parameters:
+# 	
+# 	config   (required)
+# 	autoconf (optional - used by munin-config)
+#
+# Magic markers (Used by munin-config and some installation scripts.
+# Optional):
+# author: Tarjei Huse (tarjei - at - kraken.no)
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+def parseArgs():
+    "Parses the name of the file "
+    parts = sys.argv[0].split("_")
+    params = {
+        'cores' : [core1],
+        'valueName' : "avgTimePerRequest"
+    }
+    if len(parts) == 1:
+        return params
+
+    params['valueName'] = parts[1]
+    if len(parts) < 3:
+        return params
+    params['cores'] = parts[2:]
+    return params
+
+def printGraphdef(name, label, info, _min, _max, _type):
+
+    print "%s.label %s" % (name, label)
+#    print "%s.info %s" % (name, info)
+    print "%s.max %d" % (name, _max)
+    print "%s.min %d" % (name, _min)
+    print "%s.type %s" % (name, _type)
+def fetchUrl(core):
+    if ("URL" in os.environ):
+        URL=os.environ['URL']
+    else:
+        URL="http://%s:%d/%s/admin/stats.jsp"
+
+    response = urllib2.urlopen(URL % (SOLR_HOST, SOLR_PORT, core))
+    return parse(response)
+
+def parse(response):
+    root = ET.parse(response)
+    queues = root.findall("/solr-info/QUERYHANDLER/entry")
+    return queues
+
+def fetchFile():
+    f = open("/tmp/stats.jsp.html")
+    return parse(f)
+
+def getEntry(entries, entryName):
+    for entry in entries:
+        name = entry.findtext("name").strip()
+        if (name != entryName):
+            continue
+        return entry.find("stats")
+
+def getValue(entry, valueName):
+    for stat in entry:
+        if stat.get('name') == valueName:
+            return stat.text
+    #print "Could not find %s for entry" % valueName
+    return 0
+
+if len(sys.argv) > 1:
+    if sys.argv[1]== "autoconf":
+        # check connection
+        sys.exit(0)
+    elif sys.argv[1] == "config":
+        params = parseArgs()
+       
+        print 'graph_title Solr %s' % params['valueName']
+        print 'graph_args -l 0 '
+        print 'graph_vlabel Size %s' % params['valueName']
+        print 'graph_category Solr'
+        print 'graph_info Info for cores: %s' % ( ",".join(params['cores']))
+
+        for core in params['cores']:
+            #print core, params['valueName']
+            print "%s-%s.label %s-%s" % (core, params['valueName'], params['valueName'], core)
+            print "%s-%s.type GAUGE" % (core, params['valueName'])
+            print "%s-%s.min 0" % (core, params['valueName'])
+        sys.exit(0)
+
+
+params = parseArgs()
+for core in params['cores']:
+    #print core, params['valueName']
+    queues = fetchUrl(core)
+    searcher = getEntry(queues, "org.apache.solr.handler.StandardRequestHandler")
+    value = getValue(searcher, params['valueName']).strip()
+    print "%s-%s.value %s" % (core, params['valueName'], value)
+
+
+sys.exit(0)

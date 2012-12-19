@@ -1,0 +1,48 @@
+#!/bin/bash
+
+if [ "$1" = "autoconf" ]; then
+                echo yes
+                exit 0
+fi
+
+zlines=`/sbin/zpool iostat -v| wc -l|sed 's/ //g'`
+ztail=`echo "-"$zlines`
+ztmp=/var/run/munin/zpool_iostat
+zdata=`/sbin/zpool iostat -v 1 1| tail $ztail > $ztmp`
+zlist=`cat $ztmp|gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next}; { if ( $4 >=0 ) print $1}'`
+zname=`cat $ztmp|gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next}; { if ( $4 >=0 ) print $1}'|gawk '{gsub("[^a-zA-Z0-9_]", "_", $1); print}'`
+zorder=`for o in $zname; do echo $o'_read '; echo $o'_write '; done`
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title zpool iostat'
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_vlabel write - read KBytes/s'
+        echo 'graph_category zfs'
+        echo 'graph_scale no'
+        echo 'graph_info This graph shows zpool iostat'
+	echo 'graph_order '$zorder
+	echo $zlist | tr ' ' '\n' | while read i; do
+                case $i in
+                *) name=`echo $i | gawk '{ gsub("[^a-zA-Z0-9_]", "_", $1); print }'` ;;
+                esac
+                echo $name'_read.label '$i
+		echo $name'_read.type GAUGE'
+		echo $name'_read.graph no'
+		echo $name'_write.label '$i
+		echo $name'_write.type GAUGE'
+		echo $name'_write.negative '$name'_read'
+        done
+        exit 0
+fi
+echo $zlist | tr ' ' '\n' | while read iz; do
+	zlabel=`echo $iz|gawk '{print $1}'`
+	case $iz in
+	*) name=`echo $iz | gawk '{ gsub("[^a-zA-Z0-9_]", "_", $1); print $1 }'` ;;
+	esac
+	echo -n $name'_read.value '
+	grep '^[ ]*'$zlabel $ztmp|gawk '{print $6}'|gawk '/M/ {print strtonum($1)*1000}; /K/ {print strtonum($1)}; /[0-9]$/ {print int($1)/1000}; /^0/ {print strtonum($1)}'
+	echo -n $name'_write.value '
+	grep '^[ ]*'$zlabel $ztmp|gawk '{print $7}'|gawk '/M/ {print strtonum($1)*1000}; /K/ {print strtonum($1)}; /[0-9]$/ {print int($1)/1000}; /^0/ {print strtonum($1)}'
+done
+
+rm $ztmp; touch $ztmp

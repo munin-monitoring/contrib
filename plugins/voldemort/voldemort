@@ -1,0 +1,64 @@
+#!/usr/bin/env jruby
+
+# Description: Voldemort plugin to pull basic stats on throughput and number of calls into Munin
+# Author: Peter Crossley - Webtrends Inc
+
+require 'rubygems'
+require 'jmx4r'
+
+
+#%# family=auto
+#%# capabilities=autoconf
+
+# friendly name => result of listPerfStatsKeys via JMX
+keys = {
+  "Throughput" => { "vlabel" => "rate",
+                    "type" => "ABSOLUTE",
+                    "values" => ["all_operation_throughput","delete_throughput", "get_all_throughput", "get_throughput", "put_throughput"]
+                  },
+  "Number of Calls" => { "vlabel" => "counts",
+                    "type" => "COUNTER",
+                    "values" => ["number_of_calls_to_delete","number_of_calls_to_get", "number_of_calls_to_get_all",
+                                 "number_of_calls_to_put", "number_of_exceptions"]
+                  }
+}
+
+if ARGV[0] == "config"
+  keys.each_key do |key|
+    puts "multigraph voldemort_#{key.gsub(" ", "_")}"
+    puts "graph_title #{key}"
+    puts "graph_scale no"
+    puts "graph_category voldemort"
+    puts "graph_vlabel #{keys[key]['vlabel']}"
+    for data in keys[key]['values'] do
+      puts "#{data}.type #{keys[key]['type']}"
+      puts "#{data}.label #{data.gsub("_", " ")}"
+    end
+    puts
+  end
+  exit 0
+elsif ARGV[0] == "autoconf"
+  puts "yes"
+  exit 0
+else
+
+  # Add JMX port
+  # JAVA_OPTS="$JAVA_OPTS -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=5400 -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.authenticate=false"
+  # Tell JBossAS to use the platform MBean server
+  # JAVA_OPTS="$JAVA_OPTS -Djboss.platform.mbeanserver"
+  # Make the platform MBean server able to work with JBossAS MBeans
+  # JAVA_OPTS="$JAVA_OPTS -Djavax.management.builder.initial=org.jboss.system.server.jmx.MBeanServerBuilderImpl"
+  # JBOSS_CLASSPATH="/opt/webtrends/jboss/bin/mbean"
+  JMX::MBean.establish_connection :port => 5400
+  vs = JMX::MBean.find_by_name "voldemort.store.stats.aggregate:type=aggregate-perf"
+
+  keys.each_key do |key|
+    puts "multigraph voldemort_#{key.gsub(" ", "_")}"
+    for data in keys[key]['values'] do
+      puts "#{data}.value #{begin vs.send("#{data}") rescue 0 end}"
+    end
+    puts
+  end
+end
+
+

@@ -1,0 +1,127 @@
+#!/bin/bash
+#
+# Copyright (C) 2006-2009 Benjamin Schweizer. All rights reserved.
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#
+#
+# Abstract
+# ~~~~~~~~
+# This is a plugin for the munin monitoring system. It graphs the cache
+# efficiency of your squid proxy servers and shows nice graphs for average
+# byte and request hits.
+#
+# Authors
+# ~~~~~~~
+# Benjamin Schweizer, http://benjamin-schweizer.de/contact
+#
+# Changes
+# ~~~~~~~
+# 2010-10-11: paulm: uses squidclient instead of netcat; some beautification.
+# 2010-01-20, homyakov: added disk and memory stats
+# 2009-11-25, volker: added config options and docs
+# 2009-11-19, benjamin: fixed squid3 compatibility, minor rewrite
+# 2006-11-16, benjamin: removed 5 minutes stats, fixed 5% bug
+# 2006-10-26, benjamin: excluded negative values from result
+# 2006-10-11, benjamin: initial release.
+#
+# Todo
+# ~~~~
+# - we'll see
+#
+# Munin:
+#%# family=auto
+#%# capabilities=autoconf
+#
+# Config
+# ~~~~~~
+# This plugin supports munin-autoconf, but you might need to change the host
+# and port according to your actual setup. You can overwrite the defaults
+# in your node config (/etc/munin/plugin-conf.d/) like this:
+#
+#	[squid_efficiency]
+#	env.squidhost yourhost.example.com
+#	env.squidport 8080 
+#
+
+host=${squidhost:-localhost}
+port=${squidport:-3128}
+
+test "$1" = "config" && {
+	echo 'graph_title Squid Efficiency'
+	echo 'graph_info This graph shows the proxy efficiency over the last five mins.'
+	echo 'graph_category squid'
+	echo "graph_args --lower-limit 0 --upper-limit 100"
+	echo 'graph_vlabel %'
+	echo 'request.label request hits'
+	echo 'byte.label byte hits'
+	echo 'memory.label memory request hits'
+	echo 'disk.label disk request hits'
+	exit 0
+}
+
+# squid2
+#        Request Hit Ratios:     5min: 0.0%, 60min: 17.4%
+#        Byte Hit Ratios:        5min: 75.0%, 60min: 12.0%
+# squid3
+#        Hits as % of all requests:    5min: 0.0%, 60min: 0.0%
+#        Hits as % of bytes sent:    5min: 100.0%, 60min: 100.0%
+
+DUMP=`squidclient -p $port -l $host cache_object://$host/info`
+
+# Request efficiency
+SQUID_LINE=`echo "$DUMP" | grep -E "Request Hit Ratios|Hits as % of all requests"`
+if [ $? -eq 0 ] ; then
+	# for the last hour:
+	#REQUEST_HITS=`echo $SQUID_LINE | cut -d ":" -f4 | cut -d "." -f1`
+	# for the last five mins:
+	REQUEST_HITS=`echo $SQUID_LINE | cut -d ":" -f3 | cut -d "." -f1`
+	test "$REQUEST_HITS" -gt 0 || REQUEST_HITS=0
+	echo "request.value ${REQUEST_HITS}"
+fi
+
+# Byte efficiency
+SQUID_LINE=`echo "$DUMP" | grep -E "Byte Hit Ratios|Hits as % of bytes sent"`
+if [ $? -eq 0 ] ; then
+	# for the last hour:
+	#BYTE_HITS=`echo $SQUID_LINE | cut -d ":" -f4 | cut -d "." -f1`
+	# for the last five mins:
+	BYTE_HITS=`echo $SQUID_LINE | cut -d ":" -f3 | cut -d "." -f1`
+	test "$BYTE_HITS" -gt 0 || BYTE_HITS=0
+	echo "byte.value ${BYTE_HITS}"
+fi
+
+# Memory
+SQUID_LINE=`echo "$DUMP" | grep -E "Request Memory Hit Ratios|Memory hits as % of hit requests"`
+if [ $? -eq 0 ] ; then
+	# for the last hour:
+	#MEM_REQUEST_HITS=`echo "$SQUID_LINE" | cut -d ":" -f4 | cut -d "." -f1 | xargs echo`
+	# for the last five mins:
+	MEM_REQUEST_HITS=`echo "$SQUID_LINE" | cut -d ":" -f3 | cut -d "." -f1 | xargs echo`
+	test $MEM_REQUEST_HITS -gt 0 || MEM_REQUEST_HITS=0
+	echo "memory.value ${MEM_REQUEST_HITS}"
+fi
+
+# Disk
+SQUID_LINE=`echo "$DUMP" | grep -E "Request Disk Hit Ratios|Disk hits as % of hit requests"`
+if [ $? -eq 0 ] ; then
+	# for the last hour:
+	#DISK_REQUEST_HITS=`echo "$SQUID_LINE" | cut -d ":" -f4 | cut -d "." -f1 | xargs echo`
+	# for the last five mins:
+	DISK_REQUEST_HITS=`echo "$SQUID_LINE" | cut -d ":" -f3 | cut -d "." -f1 | xargs echo`
+	test $DISK_REQUEST_HITS -gt 0 || DISK_REQUEST_HITS=0
+	echo "disk.value ${DISK_REQUEST_HITS}"
+fi
+
+
+# eof.

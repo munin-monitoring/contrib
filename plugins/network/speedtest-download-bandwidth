@@ -1,0 +1,127 @@
+#!/usr/bin/php
+<?php
+global $argc, $argv;
+
+/**************************************************************************
+	SpeedTest multi-sites, test one site at a time (in background)
+	v1.4 - tanguy.pruvot on gmail.com (24 Jan 2011)
+***************************************************************************/
+$cache_file = '/var/lib/munin/speedtest.cache';
+$grenouille_csv = '/usr/local/pygrenouille/logs/download.csv';
+
+$mire = array(
+"free" => "http://test-debit.free.fr/16384.rnd",
+//"bouygues" => "http://speedtest.lafibre.info/speedtest/random2000x2000.jpg?x=".date('U'),
+//"cableinfo" => "http://ports.cable-info.net:43210/test.php",
+"bbox" => "http://speed.degrouptest.com/ookla/speedtest/random1500x1500.jpg?x=".date('U')
+);
+
+$labels = array(
+"bbox" => "Speedtest.net BBox fibre (ookla)",
+"free" => "test-debit.free.fr"
+);
+
+//Connexion Mbits (30/100)
+$connexion = 35;
+
+// CONFIG ------------------------------------------------------------------
+if ($argc > 1 && $argv[1]=='config'){
+
+echo "graph_category network
+graph_title Speed test
+graph_args --base 1024
+graph_vlabel DL (MB/s)
+grenouille.label Grenouille (NC)
+grenouille.type GAUGE
+maximum.label Connexion (max)
+maximum.type GAUGE
+maximum.colour ff0000
+maximum.max ".$connexion."00000
+";
+
+$order="";
+foreach ($mire as $label => $url) {
+	if (isset($labels[$label]))
+		echo "$label.label ".$labels[$label]."\n";
+	else
+		echo "$label.label $label\n";
+	echo "$label.draw LINE2\n";
+	$order .= " $label";
+}
+echo "graph_order grenouille ".trim($order)." maximum\n";
+exit;
+
+}
+
+// CACHE & GRENOUILLE  -----------------------------------------------------
+$cache = @ unserialize(file_get_contents($cache_file));
+if (empty($cache))
+  $cache = array('item'=>0);
+
+
+if (is_file($grenouille_csv) ) {
+$grenouille = explode("\n",trim(file_get_contents($grenouille_csv)));
+$grenouille = end($grenouille);
+$last_data = explode(";",$grenouille);
+$cache['grenouille'] = @ floatval($last_data[2])*1000.0;
+}
+$output = "grenouille.value ".round($cache['grenouille'])."\n";
+
+// OUTPUT ------------------------------------------------------------------
+
+$item = 0;
+foreach ($mire as $label => $url) {
+		$cache[$label] = (float) @ $cache[$label];
+		$item++;
+
+		$output .= "$label.value ".round($cache[$label])."\n";
+}
+$output .= "maximum.value ".round($connexion * 1024 * 1024 / 10)."\n";
+echo $output;
+
+// SPEED TEST --------------------------------------------------------------
+
+// Background Process
+if ($argc == 2 && $argv[1]=='speedtest'){
+	$item = 0;
+	foreach ($mire as $label => $url) {
+	$cache[$label] = (float) @ $cache[$label];
+
+	if ($item == $cache['item']) {
+		$data = ""; $timeout = 10;
+		$before = microtime(true);
+		while ($timeout > 0 && strlen($data) < 15000000) {
+			$data .= file_get_contents($url);
+			$timeout--;
+		}
+		$after = microtime(true);
+		$len = strlen($data);
+
+				if (($after - $before) > 0) {
+						$speed = $len / ($after - $before);
+						if ($cache[$label] > 0)
+								$cache[$label] = ($cache[$label] + $speed) / 2;
+						else
+								$cache[$label] = $speed;
+				} else
+						$cache[$label] = 0;
+	}
+	$item++;
+	}
+	$cache['item'] = ($cache['item'] + 1) % count($mire);
+
+	//save cache for next munin call
+	@file_put_contents($cache_file,serialize($cache));
+	@chmod ($cache_file, 0666);
+	@chown($cache_file,'munin');
+}
+else
+{
+	//do all speedtests in background
+	$processes = trim(shell_exec("ps aux | grep php | grep speedtest"));
+	if (count(explode("\n", $processes)) <= 2) {
+		shell_exec("nohup ".$argv[0].' speedtest > /dev/null 2>&1 &echo $!');
+	}
+}
+
+?>

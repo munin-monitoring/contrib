@@ -1,0 +1,181 @@
+#!/bin/sh
+# 
+# Plugin to monitor icecast2 streams / listeners
+# 
+# Contributed by drew Roberts
+#
+# based on the postfix_mailqueue plugin as per below
+# 
+# Plugin to monitor postfix mail spools
+# 
+# Contributed by Nicolai Langfeldt
+# 
+# $Log$
+# Revision 1.0  2008/07/04 16:02:36  zotz
+# Initial work
+
+#
+# 
+#%# family=auto
+#%# capabilities=autoconf
+
+# Can be set via environment, but default is /var/spool/postfix
+ICEDIR=${icedir:-/var/www/rrd/logs/stream_stats/}
+
+case $1 in
+    autoconf|detect)
+	if [ -d $ICEDIR/ ] ; then
+	    echo yes
+	    exit 0
+        else
+	    echo "no (icedir not found)"
+	    exit 1
+        fi;;
+    config)
+	cat <<'EOF'
+graph_title Icecast2 Stream Listeners
+graph_args --base 1000 -l 0
+graph_vlabel Listeners for Streams
+graph_category stream
+cool_ogg.label cool_ogg
+cool_ogg.draw AREA
+cool_ogg.type GAUGE
+cool_mp3.label cool_mp3
+cool_mp3.draw STACK
+cool_mp3.type GAGUE
+jamz_ogg.label jamz_ogg
+jamz_ogg.draw STACK
+jamz_ogg.type GAGUE
+jamz_mp3.label jamz_mp3
+jamz_mp3.draw STACK
+jamz_mp3.type GAGUE
+joy_ogg.label joy_ogg
+joy_ogg.draw STACK
+joy_ogg.type GAGUE
+joy_mp3.label joy_mp3
+joy_mp3.draw STACK
+joy_mp3.type GAGUE
+y_ogg.label y_ogg
+y_ogg.draw STACK
+y_ogg.type GAGUE
+y_mp3.label y_mp3
+y_mp3.draw STACK
+y_mp3.type GAGUE
+EOF
+	exit 0;;
+esac
+
+cd $ICEDIR >/dev/null 2>/dev/null || {
+     echo "# Cannot cd to $ICEDIR"
+     exit 1
+}
+
+/usr/bin/curl -s localhost:7144/status2.xsl > /tmp/ice.txt
+/usr/bin/tail -n 1 /tmp/ice.txt > /tmp/ice1.txt
+
+awk 'BEGIN {FS=","} {tot = 0 ; i = (NF-1)/6 ; j=1 ; while (j <= i) {tot = (tot + $(((j-1)*6)+4)) ; print $(((j-1)*6)+1), ":", $(((j-1)*6)+4) > "/tmp/ice2.txt" ; j++}; print "total :", tot >> "/tmp/ice2.txt"} ' /tmp/ice1.txt
+
+# Cool ogg stream
+grep cool.ogg /tmp/ice2.txt > /dev/null 2>&1
+if [ "$?" -ne "0" ]; then
+  coologg="0"
+else
+  coologg=`grep cool.ogg /tmp/ice2.txt | cut -d ":" -f 2 - `
+  coologg=$(($coologg+0))
+fi
+#echo $coologg
+
+# Cool mp3 stream
+grep coolmp3 /tmp/ice2.txt > /dev/null 2>&1
+if [ "$?" -ne "0" ]; then
+  coolmp3="0"
+else
+  coolmp3=`grep coolmp3 /tmp/ice2.txt | cut -d ":" -f 2 - `
+  coolmp3=$(($coolmp3+0))
+fi
+#echo $coolmp3
+
+# Jamz ogg stream
+grep jamz.ogg /tmp/ice2.txt > /dev/null 2>&1
+if [ "$?" -ne "0" ]; then
+  jamzogg="0"
+else
+  jamzogg=`grep jamz.ogg /tmp/ice2.txt | cut -d ":" -f 2 - `
+  jamzogg=$(($jamzogg+0))
+fi
+#echo $jamzogg
+
+# Jamz mp3 stream
+grep jamzmp3 /tmp/ice2.txt > /dev/null 2>&1
+if [ "$?" -ne "0" ]; then
+  jamzmp3="0"
+else
+  jamzmp3=`grep jamzmp3 /tmp/ice2.txt | cut -d ":" -f 2 - `
+  jamzmp3=$(($jamzmp3+0))
+fi
+#echo $jamzmp3
+
+# Joy ogg stream
+grep joy.ogg /tmp/ice2.txt > /dev/null 2>&1
+if [ "$?" -ne "0" ]; then
+  joyogg="0"
+else
+  joyogg=`grep joy.ogg /tmp/ice2.txt | cut -d ":" -f 2 - `
+  joyogg=$(($joyogg+0))
+fi
+#echo $joyogg
+
+# Joy mp3 stream
+grep joymp3 /tmp/ice2.txt > /dev/null 2>&1
+if [ "$?" -ne "0" ]; then
+  joymp3="0"
+else
+  joymp3=`grep joymp3 /tmp/ice2.txt | cut -d ":" -f 2 - `
+  joymp3=$(($joymp3+0))
+fi
+#echo $joymp3
+
+# Y ogg stream
+grep "/y.ogg" /tmp/ice2.txt > /dev/null 2>&1
+if [ "$?" -ne "0" ]; then
+  yogg="0"
+else
+  yogg=`grep "/y.ogg" /tmp/ice2.txt | cut -d ":" -f 2 - `
+  yogg=$(($yogg+0))
+fi
+#echo $yogg
+
+# Y mp3 stream
+grep "/ymp3" /tmp/ice2.txt > /dev/null 2>&1
+if [ "$?" -ne "0" ]; then
+  ymp3="0"
+else
+  ymp3=`grep "/ymp3" /tmp/ice2.txt | cut -d ":" -f 2 - `
+  ymp3=$(($ymp3+0))
+fi
+#echo $ymp3
+
+# total streams
+grep total /tmp/ice2.txt > /dev/null 2>&1
+if [ "$?" -ne "0" ]; then
+  totals="0"
+else
+  totals=`grep total /tmp/ice2.txt | cut -d ":" -f 2 - `
+  totals=$(($totals+0))
+fi
+#echo $totals
+
+# output=`echo $coologg:$coolmp3:$jamzogg:$jamzmp3:$joyogg:$joymp3:$yogg:$ymp3:$totals`
+
+
+cat <<EOF
+cool_ogg.value $coologg
+cool_mp3.value $coolmp3
+jamz_ogg.value $jamzogg
+jamz_mp3.value $jamzmp3
+joy_ogg.value $joyogg
+joy_mp3.value $joymp3
+y_ogg.value $yogg
+y_mp3.value $ymp3
+EOF
+

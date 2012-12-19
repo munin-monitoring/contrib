@@ -1,0 +1,66 @@
+#!/usr/bin/perl -w
+#
+# Copyright (C) 2006 Rodolphe Quiedeville <rodolphe@quiedeville.org>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+# If you improve this script please send your version to my email address
+# with the copyright notice upgrade with your name.
+#
+# Plugin to monitor number of files in apt-proxy cache
+#
+# $Log$
+# Revision 1.1  2006/03/28 21:04:01  rodo
+# Created by Rodolphe Quiedeville
+#
+# Must run on aptproxy user or root
+#
+#%# family=apt-proxy
+#%# capabilities=autoconf
+
+use strict;
+
+if ($ARGV[0] and $ARGV[0] eq "config")
+{
+    print "graph_title Files in apt-proxy cache\n";
+    print "graph_args --base 1000 -l 0\n";
+    print "graph_category apt-proxy\n";
+    print "graph_vlabel files\n";
+    print "main.label main\n";
+    print "main.info Packages in main\n";
+    print "main.draw AREA\n";
+    print "security.label security\n";
+    print "security.info Packages in security\n";
+    print "security.draw STACK\n";
+    exit 0;
+}
+
+my $cache = "/var/cache/apt-proxy/debian/pool/main ";
+my $security = "/var/cache/apt-proxy/security/pool/updates/main ";
+
+open (HOME,"find $cache -type f | wc -l |");
+my $files = <HOME>;
+close(HOME);
+
+open (HOME,"find $security -type f | wc -l |");
+my $files_secu = <HOME>;
+close(HOME);
+
+chomp($files);chomp($files_secu);
+
+print "main.value ".$files."\n";
+print "security.value ".$files_secu."\n";
+
+# vim:syntax=perl

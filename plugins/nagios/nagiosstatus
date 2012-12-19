@@ -1,0 +1,137 @@
+#!/usr/bin/perl -w
+#
+# Copyright (C) 2008 Rune Nordbøe Skillingstad
+#
+# Plugin to monitor status in Nagios
+#
+# Usage: copy or link into /etc/munin/plugins
+#
+# Parameters:
+#
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+#
+# Config variables:
+#
+#       statuslog       - Which logfile to use
+#                         Might be /var/log/nagios2/nagios.log if 
+#                         /var/log/nagios/status.log is missing
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+#
+# $Log$
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use warnings;
+
+# File location may be defined with environment variable
+my $NAGIOSSTAT=($ENV{'statuslog'} || '/var/log/nagios/status.log');
+
+if ($ARGV[0]) {
+  if ($ARGV[0] eq 'autoconf') {
+    if (-r $NAGIOSSTAT) {
+      print "yes";
+      exit 0;
+    } else {
+      print "no (Nagios status file not found)";
+      exit 1;
+    }
+  } elsif ($ARGV[0] eq "config") {
+    print "graph_args --base 1000 -l 0 --vertical-label Checks\n";
+    print "graph_title Nagios status\n";
+    print "graph_category Nagios\n";
+    print "graph_info This graph shows how many Nagios checks are in warning or critical state.\n";
+    print "graph_order hdown hunknown swarning scritical sunknown\n";
+    print "hdown.label Hosts down\n";
+    print "hdown.info Number of Nagios hosts in DOWN state\n";
+    print "hdown.type GAUGE\n";
+    print "hdown.draw AREA\n";
+    print "hdown.warning 20\n";
+    print "hdown.critical 25\n";
+    print "hunknown.label Hosts unknown\n";
+    print "hunknown.info Number of Nagios hosts in UNKNOWN state\n";
+    print "hunknown.type GAUGE\n";
+    print "hunknown.draw STACK\n";
+    print "hunknown.warning 15\n";
+    print "hunknown.critical 20\n";
+    print "swarning.label Services warning\n";
+    print "swarning.info Number of Nagios services in WARNING state\n";
+    print "swarning.type GAUGE\n";
+    print "swarning.draw LINE2\n";
+    print "swarning.warning 20\n";
+    print "swarning.critical 25\n";
+    print "scritical.label Services critical\n";
+    print "scritical.info Number of Nagios services in CRITICAL state\n";
+    print "scritical.type GAUGE\n";
+    print "scritical.draw LINE2\n";
+    print "scritical.warning 15\n";
+    print "scritical.critical 20\n";
+    print "sunknown.label Services unknown\n";
+    print "sunknown.info Number of Nagios services in UNKNOWN state\n";
+    print "sunknown.type GAUGE\n";
+    print "sunknown.draw LINE2\n";
+    print "sunknown.warning 15\n";
+    print "sunknown.critical 20\n";
+  }
+  exit 0;
+}
+
+
+
+
+my $HDOWN     =0;
+my $HUNKNOWN  =0;
+my $SWARNING  =0;
+my $SCRITICAL =0;
+my $SUNKNOWN  =0;
+
+my $type = "";
+my %values;
+
+open (STATUS, $NAGIOSSTAT) or die;
+while(<STATUS>) {
+    chomp();
+    if(/^\s+\}\s*$/) {
+	$type = "";
+    }
+    
+    if($type) {
+	push(@{$values{$type}}, $_);
+    }
+    if(/^host \{/) {
+	$type = "host";
+    }
+    if(/^service \{/) {
+	$type = "service";
+    }
+}
+close (STATUS);
+
+$HDOWN     = grep(/current_state=1/, @{$values{'host'}});
+$HUNKNOWN  = grep(/current_state=2/, @{$values{'host'}});
+$SWARNING  = grep(/current_state=1/, @{$values{'service'}});
+$SCRITICAL = grep(/current_state=2/, @{$values{'service'}});
+$SUNKNOWN  = grep(/current_state=3/, @{$values{'service'}});
+
+print "hdown.value $HDOWN\n";
+print "hunknown.value $HUNKNOWN\n";
+print "swarning.value $SWARNING\n";
+print "scritical.value $SCRITICAL\n";
+print "sunknown.value $SUNKNOWN\n";
+
+

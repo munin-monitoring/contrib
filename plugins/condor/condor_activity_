@@ -1,0 +1,105 @@
+#!/bin/bash
+#
+# Wildard-plugin to monitor "activity" property of Condor nodes.
+#
+# Author: Šarūnas Burdulis, sarunas(a)mail.saabnet.com, 2008
+#
+# Runs 'condor_status' and counts virtual machines by their 
+# reported Condor "activity" (Idle, Busy, Suspended, Vacating, Benchmarking).  
+#
+# Parameters understood:
+#
+#	config   (required)
+# 	autoconf (optional - used by munin-config)
+#	suggest  (optional - used by munin-config)
+#
+# Configurable variables:
+#
+# 	env.condor_status - Path to condor_status executable,
+#		defaults to /usr/local/condor/bin/condor_status
+# 	env.constraint - Condor ClassAds constraint(s), as they are
+#		specified on the condor_status command line. For example, 
+#		to monitor 64-bit Linux nodes set:
+#		env.constraint 'arch=="x86_64" && opsys=="linux"'
+#
+# Magic markers - optional - used by installation scripts and
+# munin-config:
+#
+#%# family=contrib
+#%# capabilities=autoconf
+
+# optional tag
+TAG=`basename $0 | sed 's/^condor_activity_//g'`
+if [ -z "$TAG" ]; then
+    GRAPHTITLE="Activities"
+else
+    GRAPHTITLE="Activities (${TAG})"
+fi
+
+# env.condor_status
+if [ ! -z "$condor_status" ]; then
+    CS="$condor_status"
+else
+    CS="/usr/local/condor/bin/condor_status"
+fi
+
+# env.constraint
+if [ ! -z "$constraint" ]; then
+    CONS="-constraint ${constraint}"
+else
+    CONS=
+fi
+ 
+if [ "$1" = "autoconf" ]; then
+    echo "no"
+    exit 1
+fi
+
+if [ "$1" = "suggest" ]; then
+    echo "For example: condor_activity_Linux-x86_64."
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+	echo "graph_title "$GRAPHTITLE""
+	echo "graph_order idl bus sus vac ben"
+	echo "graph_args --lower-limit 0 "
+	echo "graph_vlabel VMs"
+	echo "graph_scale no"
+	echo "graph_info Shows slot activity from condor_status."
+	echo "graph_category Condor"
+	echo "graph_period second"
+	echo "idl.label Idle"
+	echo "idl.draw AREA"
+	echo "idl.type GAUGE"
+	echo "idl.info Idle VMs" 
+	echo "bus.label Busy"
+	echo "bus.draw STACK"
+	echo "bus.type GAUGE"
+	echo "bus.info Busy VMs"
+	echo "sus.label Suspended"
+	echo "sus.draw STACK"
+	echo "sus.type GAUGE"
+	echo "sus.info Suspended VMs"
+	echo "vac.label Vacating"
+	echo "vac.draw STACK"
+	echo "vac.type GAUGE"
+	echo "vac.info Vacating VMs"
+	echo "ben.label Benchmarking"
+	echo "ben.draw STACK"
+	echo "ben.type GAUGE"
+	echo "ben.info Benchmarking VMs"
+	exit 0
+fi
+
+echo -n "idl.value "
+eval $CS $CONS | grep Idle | wc -l 
+echo -n "bus.value "
+eval $CS $CONS | grep Busy | wc -l 
+echo -n "sus.value "
+eval $CS $CONS | grep Suspended | wc -l 
+echo -n "vac.value "
+eval $CS $CONS | grep Vacating | wc -l 
+echo -n "ben.value "
+eval $CS $CONS | grep Benchmarking | wc -l 

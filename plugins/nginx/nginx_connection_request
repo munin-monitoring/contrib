@@ -1,0 +1,154 @@
+#!/usr/bin/perl -w
+# -*- mode: cperl; mode: autopair -*-
+# Magic markers:
+#%# family=auto
+#%# capabilities=autoconf
+# nginx_connection request --- Determine the requests/connection
+#                              served by nginx.
+
+# Copyright (C) 2010 António P. P. Almeida <appa@perusio.net>
+
+# Author: António P. P. Almeida <appa@perusio.net>
+
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+
+# Except as contained in this notice, the name(s) of the above copyright
+# holders shall not be used in advertising or otherwise to promote the sale,
+# use or other dealings in this Software without prior written authorization.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+=head1 NAME
+
+nginx_connection_request - Munin plugin to show number of
+requests/connection served by nginx.
+
+=encoding utf8
+
+=head1 APPLICABLE SYSTEMS
+
+Any nginx host
+
+=head1 CONFIGURATION
+
+This shows the default configuration of this plugin.  You can override
+the status URL and User Agent.
+
+  [nginx*]
+      env.url http://localhost/nginx_status
+      env.ua nginx-status-verifier/0.1
+
+Nginx must also be configured.  Firstly the stub-status module must be
+compiled, and secondly it must be configured like this:
+
+  server {
+        listen 127.0.0.1;
+        server_name localhost;
+        location /nginx_status {
+                stub_status on;
+                access_log   off;
+                allow 127.0.0.1;
+                deny all;
+        }
+  }
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+1.1
+
+=head1 BUGS
+
+None known
+
+=head1 AUTHOR
+
+António Almeida <appa@perusio.net>
+
+=head1 REPOSITORY
+
+Source code at http://github.com/perusio/nginx-munin
+
+=head1 LICENSE
+
+MIT
+
+=cut
+
+my $ret = undef;
+
+if (! eval "require LWP::UserAgent;") {
+  $ret = "LWP::UserAgent not found";
+}
+
+chomp(my $fqdn=`hostname -f`);
+
+## Environment defined variables.
+## The default URL is nginx_status if different set it in the environment.
+my $URL = exists $ENV{'url'} ? $ENV{'url'} : "http://$fqdn/nginx_status";
+## The default user agent is ngnix-status-verifier/0.1 if different
+## set it in the environment.
+my $UA = exists $ENV{'ua'} ? $ENV{'ua'} : 'nginx-status-verifier/0.1';
+
+## Munin autoconf method.
+if (exists $ARGV[0] and $ARGV[0] eq "autoconf" ) {
+  if ($ret) {
+    print "no ($ret)\n";
+    exit 1;
+  }
+  my $ua = LWP::UserAgent->new(timeout => 30);
+  # Set the UA to something different from the libwww-perl.
+  # That UA is blocked.
+  $ua->agent($UA);
+  my $response = $ua->request(HTTP::Request->new('GET',$URL));
+
+  unless ($response->is_success and $response->content =~ /server/im) {
+    print "no (no nginx status on $URL)\n";
+    exit 1;
+  } else {
+    print "yes\n";
+    exit 0;
+  }
+}
+
+## Munin config method.
+if (exists $ARGV[0] and $ARGV[0] eq "config") {
+  print "graph_title nginx requests/connection handled\n";
+  print "graph_category nginx\n";
+  print "graph_vlabel Request/Connection\n";
+  print "connection_request.label requests/connection\n";
+  print "connection_request.min 0\n";
+  print "connection_request.draw LINE2\n";
+
+  exit 0;
+}
+
+my $ua = LWP::UserAgent->new(timeout => 30);
+# Set the UA to something different from the libwww-perl.
+# That UA is blocked.
+$ua->agent($UA);
+my $response = $ua->request(HTTP::Request->new('GET',$URL));
+
+if ($response->content =~ /^\s+(\d+)\s+(\d+)\s+(\d+)/m) {
+  printf("connection_request.value %.2f\n", $3/$2);
+} else {
+  print "connection_request.value U\n";
+}

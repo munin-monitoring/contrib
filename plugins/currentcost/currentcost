@@ -1,0 +1,815 @@
+#!/usr/bin/perl
+# -*- perl -*-
+
+=head1 NAME
+
+=encoding utf8
+
+currentcost - Munin plugin to monitor a CurrentCost energy monitor
+
+=head1 APPLICABLE SYSTEMS
+
+Any system connected to a CurrentCost monitor. These can be purchased from L<http://www.currentcost.com>.
+
+=head1 CONFIGURATION
+
+This plugin requires the following Perl modules. Either fetch them from CPAN or your distribution.
+
+=over
+
+=item *
+
+XML::Simple
+
+=item *
+
+Device::SerialPort
+
+=item *
+
+YAML
+
+=item *
+
+Time::Local
+
+=back
+
+This configuration section shows the defaults of the plugin:
+
+    [currentcost]
+    env.device          /dev/ttyUSB0
+    env.baud            2400
+    env.tick            6
+    env.currency        £
+    env.rate1           13.9
+    nenv.rate1qty       900
+    env.rate2           8.2
+    env.nightrate       0
+    env.nighthours      23:30-06:30
+    env.standingcharge  0.0
+    env.metertype       CC128
+
+The configuration can be broken down into the following subsections:
+
+=head2 DEVICE
+
+=over
+
+=item env.device
+
+Specfies the device node where the CurrentCost monitor can be found. You may find it useful to use a udev rule to symlink this somewhere permanent.
+
+=item env.baud
+
+Specifies the baud rate to use. CurrentCost devices may speak at 2400, 9600 or 57600 baud, depending on their age.
+
+=item env.tick
+
+How long, in seconds, to consider data valid for. CurrentCost monitors typically put out data every 6 or 10 seconds. If Munin does a data run less than C<env.tick> seconds after a config run, there's no need to wait for more data.
+
+=back
+
+=head2 COSTS
+
+=over
+
+=item env.currency
+
+The currency symbol to use on the cost graph. CurrentCost typically uses "E<pound>" or "E<euro>", but you may find "$" more to your taste.
+
+=item env.rate1
+
+The primary rate in hundredths of a C<env.currency> per kWh. (i.e. pence/cents per kWh)
+
+=item env.rate1qty
+
+How many kWh per month are charged at C<env.rate1>. Some tariffs charge one rate for the first so many units and then another rate for the remainder. If you are charged a flat rate per unit, set this to 0.
+
+=item env.rate2
+
+The secondary rate in hundredths of a C<env.currency> per kWh. (i.e. pence/cents per kWh)
+
+=item env.nightrate
+
+The night rate in hundredths of a C<env.currency> per kWh. Some tariffs (such as Economy 7) charge differently during the night and typically require a meter capable of reading two rates. If you do not have such a tariff, set this to 0.
+
+=item env.nighthours
+
+The time period for which C<env.nightrate> applies. This should be of the form C<hh:mm-hh:mm> and should span midnight.
+
+=item env.standingcharge
+
+The standing charge in hundreths of a C<env.currency> per month. If you do not have a standing charge, set this to 0.
+
+=item env.metertype
+
+The type of the meter. Currently "CC128" and "CC02" are supported.
+
+=back
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto contrib
+ #%# capabilities=multigraph autoconf
+
+=head1 AUTHOR
+
+Paul Saunders L<darac+munin@darac.org.uk>
+
+=cut
+
+use strict;
+use warnings;
+use utf8;
+use Munin::Plugin;
+
+need_multigraph();
+
+my $device_node    = $ENV{device}         || "/dev/ttyUSB0";
+my $baud_rate      = $ENV{baud}           || "2400";    # or 9600 or 57600
+my $tick_rate      = $ENV{tick}           || "6";
+# Tick_Rate is how long to consider data valid for (in seconds)
+
+# Costs
+my $currency       = $ENV{currency}       || "£";       # £ or €
+my $rate1          = $ENV{rate1}          || "13.9";    # in pence/cents
+my $rate1qty       = $ENV{rate1qty}       || "900";     # in kWh, 0 to use fixed rate2
+my $rate2          = $ENV{rate2}          || "8.2";     # in pence/cents
+my $nightrate      = $ENV{nightrate}      || "0";       # 0 = disabled
+my $nighthours     = $ENV{nighthours}     || "23:30-06:30";
+my $standingcharge = $ENV{standingcharge} || "0.0";     # pence/cents per month
+my $metertype      = $ENV{metertype}      || "CC128";   # or "CC02"
+
+my $MUNIN_DEBUG    = $ENV{MUNIN_DEBUG}    || 0;         # Set by munin-run
+
+my $ret;
+if ( !eval "require XML::Simple;" ) {
+    $ret .= "Could not load XML::Simple; ";
+}
+if ( !eval "require Device::SerialPort;" ) {
+    $ret .= "Could not load Device::SerialPort; ";
+}
+if ( !eval "require YAML;" ) {
+    $ret .= "Could not load YAML; ";
+}
+if ( !eval "require Time::Local;" ) {
+    $ret .= "Could not load Time::Local; ";
+}
+
+if ( defined $ARGV[0] and $ARGV[0] eq 'autoconf' ) {
+
+    # Shouldn't autoconfigure as there's no reliable way to detect
+    # serial devices.
+    print "no\n";
+    exit 0;
+}
+
+my @lastread;
+
+sub save_data {
+    my @savedata = @_;
+
+    # Do we need to save this data?
+    if ( !@lastread
+        or time >= Time::Local::timelocal(@lastread) + ($tick_rate) )
+    {
+        print "# Saving Data (Data is "
+          . ( time - Time::Local::timelocal(@lastread) )
+          . " seconds old)\n"
+          if $MUNIN_DEBUG;
+        @lastread = localtime(time);
+
+        my @save_vector;
+        push @save_vector, YAML::Dump(@lastread);
+        foreach ( split /\n/, YAML::Dump(@savedata) ) {
+            push @save_vector, $_;
+        }
+        save_state(@save_vector);
+    }
+}
+
+sub load_data {
+
+    # Bring the data back in
+    my @save_vector = restore_state();
+
+    # Read the timestamp, Do we need to refresh the data?
+    my @lastread = YAML::Load( shift @save_vector );
+
+    my $yamlstr = '';
+    foreach (@save_vector) {
+        $yamlstr .= "$_\n";
+    }
+    my @dataarray = YAML::Load($yamlstr);
+
+    if ( !@lastread
+        or time >= ( Time::Local::timelocal(@lastread) + ($tick_rate) ) )
+    {
+
+        # Data is stale
+        print "# Data is stale ("
+          . ( time - Time::Local::timelocal(@lastread) )
+          . " seconds). Re-reading device\n"
+          if $MUNIN_DEBUG;
+
+        eval {
+
+            # Fetch the XML
+            my @temparray;
+            if ( $metertype eq "CC128" ) {
+                @temparray = collect_cc128_data( $device_node, $baud_rate );
+            }
+            elsif ( $metertype eq "CC02" ) {
+                @temparray = collect_cc02_data( $device_node, $baud_rate );
+            }
+            else {
+                die "Unknown meter type $metertype.";
+            }
+
+            # Read the time so we know whether to reset
+            #  daily/monthly/yearly counters
+            my @now = localtime(time);
+            my %is_new;
+            $is_new{daily}   = ( $now[3] != $lastread[3] ) ? 1 : 0;
+            $is_new{monthly} = ( $now[4] != $lastread[4] ) ? 1 : 0;
+            $is_new{yearly}  = ( $now[5] != $lastread[5] ) ? 1 : 0;
+
+            for ( my $i = 0 ; $i <= $#temparray ; $i++ ) {
+                my $datum = $temparray[$i];
+                for ( my $j = 0 ; $j <= $#{ $datum->{data} } ; $j++ ) {
+                    for my $period (qw(daily monthly yearly)) {
+                        $period = "n$period" if is_night_rate();
+                        if ( defined( $dataarray[$i]->{data}[$j]->{$period} ) )
+                        {
+
+                            # There's old data. Consider incrementing it
+                            if ( $is_new{$period} ) {
+
+                                # Start of a new period, reset the counter
+                                print "# Start of a new $period period." .
+							          " Resetting counter\n" if $MUNIN_DEBUG;
+                                $temparray[$i]->{data}[$j]->{$period} = 0;
+                            }
+                            else {
+                                $temparray[$i]->{data}[$j]->{$period} =
+                                  $dataarray[$i]->{data}[$j]->{$period} +
+                                  $temparray[$i]->{data}[$j]->{value} / 12;
+                            }
+                        }
+                        else {
+
+                            # No old data. Set it.
+                            $temparray[$i]->{data}[$j]->{$period} =
+                              $temparray[$i]->{data}[$j]->{value} / 12;
+                        }
+                    }
+                }
+            }
+
+            # If the above threw an error, we won't overwrite the old data
+            @dataarray = @temparray;
+
+            1;
+        } or do {
+            print $@;
+          }
+    }
+    return @dataarray;
+}
+
+sub is_night_rate {
+
+    # Determine if we're on night rate
+    return 0 if not $nightrate;
+    my ( $nightstart, $nightstop ) = split /-/, $nighthours;
+    my ( $start_h,    $start_m )   = split /:/, $nightstart;
+    my ( $stop_h,     $stop_m )    = split /:/, $nightstop;
+    my $start_time = $start_m + ( $start_h * 60 );
+    my $stop_time  = $stop_m +  ( $stop_h * 60 );
+    my @now        = localtime(time);
+    my $now_time = $now[1] + ( $now[2] * 60 );
+
+    if (   $now_time >= $start_time
+        or $now_time <= $stop_time )
+    {
+        print "# Night rate is ACTIVE\n" if $MUNIN_DEBUG;
+        return 1;
+    }
+    else {
+        print "# Night rate is enabled, but NOT active\n" if $MUNIN_DEBUG;
+        return 0;
+    }
+}
+
+=head1 EXAMPLE INPUT
+
+The device will periodically output a string of XML. The string will be all on one line, they are expanded here for clarity.
+
+=head2 Classic format
+
+As per L<http://cumbers.wordpress.com/2008/05/07/breakdown-of-currentcost-xml-output/>:
+
+ <msg>
+    <date>
+        <dsb>00014</dsb>        days since birth
+        <hr>14</hr>             the time
+        <min>07</min> 
+        <sec>07</sec> 
+    </date>
+    <src>
+        <name>CC02</name>       name of this device
+        <id>03280</id>          communication channel for device
+        <type>1</type>          hardware version of the device
+        <sver>0.07</sver>       software version
+    </src>
+    <ch1>
+        <watts>00080</watts>    value from the first channel clamp
+    </ch1>
+    <ch2>
+        <watts>00000</watts>    value from the second channel clamp
+    </ch2>
+    <ch3>
+        <watts>00000</watts>    value from the third channel clamp
+    </ch3>
+    <tmpr>28.8</tmpr>           current temperature (degrees celsius)
+    <hist>
+        <hrs>
+            <h02>000.0</h02>    total Kwh used in 2 hour blocks
+            <h04>000.1</h04> 
+            <h06>000.1</h06> 
+            <h08>000.0</h08> 
+            <h10>000.0</h10> 
+            <h12>000.0</h12> 
+            <h14>000.0</h14> 
+            <h16>000.1</h16> 
+            <h18>000.1</h18> 
+            <h20>000.1</h20> 
+            <h22>000.1</h22> 
+            <h24>000.0</h24> 
+            <h26>000.0</h26> 
+        </hrs>
+        <days>
+            <d01>0000</d01>     total Kwh used per day(s)
+            <d02>0000</d02> 
+            <d03>0000</d03> 
+            <d04>0000</d04> 
+            <d05>0000</d05> 
+            <d06>0000</d06> 
+            <d07>0000</d07> 
+            <d08>0000</d08> 
+            <d09>0000</d09> 
+            <d10>0000</d10> 
+            <d11>0000</d11> 
+            <d12>0000</d12> 
+            <d13>0000</d13> 
+            <d14>0000</d14> 
+            <d15>0000</d15> 
+            <d16>0000</d16> 
+            <d17>0000</d17> 
+            <d18>0000</d18> 
+            <d19>0000</d19> 
+            <d20>0000</d20> 
+            <d21>0000</d21> 
+            <d22>0000</d22> 
+            <d23>0000</d23> 
+            <d24>0000</d24> 
+            <d25>0000</d25> 
+            <d26>0000</d26> 
+            <d27>0000</d27> 
+            <d28>0000</d28> 
+            <d29>0000</d29> 
+            <d30>0000</d30> 
+            <d31>0000</d31> 
+        </days>
+        <mths>
+            <m01>0000</m01>     total Kwh used per month(s)
+            <m02>0000</m02> 
+            <m03>0000</m03> 
+            <m04>0000</m04> 
+            <m05>0000</m05> 
+            <m06>0000</m06> 
+            <m07>0000</m07> 
+            <m08>0000</m08> 
+            <m09>0000</m09> 
+            <m10>0000</m10> 
+            <m11>0000</m11> 
+            <m12>0000</m12> 
+        </mths>
+        <yrs>
+            <y1>0000000</y1>    total Kwh used per year(s)
+            <y2>0000000</y2> 
+            <y3>0000000</y3> 
+            <y4>0000000</y4> 
+        </yrs>
+    </hist>
+ </msg>
+
+=head2 CC128 format
+
+For full definition, see L<http://www.currentcost.com/xx128/xml.html>
+
+ <msg>                           start of message
+   <src>CC128-v0.11</src>        source and software version
+   <dsb>00089</dsb>              days since birth, ie days run
+   <time>13:02:39</time>         24 hour clock time as displayed
+   <tmpr>18.7</tmpr>             temperature as displayed
+   <sensor>1</sensor>            Appliance Number as displayed
+   <id>01234</id>                radio ID received from the sensor
+   <type>1</type>                sensor Type, "1" = electricity
+   <ch1>                         sensor channel
+      <watts>00345</watts>       data and units
+   </ch1>
+   <ch2>
+      <watts>02151</watts>
+   </ch2>
+   <ch3>
+      <watts>00000</watts>
+   </ch3>
+ </msg>                           end of message
+ 
+=cut
+
+sub collect_cc128_data {
+
+    # Read data from the serial port until we see a repeated sensor
+    my ( $port, $baud ) = @_;
+
+    my $tty = Device::SerialPort->new($port) || die "Can't open $port: $!";
+    $tty->baudrate($baud)   || die "Can't set serial baudrate";
+    $tty->parity("none")    || die "Can't set serial parity";
+    $tty->databits(8)       || die "Can't set serial databits";
+    $tty->handshake("none") || die "Can't set serial handshake";
+    $tty->write_settings    || die "Can't set serial parameters";
+
+    open( my $ttydev, "<", $port ) || die "Can't open $port: $?";
+
+    my @cc_data_arr;
+    my %seen_sensors;
+
+    while (<$ttydev>) {
+        print "# Read from device: $_\n" if $MUNIN_DEBUG;
+        if (m{(<msg>.*</msg>)}) {
+            my $xmlref = XML::Simple::XMLin( $1, KeepRoot => 1 );
+
+            my $sensor = $xmlref->{msg}->{sensor};
+            print "# Parsing Sensor $sensor\n" if $MUNIN_DEBUG;
+            next unless defined $sensor;
+            if ( defined $seen_sensors{$sensor} ) {
+
+                # We've seen this sensor before.
+                # Time to stop reading data
+                print "# Hello again, Sensor $sensor\n" if $MUNIN_DEBUG;
+                last;
+            }
+            $seen_sensors{$sensor} = 1;
+
+            my $temphash;
+            $temphash->{sensor} = $sensor;
+            $temphash->{temp}   = $xmlref->{msg}->{tmpr};
+            my @temparr;
+            foreach my $key ( keys %{ $xmlref->{msg} } ) {
+                if ( $key =~ /ch(\d+)/ ) {
+                    my $channel = $1;
+                    my $unit = ( keys %{ $xmlref->{msg}->{"ch$channel"} } )[0];
+                    my $val  = $xmlref->{msg}->{"ch$channel"}->{$unit};
+                    print "# Channel $channel, Unit $unit, Value $val\n"
+                      if $MUNIN_DEBUG;
+                    push @temparr,
+                      {
+                        "channel" => $channel,
+                        "unit"    => $unit,
+                        "value"   => $val
+                      };
+                }
+            }
+            $temphash->{data} = \@temparr;
+
+            push @cc_data_arr, $temphash;
+        }
+    }
+    close($ttydev);
+
+    return @cc_data_arr;
+}
+
+sub collect_cc02_data {
+    # Function supplied by David Edmondson <dme@dme.org>
+
+    # Read data from the serial port
+    my ( $port, $baud ) = @_;
+
+    my $tty = Device::SerialPort->new($port) || die "Can't open $port: $!";
+    $tty->baudrate($baud)   || die "Can't set serial baudrate";
+    $tty->parity("none")    || die "Can't set serial parity";
+    $tty->databits(8)       || die "Can't set serial databits";
+    $tty->handshake("none") || die "Can't set serial handshake";
+    $tty->write_settings    || die "Can't set serial parameters";
+
+    open( my $ttydev, "<", $port ) || die "Can't open $port: $?";
+
+    my @cc_data_arr;
+
+    while (<$ttydev>) {
+        if (m{(<msg>.*</msg>)}) {
+            my $xmlref = XML::Simple::XMLin( $1, KeepRoot => 1 );
+
+            my $temphash;
+            $temphash->{sensor} = 0;    # Only one sensor.
+            $temphash->{temp}   = $xmlref->{msg}->{tmpr};
+            my @temparr;
+            foreach my $key ( keys %{ $xmlref->{msg} } ) {
+                if ( $key =~ /ch(\d+)/ ) {
+                    my $channel = $1;
+                    my $unit = ( keys %{ $xmlref->{msg}->{"ch$channel"} } )[0];
+                    my $val  = $xmlref->{msg}->{"ch$channel"}->{$unit};
+                    push @temparr,
+                      {
+                        "channel" => $channel,
+                        "unit"    => $unit,
+                        "value"   => $val
+                      };
+                }
+            }
+            $temphash->{data} = \@temparr;
+
+            push @cc_data_arr, $temphash;
+
+            last;
+        }
+    }
+    close($ttydev);
+
+    return @cc_data_arr;
+}
+
+my @cc_data = load_data();
+
+if ( defined $ARGV[0] and $ARGV[0] eq 'config' ) {
+    if ($ret) {
+        print $ret;
+        exit 1;
+    }
+
+    for my $datum (@cc_data) {
+        my $unit = '';
+        foreach my $key ( @{ $datum->{data} } ) {
+            if ( $unit eq '' ) {
+                $unit = $key->{unit};
+            }
+            elsif ( $unit != $key->{unit} ) {
+                print STDERR
+"# Conflicting units ($unit and $key->{unit}) on sensor $datum->{sensor}";
+            }
+        }
+
+        if ( $datum->{sensor} == 0 ) {
+
+            # Output the Root graph (being sensor 0)
+            print <<EOF;
+multigraph currentcost
+graph_title CurrentCost Consumption
+graph_args --base 1000 -l 0
+graph_vlabel $unit
+graph_category currentcost
+graph_info This graph shows the 'whole house' data.
+EOF
+            if ( scalar( @{ $datum->{data} } ) > 1 ) {
+                print "graph_total Total\n";
+            }
+            foreach my $channel ( @{ $datum->{data} } ) {
+                my $fieldname = "ch" . $channel->{channel};
+                print <<EOF;
+$fieldname.label Channel $channel->{channel}
+$fieldname.type GAUGE
+$fieldname.min 0
+$fieldname.draw AREA
+${fieldname}_t.label Channel $channel->{channel} Trend
+${fieldname}_t.type GAUGE
+${fieldname}_t.min 0
+${fieldname}_t.draw LINE2
+EOF
+                if ($nightrate) {
+                    print <<EOF;
+${fieldname}_n.label Channel $channel->{channel} Night
+${fieldname}_n.type GAUGE
+${fieldname}_n.min 0
+${fieldname}_t.cdef ${fieldname}_n,UN,${fieldname},${fieldname},IF,3600,TRENDNAN
+EOF
+                }
+                else {
+                    print "${fieldname}_t.cdef ${fieldname},3600,TRENDNAN\n";
+                }
+            }
+
+            # Output the Root cumulative graph
+            print <<EOF;
+multigraph currentcost_cumulative
+graph_title CurrentCost Total Usage
+graph_args --base 1000 -l 0
+graph_vlabel $unit * hours
+graph_category currentcost
+EOF
+            print "graph_order ";
+            my $confstr = '';
+            foreach my $channel ( @{ $datum->{data} } ) {
+                my $fieldname = "ch" . $channel->{channel};
+                print "${fieldname}=currentcost.$fieldname ${fieldname}_d ";
+                $confstr .= <<EOF;
+${fieldname}.update no
+${fieldname}.label Channel $channel->{channel}
+${fieldname}.type GAUGE
+${fieldname}.min 0
+${fieldname}.cdef PREV,${fieldname},12,/,ADDNAN
+${fieldname}_d.label Channel $channel->{channel} Daily
+${fieldname}_d.type GAUGE
+${fieldname}_d.min 0
+EOF
+            }
+            print "\n$confstr";
+            print <<EOF;
+fudge.label (fudge)
+fudge.type GAUGE
+fudge.graph yes
+EOF
+
+            # Output the root cost graph
+            print <<EOF;
+multigraph currentcost_cost
+graph_title CurrentCost Estimated Cost
+graph_args --base 1000 -l 0
+graph_vlabel ${currency}
+graph_category currentcost
+EOF
+            if ( scalar( @{ $datum->{data} } ) > 1 ) {
+                print "graph_total Total\n";
+            }
+            foreach my $channel ( @{ $datum->{data} } ) {
+                my $fieldname = "ch" . $channel->{channel};
+                print <<EOF;
+$fieldname.label Channel $channel->{channel}
+$fieldname.type GAUGE
+$fieldname.min 0
+EOF
+            }
+
+        }
+        else {
+
+            # Output a subordinate graph (being an appliance)
+            my $sensor = $datum->{sensor};
+            print <<EOF;
+multigraph currentcost.appliance$sensor
+graph_title CurrentCost Consumption (Appliance $sensor)
+graph_args --base 1000 -l 0
+graph_vlabel $unit
+graph_category currentcost
+graph_info This graph shows the data for Appliance $sensor
+EOF
+            if ( scalar( @{ $datum->{data} } ) > 1 ) {
+                print "graph_total Total\n";
+            }
+            foreach my $channel ( @{ $datum->{data} } ) {
+                my $fieldname = "ch" . $channel->{channel};
+                print <<EOF;
+$fieldname.label Channel $channel->{channel}
+$fieldname.type GAUGE
+$fieldname.min 0
+EOF
+                if ($nightrate) {
+                    print <<EOF;
+${fieldname}_n.label Channel $channel->{channel} Night
+${fieldname}_n.type GAUGE
+${fieldname}_n.min 0
+EOF
+                }
+            }
+
+            # Output the subordinate cumulative graph
+            print <<EOF;
+multigraph currentcost_cumulative.appliance$sensor
+graph_title CurrentCost Total Usage (Appliance $sensor)
+graph_args --base 1000 -l 0
+graph_vlabel $unit * hours
+graph_category currentcost
+EOF
+            print "graph_order ";
+            my $confstr = '';
+            foreach my $channel ( @{ $datum->{data} } ) {
+                my $fieldname = "ch" . $channel->{channel};
+                print "$fieldname=currentcost.$fieldname ";
+                $confstr .= <<EOF;
+$fieldname.label Channel $channel->{channel}
+$fieldname.type GAUGE
+$fieldname.min 0
+$fieldname.cdef PREV,$fieldname,12,/,ADDNAN
+EOF
+            }
+            print "\n$confstr";
+
+            # Output the subordinate Cost graph
+            print <<EOF;
+multigraph currentcost_cost.appliance$sensor
+graph CurrentCost Estimated Cost (Appliance $sensor)
+graph_args --base 1000 -l 0
+graph_vlabel ${currency}
+graph_category currentcost
+EOF
+            if ( scalar( @{ $datum->{data} } ) > 1 ) {
+                print "graph_total Total\n";
+            }
+            foreach my $channel ( @{ $datum->{data} } ) {
+                my $fieldname = "ch" . $channel->{channel};
+                print <<EOF;
+$fieldname.label Channel $channel->{channel}
+$fieldname.type GAUGE
+$fieldname.min 0
+EOF
+            }
+        }
+    }
+    save_data(@cc_data);
+    exit 0;
+}
+
+# Output the value data
+for my $datum (@cc_data) {
+    if ( $datum->{sensor} == 0 ) {
+
+        # Output the Root graph (being sensor 0)
+        print "multigraph currentcost\n";
+    }
+    else {
+        my $sensor = $datum->{sensor};
+        print "multigraph currentcost.appliance$sensor\n";
+    }
+    foreach my $channel ( @{ $datum->{data} } ) {
+        my $fieldname = "ch" . $channel->{channel};
+        if ( is_night_rate() ) {
+            print "${fieldname}_n.value " . $channel->{value} . "\n";
+            print "${fieldname}.value 0\n";
+        }
+        else {
+            print "${fieldname}.value " . $channel->{value} . "\n";
+            print "${fieldname}_n.value 0\n";
+        }
+    }
+    if ( $datum->{sensor} == 0 ) {
+
+        # Output the Root graph (being sensor 0)
+        print "multigraph currentcost_cumulative\n";
+    }
+    else {
+        my $sensor = $datum->{sensor};
+        print "multigraph currentcost_cumulative.appliance$sensor\n";
+    }
+    foreach my $channel ( @{ $datum->{data} } ) {
+        my $fieldname = "ch" . $channel->{channel};
+        my $value     = $channel->{daily};
+        $value += $channel->{ndaily} if defined $channel->{ndaily};
+        print "${fieldname}_d.value $value\n";
+    }
+    my @now = localtime(time);
+    if ( $now[3] == 1 and $now[2] == 0 and $now[1] <= 5 ) {
+
+        # First reading of month, reset.
+        print "fudge.value 0\n";
+    }
+    else {
+        print "fudge.value 1\n";
+    }
+
+    if ( $datum->{sensor} == 0 ) {
+
+        # Output the Root Cost graph (being sensor 0)
+        print "multigraph currentcost_cost\n";
+    }
+    else {
+        my $sensor = $datum->{sensor};
+        print "multigraph currentcost_cost.appliance$sensor\n";
+    }
+    foreach my $channel ( @{ $datum->{data} } ) {
+        my $fieldname = "ch" . $channel->{channel};
+        my $kWh       = $channel->{monthly} / 1000;
+        my $nightkWh  = $channel->{nmonthly} / 1000
+          if defined $channel->{nmonthly};
+        my $cost = $standingcharge;
+        if ( $nightrate and defined $nightkWh ) {
+            $cost = $nightkWh * $nightrate;
+        }
+        if ( $kWh <= $rate1qty ) {
+            $cost += $kWh * $rate1;
+        }
+        else {
+            $cost += ( ( $kWh - $rate1qty ) * $rate2 ) + ( $rate1qty * $rate1 );
+        }
+        $cost = $cost / 100;    # Convert pence/cents into pounds/euros
+        print "$fieldname.value $cost\n";
+        my $extinfo = sprintf( "Usage is %.3f kWh.", $kWh );
+        $extinfo .= sprintf( " Night usage is %.3f kWh.", $nightkWh )
+          if defined $nightkWh;
+        print "$fieldname.extinfo $extinfo\n";
+    }
+}
+save_data(@cc_data);
+exit 0;

@@ -1,0 +1,45 @@
+#!/bin/sh
+# Pasha "p01nt" Klets <pasha@klets.name>
+
+name=`basename $0`
+title=`echo ${name} | awk -F_ '{print $NF}'`
+
+hp_stat() {
+	echo "show stat" | socat unix-connect:/tmp/haproxy stdio
+}
+
+servers_section() {
+	hp_stat | grep '^'${title}',' |  egrep -v '^'${title}',(FRONTEND|BACKEND)'
+}
+
+servers() {
+	servers_section | awk -F, '{print $2}'
+}
+
+labels() {
+	servers_section | awk -F, '{print $2".label "$2"\n"$2".type GAUGE\n"$2".draw AREASTACK"}'
+}
+
+values() {
+	servers_section | awk -F, '{print $2".value "$5}'
+}
+
+graph_title="${title} sessions by servers"
+graph_vlabel=${title}
+
+case $1 in
+   config)
+		cat <<EOF
+graph_category haproxy
+graph_title  ${graph_title}
+graph_vlabel ${graph_vlabel}
+
+`labels`
+EOF
+		exit 0
+	;;
+esac
+
+values
+
+exit 0

@@ -1,0 +1,35 @@
+#!/bin/sh
+# 
+# Plugin to monitor the Scalix email system: Client statistics
+#
+# (C) 2008 P.Holzleitner
+#
+#%# family=contrib
+
+OMSTAT="/opt/scalix/bin/omstat" 
+
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title Scalix client connections'
+	echo 'graph_args --lower-limit 0'
+	echo 'graph_vlabel number'
+	echo 'graph_category Scalix'
+	echo 'swa.label Webmail connections'
+	echo 'swa.draw AREA'
+	echo 'imap.label IMAP connections'
+	echo 'imap.draw STACK'
+	echo 'outlook.label Outlook/Scalix10 connections'
+	echo 'outlook.draw STACK'
+	echo 'outlook11.label Outlook/Scalix11 connections'
+	echo 'outlook11.draw STACK'
+	exit 0
+fi
+
+IMAP=`nice -10 $OMSTAT -u rci -c | grep 'IMAP client'       | wc -l`
+SWEB=`nice -10 $OMSTAT -u rci -c | grep 'SWA client'        | wc -l`
+OLOK10=`pgrep -f "Connect for Microsoft Outlook 10"         | wc -l`
+OLOK11=`pgrep -f "Connect for Microsoft Outlook 11"         | wc -l`
+echo "swa.value $SWEB"
+echo "imap.value $IMAP"
+echo "outlook.value $OLOK10"
+echo "outlook11.value $OLOK11"

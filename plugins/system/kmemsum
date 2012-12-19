@@ -1,0 +1,64 @@
+#!/bin/sh
+# Kernel Memory usage stats.
+# Author: alex@trull.org 
+# 
+# Based on the short script at http://wiki.freebsd.org/ZFSTuningGuide (20080820)
+#
+# Parameters:
+#
+# 	config   (required)
+# 	autoconf (optional - only used by munin-config)
+#
+# Magic markers (optional - only used by munin-config and some
+# installation scripts):
+#%# family=auto
+#%# capabilities=autoconf
+
+if [ "$1" = "autoconf" ]; then
+    if [ -x /sbin/sysctl ]; then
+        /sbin/sysctl vm.kmem_size_max > /dev/null
+    	if [ $? = "0" ]; then
+	    	echo yes
+    		exit 0
+    	else
+		    echo no
+		    exit 1
+	    fi
+    else
+        echo no
+        exit 1
+    fi
+fi
+
+TEXT=`kldstat | tr a-f A-F | awk 'BEGIN {print "ibase=16"}; NR > 1 {print $4}' | bc | awk '{a+=$1}; END {print a}'`
+DATA=`vmstat -m | sed 's/K//' | awk '{a+=$3}; END {print a*1024}'`
+TOTAL=`echo $DATA $TEXT | awk '{print $1+$2}'`
+MAX=`sysctl vm.kmem_size_max | awk '{print $2}'`
+
+if [ "$1" = "config" ]; then
+        echo 'graph_args --base 1024 -l 0 --vertical-label Bytes'
+	echo 'graph_title Kernel Memory usage'
+	echo 'graph_category system'
+	echo 'graph_info This graph shows kmem usage.'
+	echo 'graph_order text data'
+	echo 'text.label text'
+	echo 'text.info kmem text'
+	echo 'text.draw AREA'
+        echo 'data.label data'
+        echo 'data.info kmem data' 
+        echo 'data.draw STACK'
+        echo 'total.label total'
+        echo 'total.info kmem total'
+        echo 'total.draw LINE'
+        echo 'max.label max'
+        echo 'max.info kmem max'
+        echo 'max.draw LINE2'
+	exit 0
+fi
+
+echo "text.value $TEXT"
+echo "data.value $DATA"
+echo "total.value $TOTAL"
+echo "max.value $MAX"
+
+ 

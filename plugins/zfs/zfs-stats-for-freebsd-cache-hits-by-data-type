@@ -1,0 +1,58 @@
+#!/bin/sh
+# -*- sh -*-
+#
+# $Id: zfs_arc_cache_hits_by_data_type 11 2010-11-25 07:10:14Z patpro $
+#
+# Parameters:
+#
+# 	config   (required)
+# 	autoconf (optional - used by munin-config)
+#
+# Magick markers (optional - used by munin-config and som installation
+# scripts):
+#%# family=auto
+#%# capabilities=autoconf
+
+export PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# autoconf
+
+if [ "$1" = "autoconf" ]; then
+   # Is the zfs-stats executable there at least ?
+   if [ -x /usr/local/bin/zfs-stats ]; then
+       if /usr/local/bin/zfs-stats -p > /dev/null 2>&1; then
+           echo yes
+           exit 0
+       else
+           echo "no"
+           exit 0
+       fi
+   else
+       echo "no (no /usr/local/bin/zfs-stats executable)"
+       exit 0
+   fi
+fi
+
+# config
+if [ "$1" = "config" ]; then
+    echo 'graph_title ZFS ARC Cache Hits and Misses'
+    echo 'graph_args --upper-limit 100 -l -100'
+    echo 'graph_vlabel %'
+    echo 'graph_category ZFS'
+    echo 'graph_info This graph shows the ARC cache hits and misses by data type'
+
+/usr/local/bin/zfs-stats -A | awk 'BEGIN { RS = "" ; FS = "\n" } /HITS BY DATA TYPE/ {print}' | \
+awk '/^\t.*%/ {sub(/[\t ]*/,"");sub(/:.*/,""); displayname = $0" (hits)"; gsub(/[ .]/,"_",$0); print "hits_"$0".label "displayname"\nhits_"$0".min 0"}' 
+/usr/local/bin/zfs-stats -A | awk 'BEGIN { RS = "" ; FS = "\n" } /MISSES BY DATA TYPE/ {print}' | \
+awk '/^\t.*%/ {sub(/[\t ]*/,"");sub(/:.*/,""); displayname = $0" (misses)"; gsub(/[ .]/,"_",$0); print "misses_"$0".label "displayname"\nmisses_"$0".min -100"}' 
+	
+	exit 0
+fi
+
+# This is the main part of the script, basically it calls
+# /usr/local/bin/zfs-stats and processes its output
+
+/usr/local/bin/zfs-stats -A | awk 'BEGIN { RS = "" ; FS = "\n" } /HITS BY DATA TYPE/ {print}' | \
+awk '/^\t.*%/ {sub(/[\t ]*/,"");sub(/:/,""); gsub(/[ .]/,"_",$0); sub(/%/,""); sub(/_/,".",$2); print "hits_"$1".value "$2}'
+/usr/local/bin/zfs-stats -A | awk 'BEGIN { RS = "" ; FS = "\n" } /MISSES BY DATA TYPE/ {print}' | \
+awk '/^\t.*%/ {sub(/[\t ]*/,"");sub(/:/,""); gsub(/[ .]/,"_",$0); sub(/%/,""); sub(/_/,".",$2); print "misses_"$1".value -"$2}'

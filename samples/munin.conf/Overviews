@@ -1,0 +1,162 @@
+# adapt paths as you see fit, we use nginx for delivery, so htmldir is within a path nginx can read
+dbdir /home/cust/var/munin
+htmldir /home/cust/var/ngi/htdocs/munin
+logdir /home/cust/log/munin
+rundir /var/run/munin
+
+# override the alphabetic ordering on top-most level, must be before any further domain/node definition
+domain_order Quick Nodes Systems
+ 
+[Quick;]
+# order as the tiers are structured
+node_order Glassfish MongoDB
+ 
+[Quick;Glassfish]
+# dont poll a node, we are loaning graphs from other RRDs
+address 127.0.0.1
+update no
+# define some "virtual" graph (loaned)
+heap.update no
+heap.graph_title Allocated Heaps
+heap.graph_vlabel bytes
+heap.graph_category jvm
+# note the delimiters ; : . used carefully like in doc
+heap.graph_order app1t1=Systems;App;custapp1t1:jmx_MemoryAllocatedHeap.Used \
+app1t2=Systems;App;custapp1t2:jmx_MemoryAllocatedHeap.Used \
+adm1t1=Systems;Misc;custadm1t1:jmx_MemoryAllocatedHeap.Used
+conn.update no
+conn.graph_title Open-Conns
+conn.graph_vlabel count
+conn.graph_category http
+conn.graph_order app1t1=Systems;App;custapp1t1:glassfish_connqueue_http_listener_1.countopenconnections \
+app1t2=Systems;App;custapp1t2:glassfish_connqueue_http_listener_1.countopenconnections \
+adm1t1=Systems;Misc;custadm1t1:glassfish_connqueue_http_listener_1.countopenconnections
+ 
+[Quick;MongoDB]
+address 127.0.0.1
+update no
+mongo_conn.update no
+mongo_conn.graph_title Connections
+mongo_conn.graph_vlabel connections
+mongo_conn.graph_category conn
+mongo_conn.graph_order dbs1t1=Systems;DB;custdbs1t1:mongo_conn.connections \
+dbs1t2=Systems;DB;custdbs1t2:mongo_conn.connections
+mongo_ops.update no
+mongo_ops.graph_title Queries
+mongo_ops.graph_vlabel q/sec
+mongo_ops.graph_category queries
+mongo_ops.graph_order dbs1t1=Systems;DB;custdbs1t1:mongo_ops.query \
+dbs1t2=Systems;DB;custdbs1t2:mongo_ops.query
+mongo_mem.update no
+mongo_mem.graph_title Memory
+mongo_mem.graph_vlabel resident bytes
+mongo_mem.graph_category memory
+mongo_mem.graph_order dbs1t1=Systems;DB;custdbs1t1:mongo_mem.resident \
+dbs1t2=Systems;DB;custdbs1t2:mongo_mem.resident
+ 
+[Nodes;Glassfish;]
+# order by our view of importance
+node_order app1t1 app1t2 adm1t2
+
+[Nodes;Glassfish;app1t1]
+address 127.0.0.1
+update no
+heap.update no
+heap.graph_title Allocated Heap
+heap.graph_vlabel bytes
+heap.graph_category jvm
+heap.graph_order Used=Systems;App;custapp1t1:jmx_MemoryAllocatedHeap.Used
+conn.update no
+conn.graph_title Open-Conns
+conn.graph_vlabel count
+conn.graph_category http
+conn.graph_order connections=Systems;App;custapp1t1:glassfish_connqueue_http_listener_1.countopenconnections
+[Nodes;Glassfish;app1t2]
+address 127.0.0.1
+update no
+heap.update no
+heap.graph_title Allocated Heap
+heap.graph_vlabel bytes
+heap.graph_category jvm
+heap.graph_order Used=Systems;App;custapp1t2:jmx_MemoryAllocatedHeap.Used
+conn.update no
+conn.graph_title Open-Conns
+conn.graph_vlabel count
+conn.graph_category http
+conn.graph_order connections=Systems;App;custapp1t2:glassfish_connqueue_http_listener_1.countopenconnections
+[Nodes;Glassfish;adm1t1]
+address 127.0.0.1
+update no
+heap.update no
+heap.graph_title Allocated Heap
+heap.graph_vlabel bytes
+heap.graph_category jvm
+heap.graph_order Used=Systems;Misc;custadm1t1:jmx_MemoryAllocatedHeap.Used
+conn.update no
+conn.graph_title Open-Conns
+conn.graph_vlabel count
+conn.graph_category http
+conn.graph_order connections=Systems;Misc;custadm1t1:glassfish_connqueue_http_listener_1.countopenconnections
+[Nodes;MongoDB]
+node_order dbs1t1 dbs1t2
+[Nodes;MongoDB;dbs1t1]
+address 127.0.0.1
+update no
+mongo_conn.update no
+mongo_conn.graph_title Connections
+mongo_conn.graph_vlabel connections
+mongo_conn.graph_category conn
+mongo_conn.graph_order connections=Systems;DB;custdbs1t1:mongo_conn.connections
+mongo_ops.update no
+mongo_ops.graph_title Queries
+mongo_ops.graph_vlabel q/sec
+mongo_ops.graph_category queries
+mongo_ops.graph_order queries=Systems;DB;custdbs1t1:mongo_ops.query
+mongo_mem.update no
+mongo_mem.graph_title Memory
+mongo_mem.graph_vlabel resident bytes
+mongo_mem.graph_category memory
+mongo_mem.graph_order memory=Systems;DB;custdbs1t1:mongo_mem.resident
+[Nodes;MongoDB;dbs1t2]
+address 127.0.0.1
+update no
+mongo_conn.update no
+mongo_conn.graph_title Connections
+mongo_conn.graph_vlabel connections
+mongo_conn.graph_category conn
+mongo_conn.graph_order connections=Systems;DB;custdbs1t2:mongo_conn.connections
+mongo_ops.update no
+mongo_ops.graph_title Queries
+mongo_ops.graph_vlabel q/sec
+mongo_ops.graph_category queries
+mongo_ops.graph_order queries=Systems;DB;custdbs1t2:mongo_ops.query
+mongo_mem.update no
+mongo_mem.graph_title Memory
+mongo_mem.graph_vlabel resident bytes
+mongo_mem.graph_category memory
+mongo_mem.graph_order memory=Systems;DB;custdbs1t2:mongo_mem.resident
+
+# end of "virtual/loaned" graphing
+
+# the following section is the actual polling into nodes!
+ 
+[Systems;]
+node_order Web App DB Misc
+[Systems;Misc;]
+node_order custgw11 custadm1t1
+
+# no need for real hostnames/domains, just use names as you like unless using "use_nodename_yes"!
+[Systems;Misc;custadm1t1]
+address 192.168.10.6
+[Systems;Misc;custgw11]
+address 192.168.10.1
+[Systems;App;custapp1t1]
+address 192.168.10.4
+[Systems;App;custapp1t2]
+address 192.168.10.5
+[Systems;DB;custdbs1t1]
+address 192.168.10.253
+[Systems;DB;custdbs1t2]
+address 192.168.10.254
+[Systems;Web;custrpx1t1]
+address 192.168.10.30

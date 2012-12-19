@@ -1,0 +1,60 @@
+#!/bin/sh
+#
+#  pdns_recursor munin plugin.
+#  Written by Sean Reifschneider <jafo@tummy.com> 2009-12-03
+#  Placed in the public domain
+#
+#  Requires running as root:
+#
+#    echo '[pdns_rec_*]' >/etc/munin/plugin-conf.d/pdns_rec
+#    echo 'user root' >>/etc/munin/plugin-conf.d/pdns_rec
+
+if [ "$1" = "autoconf" ]; then
+	if [ -e /usr/bin/rec_control ]; then
+		echo yes
+		exit 0
+	else
+		echo no
+		exit 1
+	fi
+fi
+
+RESENDS=`rec_control get cache-resends`
+ISRESENDS=""
+[ "$RESENDS" != "UNKNOWN" ] && ISRESENDS="resends"
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title PDNS Cache'
+	echo "graph_order hits misses $ISRESENDS"
+	echo 'graph_vlabel entries'
+	echo 'graph_info Hit/miss rate'
+	echo 'graph_category pdns'
+
+	echo 'hits.label hits'
+	echo 'hits.min 0'
+	echo 'hits.max 100000'
+	echo 'hits.type COUNTER'
+	echo 'hits.info Cache hits'
+
+	echo 'misses.label misses'
+	echo 'misses.min 0'
+	echo 'misses.max 100000'
+	echo 'misses.type COUNTER'
+	echo 'misses.info Cache misses'
+
+	if [ "$RESENDS" != "UNKNOWN" ]; then
+		echo 'resends.label resends'
+		echo 'resends.min 0'
+		echo 'resends.max 100000'
+		echo 'resends.type COUNTER'
+		echo 'resends.info Cache resends'
+	fi
+
+	exit 0
+fi
+
+echo hits.value `rec_control get cache-hits`
+echo misses.value `rec_control get cache-misses`
+[ "$RESENDS" != "UNKNOWN" ] && echo resends.value `rec_control get cache-resends`
+
+exit 0

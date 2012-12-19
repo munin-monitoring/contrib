@@ -1,0 +1,67 @@
+#!/bin/bash
+
+
+db=$(basename $0 | sed 's/^postgres_queries2_//g')
+if [ "$db" == "" ];then
+	echo	"error/no db" >&2
+	exit 1
+fi
+
+#echo $db
+
+if [ "$1" == "config" ];then
+cat << EOF
+graph_title Postgres queries2 on $db
+graph_args --base 1000
+graph_vlabel Queries per \${graph_period}
+graph_category PostgreSQL
+graph_info Shows number of select, insert, update and delete queries
+sel_seq.label s_selects
+sel_seq.info Sequential selects on all tables
+sel_seq.type DERIVE
+sel_seq.min 0
+sel_seq_rows.label s_select rows
+sel_seq_rows.info Rows returned from sequential selects
+sel_seq_rows.type DERIVE
+sel_seq.min 0
+sel_idx.label i_selects
+sel_idx.info Sequential selects on all indexes
+sel_idx.type DERIVE
+sel_seq.min 0
+sel_idx_rows.label i_select rows
+sel_idx_rows.info Rows returned form index selects
+sel_idx_rows.type DERIVE
+sel_seq_rows.min 0
+inserts.label inserts
+inserts.info Rows inserted on all tables
+inserts.type DERIVE
+inserts.min 0
+updates.label updates
+updates.info Rows updated on all tables
+updates.type DERIVE
+updates.min 0
+deletes.label deletes
+deletes.info Rows deleted from all tables
+deletes.type DERIVE
+deletes.min 0
+EOF
+else
+psql -At $db << EOF
+select	
+	'sel_seq.value '	|| SUM(seq_scan)	|| E'\n' ||
+	'sel_seq_rows.value '	|| SUM(seq_tup_read)	|| E'\n' ||
+	'sel_idx.value '	|| SUM(idx_scan)	|| E'\n' ||
+	'sel_idx_rows.value '	|| SUM(idx_tup_fetch)	|| E'\n' ||
+	'inserts.value '	|| SUM(n_tup_ins)	|| E'\n' ||
+	'updates.value '	|| SUM(n_tup_upd)	|| E'\n' ||
+	'deletes.value '	|| SUM(n_tup_del)
+		from pg_stat_all_tables;
+EOF
+	
+#    my $sql = "SELECT SUM(seq_scan),SUM(seq_tup_read), ";
+ #   $sql   .= "SUM(idx_scan),SUM(idx_tup_fetch), ";
+ #   $sql   .= "SUM(n_tup_ins),SUM(n_tup_upd),SUM(n_tup_del) ";
+ #   $sql   .= "from pg_stat_all_tables";
+#	echo	1
+fi
+

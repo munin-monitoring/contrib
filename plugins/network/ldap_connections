@@ -1,0 +1,137 @@
+#!/bin/sh
+# 
+# Plugin to monitor the number of open connexions to LDAP
+#
+# $Log: ldap_connections,v $
+# Revision 1.9  2008/05/20 21:30:34  cvserver
+# Corrections de bugs
+#
+# Revision 1.8  2007/09/03 09:35:37  cvserver
+# Correction2 pour OpenBSD
+#
+# Revision 1.7  2007/09/03 09:01:07  cvserver
+# Modif pour OpenBSD
+#
+# Revision 1.6  2007/03/02 07:52:52  cvserver
+# pas LISTEN pour les IPs utilisées (en cas de *:389)
+#
+# Revision 1.5  2007/03/01 16:06:53  cvserver
+# corrections:
+#  - reinitialisation de $IPS_BOUND au debut de la fonction find_ip_bound
+#  - precision dans le grep (LISTEN)
+#
+# Revision 1.4  2006/09/27 11:56:54  cvserver
+# + sockets
+#
+# Revision 1.3  2006/06/24 23:38:30  cvserver
+# correction
+#
+# Revision 1.2  2006/06/24 23:24:30  cvserver
+# correction
+#
+# Revision 1.1  2006/06/24 23:15:25  cvserver
+# connexions LDAP pour munin
+#
+#
+# plugin-conf.d/-options:
+#       
+#       netstat         -- path to netstat executable
+#       ports           -- ldap ports used (389 and 636)
+#			   only used ones are graphed
+#	socket		-- ldapi socket (default: /var/run/openldap/ldapi)
+#
+# Parameters:
+# 	
+# 	config   (required)
+# 	autoconf (optional - used by munin-config)
+#
+# Magic markers (Used by munin-config and some installation scripts.
+# Optional):
+#
+#%# family=contrib
+#%# capabilities=autoconf
+
+NETSTAT=${netstat:-`which netstat`}
+NETSTAT=${NETSTAT:-/usr/bin/netstat}
+PORTS=${ports:-389 636}
+TEMP_FILE=$(mktemp /tmp/munin_ldap.XXXXXX)
+PATH=/bin:/usr/bin:/usr/local/bin
+SOCKET=${socket:-/var/run/openldap/ldapi}
+
+case $(uname -s) in
+  *BSD)
+    NETSTAT_ARGS="-an -ptcp"
+    FAMILYMARK="-f "
+    ;;
+  Linux)
+    NETSTAT_ARGS="-alnt"
+    FAMILYMARK="--"
+    ;;
+  *)
+    NETSTAT_ARGS="-an"
+    FAMILYMARK="-f "
+    ;;
+esac
+
+$NETSTAT $NETSTAT_ARGS > $TEMP_FILE
+
+# arg: port
+find_ips_bound() {
+  port=$1
+  IPS_BOUND=""
+  for i in $(grep "^tcp[46]\{0,1\}\([[:space:]]\{1,\}[[:digit:]]\{1,\}\)\{2\}[[:space:]]\{1,\}\(\([0-9]\)\{1,3\}\.\)\{3\}[0-9]\{1,3\}[\.:]$port[[:space:]].*" $TEMP_FILE | awk '{print $4}' | sed "s/^\(.*\)[\.:]$port$/\1/"); do
+    echo $IPS_BOUND | grep "$i" > /dev/null || IPS_BOUND=$IPS_BOUND" $i"
+  done
+  echo $IPS_BOUND
+}
+
+# see which port(s) is/are really bound
+LISTENING_PORTS=""
+for port in $PORTS; do
+  find_ips_bound $port > /dev/null && LISTENING_PORTS="$LISTENING_PORTS$port "
+done
+
+if [ "$1" = "autoconf" ]; then
+  ONE_LISTENING=""
+  for port in $PORTS; do
+    ONE_LISTENING=${ONE_LISTENING}$(find_ips_bound $port)
+  done
+  rm -f $TEMP_FILE
+  if [ -n "$ONE_LISTENING" ]; then
+  	echo yes
+  	exit 0
+  else
+  	echo no '(no slapd listening on '$PORTS')'
+  	exit 1
+  fi
+fi
+
+if [ "$1" = "config" ]; then
+  echo 'graph_title LDAP connections'
+  echo 'graph_args -l 0'
+  echo 'graph_vlabel active connections to ldap by port'
+  echo 'graph_category network'
+  for port in $LISTENING_PORTS; do
+    for ip in $(find_ips_bound $port | sed 's/\./_/g'); do
+      echo "${ip}_${port}.label ${ip}:${port}"
+    done
+  done
+  if [ -e $SOCKET ]; then
+    if [ $($NETSTAT -an ${FAMILYMARK}unix | grep $SOCKET | wc -l) -gt 0 ]; then
+      echo "socket.label ldapi"
+    fi
+  fi
+  rm -f $TEMP_FILE
+  exit 0
+fi
+
+for port in $LISTENING_PORTS; do
+  for ip in $(find_ips_bound $port); do
+    echo "$(echo $ip | sed 's/\./_/g')_${port}.value $(grep "^tcp[46]\{0,1\}\([[:space:]]\{1,\}[[:digit:]]\{1,\}\)\{2\}[[:space:]]\{1,\}$ip[\.:]$port[[:space:]].*ESTABLISHED$" $TEMP_FILE | wc -l | sed 's/[[:space:]]*//g')"
+  done
+done
+if [ -e "$SOCKET" ]; then
+  echo "socket.value $($NETSTAT -an ${FAMILYMARK}unix | grep $SOCKET | wc -l | sed 's/[[:space:]]*//g')"
+fi
+
+rm -f $TEMP_FILE

@@ -1,0 +1,89 @@
+#!/bin/sh
+#
+# Plugin Configuration
+#  [openvpn_multi]
+#   user root
+#   env.statusfile /var/log/openvpn.status
+#   env.userlist user1 user2 ...
+#
+#
+# No error handling/mapping for ${userlist} => ${statusfile}
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+if [ "$1" = "autoconf" ]; then
+	if [ -f ${statusfile} ]; then
+		echo yes
+		exit 0
+	else
+		echo "no (${statusfile} not found)"
+		exit 1
+	fi
+fi
+
+if [ "$1" = "suggest" ]; then
+	echo "Configure a status file..."
+	exit 0
+fi
+
+FieldAttrib () {
+	echo "${USER}_in.label ${USER} Received"
+	echo "${USER}_in.type DERIVE"
+	echo "${USER}_in.min 0"
+	echo "${USER}_in.graph no"
+	echo "${USER}_in.cdef ${USER}_in,1,*"
+	echo "${USER}_out.label ${USER} Bps"
+	echo "${USER}_out.type DERIVE"
+	echo "${USER}_out.min 0"
+	echo "${USER}_out.negative ${USER}_in"
+	echo "${USER}_out.cdef ${USER}_out,1,*"
+}
+
+GetValues () {
+	if grep -q ^$USER $statusfile; then
+		awk -F , '/^'"$USER"'/ {print $1"_in.value "$3 "\n"$1"_out.value "$4}' $statusfile
+	else
+		echo "${USER}_in.value -1"
+		echo "${USER}_out.value -1"
+	fi
+}
+
+
+# Setup config
+if [ "$1" = "config" ]; then
+        echo "graph_title Root Graph of Openvpn Traffic by CN"
+        echo "graph_args --base 1024 --lower-limit 0"
+        echo "graph_vlabel Bytes Out (-) / In (+) per \${graph_period}"
+	echo "graph_category openvpn"
+	echo "graph_info This graph shows the bandwidth usage in Bytes/s. It prepulates the graph lines from a list of user CN's in the plugin conf file, this must correlate with the values in the ${statusfile} log file."
+        for USER in $userlist
+        do
+		FieldAttrib
+        done
+        for USER in $userlist
+        do
+		echo "multigraph openvpn_multi.${USER}"
+        	echo "graph_title ${USER} sub-graph"
+		echo "graph_category openvpn"
+		echo "graph_info This graph shows the bandwidth usage in bytes/s. It prepulates the graph lines from a list of user CN's in the plugin conf file, this must correlate with the values in the ${statusfile} log file."
+		FieldAttrib
+	done
+	exit 0
+fi;
+
+# Get .values for root graph
+for USER in $userlist
+do
+	GetValues
+done
+
+# Get .values for sub-graphs
+for USER in $userlist
+do
+	echo "multigraph openvpn_multi.${USER}"
+	GetValues
+done

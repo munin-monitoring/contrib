@@ -1,0 +1,36 @@
+#!/bin/sh
+if [ "$1" = "config" ]; then
+  echo "graph_title Memory usage (in MB)"
+  echo 'graph_category system'
+  echo "acti.label Active"
+  echo "used.label Used"
+  echo "total.label Total"
+  echo "free.label Free"
+  exit 0
+fi
+
+# Memory: Real: 14M/69M act/tot  Free: 173M  Swap: 0K/612M used/tot
+
+top -un | nawk '
+function scale(v) {
+  if (v ~ /G$/) { sub("G", "", v);v *= 1024 }
+  else if (v ~ /M$/) sub("M", "", v)
+  else if (v ~ /K$/) { sub("K", "", v);v /= 1024 }
+  else v /= 1024 * 1024;
+  return v;
+}
+function spliter(v, i) {
+  split(v, a, "/");
+  return(a[i]);
+}
+/^Memory/ {
+  acti  = scale(spliter($3,1));
+  used  = scale(spliter($3,2));
+  free  = scale($6);
+  total = used + free;
+
+  print "acti.value", acti
+  print "used.value", used
+  print "total.value", total
+  print "free.value", free
+}'

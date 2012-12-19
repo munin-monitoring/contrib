@@ -1,0 +1,100 @@
+#!/usr/bin/env ruby
+#
+# mongrel_process_memory - A munin plugin to monitor memory size of 
+#                          each individual mongrel process
+# Copyright (C) 2007 Ben VandenBos and Avvo, Inc.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 2 
+# as published by the Free Software Foundation.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+# Author: Ben VandenBos
+# Contributors: Adam Jacob (<adam@hjksolutions.com>)
+#               Ryan Woodrum 
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+module Munin
+  class MongrelProcessMemory
+    
+    def run
+      h = get_pids()
+      ps_output = ""
+      #I have no doubt that this is a terrible way of doing this.
+      h.each do |k, v|
+        ps_output = ps_output + `ps --no-heading l #{k}`
+      end
+
+      if ps_output
+        port_list = Hash.new
+        ps_output.each_line do |l|
+          if l =~ /-p (\d+)/
+            port = $1
+            l_ary = l.split(/\s+/)
+            if l_ary.length > 6
+              port_list[port] = l_ary[7].to_i * 1024
+            end
+          end
+        end
+        port_list.sort.each do |port|
+          puts "mongrel_#{port[0]}.value #{port[1]}"
+        end
+        
+      end    
+    end
+    
+    def get_pids
+      h = Hash.new
+      pids = []
+      pids = `pgrep mongrel_rails`
+      pids.each { |p|
+        l = `ps #{p}`
+      	l =~ /-p (\d+)/
+      	h[p] = $1
+      }
+      h
+    end
+
+    def autoconf
+      pids.length > 0
+    end
+        
+  end
+end
+  
+mpm = Munin::MongrelProcessMemory.new
+
+case ARGV[0]
+when "config"
+  puts "graph_title Mongrel Memory"
+  puts "graph_vlabel RSS"
+  puts "graph_category Memory"
+  puts "graph_args --base 1024 -l 0"
+  puts "graph_scale yes"
+  puts "graph_info Tracks the size of individual mongrel processes"
+  mpm.get_pids.values.sort.each do |port|
+    puts "mongrel_#{port}.label mongrel_#{port}"
+    puts "mongrel_#{port}.info Process memory"
+    puts "mongrel_#{port}.type GAUGE"
+    puts "mongrel_#{port}.min 0"
+  end
+when "autoconf"
+  if mpm.autoconf
+    puts "yes"
+    exit 0
+  end
+  puts "no"
+  exit 1
+else
+  mpm.run
+end

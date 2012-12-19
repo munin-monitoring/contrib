@@ -1,0 +1,54 @@
+#!/bin/sh
+# -*- sh -*-
+#
+# $Id: zfs_dmu_prefetch 11 2010-11-25 07:10:14Z patpro $
+#
+# Parameters:
+#
+# 	config   (required)
+# 	autoconf (optional - used by munin-config)
+#
+# Magick markers (optional - used by munin-config and som installation
+# scripts):
+#%# family=auto
+#%# capabilities=autoconf
+
+export PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# autoconf
+
+if [ "$1" = "autoconf" ]; then
+   # Is the zfs-stats executable there at least ?
+   if [ -x /usr/local/bin/zfs-stats ]; then
+       if /usr/local/bin/zfs-stats -p > /dev/null 2>&1; then
+           echo yes
+           exit 0
+       else
+           echo "no"
+           exit 0
+       fi
+   else
+       echo "no (no /usr/local/bin/zfs-stats executable)"
+       exit 0
+   fi
+fi
+
+# config
+if [ "$1" = "config" ]; then
+    echo 'graph_title ZFS DMU prefech stats'
+    echo 'graph_args --upper-limit 100 -l -100'
+    echo 'graph_vlabel %'
+    echo 'graph_category ZFS'
+    echo 'graph_info This graph shows the DMU prefech stats'
+
+/usr/local/bin/zfs-stats -Z | awk '/Hit Ratio/ {sub(/[\t ]*/,"");sub(/:.*/,""); displayname = $0; gsub(/[ .]/,"_",$0); print $0".label "displayname"\n"$0".min 0"}' 
+/usr/local/bin/zfs-stats -Z | awk '/Miss Ratio/ {sub(/[\t ]*/,"");sub(/:.*/,""); displayname = $0; gsub(/[ .]/,"_",$0); print $0".label "displayname"\n"$0".min -100"}' 
+	
+	exit 0
+fi
+
+# This is the main part of the script, basically it calls
+# /usr/local/bin/zfs-stats and processes its output
+
+/usr/local/bin/zfs-stats -Z | awk '/Hit Ratio/ {sub(/[\t ]*/,"");sub(/:/,""); gsub(/[ .]/,"_",$0); sub(/%/,""); sub(/_/,".",$2); print $1".value "$2}'
+/usr/local/bin/zfs-stats -Z | awk '/Miss Ratio/ {sub(/[\t ]*/,"");sub(/:/,""); gsub(/[ .]/,"_",$0); sub(/%/,""); sub(/_/,".",$2); print $1".value -"$2}'

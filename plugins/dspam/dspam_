@@ -1,0 +1,654 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+dspam_ - Plugin to monitor various aspects of DSPAM performance
+
+=head1 APPLICABLE SYSTEMS
+
+Any system running a recent (3.8.0 or higher) DSPAM install.
+
+=head1 CONFIGURATION
+
+The plugin uses the output of the dspam_stats command, which is usually part
+of any DSPAM install. You'll need to run this plugin as a user that has enough
+rights to run dspam_stats and generate data for all users. This means that the
+plugin needs to be run either as root, or as a user that has read access to
+dspam.conf, and is added as a Trusted user in dspam.conf.
+
+The following environment variables are used by this plugin:
+
+ dspam_stats - Where to find the dspam_stats binary when it's not in
+               $PATH (default: find anywhere in $PATH).
+ statefile   - Where to read/write the statefile that is used to store
+               dspam_stats output
+               (default: $MUNIN_PLUGSTATE/dspam.state).
+ warning     - When to trigger a warning (default: 95:).
+ critical    - When to trigger a critical (default: 90:).
+ pattern     - A pattern that is passed to grep in order to find the
+               DSPAM uids to display. When this variable is set, the
+               value of target (see USAGE) is ignored (default: empty).
+ description - A string describing the set of uids selected by
+               above pattern (default: empty).
+
+Warning and critical values can also set on a DSPAM uid basis, use Munins
+internal format for the DSPAM uid for this notation (see CONFIGURATION
+EXAMPLES and USAGE for details).
+
+=head2 CONFIGURATION EXAMPLES
+
+ [dspam*]
+ user root
+ env.dspam_stats /opt/dspam/bin/dspam_stats
+ env.statefile /tmp/dspam.state
+
+ [dspam_accuracy*]
+ env.critical 95:
+ env.warning 96:
+
+ # raise warning level for username@example.org
+ env.username_example_org_warning 97:
+
+ # show all accounts from one domain
+ env.pattern @example\.org
+ env.description domain example.org
+
+=head1 USAGE
+
+Link this plugin to /etc/munin/plugins/ and restart the munin-node. The link
+should be in the format: dspam_<graph>_<target>, where:
+
+ graph      - One of: accuracy, processed, processed_abs.
+ target     - The uid that DSPAM generates in dspam_stats output,
+              but converted to Munin internal name format. Normally
+              this means that non-alphabetic and non-numeral characters
+              are replaced by an underscore. For example,
+              username@example.org will become username_example_org.
+              A special case is uid ALL, which will draw a graph for
+              a total of all uids, or for a list of all uids (depending
+              on the graph type).
+              NB For advanced uid selection such as 'all users of domain
+              example.org', please see the environment variable 'pattern' 
+              under CONFIGURATION.
+
+=head1 INTERPRETATION
+
+The plugin supports the following graph types:
+
+ accuracy     - Shows the overall accuracy of all users as a
+                percentage. The overall accuracy is the number of
+                correctly classified messages (both ham and spam) in
+                relation to the number of all processed messages.
+
+ absprocessed - Shows the absolute numbers of mesages processed,
+                sorted by the classification that DSPAM uses. The
+                numbers are stacked, making the height of the column
+                display the increase of processed messages over time.
+
+ processed    - Shows the same data as dspam_processed_abs_, but as
+                percentage of the total amount of processed messages,
+                making it clear to see how the amounts of classified
+                messages are divided.
+
+=head1 AUTHOR
+
+Copyright 2010 Tom Hendrikx <tom@whyscream.net>
+
+=head1 LICENSE
+
+GPLv2
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; version 2 dated June, 1991.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+02110-1301 USA.
+
+=head1 BUGS
+
+None known. Please report to author when you think you found something.
+
+=head2 TODO LIST
+
+Currently developed and tested with bash/dash on linux.
+More testing might be needed with other shells and OSes.
+
+=head1 VERSION
+
+$Id: dspam_ 72 2010-09-15 22:09:15Z tomhendr $
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=cut
+
+# defaults for configurable settings
+: ${dspam_stats:=$(which dspam_stats 2> /dev/null)}
+: ${statefile:=${MUNIN_PLUGSTATE}/dspam.state}
+: ${statefile_max_age:=180} # 3 minutes
+: ${warning:=95:}
+: ${critical:=90:}
+
+# include munin plugin helper
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+#######################################
+# Some generic file locking functions #
+#######################################
+
+#
+# file_is_usable $file $max_age
+#	Check if file is OK for usage: existing, readable and not too old
+#
+file_is_usable() {
+	local file=$1
+	local max_age=$2
+	local lock=$file.lock
+
+	[ ! -f $file ] && debug statefile $file does not exist && return 66 # EX_NOINPUT
+	[ ! -r $file ] && debug statefile $file is not readable && return 65 # EX_DATAERR
+
+	local mtime=$(stat --format %Y $file)
+	local file_age=$(( $(date +%s) -mtime ))
+	[ $file_age -gt $max_age ] && debug file $file is too old: $file_age seconds && return 65 # EX_DATAERR
+
+	debug file $file is ok, $file_age seconds old
+	return 0 # EX_OK
+}
+
+#
+# file_get_lock $file
+#	Obtain a lock for the named file
+#
+file_get_lock() {
+	local file=$1
+	local lock=$file.lock
+
+	while file_is_locked $file; do
+		sleep 1
+	done
+
+	echo $$ > $lock
+	[ $? -gt 0 ] && debug failed to create lockfile $lock && return 73 # EX_CANTCREAT
+
+	debug created lock for $file
+	return 0 # EX_OK
+}
+
+#
+# file_remove_lock $file
+#	Remove a set lockfile for the named file
+#
+file_remove_lock() {
+	local file=$1
+	local lock=$file.lock
+
+	rm -f $lock
+	[ $? -gt 0 ] && debug failed to remove lockfile $lock && return 69 # EX_UNAVAILABLE
+
+	debug removed lock for file $file
+	return 0 # EX_OK
+}
+
+#
+# file_is_locked $file
+#	Check if a file is locked
+#
+file_is_locked() {
+	local file=$1
+	local lock=$1.lock
+
+	[ -f $lock ] && debug file $file is locked && return 0 # EX_OK
+	debug file $file is not locked
+	return 69 # EX_UNAVAILABLE
+}
+
+####################################
+# DSPAM output processing function #
+####################################
+
+#
+# update_statefile
+#	Read the output of dspam_stats, convert it and write usable data to the statefile
+#
+update_statefile() {
+
+	file_is_usable $statefile $statefile_max_age && return $? # return when all OK
+	! file_get_lock $statefile && return $? # return when locking failed
+
+	local tmpfile=$(mktemp)
+	debug created tmpfile $tmpfile
+
+	debug starting $dspam_stats -t -S
+	local t_start=$(date +%s)
+	$dspam_stats -t -S | while read a b c d e f g h i j k l x; do
+
+		# example of output format (3.9.1 rc1) for each user:
+		#username@example.org
+		#    TP:     0 TN:  2147 FP:     0 FN:    53 SC:     0 NC:     0
+		#    SHR:    0.00%       HSR:    0.00%       OCA:   97.59%
+
+		case $a in
+			TP:)
+				# the 2nd line
+				local tp=$b tn=$d fp=$f fn=$h sc=$j nc=$l
+				;;
+			SHR:)
+				# the 3rd line
+				local shr=$(echo $b | sed 's/%$//g')
+				local hsr=$(echo $d | sed 's/%$//g')
+				local oca=$(echo $f | sed 's/%$//g')
+
+				# we're done, write data from current user to the statefile
+				local clean_user=$(clean_fieldname $uid)
+				local state="$uid $clean_user $tp $tn $fp $fn $sc $nc $shr $hsr $oca"
+				echo $state >> $tmpfile
+				[ $? -gt 0 ] && debug failed to write data for $uid to tmpfile && return 73 # EX_CANTCREAT
+				debug wrote data for $uid to tmpfile: $state
+				;;
+			*)
+				# the 1st line
+				local uid=$a
+				;;
+		esac
+	done
+	local t_end=$(date +%s)
+	debug dspam_stats finished, runtime $((t_end - t_start)) seconds
+
+	mv $tmpfile $statefile
+	[ $? -gt 0 ] && debug failed to move tmpfile to $statefile && return 73 # EX_CANTCREAT
+	debug moved tmpfile to $statefile
+
+	file_remove_lock $statefile
+
+	return 0 # EX_OK
+}
+
+
+#
+# abs2perc
+#	Outputs a percentage calculated from its two arguments
+#
+abs2perc() {
+	# division by zero protection: debug output is merely informal and harmless ;)
+	[ $1 -eq 0 ] && echo 0 && debug abs2perc prevented possible division-by-zero on first argument && return 0 # EX_OK
+	[ $2 -eq 0 ] && echo 0 && debug abs2perc prevented possible division-by-zero on second argument && return 0 # EX_OK
+
+	echo $1 $2 | awk '{ print $1 * 100 / $2 }'
+}
+
+#
+# debug $output
+#	Prints debugging output when munin-run is called with --pidebug argument (i.e. when MUNIN_DEBUG is set)
+#
+debug() {
+	if [ -n "$MUNIN_DEBUG" ]; then
+		echo "# DEBUG: $@"
+	fi
+}
+
+########################################
+# Functions that generate munin output #
+########################################
+
+#
+# print_autoconf
+#	Output for 'munin-node-configure' autoconf functionality
+#
+print_autoconf() {
+	if [ -z "$dspam_stats" ]; then
+		echo "no (no dspam_stats binary found)"
+	elif [ ! -x $dspam_stats ]; then
+		echo "no ($dspam_stats found but not executable)"
+        else
+                echo yes
+        fi
+}
+
+#
+# print_suggest
+#	Output for 'munin-node-configure --suggest'
+#
+print_suggest() {
+	echo accuracy_ALL
+	echo processed_ALL
+	echo absprocessed_ALL
+}
+
+#
+# print_config
+#	Output for 'munin-run <plugin> config' command.
+#
+print_config() {
+	debug printing config for graph: $graph
+
+	while file_is_locked $statefile; do
+		debug statefile is locked, waiting
+		sleep 1
+	done
+
+	case $graph in
+		accuracy)
+			if [ -n "$pattern" ]; then
+				debug env.pattern was set, so use it: $pattern
+				local uid=$description
+				local uid_count=$(grep $pattern $statefile | wc -l)
+				debug uid_count retrieved from statefile: $uid_count
+			elif [ "$target" = "ALL" ]; then
+				local pattern="-v TOTAL"
+				debug target=ALL: need pattern for all users but not TOTAL: $pattern
+				local uid="all users"
+				local uid_count=$(grep $pattern $statefile | wc -l)
+				debug uid_count retrieved from statefile: $uid_count
+			else
+				local pattern="\b$target\b"
+				debug target=$target: need pattern for a single user: $pattern
+				local uid=$(grep $pattern $statefile | cut -d' ' -f1)
+				debug retrieved uid value from statefile: $uid
+				local uid_count=1
+			fi
+
+			echo "graph_title Accuracy for $uid"
+			echo graph_category dspam
+			echo graph_args --base 1000 --upper-limit 100 --rigid
+			echo graph_vlabel Accuracy in %
+			echo "graph_info This graph shows the current DSPAM Overall Accuracy for $uid ($uid_count uids). Overall Accuracy is the percentage of messages that is classified correctly as either ham or spam."
+
+			debug starting grep for user data in statefile
+			local t_start=$(date +%s)
+			grep $pattern $statefile | while read uid clean_user x; do
+					echo $clean_user.label $uid
+					print_warning $clean_user
+					print_critical $clean_user
+			done
+			local t_end=$(date +%s)
+			debug grep finished, runtime $((t_end - t_start)) seconds
+
+			;;
+
+		processed)
+			if [ -n "$pattern" ]; then
+				debug env.pattern was set, so use it: $pattern
+				local uid=$description
+				local uid_count=$(grep $pattern $statefile | wc -l)
+				debug uid_count retrieved from statefile: $uid_count
+			elif [ "$target" = "ALL" ]; then
+				local pattern="-v TOTAL"
+				debug target=ALL: need pattern for all users but not TOTAL: $pattern
+				local uid="all users"
+				local uid_count=$(grep $pattern $statefile | wc -l)
+				debug uid_count retrieved from statefile: $uid_count
+			else
+				local pattern="\b$target\b"
+				debug target=$target: need pattern for a single user: $pattern
+				local uid=$(grep $pattern $statefile | cut -d' ' -f1)
+				debug retrieved uid value from statefile: $uid
+				local uid_count=1
+			fi
+
+			echo "graph_title Processed messages for $uid (%)"
+			echo graph_category dspam
+			echo graph_args --base 1000 --upper-limit 100 --rigid
+			echo graph_vlabel Messages in %
+			echo "graph_info This graph shows the messages that DSPAM processed for $uid ($uid_count uids) in percentages of all processed messages. Messages are divided in the following categories: true positives/negatives, false positives/negatives, and corpusfed ham/spam."
+			echo tp.label True positives
+			echo tp.info Spam messages correctly classified as spam.
+			echo tp.draw AREASTACK
+			echo tn.label True negatives
+			echo tn.info Ham messages correctly classified as ham.
+			echo tn.draw AREASTACK
+			echo fp.label False positives
+			echo fp.info Ham messages incorrectly classified as spam, but corrected by the user.
+			echo fp.draw AREASTACK
+			echo fn.label False negatives
+			echo fn.info Spam messages incorrectly classified as ham, but corrected by the user.
+			echo fn.draw AREASTACK
+			echo sc.label Corpusfed spam
+			echo sc.info Spam messages from a collected corpus for training purposes.
+			echo sc.draw AREASTACK
+			echo nc.label Corpusfed ham
+			echo nc.info Ham messages from a collected corpus for training purposes.
+			echo nc.draw AREASTACK
+			;;
+
+		absprocessed)
+			if [ -n "$pattern" ]; then
+				debug env.pattern was set, so use it: $pattern
+				local uid=$description
+				local uid_count=$(grep $pattern $statefile | wc -l)
+				debug uid_count retrieved from statefile: $uid_count
+			elif [ "$target" = "ALL" ]; then
+				local pattern="-v TOTAL"
+				debug target=ALL: need pattern for all users but not TOTAL: $pattern
+				local uid="all users"
+				local uid_count=$(grep $pattern $statefile | wc -l)
+				debug uid_count retrieved from statefile: $uid_count
+			else
+				local pattern="\b$target\b"
+				debug target=$target: need pattern for a single user: $pattern
+				local uid=$(grep $pattern $statefile | cut -d' ' -f1)
+				debug retrieved uid value from statefile: $uid
+				local uid_count=1
+			fi
+
+			echo "graph_title Processed messages for $uid"
+			echo graph_category dspam
+			echo graph_args --base 1000
+			echo graph_vlabel Messages
+			echo graph_total Total
+			echo "graph_info This graph shows the messages that DSPAM processed for $uid ($uid_count uids). Messages are divided in the following categories: true positives/negatives, false positives/negatives, and corpusfed ham/spam."
+			echo tp.label True positives
+			echo tp.info Spam messages correctly classified as spam.
+			echo tp.draw AREASTACK
+			echo tn.label True negatives
+			echo tn.info Ham messages correctly classified as ham.
+			echo tn.draw AREASTACK
+			echo fp.label False positives
+			echo fp.info Ham messages incorrectly classified as spam, but corrected by the user.
+			echo fp.draw AREASTACK
+			echo fn.label False negatives
+			echo fn.info Spam messages incorrectly classified as ham, but corrected by the user.
+			echo fn.draw AREASTACK
+			echo sc.label Corpusfed spam
+			echo sc.info Spam messages from a collected corpus for training purposes.
+			echo sc.draw AREASTACK
+			echo nc.label Corpusfed ham
+			echo nc.info Ham messages from a collected corpus for training purposes.
+			echo nc.draw AREASTACK
+			;;
+
+		*)
+			debug no config available for graph: $graph, exiting with error
+			exit 78 # EX_CONFIG
+			;;
+	esac
+	debug finished with printing config for graph: $graph
+}
+
+#
+# print_fetch
+#	Output for 'munin-run <plugin> fetch' command: the actual data to graph.
+#
+print_fetch() {
+	debug printing fetch for graph: $graph
+
+	while file_is_locked $statefile; do
+		debug statefile is locked, waiting
+		sleep 1
+	done
+
+	case $graph in
+		accuracy)
+			if [ -n "$pattern" ]; then
+				debug env.pattern was set, so use it: $pattern
+				continue
+			elif [ $target == "ALL" ]; then
+				local pattern="-v TOTAL"
+				debug target=ALL: need pattern for all users, but not for TOTAL: $pattern
+			else
+				local pattern="\b$target\b"
+				debug target=$target: need pattern for a single user: $pattern
+			fi
+
+			debug starting grep for user data in statefile
+			local t_start=$(date +%s)
+			grep $pattern $statefile | while read x clean_user x x x x x x x x oca x; do
+				echo $clean_user.value $oca
+			done
+			local t_end=$(date +%s)
+			debug grep finished, runtime $((t_end - t_start)) seconds
+			;;
+
+		processed)
+			if [ -n "$pattern" ]; then
+				debug env.pattern was set, so use it: $pattern
+				continue
+			elif [ $target = "ALL" ]; then
+				local pattern="TOTAL"
+				debug target=ALL: need pattern for TOTAL of all users: $pattern
+			else
+				local pattern="\b$target\b"
+				debug target=$target: need pattern for a single user: $pattern
+			fi
+
+			local tmpfile=$(mktemp) || debug failed to create tmpfile && debug tmpfile created at: $tmpfile
+			debug starting grep for user data in statefile, sending to tmpfile
+			local t_start=$(date +%s)
+			grep $pattern $statefile > $tmpfile
+			local t_end=$(date +%s)
+			debug grep finished, runtime $((t_end - t_start)) seconds
+
+			debug starting loop over data in tmpfile
+			while read user x tp tn fp fn sc nc x; do
+				debug read data for user $user: $tp $tn $fp $fn $sc $nc
+				all_tp=$((all_tp + tp))
+				all_tn=$((all_tn + tn))
+				all_fp=$((all_fp + fp))
+				all_fn=$((all_fn + fn))
+				all_sc=$((all_sc + sc))
+				all_nc=$((all_nc + nc))
+				debug calculated new totals: $all_tp $all_tn $all_fp $all_fn $all_sc $all_nc
+			done < $tmpfile
+			debug finished data loop
+			rm -f $tmpfile || debug failed to remove tmpfile && debug removed tmpfile
+
+			local total=$((all_tp + all_tn + all_fp + all_fn + all_sc + all_nc))
+			debug calculated total of all messages: $total
+			echo tp.value $(abs2perc $all_tp $total)
+			echo tn.value $(abs2perc $all_tn $total)
+			echo fp.value $(abs2perc $all_fp $total)
+			echo fn.value $(abs2perc $all_fn $total)
+			echo sc.value $(abs2perc $all_sc $total)
+			echo nc.value $(abs2perc $all_nc $total)
+			;;
+
+		absprocessed)
+			if [ -n "$pattern" ]; then
+				debug env.pattern was set, so use it: $pattern
+				continue
+			elif [ $target = "ALL" ]; then
+				local pattern="TOTAL"
+				debug target=ALL: need pattern for TOTAL of all users: $pattern
+			else
+				local pattern="\b$target\b"
+				debug target=$target: need pattern for a single user: $pattern
+			fi
+
+			local tmpfile=$(mktemp) || debug failed to create tmpfile && debug tmpfile created at: $tmpfile
+			debug starting grep for user data in statefile, sending to tmpfile
+			local t_start=$(date +%s)
+			grep $pattern $statefile > $tmpfile
+			local t_end=$(date +%s)
+			debug grep finished, runtime $((t_end - t_start)) seconds
+
+			debug starting loop over data in tmpfile
+			while read user x tp tn fp fn sc nc x; do
+				debug read data for user $user: $tp $tn $fp $fn $sc $nc
+				all_tp=$((all_tp + tp))
+				all_tn=$((all_tn + tn))
+				all_fp=$((all_fp + fp))
+				all_fn=$((all_fn + fn))
+				all_sc=$((all_sc + sc))
+				all_nc=$((all_nc + nc))
+				debug calculated new totals: $all_tp $all_tn $all_fp $all_fn $all_sc $all_nc
+			done < $tmpfile
+			debug finished data loop
+			rm -f $tmpfile || debug failed to remove tmpfile && debug removed tmpfile
+
+			echo tp.value $all_tp
+			echo tn.value $all_tn
+			echo fp.value $all_fp
+			echo fn.value $all_fn
+			echo sc.value $all_sc
+			echo nc.value $all_nc
+			;;
+
+		*)
+			debug no fetch available for graph: $graph, exiting with error
+			exit 78 # EX_CONFIG
+			;;
+	esac
+	debug finished printing fetch for graph: $graph
+}
+
+
+#####################
+# Main process loop #
+#####################
+
+# show env settings
+debug dspam_ plugin started, pid=$$
+debug settings:
+debug - dspam_stats is set to: $dspam_stats
+debug - statefile is set to: $statefile
+debug - statefile_max_age is set to: $statefile_max_age
+debug - warning is set to: $warning
+debug - critical is set to: $critical
+debug - pattern is set to: $pattern
+debug - description is set to: $description
+
+command=$1
+[ -n "$command" ] || command="fetch"
+debug - command is set to: $command
+
+graph=$(basename $0 | cut -d'_' -f2)
+debug - graph is set to: $graph
+
+target=$(basename $0 | cut -d'_' -f3-)
+[ -n "$target" ] || target="ALL"
+debug - target is set to: $target
+
+debug settings completed, starting process
+
+case $command in
+	autoconf)
+		print_autoconf
+		;;
+	suggest)
+		print_suggest
+		;;
+	config)
+		update_statefile
+		print_config
+		;;
+	fetch)
+		update_statefile
+		print_fetch
+		;;
+esac
+
+debug exiting
+exit 0 # EX_OK

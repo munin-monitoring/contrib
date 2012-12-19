@@ -1,0 +1,219 @@
+#!/usr/bin/perl
+# Munin plugin for monitoring memory usage.
+#
+# FIELDS:
+#		RAM Kernel	Kernel resident in RAM (and usually lobel swap_total\n";
+#		RAM Locked	Locked memory pages from swap (Anon)
+#		RAM Used	Anon, Exec + Libs, Page cache
+#		RAM Avail	Free memory that can be immediately used
+#
+# Core logic developed by Brendan Gregg. 
+# REFERENCE: http://www.brendangregg.com/k9toolkit.html - the swap diagram.
+#
+# COPYRIGHT: Copyright (c) 2004 Brendan Gregg.
+#
+#  This program is free software; you can redistribute it and/or
+#  modify it under the terms of the GNU General Public License
+#  as published by the Free Software Foundation; either version 2
+#  of the License, or (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software Foundation,
+#  Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+#  (http://www.gnu.org/copyleft/gpl.html)
+
+# Perldoc
+
+=pod
+
+=head1 NAME
+
+raminfo - Plugin for monitoring memory usage
+
+=head1 AUTHOR
+
+Christian Braum, chrisi_braum@web.de
+ 
+Core logic developed by Brendan Gregg. See K9Toolkit:
+http://www.brendangregg.com/K9Toolkit/swapinfo
+
+=head1 LICENSE
+
+GPL 2.
+
+=cut
+
+# Main
+use strict;
+use warnings;
+
+if( defined $ARGV[0] )
+{
+	if( $ARGV[0] eq "config" )
+	{
+		&config();
+	}
+	else
+	{
+		&output();
+	}
+}
+else
+{
+	&output();
+}
+
+
+sub value # get value for variables
+{
+	my %h_ramvalues;
+	use Sun::Solaris::Kstat;
+	my $Kstat = Sun::Solaris::Kstat->new();
+
+	# --- Fetch Hardware info ---
+	### pagesize
+	$ENV{PATH} = "/usr/bin";
+	chomp(my $PAGESIZE = `pagesize`);
+	my $PAGETOMB = $PAGESIZE / (1024 * 1024);
+	my $PAGETOKB = $PAGESIZE / (1024);
+	my $PAGETOBYTE = $PAGESIZE;
+	my $BLOCKTOP = 512 / $PAGESIZE;
+
+	### RAM total
+	my $ram_total = 0;
+	foreach my $i (keys(%{$Kstat->{lgrp}})) {                          # instance
+       		foreach my $c (keys(%{$Kstat->{lgrp}->{$i}})) {            # class
+                	$ram_total += $Kstat->{lgrp}->{$i}->{$c}->{"pages installed"};
+        	}
+	}
+
+	### RAM available for the OS
+	my $pagestotal = $Kstat->{unix}->{0}->{system_pages}->{pagestotal};
+
+
+	# --- Fetch VM info ---
+	my %VMnow;
+	my %VMinfo;
+	my %VMold;
+
+	foreach my $count (0..12) 
+	{
+		#
+		#  The values are counters that increment each second, here we
+		#  check them several times and look for the value changing.
+		#  (reading them once then again a second later was not reliable).
+		#
+
+		foreach my $var ( "freemem" ) 
+		{
+			$VMnow{$var} = $Kstat->{unix}->{0}->{vminfo}->{$var};
+			unless ($count) {
+				$VMold{$var} = $VMnow{$var};
+				next;
+			}
+			if (($VMnow{$var} != $VMold{$var}) && (! $VMinfo{$var})) {
+				$VMinfo{$var} = $VMnow{$var} - $VMold{$var};
+			}
+		}
+		select(undef, undef, undef, 0.1);
+		$Kstat->update();
+	}
+
+	my $freemem = $Kstat->{unix}->{0}->{system_pages}->{freemem};
+	my $pageslocked = $Kstat->{unix}->{0}->{system_pages}->{pageslocked};
+	my $pp_kernel = $Kstat->{unix}->{0}->{system_pages}->{pp_kernel};
+
+	### ---RAM Calculations ---
+	my $ram_unusable = $ram_total - $pagestotal;
+	my $ram_kernel;
+	my $ram_locked;
+
+	if ($pp_kernel < $pageslocked) {
+		# here we assume all pp_kernel pages are in memory,
+		$ram_kernel = $pp_kernel;
+		$ram_locked = $pageslocked - $pp_kernel;
+	} else {
+		# here we assume pageslocked is entirerly kernel,
+		$ram_kernel = $pageslocked;
+		$ram_locked = 0;
+	}
+
+	my $ram_used = $pagestotal - $freemem - $ram_kernel - $ram_locked;
+
+	### format values
+	
+	my $freemem_B      = sprintf( "%d ", $freemem * $PAGETOBYTE );
+	my $pp_kernel_B    = sprintf( "%d ", $pp_kernel * $PAGETOBYTE );
+	my $pageslocked_B  = sprintf( "%d ", $pageslocked * $PAGETOBYTE );
+	my $pagestotal_B   = sprintf( "%d ", $pagestotal * $PAGETOBYTE );
+	my $ram_unusable_B = sprintf( "%d ", $ram_unusable * $PAGETOBYTE );
+	my $ram_kernel_B   = sprintf( "%d ", $ram_kernel * $PAGETOBYTE ); 
+	my $ram_locked_B   = sprintf( "%d ", $ram_locked * $PAGETOBYTE );
+	my $ram_used_B     = sprintf( "%d ", $ram_used * $PAGETOBYTE );
+	my $ram_total_B    = sprintf( "%d ", $ram_total * $PAGETOBYTE );
+
+	# --- assign the variables  ---	
+	$h_ramvalues{"Unusable.value"} = "$ram_unusable_B";
+	$h_ramvalues{"Kernel.value"} = "$ram_kernel_B";
+	$h_ramvalues{"Locked.value"} = "$ram_locked_B";
+	$h_ramvalues{"Used.value"} = "$ram_used_B";
+	$h_ramvalues{"Avail.value"} = "$freemem_B";
+	$h_ramvalues{"Total.value"} = "$ram_total_B";
+
+	return %h_ramvalues;
+}  # sub value
+
+sub output       # print out the values of the variables.
+{
+	my %h_ramvalue=value();
+
+	print "Unusable.value " . $h_ramvalue{"Unusable.value"} . "\n";
+	print "Kernel.value " . $h_ramvalue{"Kernel.value"} . "\n";
+	print "Locked.value " . $h_ramvalue{"Locked.value"} . "\n";
+	print "Used.value " . $h_ramvalue{"Used.value"} . "\n";
+	print "Avail.value " . $h_ramvalue{"Avail.value"} . "\n";
+}
+
+sub config       # print config message and exit.
+{
+	    my %h_ramvalue=value();
+
+	    print "graph_args --base 1024 -l 0 --upper-limit " .  $h_ramvalue{"Total.value"}. "--rigid"  . "\n";
+	    print "graph_vlabel Bytes\n";
+	    print "graph_title RAM usage\n";
+	    print "graph_category system\n";
+	    print "graph_info This graph shows what the machine uses RAM for.\n";
+	    print "graph_order ";
+
+	    #print "vmalloc_used " if exists $mems{'VmallocUsed'};
+
+
+	    print "Unusable ",
+	      "Kernel ",
+		"Locked ",
+		  "Used ",
+		    "Avail ",
+		    "\n";
+	  
+	    print "Unusable.label Unusable \n";
+	    print "Unusable.draw AREA \n";
+	    print "Unusable.info RAM consumed by the OBP and TSBs.\n";
+	    print "Kernel.label Kernel \n";
+	    print "Kernel.draw STACK \n";
+	    print "Kernel.info Kernel resident in RAM.\n";
+	    print "Locked.label Locked \n";
+	    print "Locked.draw STACK \n";
+	    print "Locked.info Locked memory pages from swap.\n";
+	    print "Used.label Used\n";
+	    print "Used.draw STACK\n";
+	    print "Used.info RAM used.\n";
+	    print "Avail.label Avail\n";
+	    print "Avail.draw STACK\n";
+	    print "Avail.info Free RAM.\n";
+} # sub config

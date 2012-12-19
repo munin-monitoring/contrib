@@ -1,0 +1,68 @@
+#!/bin/sh
+#
+#  pdns_recursor munin plugin.
+#  Written by Sean Reifschneider <jafo@tummy.com> 2009-12-03
+#  Placed in the public domain
+#
+#  Requires running as root:
+#
+#    echo '[pdns_rec_*]' >/etc/munin/plugin-conf.d/pdns_rec
+#    echo 'user root' >>/etc/munin/plugin-conf.d/pdns_rec
+
+if [ "$1" = "autoconf" ]; then
+	if [ -e /usr/bin/rec_control ]; then
+		echo yes
+		exit 0
+	else
+		echo no
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title PDNS Recursor Exceptions'
+	echo 'graph_order spoofs resource client server overflow'
+	echo 'graph_vlabel queries'
+	echo 'graph_info Exceptional queries'
+	echo 'graph_category pdns'
+
+	echo 'spoofs.label spoofs'
+	echo 'spoofs.min 0'
+	echo 'spoofs.max 100000'
+	echo 'spoofs.type COUNTER'
+	echo 'spoofs.info Spoofs prevented'
+
+	echo 'resource.label resources'
+	echo 'resource.min 0'
+	echo 'resource.max 100000'
+	echo 'resource.type COUNTER'
+	echo 'resource.info Denied because of resource limits'
+
+	echo 'client.label client'
+	echo 'client.min 0'
+	echo 'client.max 100000'
+	echo 'client.type COUNTER'
+	echo 'client.info Client parse errors'
+
+	echo 'server.label server'
+	echo 'server.min 0'
+	echo 'server.max 100000'
+	echo 'server.type COUNTER'
+	echo 'server.info Server parse errors'
+
+	echo 'overflow.label tcp concurrency'
+	echo 'overflow.min 0'
+	echo 'overflow.max 100000'
+	echo 'overflow.type COUNTER'
+	echo 'overflow.info TCP client concurrency limit'
+
+	exit 0
+fi
+
+echo spoofs.value `rec_control get spoof-prevents`
+echo resource.value `rec_control get resource-limits`
+echo client.value `rec_control get client-parse-errors`
+echo server.value `rec_control get server-parse-errors`
+echo overflow.value `rec_control get tcp-client-overflow`
+
+exit 0

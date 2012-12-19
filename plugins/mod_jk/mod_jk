@@ -1,0 +1,120 @@
+#!/bin/sh
+#
+# This plugin will graph data from mod_jk
+#
+# Author: Anders Welén, anders.welen@redpill-linpro.com
+#
+
+url="http://localhost/jkstatus?mime=prop"
+wget=`which wget`
+
+if [ "$1" = "autoconf" ]
+then
+	if test "x$wget" =  "x"
+	then
+		echo "no (need wget)"
+    		exit 0
+	fi
+	echo yes
+	exit 0
+fi
+
+if [ "$1" = "config" ]
+then
+	nodes=`$wget -q --no-cache $url -O - | grep "^worker\..*\.type=ajp13$" | awk -F . '{print $2}'`
+
+	# Status graph
+	echo "multigraph mod_jk_status"
+	echo "graph_title mod_jk Status"
+	echo "graph_category mod_jk"
+	echo "graph_info This graph shows the status of the different mod_jk nodes."
+	echo "graph_vlabel Status"
+
+	for i in $nodes
+	do
+		echo "$i.label $i"
+		echo "$i.info 1=Ok, 2=All connections busy, 3=Error"
+		echo "$i.warning 1"
+		echo "$i.critical 2"
+	done
+
+        # Request graphs
+        for i in $nodes
+        do
+        	echo "multigraph mod_jk_requests_$i"
+        	echo "graph_title mod_jk Requests $i"
+        	echo "graph_category mod_jk"
+        	echo "graph_info This graph shows the status of requests to the mod_jk node: $i"
+        	echo "graph_vlabel Request"
+                echo "busy.label Current"
+                echo "max_busy.label Max. concurrent"
+                echo "errors.label Errors/min"
+                echo "errors.info The number of errors/min"
+                echo "errors.type COUNTER"
+                echo "errors.graph_period minute"
+        done
+
+	# Traffic graphs
+        for i in $nodes
+        do
+                echo "multigraph mod_jk_traffic_$i"
+                echo "graph_title mod_jk Traffic $i"
+                echo "graph_category mod_jk"
+                echo "graph_info This graph shows the traffic statistics to the mod_jk node: $i"
+                echo "graph_vlabel Bytes/min"
+                echo "transferred.label Write to node (bytes/min)"
+                echo "transferred.type COUNTER"
+                echo "transferred.graph_period minute"
+                echo "read.label Read from node (bytes/min)"
+                echo "read.type COUNTER"
+                echo "read.graph_period minute"
+        done
+
+	exit 0
+fi
+
+data=`$wget -q --no-cache $url -O -`
+
+# Status graph
+echo "multigraph mod_jk_status"
+for i in `echo $data | sed 's/worker/\nworker/g' | grep "^worker\..*\.state=.*"`
+do
+	node=`echo $i | awk -F . '{print $2}'`
+	status=`echo $i | awk -F = '{print $2}'`
+	
+	value=0
+	if [ `echo $status | sed 's/^OK/XOK/'` = "X$status" ]
+	then
+		value=1
+	fi
+
+	if [ `echo $status | sed 's/BUSY/X/'` != $status ]
+	then
+		value=2
+	fi
+
+	if [ `echo $status | sed 's/^ERR/XERR/'` = "X$status" ]
+	then
+		value=3
+	fi
+		
+	echo "$node.value $value"
+done
+
+# Request graphs
+for node in `echo $data | sed 's/worker/\nworker/g' | grep "^worker\..*\.type=ajp13" | awk -F . '{print $2}'`
+do
+	echo "multigraph mod_jk_requests_$node"
+	echo "busy.value `echo $data |  sed 's/worker/\nworker/g' | grep "^worker.$node.busy" | awk -F = '{print $2}'`"
+	echo "max_busy.value `echo $data |  sed 's/worker/\nworker/g' | grep "^worker.$node.max_busy" | awk -F = '{print $2}'`"
+	echo "errors.value `echo $data |  sed 's/worker/\nworker/g' | grep "^worker.$node.errors" | awk -F = '{print $2}'`"
+done
+
+# Traffic graphs
+for node in `echo $data | sed 's/worker/\nworker/g' | grep "^worker\..*\.type=ajp13" | awk -F . '{print $2}'`
+do
+        echo "multigraph mod_jk_traffic_$node"
+        echo "transferred.value `echo $data |  sed 's/worker/\nworker/g' | grep "^worker.$node.transferred" | awk -F = '{print $2}'`"
+        echo "read.value `echo $data |  sed 's/worker/\nworker/g' | grep "^worker.$node.read" | awk -F = '{print $2}'`"
+done
+

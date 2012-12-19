@@ -1,0 +1,60 @@
+#! /bin/bash
+#
+# Simple munin plugin to get total traffic transferred on all network interfaces.
+# Uses vnStat to keep track of the traffic.
+#
+# author:	wandrer (wandrer@gmail.com)
+# site:		http://roguenoise.org/munin_plugin_vnstat
+#
+# If the plugin is run as root it will update the vnStat database before getting
+# the stats.
+#
+
+
+# Config section
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title Total Traffic'
+	echo 'graph_args --base 1000 --lower-limit 0'
+	echo 'graph_vlabel Traffic'
+	echo 'graph_category network'
+	echo 'graph_info Total network traffic in bytes.'
+	echo 'totaltx.label Sent'
+	echo 'totaltx.info Total data sent.'
+	echo 'totaltx.cdef totaltx,1000000,*'
+	echo 'totalrx.label Received'
+	echo 'totalrx.info Total data received.'
+	echo 'totalrx.cdef totalrx,1000000,*'
+	exit 0
+	
+fi;
+
+
+# The Script
+
+# Running as root?
+if [ `whoami` = "root" ]; then
+	`vnstat -u`
+fi;
+
+# Grabs the totals from the database.
+TOTALSRX=`vnstat --dumpdb | grep 'totalrx;' | cut -d';' -f2`
+TOTALSTX=`vnstat --dumpdb | grep 'totaltx;' | cut -d';' -f2`
+
+TOTALSRXMB=0
+TOTALSTXMB=0
+
+for TOTALRX in $TOTALSRX
+do
+	let 'TOTALSRXMB += TOTALRX'
+done
+
+for TOTALTX in $TOTALSTX
+do
+	let 'TOTALSTXMB += TOTALTX'
+done
+
+echo 'totalrx.value' $TOTALSRXMB
+echo 'totaltx.value' $TOTALSTXMB
+
+exit 0

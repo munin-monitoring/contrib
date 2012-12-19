@@ -1,0 +1,198 @@
+#!/usr/bin/python
+#%# family=auto
+#%# capabilities=autoconf
+
+
+"""
+=head1 NAME
+
+	nsd - Munin plugin to monitor the number of queries a running process
+	      of nsd3 has recievied.
+
+=head1 APPLICABLE SYSTEMS
+
+	Linux or *nix system with a logging installtion of NSD v3 installed.
+	  (http://nlnetlabs.nl/projects/nsd/)
+
+=head1 CONFIGURATION
+	
+	The plugin needs access to the nsd logfile and the nsd pid file to
+	force the running nsd process to write the current statistics.
+
+	Tip: To see if it's already set up correctly, just run this plugin 
+	with the paramater "autoconf".  If you get a "yes", everything should
+	work like a charm already.
+
+	This configuration section shows the defaults of the plugin:
+
+	The stats line is a set of space-seperated values that you wish to 
+	retrieve from NSD.  The format is VALUE=Caption.  For spaces in a
+	caption value, replace them with an underscore (_).
+
+	[nsd]
+	        env.statsfile /var/log/nsd.log
+        	env.pidfile /var/run/nsd3/nsd.pid
+		env.stats "A=A AAAA=AAAA MX=MX PTR=PTR TYPE252=AXFR SNXD=NXDOMAIN RQ=Total_Successful"
+
+	If you need to set a user for the logfile to be readable, and most 
+	importantly, the process to recieve the signal, you may specify it.
+	For example:
+
+	[nsd]
+		user nsd
+
+=head1 INTERPRETATION
+	
+	The plugin shows the number of queries that nsd has recieved, 
+	averaged over a period to gain the number of queries per second.
+	For most servers, these values will be very low.  In the event
+	of a misconfiguration, the plugin will return undefined values.
+
+=head1 MAGIC MARKERS
+	
+	#%# family=auto
+	#%# capabilities=autoconf
+
+=head1 VERSION
+
+	v1.0.1
+	
+=head1 AUTHOR
+
+	J.T.Sage <jtsage@gmail.com>
+	
+=head1 LICENSE
+	
+	GPLv2
+	
+=cut
+"""
+
+import os
+import sys
+import subprocess
+import time
+import re
+import signal
+
+STATS_FILE = os.environ.get('statsfile', '/var/log/nsd.log')
+PID_FILE = os.environ.get('pidfile', '/var/run/nsd3/nsd.pid')
+STATS_STRING = os.environ.get('stats', "A=A AAAA=AAAA MX=MX PTR=PTR TYPE252=AXFR SNXD=NXDOMAIN RQ=Total_Succesful")
+
+BOTH_LISTS = STATS_STRING.split()
+
+def print_config():
+	"""Generates and prints a munin config for a given chart."""
+
+	print "graph_title NSD3 Queries"
+	print "graph_vlabel qps"
+	print "graph_category network"
+	print "graph_info Queries per second"
+	for x in BOTH_LISTS:
+		val = x.split('=')
+		name = val[0].lower()
+		label = val[1].replace('_', ' ')
+		print name + '.label ' + label
+		print name + '.type DERIVE'
+		print name + '.min 0'
+
+	sys.exit(0)
+
+def print_values():
+	"""Gets NSD's latest stats."""
+
+	bigfail = False
+	if ( not os.access(STATS_FILE, os.R_OK) ) :
+		bigfail = True
+	if ( not os.access(PID_FILE, os.R_OK) ) :
+		bigfail = True
+
+	if ( not bigfail ):
+		pidf = open(PID_FILE, 'r')
+		pidn = pidf.read()
+		pidf.close();
+		try:
+			os.kill(int(pidn.strip()), signal.SIGUSR1)
+	        except OSError:
+			bigfail = True
+
+
+	time.sleep(.5) # Wait for the log to write.
+
+	if ( not bigfail ):
+		statf = open(STATS_FILE, 'r')
+		stats = tail(statf, 10)
+
+		nstats = []
+		xstats = []
+
+		for line in stats:
+			if "XSTATS" in line:
+				xstats.append(line.strip())
+			if "NSTATS" in line:
+				nstats.append(line.strip())
+
+		statsline = nstats[-1] + xstats[-1]
+	else:
+		statsline = " "
+
+	relist = []
+	for x in BOTH_LISTS:
+                val = x.split('=')
+                name = val[0].lower()
+		rxp = val[0]
+		relist.append([name, rxp])
+
+	for point in relist:
+		matches = re.compile(' '+point[1]+'=(\d+)').findall(statsline)
+		if bigfail:
+			print point[0]+'.value U'
+		elif matches == []:
+			print point[0]+'.value 0'
+		else:
+			print point[0]+'.value '+matches[0]
+
+def tail( f, window=20 ):
+	f.seek( 0, 2 )
+	bytes = f.tell()
+	size = window
+	block = -1
+	while size > 0 and bytes+block*1024  > 0:
+		f.seek( block*1024, 2 ) # from the end!
+		data = f.read( 1024 )
+		linesFound = data.count('\n')
+		size -= linesFound
+		block -= 1
+	f.seek( block*1024, 2 )
+	f.readline() # find a newline
+	lastBlocks = list( f.readlines() )
+	return lastBlocks[-window:]
+
+if __name__ == '__main__':
+	if len(sys.argv) > 1:
+		if  sys.argv[1] == 'autoconf':
+			if ( not os.path.isfile(STATS_FILE) ) :
+				print 'no (Log file not found)'
+			elif ( not os.path.isfile(PID_FILE) ) :
+				print 'no (PID file not found)'
+			elif ( not os.access(STATS_FILE, os.R_OK) ) :
+				print 'no (Log file exists, access denied for read)'
+                        elif ( not os.access(PID_FILE, os.R_OK) ) :
+                                print 'no (PID file exists, access denied for read)'
+			else:
+				pidf = open(PID_FILE, 'r')
+				pidn = pidf.read()
+				pidf.close();
+				try:
+					os.kill(int(pidn.strip()), signal.SIGUSR1)
+				except OSError as (errno, strerror):
+					print 'no (Unable to signal process :: '+strerror+')'
+					sys.exit(0)
+				print 'yes'
+			sys.exit(0)
+
+	if len(sys.argv) > 1 and sys.argv[1] == 'config':
+		print_config()
+		sys.exit(0)
+
+	print_values()

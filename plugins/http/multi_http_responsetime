@@ -1,0 +1,116 @@
+#! /usr/bin/perl
+# This plugin based on http_responestime designed by Anders Nordby
+#
+# It is written to control the quality of an internet conneting by 
+# downloading a favicon.ico file from a lot - unlimited - count of
+# domains.
+#
+# Don't forget zu fill in the following lines into the munin-node
+# - ormally at /etc/muni/plugin-conf.d/ - an than restart munin
+#
+#   [multi_http_responsetime]
+#   user root
+#                                      Jo Hartmann (Version 08-0912)
+#
+# Now working under munin 1.4.5
+#                                      Jo Hartmann (Version 11-0426)
+
+
+
+
+use Sys::Hostname;
+use Time::HiRes qw( time );
+use IO::Socket;
+
+# ----- config -----
+push(@url_array, "http://www.google.de");
+push(@url_array, "http://www.t-online.de");
+push(@url_array, "http://www.telekom.de");
+push(@url_array, "http://www.ebay.de");
+push(@url_array, "http://www.tus-vahrenwald.de");
+$host = "localhost";
+$comment = "HTTP-Ladezeiten von Web-Seiten";
+#$host = hostname;
+# ----- config -----
+
+sub geturl {
+	my $data;
+	my $sock = new IO::Socket::INET (
+					PeerAddr => $host,
+					PeerPort => 80,
+					Proto => 'tcp'
+					);
+	return(0) unless ($sock);
+	print $sock "GET $baseurl HTTP/1.1\nHost: $vhost\nConnection: close\n\n";
+	while (<$sock>) {
+		$data .= $_;
+	}
+	close($sock);
+
+	# Debug
+	#my @response = split(/\n/, $data);
+	#my $httpresponse = $response[0];
+	#chomp($httpresponse);
+	#$httpresponse =~ s@\r@@g;
+	#print "HTTP response code: $httpresponse\n";
+}
+
+sub cktime {
+	for ($i=0; $i <= $max_index; ++$i) {
+		$url = $url_array[$i], "/favicon.ico";
+
+		$vhost = $url;
+		$vhost =~ s@^\w+://(.+?)/.*@\1@;
+
+		$proto = $url;
+		$proto =~ s@^(\w+)://.*@\1@;
+
+		$baseurl = $url;
+		$baseurl =~ s@^\w+://.+?(/)@\1@;
+
+		$tick1 = time();
+		geturl;
+		$tick2 = time();
+
+		$tspent = $tick2-$tick1;
+		$msecs = ($tspent * 1000);
+
+		printf "timespent$i.value %.3f\n", $msecs;
+		}
+	}
+
+# Count of urls
+	$max_index = $#url_array;
+
+if ($ARGV[0] && $ARGV[0] eq "autoconf") {
+	print "yes\n";
+} elsif ($ARGV[0] && $ARGV[0] eq "config") {
+	if ($comment) {
+		print "graph_title $comment\n";
+	} else {
+		print "graph_title HTTP response time \n";
+	}
+	print "graph_scale no\n";
+	print "graph_vlabel ms\n";
+	print "graph_category HTTP\n";
+	print "graph_info This graph shows the response time in milliseconds, to load a web page\n";
+	for ($i=0; $i <= $max_index; ++$i) {
+		$vhost = $url_array[$i];
+		$proto = $url_array[$i];
+		$vhost =~ s@^\w+://(.+?)/.*@\1@;
+		$proto =~ s@^(\w+)://.*@\1@;
+
+# If url_array[] is a domain, vhost will be contain the the strinf "http://" 
+		if($vhost =~ /http/) {
+		 	print "timespent$i.label $vhost\n";
+		} else {
+		 	print "timespent$i.label $proto://$vhost\n";	
+		}
+
+	 	print "timespent$i.info Ladezeit von $url_array[$i]/favicon.ico\n";
+		print "timespent$i.type GAUGE\n";
+		print "timespent$i.graph yes\n";
+	}
+} else {
+	cktime;
+}

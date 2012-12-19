@@ -1,0 +1,45 @@
+#!/bin/sh
+
+# tcp_retries revision 2 (Feb 2012)
+#
+# TCP retransmission rate. Useful for network debugging.
+#
+# Required privileges: none
+#
+# OS: Linux with procfs
+#
+# Author: Artem Sheremet <dot.doom@gmail.com>
+#
+
+#%# family=auto
+#%# capabilities=autoconf
+
+TCPSTAT=/proc/net/tcp
+
+case $1 in
+	autoconf)
+		[ -r $TCPSTAT -o -r ${TCPSTAT}6 ] && echo "yes" || echo "no"
+		;;
+    config)
+		cat <<CONFIG
+graph_title TCP retransmissions
+graph_vlabel Rate, retrs/sockets
+graph_category network
+graph_info TCP sockets retransmission counters from $TCPSTAT
+rate.label Retransmission rate
+rate.draw LINE2
+rate.min 0
+CONFIG
+		;;
+esac
+
+cat /proc/net/tcp* | awk '
+{
+	TOTAL += $7;
+	COUNT++;
+}
+
+END {
+	printf "rate.value %.3f\n", TOTAL/COUNT
+}
+'

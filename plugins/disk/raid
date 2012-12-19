@@ -1,0 +1,73 @@
+#!/usr/bin/perl -w
+# 
+# (c) 2007 Nathan Rutman nathan@clusterfs.com
+# 
+# Plugin to monitor RAID status 
+#
+# Results are % of healthy drives in a raid device
+# and % rebuilt of devices that are resyncing. 
+#
+#%# family=contrib
+#%# capabilities=autoconf
+
+if ($ARGV[0] and $ARGV[0] eq "autoconf") {
+    if (-r "/proc/mdstat" and `grep md /proc/mdstat`) {
+	print "yes\n";
+	exit 0;
+    } else {
+	print "no RAID devices\n";
+	exit 1;
+    }
+}
+
+if ( $ARGV[0] and $ARGV[0] eq "config" ) {
+    print "graph_title RAID status\n";
+    print "graph_category disk\n";
+    print "graph_info This graph monitors RAID disk health.  Values are percentage of healthy drives in each raid group.  Degraded devices are marked Critical.\n";
+    print "graph_args --base 1000 -l 0\n";
+    print "graph_vlabel % healthy/rebuilt\n";
+    print "graph_scale  no\n";
+}
+
+{
+    local( $/, *MDSTAT ) ;
+    open (MDSTAT, "/proc/mdstat") or exit 1;
+    #open (MDSTAT, "/etc/munin/plugins/sample.failed") or exit 1;
+    my $text = <MDSTAT>;
+    close MDSTAT;
+
+    # Should look like "active raid1 sda1[0] sdc1[2] sdb1[1]"
+    # Interestingly, swap is presented as "active (auto-read-only)"
+    while ($text =~ /(md\d+)\s+:\s+active\s+(\(auto-read-only\)\s+|)(\w+)\s+(.*)\n.*\[(\d+)\/(\d+)]\s+\[(\w+)]/ ) {
+	my($dev,$dummy,$type,$members,$nmem,$nact,$status) = ($1,$2,$3,$4,$5,$6,$7);
+#	print "$text\nitem: $dev $type ($members) status=$status \n";
+	if ( $ARGV[0] and $ARGV[0] eq "config" ) {
+	    print "$dev.label $dev\n";
+	    print "$dev.info $type $members\n";
+	    # 100: means less than 100
+	    # Because of an unfound bug, sometimes reported as 99.XX even when OS reports 100.
+	    print "$dev.critical 98:\n";	
+	    print $dev, "_rebuild.label $dev rebuilt\n";
+	    print $dev, "_rebuild.info $type\n";
+	    # Because of an unfound bug, sometimes reported as 99.XX even when OS reports 100.
+	    print $dev, "_rebuild.critical 98:\n";	
+	} else {
+	    my $pct = 100 * $nact / $nmem;
+	    my $rpct = 100;
+	    if ( $pct < 100 ) {
+		my @output = `/sbin/mdadm -D /dev/$dev | grep Rebuild`;
+		if( $output[0] =~ /([0-9]+)% complete/ ) {
+			$rpct = $1;
+		} else {
+			$rpct = 0;
+		}
+	    }
+	    print "$dev.value $pct\n";
+	    print $dev, "_rebuild.value $rpct\n";
+	}
+	$text = $';
+    } 
+}
+
+exit 0;
+

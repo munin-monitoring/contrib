@@ -1,0 +1,85 @@
+#!/bin/sh
+#
+# OpenBSD's pf(4) monitoring for OpenBSD
+# 2007, Originally by Gergely Czuczy <phoemix@harmless.hu>
+# for FreeBSD systems. Ported and splitted by the 
+# immerda admin team admin(at)immerda.ch
+# this version is adapted for openbsd and is only tested on
+# openbsd systems.
+#
+# Needs to run as root.
+# Add "user root" for the [pf] into plugins.conf.
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+pfctl='/sbin/pfctl'
+
+case $1 in
+    config)
+    cat <<EOF
+graph_title OpenBSD pf label bytes statistics
+graph_vlabel bytes per second
+graph_scale no
+graph_category network
+graph_args -l 0
+graph_info OpenBSD's pf label bytes usage statistics
+EOF
+pfctl -sl | awk '
+BEGIN {
+ total=0
+}
+{
+ l=$1;
+ f_bytes=l;
+ gsub(/[^a-z0-9A-Z]/, "_", f_bytes);
+ fields[f_bytes]=l;
+ total=total+1
+}
+END {
+ if ( total == 0 ) exit 0;
+ for ( k in fields ) print k".label "fields[k]"\n"k".type DERIVE\n"k".min 0"
+}'
+
+    exit 0
+    ;;
+    autoconf)
+	# FreeBSD
+	ostype=`uname -s`
+	# OpenBSD
+	if [ ${ostype} = "OpenBSD" ]; then
+            # enabled?
+	    if [ `pfctl -si 2>/dev/null | awk '/^Status:/{print $2}'` != "Enabled" ]; then
+		echo "no (pf(4) is not enabled, consult pfctl(8)"
+		exit 1
+	    fi
+	# Other OSes
+	else
+	    echo "no (this plugin is not supported on your OS)"
+	    exit 1
+	fi
+	echo "yes"
+	exit 0
+	;;
+    suggest)
+	exit 0;
+	;;
+esac
+
+sudo pfctl -sl | awk '
+BEGIN {
+ total=0
+}
+{
+ l=$1;
+ f_bytes=l;
+ gsub(/[^a-z0-9A-Z]/, "_", f_bytes);
+ total=total+1;
+ fields[f_bytes]=fields[f_bytes]+$4;
+}
+END {
+ if ( total == 0 ) exit 0;
+ for ( k in fields ) print k".value "fields[k]
+}'
+
+

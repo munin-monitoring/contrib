@@ -1,0 +1,185 @@
+#!/usr/bin/perl -w
+
+=head1 NAME
+
+dnsresponse - Plugin to monitor DNS resolution times.
+"Poor man's smokeping" :)
+
+=head1 APPLICABLE SYSTEMS
+
+Any unix system.
+
+=head1 CONFIGURATION
+
+The following shows the default configuration.
+
+  [dnsresponse_*]
+    env.site www.google.com
+    env.times 20
+
+=head1 INTERPRETATION
+
+The plugin shows the average and median times taken to resolve a site.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf,suggest
+
+=head1 BUGS
+
+None known.
+
+=head1 VERSION
+
+$Id: dnsresponse_ 61 2009-04-14 09:11:00Z stsimb $
+
+=head1 AUTHOR
+
+Copyright (c) 2009 by Sotiris Tsimbonis.
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+use strict;
+use warnings;
+
+my $DEBUG=0;
+my $site = exists $ENV{'site'} ? $ENV{'site'} : "www.google.com";
+my $times = exists $ENV{'times'} ? $ENV{'times'} : "20";
+my $resconf="/etc/resolv.conf";
+
+use File::Basename;
+my $basename=basename($0);
+my $scriptname;
+my $dnsip;
+($scriptname, $dnsip) = split("_", $basename);
+print "DBG: target dns ip $dnsip\n" if ($DEBUG>0);
+
+if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
+	print "graph_title $dnsip DNS response time\n";
+	print "graph_vlabel milliseconds\n";
+	print "graph_scale no\n";
+	print "graph_category Other\n";
+	print "graph_info Time taken by $dnsip to resolve $site $times times.\n";
+	#my @val = ("min", "avg", "median", "max");
+	my @val = ("avg", "median", "stddev");
+	my $value;
+	foreach $value ( @val ) {
+		if ($value eq "stddev") {
+			print "$value.info Standard deviation (variance).\n";
+		} else {
+			print "$value.info $value time taken by $dnsip to resolve $site $times times.\n";
+		}
+		print "$value.label $value\n";
+#		print "$value.type DERIVE\n";
+#		print "$value.min 0\n";
+#		print "$value.warning 100\n";
+#		print "$value.critical 600\n";
+	}
+	exit 0;
+}
+
+if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
+	my $ret;
+	if (! eval "require Net::DNS;") { $ret .= "Net::DNS not found. "; }
+	if (! eval "require Time::HiRes;") { $ret .= "Time::HiRes not found. "; }
+	if (! -s $resconf) { $ret .= "$resconf not found. "; }
+	if ($ret) {
+		print "no ($ret)\n";
+		exit 1;
+	} else {
+		print "yes\n";
+		exit 0;
+	}
+}
+
+if ( defined $ARGV[0] and $ARGV[0] eq "suggest" ) {
+	if (-s $resconf) {
+		open (FILE, "< $resconf") || die "Could not open $resconf: $!\n";
+		my $line;
+		while ($line = <FILE>) {
+			if ($line =~ /^nameserver/) {
+				my $ns; my $ip;
+				($ns, $ip) = split(" ", $line);
+				print "$ip\n";
+			}
+		}
+		exit 0;
+	} else {
+		print "ERROR reading $resconf\n";
+		exit 1;
+	}
+}
+
+use Time::HiRes qw ( gettimeofday tv_interval );
+use Net::DNS;
+
+my $res = Net::DNS::Resolver->new(
+	nameservers => [$dnsip],
+	recurse     => 1,
+	debug       => $DEBUG,
+);
+
+my $i;
+my @restimes;
+for ($i=1; $i<=$times; $i++) {
+	my $t0 = [gettimeofday];
+	my $answer = $res->send($site);
+	my $elapsed = tv_interval ($t0);
+	push(@restimes, $elapsed);
+	print "DBG: count $i elapsed $elapsed\n" if ($DEBUG>0);
+}
+
+
+@restimes=sort(@restimes);
+
+#my $min=$restimes[0]*1000;
+my $average=mean(@restimes)*1000;
+my $median=median(@restimes)*1000;
+my $stddev=std_dev_ref_sum(@restimes)*1000;
+#my $max=$restimes[$times-1]*1000;
+
+#print "min.value $min\n";
+print "avg.value $average\n";
+print "median.value $median\n";
+print "stddev.value $stddev\n";
+#print "max.value $max\n";
+
+sub mean {
+	my $result;
+	foreach (@_) { $result += $_ }
+	return $result / @_;
+}
+
+sub median {
+	my @ar = @_;
+	my $elements = scalar(@ar);
+	return $ar[(int($elements-1)/2)];
+#	if ($elements % 2) {
+#		return $ar[($elements-1)/2];
+#	} else {
+#	return ($ar[($elements-1)/2-0.5]+$ar[($elements-1)/2+0.5])/2;
+#	}
+}
+
+# Standard Deviance function from http://www.linuxjournal.com/article/6540
+sub std_dev_ref_sum {
+	my @ar = @_;
+	my $elements = scalar @ar;
+	my $sum = 0;
+	my $sumsq = 0;
+
+	foreach (@ar) {
+		$sum += $_;
+		$sumsq += ($_ **2);
+	}
+
+	return sqrt( $sumsq/$elements - (($sum/$elements) ** 2));
+}

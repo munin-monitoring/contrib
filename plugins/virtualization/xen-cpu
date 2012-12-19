@@ -1,0 +1,129 @@
+#!/usr/bin/perl -wT
+#
+# Script to minitor the cpu usage of Xen domains
+#
+# Author: Adam Crews <doo <at> shroom <dot> com>
+# 
+# License: GPL
+# Based on the origional xen script from Matthias Pfafferodt, syntron at web.de
+#
+# Note: Your munin config must run this as root.
+#
+# Parameters
+#   config 	(required)
+#   autoconf	(optional - used by munin-config)
+#
+# Changelog:
+# Properly ignore the xentop output header line.
+# Ward Vandewege (ward@gnu.org), 2011-04-20
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+# Define where to find xm tools
+my $XM = '/usr/sbin/xm';
+my $XMTOP = '/usr/sbin/xentop';
+
+##############
+# You should not need to edit anything below here
+#
+
+use strict;
+
+$ENV{PATH} = '/bin:/usr/bin:/usr/sbin';
+
+my $arg; undef($arg);
+if (defined($ARGV[0])) {
+	$arg = 'config' if ($ARGV[0] eq 'config');
+	$arg = 'autoconf' if ($ARGV[0] eq 'autoconf');
+
+	if ( "$arg" eq 'autoconf') {
+		if ( -e $XM && -e $XMTOP ) {
+			print "yes\n";
+			exit 0;
+		} else {
+			print "no ($XM and/or $XMTOP not found\n";
+			exit 1;
+		}
+	}
+
+	if ( "$arg" eq 'config') {
+		my %cnf; undef(%cnf);
+		%cnf = (
+			'graph_title' => 'Xen Domain CPU Usage',
+			'graph_args' => '--base 1000 -l 0 --upper-limit 100 --rigid',
+			'graph_vlabel' => 'Percent (%)',
+			'graph_category' => 'xen',
+			'graph_info' => 'Display the % of CPU Usage for each domain',
+		);	
+
+		my @domains = `$XM list`;
+		shift(@domains); # we dont need the header line
+		my $cnt = "0";
+		foreach my $domain ( @domains ) {
+			my ($dom,undef) = split(/\s/, $domain, 2);
+			# we need to change - and . to _ or things get weird with the graphs
+			# some decent quoting would probably fix this, but this works for now
+			$dom =~ s/[-.]/_/g;
+
+			$cnf{ "$dom" . '.label' } = "$dom";
+			$cnf{ "$dom" . '.draw' } = 'STACK';
+			$cnf{ "$dom" . '.min' } = '0';
+			$cnf{ "$dom" . '.max' } = '100';
+			$cnf{ "$dom" . '.info' } = '% CPU used for ' . "$dom";
+
+			if ( "$cnt" == "0") { $cnf{$dom.'.draw'} = 'AREA'; }
+			$cnt++;
+		}
+	
+		foreach my $key (sort(keys(%cnf))) {
+			print "$key $cnf{$key}\n";
+		}
+		exit 0;
+	}
+}
+
+# Nothing was passed as an argument, so let's just return the proper values
+
+my @chunks; undef(@chunks);
+
+{ 
+	# run the xentop command a few times because the first reading is not always accurate
+	local $/ = undef;
+	@chunks = split(/^xentop - .*$/m, `$XMTOP -b -i2 -d2`);
+}
+
+# Take only the last run of xentop
+my @stats = split (/\n/,pop(@chunks));
+
+# remove the first 4 items that are junk that we don't need.
+shift(@stats); 
+shift(@stats); 
+shift(@stats); 
+shift(@stats); 
+
+my %vals; undef(%vals);
+
+foreach my $domain (@stats) {
+	# trim the leading whitespace
+	$domain =~ s/^\s+//;
+	my @v_tmp = split(/\s+/, $domain);
+	next if ($v_tmp[0] eq 'NAME');
+
+	# we need to change - and . to _ or things get weird with the graphs
+	# some decent quoting would probably fix this, but this works for now
+	$v_tmp[0] =~ s/[-.]/_/g;
+
+	$vals{$v_tmp[0]}{'cpu_percent'} = $v_tmp[3];
+	$vals{$v_tmp[0]}{'vcpu'} = $v_tmp[8];
+	if ( $vals{$v_tmp[0]}{'vcpu'} =~ m/n\/a/ ) {
+		my $cpu = `grep -c "processor" < /proc/cpuinfo`;
+		if ( $cpu =~ m/^(\d+)$/ ) {
+			$vals{$v_tmp[0]}{'vcpu'} = $1;
+		}
+	}
+}
+
+foreach my $key (sort(keys(%vals))) {
+	print "$key.value " . ($vals{$key}{'cpu_percent'}/$vals{'Domain_0'}{'vcpu'}), "\n";
+}

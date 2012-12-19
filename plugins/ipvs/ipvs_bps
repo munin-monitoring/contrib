@@ -1,0 +1,87 @@
+#!/bin/bash
+# -*- bash -*-
+
+: << =cut
+
+=head1 NAME
+
+ipvs_conn -Indicate the number of bytes per second in ipvs
+
+=head1 CONFIGURATION
+
+[ipvs_*]
+user root
+env.ips IP1 IP2
+
+=head1 AUTHOR
+
+Ricardo Fraile <rfrail3@yahoo.es>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGICK MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+
+IPLIST=$ips
+
+
+if [ "$1" = "autoconf" ]; then
+        echo yes 
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+        echo 'graph_title Ipvs Traffic'
+        echo 'graph_args --base 1000 -l 0 '
+	echo 'graph_vlabel Bytes in (-) / out (+)'
+        echo 'graph_category Ipvs'
+        echo 'graph_info Indicate the ipvs traffic.'
+
+	for IP in $IPLIST; do
+		NM=`echo $IP | md5sum | cut -d - -f1 | sed 's/ //g' | cut -b 5-9`
+
+		echo "down$NM.label Bytes $IP"
+                echo "down$NM.type GAUGE"
+                echo "down$NM.graph no"
+                echo "down$NM.cdef down$NM,8,*"
+                echo "down$NM.min 0"
+
+                echo "up$NM.label Bytes $IP"
+                echo "up$NM.type GAUGE"
+                echo "up$NM.negative down$NM"
+                echo "up$NM.cdef up$NM,8,*"
+                echo "up$NM.info Bytes in $i"
+                echo "up$NM.min 0"
+	done
+
+        exit 0
+fi
+
+
+
+
+F1=`mktemp`
+ipvsadm -l -n  --rate| nl > $F1
+
+for IP in $IPLIST; do
+
+	COUNT1=`cat $F1 | grep TCP | grep $IP  | awk '{print $7}'`
+	COUNT2=`cat $F1 | grep TCP | grep $IP  | awk '{print $8}'`
+	NM=`echo $IP | md5sum | cut -d - -f1 | sed 's/ //g' | cut -b 5-9`
+	echo down$NM.value $COUNT1
+	echo up$NM.value $COUNT2
+
+done
+
+# Remove temp file
+rm -f $F1

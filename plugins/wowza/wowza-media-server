@@ -1,0 +1,327 @@
+#!/usr/bin/env python2
+"""
+Plugin to monitor Wowza streaming servers.
+
+Author: Srijan Choudhary <srijan4@gmail.com>
+Version: 2011031507
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+Usage:
+        - Link or copy to /etc/munin/plugins
+        - To enable extra graphs, also link to one or more of the
+        possible links (given below)
+        - Then restart munin-node
+
+Links possible:
+        <default>                       total number of listeners in wowza
+        wowza_duration                  duration of listeners (avg and mdn)
+
+        wowza_vhost_listeners           number of listeners per vhost
+        wowza_vhost_duration            duration of listeners per vhost
+        wowza_vhost_uptime              uptime of vhosts
+
+        wowza_app_listeners             number of listeners per application
+        wowza_app_duration              duration of listeners per application
+        wowza_app_uptime                uptime of applications
+
+Configuration:
+        - Enter your server, username, and password below
+        (The plugin does not need to run on the same host
+        as the Wowza media server)
+        - Optionally provide clients to exclude
+        - Optionally provide apps to exclude
+        - Optionally provide vhosts to exclude
+
+Possible TODOs:
+        - use autoconf
+        - use munin's configuration system
+
+"""
+from __future__ import print_function
+from sys import argv, exit, stderr
+import urllib2
+from xml.etree.ElementTree import ElementTree
+from os.path import basename
+
+# CONFIGURATION
+
+server = "127.0.0.1:8086"
+user = "admin"
+pw = "password"
+
+# Exclude these in all calculations
+client_exclude = ("127.0.0.1")
+app_exclude = ("testapp")
+vhost_exclude = ("testhost")
+
+# /CONFIGURATION
+
+url = "http://%s/serverinfo" %server
+
+passman = urllib2.HTTPPasswordMgrWithDefaultRealm()
+passman.add_password(None, url, user, pw)
+authhandler = urllib2.HTTPDigestAuthHandler(passman)
+
+opener = urllib2.build_opener(authhandler)
+urllib2.install_opener(opener)
+f = urllib2.urlopen(url)
+
+tree = ElementTree()
+tree.parse(f)
+f.close()
+
+vhosts = []
+for vh in tree.iter("VHost"):
+        if vh.find("Name").text not in vhost_exclude:
+                applications = []
+                for app in vh.iter("Application"):
+                        if app.find("Name").text not in app_exclude:
+                                if app.find("Status").text == "loaded":
+                                        clients = []
+                                        for client in app.iter("Client"):
+                                                if client.find("IpAddress").text not in client_exclude:
+                                                        clients.append({"ClientId": client.find("ClientId").text,
+                                                                        "FlashVersion": client.find("FlashVersion").text,
+                                                                        "IpAddress": client.find("IpAddress").text,
+                                                                        "TimeRunning": float(client.find("TimeRunning").text),
+                                                                        "DateStarted": client.find("DateStarted").text,
+                                                                        "URI": client.find("URI").text,
+                                                                        "Protocol": client.find("Protocol").text,
+                                                                        "IsSSL": client.find("IsSSL").text,
+                                                                        "IsEncrypted": client.find("IsEncrypted").text,
+                                                                        "Port": client.find("Port").text
+                                                                        })
+                                        applications.append({"Name": app.find("Name").text,
+                                                             "Status": app.find("Status").text,
+                                                             "TimeRunning": float(app.find("TimeRunning").text),
+                                                             "ConnectionsCurrent" : app.find("ConnectionsCurrent").text,
+                                                             "ConnectionsTotal": app.find("ConnectionsTotal").text,
+                                                             "ConnectionsTotalAccepted" : app.find("ConnectionsTotalAccepted").text,
+                                                             "ConnectionsTotalRejected" : app.find("ConnectionsTotalRejected").text,
+                                                             "Clients": clients})
+                                else:
+                                        applications.append({"Name": app.find("Name").text,
+                                                             "Status": app.find("Status").text,
+                                                             "TimeRunning": float(0),
+                                                             "ConnectionsCurrent" : 0,
+                                                             "ConnectionsTotal": 0,
+                                                             "ConnectionsTotalAccepted" : 0,
+                                                             "ConnectionsTotalRejected" : 0,
+                                                             "Clients": []})
+                vhosts.append({"Name": vh.find("Name").text,
+			       "TimeRunning": float(vh.find("TimeRunning").text),
+			       "ConnectionsLimit": vh.find("ConnectionsLimit").text,
+			       "ConnectionsCurrent" : vh.find("ConnectionsCurrent").text,
+			       "ConnectionsTotal": vh.find("ConnectionsTotal").text,
+			       "ConnectionsTotalAccepted" : vh.find("ConnectionsTotalAccepted").text,
+			       "ConnectionsTotalRejected" : vh.find("ConnectionsTotalRejected").text,
+                               "Applications": applications})
+
+plugin_name = basename(argv[0])
+
+try:
+	if argv[1] == "config":
+		if plugin_name == "wowza_duration":
+			print ("graph_title Wowza clients listening duration")
+			print ("graph_args --base 1000 -l 0")
+			print ("graph_scale no")
+			print ("graph_category Wowza")
+			print ("graph_vlabel minutes")
+			print ("avg.label average listening duration")
+			print ("mdn.label median listening duration")
+		
+		elif plugin_name == "wowza_vhost_listeners":
+			print ("graph_title Wowza listeners count by vhosts")
+			print ("graph_args --base 1000 -l 0")
+			print ("graph_scale no")
+			print ("graph_category Wowza")
+			print ("graph_vlabel listeners")
+			is_first = True
+			for vh in vhosts:
+                                vname = vh["Name"].strip("/").replace(".","_").replace("-","_")
+                                print (vname,".label vhost: ",vh["Name"],sep='')
+				if is_first:
+					print (vname,".draw AREA",sep='')
+					is_first = False
+				else:
+					print (vname,".draw STACK",sep='')
+                
+		elif plugin_name == "wowza_vhost_duration":
+			print ("graph_title Wowza clients listening duration by vhosts")
+			print ("graph_args --base 1000 -l 0")
+			print ("graph_scale no")
+			print ("graph_category Wowza")
+			print ("graph_vlabel minutes")
+			for vh in vhosts:
+                                vname = vh["Name"].strip("/").replace(".","_").replace("-","_")
+                                print (vname,"_avg.label average listening duration for ",vh["Name"],sep='')
+                                print (vname,"_mdn.label median listening duration for ",vh["Name"],sep='')
+                
+		elif plugin_name == "wowza_vhost_uptime":
+			print ("graph_title Wowza vhosts uptime")
+			print ("graph_args --base 1000 -l 0")
+			print ("graph_scale no")
+			print ("graph_category Wowza")
+			print ("graph_vlabel hours")
+			for vh in vhosts:
+                                vname = vh["Name"].strip("/").replace(".","_").replace("-","_")
+				print (vname,".label vhost: ",vh["Name"],sep='')
+		
+		elif plugin_name == "wowza_app_listeners":
+			print ("graph_title Wowza listeners count by apps")
+			print ("graph_args --base 1000 -l 0")
+			print ("graph_scale no")
+			print ("graph_category Wowza")
+			print ("graph_vlabel listeners")
+			is_first = True
+			for vh in vhosts:
+                                vname = vh["Name"].strip("/").replace(".","_").replace("-","_")
+                                for app in vh["Applications"]:
+                                        aname = app["Name"].strip("/").replace(".","_").replace("-","_")
+                                        print (vname,"_",aname,".label vhost.app: ",vh["Name"],".",app["Name"],sep='')
+                                        if is_first:
+                                                print (vname,"_",aname,".draw AREA",sep='')
+                                                is_first = False
+                                        else:
+                                                print (vname,"_",aname,".draw STACK",sep='')
+                
+		elif plugin_name == "wowza_app_duration":
+			print ("graph_title Wowza clients listening duration by apps")
+			print ("graph_args --base 1000 -l 0")
+			print ("graph_scale no")
+			print ("graph_category Wowza")
+			print ("graph_vlabel minutes")
+			for vh in vhosts:
+                                vname = vh["Name"].strip("/").replace(".","_").replace("-","_")
+                                for app in vh["Applications"]:
+                                        aname = app["Name"].strip("/").replace(".","_").replace("-","_")
+                                        print (vname,"_",aname,"_avg.label average listening duration for ",vh["Name"],".",app["Name"],sep='')
+                                        print (vname,"_",aname,"_mdn.label median listening duration for ",vh["Name"],".",app["Name"],sep='')
+                
+		elif plugin_name == "wowza_app_uptime":
+			print ("graph_title Wowza apps uptime")
+			print ("graph_args --base 1000 -l 0")
+			print ("graph_scale no")
+			print ("graph_category Wowza")
+			print ("graph_vlabel hours")
+			for vh in vhosts:
+                                vname = vh["Name"].strip("/").replace(".","_").replace("-","_")
+                                for app in vh["Applications"]:
+                                        aname = app["Name"].strip("/").replace(".","_").replace("-","_")
+                                        print (vname,"_",aname,".label vhost.app: ",vh["Name"],".",app["Name"],sep='')
+                
+		else:                   # wowza_listeners
+                        print ("graph_title Wowza listeners count")
+			print ("graph_args --base 1000 -l 0")
+			print ("graph_scale no")
+			print ("graph_category Wowza")
+			print ("graph_vlabel listeners")
+			print ("wowza_listeners.label Total Listeners")
+			print ("wowza_listeners.draw AREA")
+                        pass
+	exit(0)
+
+except IndexError:
+	pass
+
+if plugin_name == "wowza_duration":
+        alldurations = []
+        for vh in vhosts:
+                for app in vh["Applications"]:
+                        for client in app["Clients"]:
+                                alldurations.append(client["TimeRunning"])
+        alldurations.sort()
+        if len(alldurations) == 0:
+                average = 0
+        else:
+                average = (sum(alldurations) / float(len(alldurations)) / 60.)
+        print ("avg.value ",average,sep='')
+        if len(alldurations) % 2:
+                median = alldurations[len(alldurations) / 2] / 60.
+        elif len(alldurations):
+                median = (alldurations[len(alldurations) / 2 - 1] + alldurations[len(alldurations) / 2]) / 2. / 60.
+        else:
+                median = 0
+        print ("mdn.value ",median,sep='')
+
+elif plugin_name == "wowza_vhost_listeners":
+        for vh in vhosts:
+                print (vh["Name"].strip("/").replace(".","_").replace("-","_"),".value ",vh["ConnectionsCurrent"],sep='')
+
+elif plugin_name == "wowza_vhost_duration":
+        alldurations = {}
+        for vh in vhosts:
+                vname = vh["Name"].strip("/").replace(".","_").replace("-","_")
+                alldurations[vh["Name"]] = []
+                for app in vh["Applications"]:
+                        for client in app["Clients"]:
+                                alldurations[vh["Name"]].append(client["TimeRunning"])
+                alldurations[vh["Name"]].sort()
+                if len(alldurations[vh["Name"]]) == 0:
+                       average = 0
+                else:
+                       average = (sum(alldurations[vh["Name"]]) / float(len(alldurations[vh["Name"]])) / 60.)
+                print (vname,"_avg.value ",average,sep='')
+                if len(alldurations[vh["Name"]]) % 2:
+                        median = alldurations[vh["Name"]][len(alldurations[vh["Name"]]) / 2] / 60.
+                elif len(alldurations):
+                        median = (alldurations[vh["Name"]][len(alldurations[vh["Name"]]) / 2 - 1] + alldurations[vh["Name"]][len(alldurations[vh["Name"]]) / 2]) / 2. / 60.
+                else:
+                        median = 0
+                print (vname,"_mdn.value ",median,sep='')
+
+elif plugin_name == "wowza_vhost_uptime":
+        for vh in vhosts:
+            print (vh["Name"].strip("/").replace(".","_").replace("-","_"),".value ",vh["TimeRunning"]/3600.,sep='')
+
+elif plugin_name == "wowza_app_listeners":
+        for vh in vhosts:
+                for app in vh["Applications"]:
+                        print (vh["Name"].strip("/").replace(".","_").replace("-","_"),"_",app["Name"].strip("/").replace(".","_").replace("-","_"),".value ",app["TimeRunning"],sep='')
+
+elif plugin_name == "wowza_app_duration":
+        alldurations = {}
+        for vh in vhosts:
+                vname = vh["Name"].strip("/").replace(".","_").replace("-","_")
+                for app in vh["Applications"]:
+                        aname = app["Name"].strip("/").replace(".","_").replace("-","_")
+                        name = ''.join([vname,'_',aname])
+                        alldurations[name] = []
+                        for client in app["Clients"]:
+                                alldurations[name].append(client["TimeRunning"])
+                        alldurations[name].sort()
+                        if len(alldurations[name]) == 0:
+                                average = 0
+                        else:
+                                average = (sum(alldurations[name]) / float(len(alldurations[name])) / 60.)
+                        print (name,"_avg.value ",average,sep='')
+                        if len(alldurations[name]) % 2:
+                                median = alldurations[name][len(alldurations[name]) / 2] / 60.
+                        elif len(alldurations):
+                                median = (alldurations[name][len(alldurations[name]) / 2 - 1] + alldurations[name][len(alldurations[name]) / 2]) / 2. / 60.
+                        else:
+                                median = 0
+                        print (name,"_mdn.value ",median,sep='')
+
+elif plugin_name == "wowza_app_uptime":
+	for vh in vhosts:
+                for app in vh["Applications"]:
+                        print (vh["Name"].strip("/").replace(".","_").replace("-","_"),"_",app["Name"].strip("/").replace(".","_").replace("-","_"),".value ",app["TimeRunning"]/3600.,sep='')
+
+else:                   # wowza_listeners
+        listeners = 0
+        for vh in vhosts:
+                listeners += int(vh["ConnectionsCurrent"])
+        print ("wowza_listeners.value ",listeners,sep='')

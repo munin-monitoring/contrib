@@ -1,0 +1,98 @@
+#!/usr/bin/perl
+#
+# Parameters supported:
+#
+# 	config
+# 	autoconf
+#
+# Configurable variables
+#
+# 	url      - Override default status-url
+#
+# Magic markers:
+#%# family=auto
+#%# capabilities=autoconf
+
+my $ret = undef;
+if (!eval "require LWP::UserAgent;") {
+    $ret = "LWP::UserAgent not found";
+}
+
+my $URL = exists $ENV{'url'} ? $ENV{'url'} : "http://127.0.0.1:%d/server-status?auto";
+my @PORTS = exists $ENV{'ports'} ? split(' ', $ENV{'ports'}) : (80);
+my %chars = (
+	     # '\_' => 'Waiting',
+	     # 'S' => 'Starting up',
+	     'R' => 'Reading request',
+	     'W' => 'Sending reply',
+	     'K' => 'Keepalive',
+	     'D' => 'DNS lookup',
+	     'C' => 'Closing',
+	     # 'L' => 'Logging',
+	     # 'G' => 'Gracefully finishing',
+	     # 'I' => 'Idle cleanup',
+	     # '\.' => 'Open slot',
+	     );
+
+#    "_" Waiting for Connection, "S" Starting up, "R" Reading Request,
+#    "W" Sending Reply, "K" Keepalive (read), "D" DNS Lookup,
+#    "C" Closing connection, "L" Logging, "G" Gracefully finishing,
+#    "I" Idle cleanup of worker, "." Open slot with no current process
+
+if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
+    if ($ret) {
+	print "no ($ret)\n";
+	exit 1;
+    }
+    my $ua = LWP::UserAgent->new(timeout => 30);
+    my @badports;
+    
+    foreach my $port (@PORTS) {
+	my $url = sprintf $URL, $port;
+	my $response = $ua->request(HTTP::Request->new('GET',$url));
+	push @badports, $port unless $response->is_success and $response->content =~ /Scoreboard/im;
+    }
+    
+    if (@badports) {
+	print "no (no apache server-status on ports @badports)\n";
+	exit 1;
+    } else {
+	print "yes\n";
+	exit 0;
+    }
+}
+
+if (exists $ARGV[0] and $ARGV[0] eq "config") {
+    print "graph_title Apache activity\n";
+    print "graph_args --base 1000 -l 0\n";
+    print "graph_category apache\n";
+    print "graph_vlabel processes\n";
+    foreach my $port (@PORTS) {
+	while (my ($char, $val) = each (%chars)) {
+	    $char =~ s/\\\./dot/;
+            $char =~ s/\\\_/underline/;
+            print "activity_${port}_${char}.label ";
+	    print $val, "\n";
+            print "activity_${port}_${char}.type GAUGE\n";
+        }
+    }    
+    exit 0;
+}
+
+foreach my $port (@PORTS) {
+    my $ua = LWP::UserAgent->new (timeout => 30);
+    my $url = sprintf $URL, $port;
+    my $response = $ua->request (HTTP::Request->new('GET',$url));
+    if ($response->content =~ /^Scoreboard\:\s?(.*)$/sm) {
+	my $string = $1;
+	chomp $string;
+	my @act = split (//, $string);
+	foreach my $char (keys (%chars)) {
+	    my $num = scalar (grep (/$char/, @act));
+	    $char =~ s/\\\./dot/;
+	    $char =~ s/\\\_/underline/;
+	    print "activity_${port}_${char}.value $num\n";
+	}
+    }
+}
+

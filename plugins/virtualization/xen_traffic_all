@@ -1,0 +1,70 @@
+#!/bin/sh
+# Author: mario manno <projects@manno.name>
+# Description: measure traffic for all xen hosts
+#
+# Changelog:
+# Also handle domUs with named network interfaces.
+# Ward Vandewege (ward@gnu.org), 2011-04-20
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+if [ "$1" = "autoconf" ]; then
+    if which xm > /dev/null ; then
+        echo yes
+    else
+        echo "no (xm not found)"
+        exit 1
+    fi
+    if [ -r /proc/net/dev ]; then
+        echo yes
+    else
+        echo "no (/proc/net/dev not found)"
+        exit 1
+    fi
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    echo 'graph_title Xen Traffic'
+    echo 'graph_vlabel bits received (-) / sent (+) per ${graph_period}'
+    echo 'graph_args --base 1024 -l 0'
+    echo 'graph_category xen'
+    DOMAINS=$(xm list | awk '{print $1}' | egrep -v "^(Name|Domain-0)")
+    for dom in $DOMAINS; do
+        name=$( echo $dom | tr .- __ )
+        #echo $name"UP.label $name"
+        #echo $name"DOWN.label $name"
+        
+        echo $name'Down.label received'
+        echo $name'Down.type COUNTER'
+        echo $name'Down.graph no'
+        echo "${name}Down.cdef ${name}Down,8,*"
+        echo "${name}Up.label ${name}"
+        echo $name'Up.type COUNTER'
+        echo "${name}Up.negative ${name}Down"
+        echo "${name}Up.cdef ${name}Up,8,*"
+    done
+    exit 0
+fi
+
+DOMAINS=$(xm list | awk '{print $1}' | egrep -v "^(Name|Domain-0)")
+for dom in $DOMAINS; do
+		dev=$( xm list $dom --long | awk '/vifname / { print $2 }' | sed 's/)//' )
+		if [ "$dev" == "" ]; then
+	    dev=$( xm network-list $dom |\
+	        egrep "^[0-9]+" | sed 's@^.*vif/\([0-9]*\)/\([0-9]*\).*$@vif\1.\2@')
+		fi
+    name=$( echo $dom | tr .- __ ) 
+    #awk -v name="$name" -v interface="$dev" -F'[: \t]+' \
+    #'{ sub(/^ */,""); if ($1 == interface) \
+    #print name"DOWN.value "$2"\n"name"UP.value "$10; }' /proc/net/dev
+    awk -v name="$name" -v interface="$dev" \
+        'BEGIN { gsub(/\./, "\\.", interface) } \
+        $1 ~ "^" interface ":" {
+            split($0, a, /: */); $0 = a[2]; \
+            print name"Down.value " $1 "\n"name"Up.value " $9 \
+        }' \
+        /proc/net/dev
+done
+

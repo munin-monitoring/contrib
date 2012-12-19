@@ -1,0 +1,881 @@
+#!/usr/bin/perl
+#
+=head1 MEMCACHED
+
+Memcached - A Plugin to monitor Memcached Servers (Multigraph)
+
+=head1 MUNIN CONFIGURATION
+
+[memcached_*]
+ env.host 127.0.0.1     *default*
+ env.port 11211         *default*
+ env.timescale 3        *default*
+
+=head2 MUNIN ENVIRONMENT CONFIGURATION EXPLANATION
+
+ host = host we are going to monitor
+ port = port we are connecting to, in order to gather stats
+ timescale = what time frame do we want to format our graphs too
+
+=head1 NODE CONFIGURATION
+
+Please make sure you can telnet to your memcache servers and issue the
+ following commands: stats, stats settings, stats items and stats slabs.
+
+Available Graphs contained in this Plugin
+
+bytes => This graphs the current network traffic in and out
+
+commands => I<MULTIGRAPH> This graphs the current commands being issued to the memcache machine. B<Multigraph breaks this down to per slab.>
+
+conns => This graphs the current, max connections as well as avg conns per sec avg conns per sec is derived from total_conns / uptime.
+
+evictions => I<MULTIGRAPH> This graphs the current evictions on the node. B<Multigraph breaks this down to per slab.>
+
+items => I<MULTIGRAPH> This graphs the current items and total items in the memcached node. B<Multigraph breaks this down to per slab.>
+
+memory => I<MULTIGRAPH> This graphs the current and max memory allocation B<Multigraph breaks this down to per slab.>
+
+=head1 ADDITIONAL INFORMATION
+
+You will find that some of the graphs have LEI on them. This was done in order to save room
+on space for text and stands for B<Last Evicted Item>.
+
+The B<Timescale> variable formats certain graphs based on the following guidelines.
+ 1 => Seconds
+ 2 => Minutes
+ 3 => Hours  B<*Default*>
+ 4 => Days
+
+=head1 ACKNOWLEDGEMENTS
+
+Thanks to dormando for putting up with me ;)
+
+=head1 AUTHOR
+
+Matt West < https://github.com/mhwest13/Memcached-Munin-Plugin >
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+=cut
+
+use strict;
+use warnings;
+use IO::Socket;
+use Munin::Plugin;
+use File::Basename;
+
+if (basename($0) !~ /^memcached_multi_/) {
+    print "This script needs to be named memcached_multi_ and have symlinks which start the same.\n";
+    exit 1;
+}
+
+# tell munin about our multigraph capabilities
+need_multigraph();
+
+=head1 Variable Declarations
+
+    This section of code is to declare the variables used throughout the plugin
+    Some of them are imported as environment variables from munin plugin conf.d
+    file, others are hashes used for storing information that comes from the
+    stats commands issued to memcached.
+
+=cut
+
+# lets import environment variables for the plugin or use the default
+my $host = $ENV{host} || "127.0.0.1";
+my $port = $ENV{port} || 11211;
+
+# This gives us the ability to control the timescale our graphs are displaying.
+# The default it set to divide by hours, if you want to get seconds set it to 1.
+# Options: 1 = seconds, 2 = minutes, 3 = hours, 4 = days
+my $timescale = $ENV{timescale} || 3;
+
+# This hash contains the information contained in two memcache commands
+# stats and stats settings.
+my %stats;
+
+# This gives us eviction rates and other hit stats per slab
+# We track this so we can see if something was evicted earlier than necessary
+my %items;
+
+# This gives us the memory size and usage per slab
+# We track this so we can see what slab is being used the most and has no free chunks 
+# so we can re-tune memcached to allocate more pages for the specified chunk size
+my %chnks;
+
+=head2 Graph Declarations
+
+    This block of code builds up all of the graph info for all root / sub graphs.
+
+    %graphs: is a container for all of the graph definition information. In here is where you'll
+             find the configuration information for munin's graphing procedure.
+    Format:
+
+    $graph{graph_name} => {
+        config => {
+            You'll find the main graph config stored here
+            { key => value },
+            { ... },
+        },
+        datasrc => [
+            Name: name given to data value
+            Attr: Attribute and value, attribute must be valid plugin argument
+            { name => 'Name', info => 'info about graph', ... },
+            { ... },
+        ],
+    }
+
+=cut
+
+my %graphs;
+
+# main graph for memcached item count
+$graphs{items} = {
+    config => {
+        args => '--base 1000 --lower-limit 0',
+        vlabel => 'Items in Memcached',
+        category => 'memcached',
+        title => 'Items',
+        info => 'This graph shows the number of items in use by memcached',
+    },
+    datasrc => [
+        { name => 'curr_items', label => 'Current Items', min => '0' },
+        { name => 'total_items', label => 'New Items', min => '0', type => 'DERIVE' },
+    ],
+};
+# main graph for memcached memory usage
+$graphs{memory} = {
+    config => {
+        args => '--base 1024 --lower-limit 0',
+        vlabel => 'Bytes Used',
+        category => 'memcached',
+        title => 'Memory Usage',
+        info => 'This graph shows the memory consumption of memcached',
+    },
+    datasrc => [
+        { name => 'limit_maxbytes', draw => 'AREA', label => 'Maximum Bytes Allocated', min => '0' },
+        { name => 'bytes', draw => 'AREA', label => 'Current Bytes Used', min => '0' },
+    ],
+};
+# main graph for memcached network usage
+$graphs{bytes} = {
+    config => {
+        args => '--base 1000',
+        vlabel => 'bits in (-) / out (+)',
+        title => 'Network Traffic',
+        category => 'memcached',
+        info => 'This graph shows the network traffic in (-) / out (+) of the machine',
+        order => 'bytes_read bytes_written',
+    },
+    datasrc => [
+        { name => 'bytes_read', type => 'DERIVE', label => 'Network Traffic coming in (-)', graph => 'no', cdef => 'bytes_read,8,*', min => '0' },
+        { name => 'bytes_written', type => 'DERIVE', label => 'Traffic in (-) / out (+)', negative => 'bytes_read', cdef => 'bytes_written,8,*', min => '0' },
+    ],
+};
+# graph for memcached connections
+$graphs{conns} = {
+    config => {
+        args => '--base 1000 --lower-limit 0',
+        vlabel => 'Connections per ${graph_period}',
+        category => 'memcached',
+        title => 'Connections',
+        info => 'This graph shows the number of connections being handled by memcached',
+        order => 'max_conns curr_conns avg_conns',
+    },
+    datasrc => [
+        { name => 'curr_conns', label => 'Current Connections', min => '0' },
+        { name => 'max_conns', label => 'Max Connections', min => '0' },
+        { name => 'avg_conns' , label => 'Avg Connections', min => '0' },
+    ],
+};
+# main graph for memcached commands issued
+$graphs{commands} = {
+    config => {
+        args => '--base 1000 --lower-limit 0',
+        vlabel => 'Commands per ${graph_period}',
+        category => 'memcached',
+        title => 'Commands',
+        info => 'This graph shows the number of commands being handled by memcached',
+    },
+    datasrc => [
+        { name => 'cmd_get', type => 'DERIVE', label => 'Gets', info => 'Cumulative number of retrieval reqs', min => '0' },
+        { name => 'cmd_set', type => 'DERIVE', label => 'Sets', info => 'Cumulative number of storage reqs', min => '0' },
+        { name => 'get_hits', type => 'DERIVE', label => 'Get Hits', info => 'Number of keys that were requested and found', min => '0' },
+        { name => 'get_misses', type => 'DERIVE', label => 'Get Misses', info => 'Number of keys there were requested and not found', min => '0' },
+        { name => 'delete_hits', type => 'DERIVE', label => 'Delete Hits', info => 'Number of delete requests that resulted in a deletion of a key', min => '0' },
+        { name => 'delete_misses', type => 'DERIVE', label => 'Delete Misses', info => 'Number of delete requests for missing key', min => '0' },
+        { name => 'incr_hits', type => 'DERIVE', label => 'Increment Hits', info => 'Number of successful increment requests', min => '0' },
+        { name => 'incr_misses', type => 'DERIVE', label => 'Increment Misses', info => 'Number of unsuccessful increment requests', min => '0' },
+        { name => 'decr_hits', type => 'DERIVE', label => 'Decrement Hits', info => 'Number of successful decrement requests', min => '0' },
+        { name => 'decr_misses', type => 'DERIVE', label => 'Decrement Misses', info => 'Number of unsuccessful decrement requests', min => '0' },
+    ],
+};
+# main graph for memcached eviction rates
+$graphs{evictions} = {
+    config => {
+        args => '--base 1000 --lower-limit 0',
+        vlabel => 'Evictions per ${graph_period}',
+        category => 'memcached',
+        title => 'Evictions',
+        info => 'This graph shows the number of evictions per second',
+    },
+    datasrc => [
+        { name => 'evictions', label => 'Evictions', info => 'Cumulative Evictions Across All Slabs', type => 'DERIVE', min => '0' },
+        { name => 'evicted_nonzero', label => 'Evictions prior to Expire', info => 'Cumulative Evictions forced to expire prior to expiration', type => 'DERIVE', min => '0' },
+        { name => 'reclaimed', label => 'Reclaimed Items', info => 'Cumulative Reclaimed Item Entries Across All Slabs', type => 'DERIVE', min => '0' },
+    ],
+};
+# sub graph for breaking memory info down by slab ( sub graph of memory )
+$graphs{slabchnks} = {
+    config => {
+        args => '--base 1000 --lower-limit 0',
+        vlabel => 'Available Chunks for this Slab',
+        category => 'memcached',
+        title => 'Chunk Usage for Slab: ',
+        info => 'This graph shows you the chunk usage for this memory slab.',
+    },
+    datasrc => [
+        { name => 'total_chunks', label => 'Total Chunks Available', min => '0' },
+        { name => 'used_chunks', label => 'Total Chunks in Use', min => '0' },
+        { name => 'free_chunks', label => 'Total Chunks Not in Use (Free)', min => '0' },
+    ],
+};
+# sub graph for breaking commands down by slab ( sub graph of commands )
+$graphs{slabhits} = {
+    config => {
+        args => '--base 1000 --lower-limit 0',
+        vlabel => 'Hits per Slab per ${graph_period}',
+        category => 'memcached',
+        title => 'Hits for Slab: ',
+        info => 'This graph shows you the successful hit rate for this memory slab.',
+    },
+    datasrc => [
+        { name => 'get_hits', label => 'Get Requests', type => 'DERIVE', min => '0' },
+        { name => 'cmd_set', label => 'Set Requests', type => 'DERIVE', min => '0' },
+        { name => 'delete_hits', label => 'Delete Requests', type => 'DERIVE', min => '0' },
+        { name => 'incr_hits', label => 'Increment Requests', type => 'DERIVE', min => '0' },
+        { name => 'decr_hits', label => 'Decrement Requests', type => 'DERIVE', min => '0' },
+    ],
+};
+# sub graph for breaking evictions down by slab ( sub graph of evictions )
+$graphs{slabevics} = {
+    config => {
+        args => '--base 1000 --lower-limit 0',
+        vlabel => 'Evictions per Slab per ${graph_period}',
+        category => 'memcached',
+        title => 'Evictions for Slab: ',
+        info => 'This graph shows you the eviction rate for this memory slab.',
+    },
+    datasrc => [
+        { name => 'evicted', label => 'Total Evictions', type => 'DERIVE', min => '0' },
+        { name => 'evicted_nonzero', label => 'Evictions from LRU Prior to Expire', type => 'DERIVE', min => '0' },
+        { name => 'reclaimed', label => 'Reclaimed Expired Items', info => 'This is number of times items were stored in expired entry memory space', type => 'DERIVE', min => '0' },
+    ],
+};
+# sub graph for showing the time between an item was last evicted and requested ( sub graph of evictions )
+$graphs{slabevictime} = {
+    config => {
+        args => '--base 1000 --lower-limit 0',
+        vlabel => ' since Request for LEI',
+        category => 'memcached',
+        title => 'Eviction Request Time for Slab: ',
+        info => 'This graph shows you the time since we requested the last evicted item',
+    },
+    datasrc => [
+        { name => 'evicted_time', label => 'Eviction Time (LEI)', info => 'Time Since Request for Last Evicted Item', min => '0' },
+    ],
+};
+# sub graph for breaking items down by slab ( sub graph of items )
+$graphs{slabitems} = {
+    config => {
+        args => '--base 1000 --lower-limit 0',
+        vlabel => 'Items per Slab',
+        category => 'memcached',
+        title => 'Items in Slab: ',
+        info => 'This graph shows you the number of items and reclaimed items per slab.',
+    },
+    datasrc => [
+        { name => 'number', label => 'Items', info => 'This is the amount of items stored in this slab', min => '0' },
+    ],
+};
+# sub graph for showing the age of the eldest item stored in a slab ( sub graph of items )
+$graphs{slabitemtime} = {
+    config => {
+        args => '--base 1000 --lower-limit 0',
+        vlabel => ' since item was stored',
+        category => 'memcached',
+        title => 'Age of Eldest Item in Slab: ',
+        info => 'This graph shows you the time of the eldest item in this slab',
+    },
+    datasrc => [
+        { name => 'age', label => 'Eldest Item\'s Age', min => '0' },
+    ],
+};
+
+=head1 Munin Checks
+
+    These checks look for config / autoconf / suggest params
+
+=head2 Config Check
+
+    This block of code looks at the argument that is possibly supplied,
+    should it be config, it then checks to make sure the plugin 
+    specified exists, assuming it does, it will run the do_config 
+    subroutine for the plugin specified, otherwise it dies complaining
+    about an unknown plugin.
+
+=cut
+
+if (defined $ARGV[0] && $ARGV[0] eq 'config') {
+    # Lets get our plugin from the symlink being called up, we'll also verify its a valid
+    # plugin that we have graph information for
+    $0 =~ /memcached_multi_(.+)*/;
+    my $plugin = $1;
+    die 'Unknown Plugin Specified: ' . ($plugin ? $plugin : '') unless $graphs{$plugin};
+    # We need to fetch the stats before we do any config, cause its needed for multigraph
+    # subgraphs which use slab information for title / info per slab
+    fetch_stats();
+    # Now lets go ahead and print out our config.
+	do_config($plugin);
+	exit 0;
+}
+
+=head2 Autoconf Check
+
+    This block of code looks at the argument that is possibly supplied,
+    should it be autoconf, we will attempt to connect to the memcached
+    service specified on the host:port, upon successful connection it
+    prints yes, otherwise it prints no.
+
+=cut
+
+if (defined $ARGV[0] && $ARGV[0] eq 'autoconf') {
+    # Lets attempt to connect to memcached
+    my $s = get_conn();
+    # Lets verify that we did connect to memcached
+    if (defined($s)) {
+        print "yes\n";
+        exit 0;
+    } else {
+        print "no (unable to connect to $host\[:$port\])\n";
+        exit 0;
+    }
+}
+
+=head2 Suggest Check
+
+    This block of code looks at the argument that is possibly supplied,
+    should it be suggest, we are going to print the possible plugins
+    which can be specified. Note we only specify the root graphs for the
+    multigraphs, since the rest of the subgraphs will appear "behind" the
+    root graphs. It also attempts to connect to the memcached service to
+    verify it is infact running.
+
+=cut
+
+if (defined $ARGV[0] && $ARGV[0] eq 'suggest') {
+    # Lets attempt to connect to memcached
+    my $s = get_conn();
+    # Lets check that we did connect to memcached
+    if (defined($s)) {
+        my @rootplugins = ('bytes','conns','commands','evictions','items','memory');
+        foreach my $plugin (@rootplugins) {
+            print "$plugin\n";
+        }
+        exit 0;
+    } else {
+        print "no (unable to connect to $host\[:$port\])\n";
+        exit 0;
+    }
+}
+
+=head1 Output Subroutines
+
+    Output Subroutine calls to output data values
+
+=head2 fetch_output
+
+    This subroutine is the main call for printing data for the plugin.
+    No parameters are taken as this is the default call if no arguments
+    are supplied from the command line.
+
+=cut
+
+# Well, no arguments were supplied that we know about, so lets print some data
+fetch_output();
+
+sub fetch_output {
+    # Lets get our plugin from the symlink being called up, we'll also verify its a valid
+    # plugin that we have graph information for
+    $0 =~ /memcached_multi_(.+)*/;
+    my $plugin = $1;
+    die 'Unknown Plugin Specified: ' . ($plugin ? $plugin : '') unless $graphs{$plugin};
+    # Well we need to actually fetch the stats before we do anything to them.
+    fetch_stats();
+    # Now lets go ahead and print out our output.
+    my @subgraphs;
+    if ($plugin eq 'memory') {
+        @subgraphs = ('slabchnks');
+        foreach my $slabid(sort{$a <=> $b} keys %chnks) {
+            print_submulti_output($slabid,$plugin,@subgraphs);
+        }
+        print_rootmulti_output($plugin);
+    } elsif ($plugin eq 'commands') {
+        @subgraphs = ('slabhits');
+        foreach my $slabid(sort{$a <=> $b} keys %chnks) {
+            print_submulti_output($slabid,$plugin,@subgraphs);
+        }
+        print_rootmulti_output($plugin);
+    } elsif ($plugin eq 'evictions') {
+        @subgraphs = ('slabevics','slabevictime');
+        foreach my $slabid (sort{$a <=> $b} keys %items) {
+            print_submulti_output($slabid,$plugin,@subgraphs);
+        }
+        print_rootmulti_output($plugin);
+    } elsif ($plugin eq 'items') {
+        @subgraphs = ('slabitems','slabitemtime');
+        foreach my $slabid (sort{$a <=> $b} keys %items) {
+            print_submulti_output($slabid,$plugin,@subgraphs);
+        }
+        print_rootmulti_output($plugin);
+    } else {
+        print_root_output($plugin);
+    }
+
+    return;
+}
+
+=head2 print_root_output
+
+    This block of code prints out the return values for our root graphs. It takes
+    one parameter $plugin. Returns when completed, this is the non multigraph
+    output subroutine.
+
+        $plugin;    graph we are calling up to print data values for 
+
+    Example: print_root_output($plugin);
+
+=cut
+
+sub print_root_output {
+    # Lets get our plugin, set our graph reference and print out info for Munin
+    my ($plugin) = (@_);
+    my $graph = $graphs{$plugin};
+    print "graph memcached_$plugin\n";
+    # The conns plugin has some specific needs, looking for plugin type
+    if ($plugin ne 'conns') {
+        foreach my $dsrc (@{$graph->{datasrc}}) {
+            my %datasrc = %$dsrc;
+            while ( my ($key, $value) = each(%datasrc)) {
+                next if ($key ne 'name');
+                my $output = $stats{$value};
+                print "$dsrc->{name}.value $output\n";
+            }
+        }
+    } else {
+        my $output;
+        foreach my $dsrc (@{$graph->{datasrc}}) {
+            my %datasrc = %$dsrc;
+            while ( my ($key, $value) = each(%datasrc)) {
+                if ($value eq 'max_conns') {
+                    $output = $stats{maxconns};
+                } elsif ($value eq 'curr_conns') {
+                    $output = $stats{curr_connections};
+                } elsif ($value eq 'avg_conns') {
+                    $output = sprintf("%02d", $stats{total_connections} / $stats{uptime});
+                } else {
+                    next;
+                }
+                print "$dsrc->{name}.value $output\n";
+            }
+        }
+    }
+    return;
+}
+
+=head2 print_rootmulti_output
+
+    This block of code prints out the return values for our root graphs. It takes
+    one parameter $plugin. Returns when completed, this is the multigraph
+    output subroutine
+
+        $plugin;    main(root) graph we are calling up to print data values for
+
+    Example: print_rootmulti_output($plugin);
+
+=cut
+
+sub print_rootmulti_output {
+    # Lets get our plugin, set our graph reference and print out info for Munin
+    my ($plugin) = (@_);
+    my $graph = $graphs{$plugin};
+    print "multigraph memcached_$plugin\n";
+    # Lets print our data values with their appropriate name
+    foreach my $dsrc (@{$graph->{datasrc}}) {
+        my $output = 0;
+        my %datasrc = %$dsrc;
+        while ( my ($key, $value) = each(%datasrc)) {
+            next if ($key ne 'name');
+            next if (($plugin eq 'evictions') && ($value eq 'reclaimed') && ($stats{version} =~ /1\.4\.[0-2]/));
+            if (($plugin eq 'evictions') && ($value eq 'evicted_nonzero')) {
+                foreach my $slabid (sort{$a <=> $b} keys %items) {
+                    $output += $items{$slabid}->{evicted_nonzero};
+                }
+            } else {
+                $output = $stats{$value};
+            }
+            print "$dsrc->{name}.value $output\n";
+        }
+    }
+    return;
+}
+
+=head2 print_submulti_output
+
+    This block of code prints out the return values for our root graphs. It takes
+    three parameters $slabid, $plugin and @subgraphs. Returns when completed, this
+    is the multigraph output subroutine for our subgraphs
+
+        $slabid;    slab id that we will use to grab info from and print out
+        $plugin;    main(root) being called, used for multigraph output and slab id
+        @subgraphs; graphs we are actually trying to print data values for
+
+    Example: print_submulti_output($slabid,$plugin,@subgraphs);
+
+=cut
+
+sub print_submulti_output {
+    # Lets get our slabid, plugin, and subgraphs
+    my ($slabid,$plugin,@subgraphs) = (@_);
+    my $currslab = undef;
+    # Time to loop over our subgraphs array
+    foreach my $sgraph (@subgraphs) {
+        # Lets set our graph reference for quick calling, and print some info for munin
+        my $graph = $graphs{$sgraph};
+        print "multigraph memcached_$plugin.$sgraph\_$slabid\n";
+        # Lets figure out what slab info we are trying to call up
+        if ($plugin eq 'evictions') {
+            $currslab = $items{$slabid};
+        } elsif ($plugin eq 'memory') {
+            $currslab = $chnks{$slabid};
+        } elsif ($plugin eq 'commands') {
+            $currslab = $chnks{$slabid};
+        } elsif ($plugin eq 'items') {
+            $currslab = $items{$slabid};
+        } else {
+            return;
+        }
+        # Lets print our data values with their appropriate name
+        foreach my $dsrc (@{$graph->{datasrc}}) {
+            my %datasrc = %$dsrc;
+            while ( my ($key, $value) = each(%datasrc)) {
+                next if ($key ne 'name');
+                next if (($sgraph eq 'slabevics') && ($value eq 'reclaimed') && ($stats{version} =~ /1\.4\.[0-2]/));
+                my $output = $currslab->{$value};
+                if (($sgraph eq 'slabevictime') || ($sgraph eq 'slabitemtime')) {
+                    $output = time_scale('data',$output); ;
+                }
+                print "$dsrc->{name}.value $output\n";
+            }
+        }
+    }
+    return;
+}
+
+=head1 Config Subroutines
+
+    These subroutines handle the config portion of munin calls.
+
+=head2 do_config
+
+    This is the main call issued assuming we call up config and plugin specified exists
+    The subroutine takes one parameter $plugin, and returns when completed.
+
+        $plugin; main(root) graph being called
+
+    Example: do_config($plugin);
+
+=cut
+
+sub do_config {
+    my ($plugin) = (@_);
+    my @subgraphs;
+    if ($plugin eq 'memory') {
+        @subgraphs = ('slabchnks');
+        foreach my $slabid (sort{$a <=> $b} keys %chnks) {
+            print_submulti_config($slabid,$plugin,@subgraphs);
+        }
+        print_rootmulti_config($plugin);
+    } elsif ($plugin eq 'commands') {
+        @subgraphs = ('slabhits');
+        foreach my $slabid (sort{$a <=> $b} keys %chnks) {
+            print_submulti_config($slabid,$plugin,@subgraphs);
+        }
+        print_rootmulti_config($plugin);
+    } elsif ($plugin eq 'evictions') {
+        @subgraphs = ('slabevics','slabevictime');
+        foreach my $slabid (sort{$a <=> $b}  keys %items) {
+            print_submulti_config($slabid,$plugin,@subgraphs);
+        }
+        print_rootmulti_config($plugin);
+    } elsif ($plugin eq 'items') {
+        @subgraphs = ('slabitems','slabitemtime');
+        foreach my $slabid (sort{$a <=> $b} keys %items) {
+            print_submulti_config($slabid,$plugin,@subgraphs);
+        }
+        print_rootmulti_config($plugin);
+    } else {
+        print_root_config($plugin);
+    }
+
+    return;
+}
+
+=head2 get_conn
+
+    This subroutine returns a socket connection
+
+=cut
+
+sub get_conn {
+    my $s = undef;
+
+    # check if we want to use sockets instead of tcp
+    my ($sock) = ($host =~ /unix:\/\/(.+)*$/);
+
+    if ($sock) {
+       $s = IO::Socket::UNIX->new(
+            Peer     => $sock
+      );
+    } else {
+       $s = IO::Socket::INET->new(
+            Proto    => "tcp",
+            PeerAddr => $host,
+            PeerPort => $port,
+            Timeout  => 10,
+       );
+    }
+
+    return $s;
+}
+
+=head2 print_submulti_config
+
+    This subroutine prints out the config information for all of the subgraphs.
+    It takes three parameters, $slabid, $plugin and @subgraphs, returns when
+    completed, this is the mutligraph config output for our subgraphs
+
+        $slabid;    slab id that we will use to grab info from and print out
+        $plugin;    main(root) being called, used for multigraph output and slab id
+        @subgraphs; graphs we are actually trying to print data values for
+
+    Example:  print_submulti_config($slabid,$plugin,@subgraphs);
+
+=cut
+
+sub print_submulti_config {
+    # Lets get our slabid, plugin, and subgraphs
+    my ($slabid,$plugin,@subgraphs) = (@_);
+    my ($slabitems,$slabchnks) = undef;
+    # Time to loop over our subgraphs array
+    foreach my $sgraph (@subgraphs) {
+        # Lets set our graph reference, and main graph config for easy handling
+        my $graph = $graphs{$sgraph};
+        my %graphconf = %{$graph->{config}};
+        # Lets tell munin which graph we are graphing, and what our main graph config info is 
+        print "multigraph memcached_$plugin.$sgraph\_$slabid\n";
+        while ( my ($key, $value) = each(%graphconf)) {
+	        if ($key eq 'title') {
+	            print "graph_$key $value" . "$slabid" . " ($chnks{$slabid}->{chunk_size} Bytes)\n";
+	        } elsif (($key eq 'vlabel') && (($sgraph eq 'slabevictime') || ($sgraph eq 'slabitemtime'))) {
+                $value = time_scale('config',$value);
+                print "graph_$key $value\n";
+            } else {
+                print "graph_$key $value\n";
+	        }
+        }
+        # Lets tell munin about our data values and how to treat them
+        foreach my $dsrc (@{$graph->{datasrc}}) {
+            my %datasrc = %$dsrc;
+            while ( my ($key, $value) = each(%datasrc)) {
+                next if ($key eq 'name');
+                print "$dsrc->{name}.$key $value\n";
+            }
+        }
+    }
+
+    return;
+}
+
+=head2 print_rootmulti_config
+
+    This subroutine prints out the config information for all of the main(root) graphs.
+    It takes one parameter, $plugin, returns when completed.
+
+        $plugin;    main(root) graph used for multigraph call
+
+    Example:  print_rootmulti_config($plugin);
+
+=cut
+
+sub print_rootmulti_config {
+    # Lets get out plugin, set our graph reference and our graph config info
+    my ($plugin) = (@_);
+    my $graph = $graphs{$plugin};
+    my %graphconf = %{$graph->{config}};
+    # Lets tell munin about the graph we are referencing and print the main config
+    print "multigraph memcached_$plugin\n";
+    while ( my ($key, $value) = each(%graphconf)) {
+        print "graph_$key $value\n";
+    }
+    # Lets tell munin about our data values and how to treat them
+    foreach my $dsrc (@{$graph->{datasrc}}) {
+        my %datasrc = %$dsrc;
+        while ( my ($key, $value) = each(%datasrc)) {
+            next if ($key eq 'name');
+            print "$dsrc->{name}.$key $value\n";
+        }
+    }
+    return;
+}
+
+=head2 print_root_config
+
+    This subroutine prints out the config information for all of the main(root) graphs.
+    It takes one parameter, $plugin, returns when completed.
+
+        $plugin;    main(root) graph used for multigraph call
+
+    Example:  print_root_config($plugin);
+
+=cut
+
+sub print_root_config {
+    # Lets get our plugin, set our graph reference and our graph config info
+    my ($plugin) = (@_);
+    my $graph = $graphs{$plugin};
+    my %graphconf = %{$graph->{config}};
+    # Lets tell munin about the graph we are referencing and print the main config
+    print "graph memcached_$plugin\n";
+    while ( my ($key, $value) = each(%graphconf)) {
+        print "graph_$key $value\n";
+    }
+    # Lets tell munin about our data values and how to treat them
+    foreach my $dsrc (@{$graph->{datasrc}}) {
+        my %datasrc = %$dsrc;
+        while ( my ($key, $value) = each(%datasrc)) {
+            next if ($key eq 'name');
+            print "$dsrc->{name}.$key $value\n";
+        }
+    }
+    return;
+}
+
+=head1 Misc Subroutines
+
+    These subroutines are misc ones, and are referenced inside of the code. They
+    should never be called up by Munin.
+
+=head2 fetch_stats
+
+    This subroutine fetches the information from memcached and stores it into our
+    hashes for later referencing throughout the graph. Returns when completed
+
+=cut
+
+sub fetch_stats {
+    # Lets try and connect to memcached
+    my $s = get_conn();
+    # Die if we can't establish a connection to memcached
+    die "Error: Unable to Connect to $host\[:$port\]\n" unless $s;
+    # Lets print the stats command and store the info from the output
+    print $s "stats\r\n";
+    while (my $line = <$s>) {
+        if ($line =~ /STAT\s(.+?)\s(.*)/) {
+            my ($skey,$svalue) = ($1,$2);
+            $stats{$skey} = $svalue;
+        }
+        last if $line =~ /^END/;
+    }
+    # Lets print the stats settings command and store the info from the output
+    print $s "stats settings\r\n";
+    while (my $line = <$s>) {
+        if ($line =~ /STAT\s(.+?)\s(.*)/) {
+            my ($skey,$svalue) = ($1,$2);
+            if ($skey eq 'evictions') {
+                $skey = 'evictions_active';
+            }
+            $stats{$skey} = $svalue;
+        }
+        last if $line =~ /^END/;
+    }
+    # Lets print the stats slabs command and store the info from the output
+    print $s "stats slabs\r\n";
+    while (my $line = <$s>) {
+        if ($line =~ /STAT\s(\d+):(.+)\s(\d+)/) {
+            my ($slabid,$slabkey,$slabvalue) = ($1,$2,$3);
+            $chnks{$slabid}->{$slabkey} = $slabvalue;
+        }
+        last if $line =~ /^END/;
+    }
+    # Lets print the stats items command and store the info from the output
+    print $s "stats items\r\n";
+    while (my $line = <$s>) {
+        if ($line =~ /STAT\sitems:(\d+):(.+?)\s(\d+)/) {
+            my ($itemid,$itemkey,$itemvalue) = ($1,$2,$3);
+            $items{$itemid}->{$itemkey} = $itemvalue;
+        }
+        last if $line =~ /^END/;
+    }
+}
+
+=head2 time_scale
+
+    This subroutine is here for me to adjust the timescale of the time graphs
+    for last evicted item and age of eldest item in cache.
+
+        Please note, after long usage I have noticed these counters may not
+        be accurate, I believe the developers are aware and have submitted
+        a patch upstream.
+
+=cut
+
+sub time_scale {
+    # Lets get our config option and value to adjust
+    my ($configopt,$origvalue) = (@_);
+    my $value;
+    # If config is defined, it returns the config info for time scale
+    # If data is defined, it returns the original value after its been adjusted
+    if ($configopt eq 'config') {
+        if ($timescale == 1) {
+            $value = "Seconds" . $origvalue;
+        } elsif ($timescale == 2) {
+            $value = "Minutes" . $origvalue;
+        } elsif (($timescale == 3) || ($timescale > 4) || (!defined($timescale))) {
+            $value = "Hours" . $origvalue;
+        } elsif ($timescale == 4) {
+            $value = "Days" . $origvalue;
+        }
+    } elsif ($configopt eq 'data') {
+        if ($timescale == 1) {
+            $value = sprintf("%02.2f", $origvalue / 1);
+        } elsif ($timescale == 2) {
+            $value = sprintf("%02.2f", $origvalue / 60);
+        } elsif (($timescale == 3) || ($timescale > 4) || (!defined($timescale))) {
+            $value = sprintf("%02.2f", $origvalue / 3600);
+        } elsif ($timescale == 4) {
+            $value = sprintf("%02.2f", $origvalue / 86400);
+        }
+    } else {
+        die "Unknown time_scale option given: either [config/data]\n";
+    }
+    return $value;
+}

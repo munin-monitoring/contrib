@@ -1,0 +1,342 @@
+#!/usr/bin/perl
+#
+# Plugin to monitor Forefront Client Security status in MOM database
+#
+# Copyright (c) 2008 Rune Nordbøe Skillingstad - <rune.skillingstad@ntnu.no>
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 dated June, 1991.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
+# USA.
+#
+# Parameters: 
+#
+#     config
+#     autoconf
+#     suggest
+#
+# Config variables
+# 
+#     dsn     - If DSN name differs from hostname
+#     dbuser  - Valid MS SQL user (Windows authentication is posible using "DOMAIN\user")
+#     dbpass  - Password 
+#
+# Install guide:
+# This plugin relies on correct configured ODBC for the MOM database
+# Prerequisits:
+# * Install and configure FreeTDS and DBD::Sybase (packages tdsodbc and libdbd-sybase-perl on Ubuntu)
+# - DBD::Sybase is prefered over ODBC because of strange TEXT field handling in DBD::ODBC
+#
+# Example 
+# /etc/freetds/freetds.conf:
+# [MyHost]
+#        host = MyHost.domain.tld
+#        port = 1433
+#        tds version = 7.0
+# 
+# Copy this script to /usr/share/munin/plugins and run "munin-node-configure --shell"
+# If freetds.conf has one or more lines containing "host = <server>", the output will be something like this:
+# ln -s /usr/share/munin/plugins/forefront_ /etc/munin/plugins/forefront_MyHost.Domain.tld_computers
+# ln -s /usr/share/munin/plugins/forefront_ /etc/munin/plugins/forefront_MyHost.domain.tld_deployments
+# ln -s /usr/share/munin/plugins/forefront_ /etc/munin/plugins/forefront_MyHost.domain.tld_status
+#
+# To manually add, symlink forefront_ to forefront_MyHost.domain.tld_computers, 
+# forefront_MyHost.domain.tld_deployments and forefront_MyHost.domain.tld_status 
+#
+# Add your DSN and user/password to /etc/munin/plugin-conf.d/munin-node:
+# [forefront_MyHost.domain.tld_*]
+# env.dsn MyHost
+# env.dbuser <user>
+# env.dbpass <password>
+# 
+# On your munin server, add this to /etc/munin/munin.conf
+#
+# [MyHost.domain.tld]
+#    address <ip address to node running this plugin>
+#    use_node_name no
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+use strict;
+
+my $host = undef;
+my $stat = undef;
+
+my @stats = qw(computers status deployments);
+
+if($0 =~ /^(?:|.*\/)forefront_(.+?)_([^_]+)$/) {
+    $host = $1;
+    $stat = $2;
+    $host =~  s/_/-/g;
+}
+my $dsn    = $ENV{dsn}    || $host;
+my $dbuser = $ENV{dbuser} || undef;
+my $dbpass = $ENV{dbpass} || undef;
+
+my $ret = undef;
+if(!eval "require DBI;") {
+    $ret = "DBI not found ";
+}
+if(!eval "require DBD::Sybase;") {
+    $ret .= "DBD::Sybase not found ";
+}
+if(!eval "require MIME::Base64;") {
+    $ret .= "MIME::Base64 not found ";
+} else {
+    use MIME::Base64;
+}
+
+if($ARGV[0] and $ARGV[0] eq "autoconf") {
+    if($ret) {
+	print "no ($ret)\n";
+	exit 1;
+    }
+    print "yes\n";
+    exit 0;
+}
+
+if($ARGV[0] and $ARGV[0] eq "suggest") {
+    if("/etc/odbc.ini") {
+	my $dsn = undef;
+	my $host = undef;
+	open(IN, "</etc/freetds/freetds.conf") || die "Can't read FreeTDS config file";
+	while(<IN>) {
+	    next if(/^[;#]/);
+	    if(/host\s*=\s*([\w.-]+)/) {
+		my $host = $1;
+		$host =~ s/-/_/g;
+		print $host."_".join("\n".$host."_",@stats)."\n";
+	    }
+	}
+	close(IN);
+	exit 0;
+    }
+    exit 1;
+}
+
+
+
+if(!grep(/$stat/, @stats)) {
+    print STDERR "\"$stat\" is not a valid script ending\n";
+    exit 1;
+}
+
+if($ARGV[0] and $ARGV[0] eq "config") {
+    eval "&".$stat."_config()";
+    exit 0;
+}
+
+eval "&".$stat."_fetch()";
+
+sub computers_config {
+    print <<EOF;
+host_name $host
+graph_title Number of computers using Forefront
+graph_args --base 1000 -l 0 -X 0
+graph_vlabel number of computers
+graph_category security
+graph_scale no
+graph_info This graph shows the number of computers registered in MOM database for Forefront Client Security.
+graph_order missing672 missing168 missing computers pending
+missing672.label Not reported 28d
+missing672.draw AREA
+missing672.info Number of computers not reported in 28 days
+missing168.label Not reported 7d
+missing168.draw STACK
+missing168.info Number of computers not reported in 7 days
+missing.label Not reported 1d
+missing.draw STACK
+missing.info Number of computers not reported in 24 hours
+computers.label Computers
+computers.draw STACK
+computers.info Number of computers registered.
+pending.label Pending
+pending.draw STACK
+pending.info Number of computers pending approval.
+totl.label Total
+totl.cdef missing672,missing168,+,missing,+,computers,+,pending,+
+totl.colour 000000
+totl.info Total number of computers.
+totl.draw LINE1
+EOF
+}
+
+sub status_config {
+    my %alerts;
+    my $dbh = DBI->connect("DBI:Sybase:$dsn", $dbuser, $dbpass, { PrintError => 1, AutoCommit => 1 });
+    my $sth = $dbh->prepare("SELECT Level, Name FROM AlertLevel ORDER BY Level", {odbc_exec_direct => 1});
+    $sth->execute();
+    while(my @row = $sth->fetchrow_array) {
+	$alerts{$row[0]} = $row[1];
+    }
+    print <<EOF;
+host_name $host
+graph_title Forefront client status
+graph_args --base 1000 -l 0 -X 0
+graph_vlabel %
+graph_category security
+graph_scale no
+graph_info This graph shows the Forefront client status in percentage
+EOF
+    foreach my $level (sort(keys(%alerts))) {
+	print "alert" . $level . ".label " . $alerts{$level} . "\n";
+	print "alert" . $level . ".draw LINE2\n";
+	print "alert" . $level . ".info Computers reporting " . $alerts{$level} . " status\n";
+    }
+}
+
+sub deployments_config {
+    print <<EOF;
+host_name $host
+graph_title Policy deployment status
+graph_args --base 1000 -l 0 -X 0
+graph_vlabel number of computers
+graph_category security
+graph_scale no
+graph_info This graph shows policy deployment status for Forefront Client Security
+EOF
+    my %profiles = &deployments_general();
+    foreach my $policy (sort(keys(%profiles))) {
+	my $field = encode_base64($policy);
+	chomp($field);	
+	print $field . ".label " . $profiles{$policy}{'name'} . "\n";
+	print $field . ".draw LINE2\n";
+	print $field . ".info Numer of computers having the " .$profiles{$policy}{'name'} . " profile.\n";
+	if($profiles{$policy}{'old'}) {
+	    print $field . "old.label " . $profiles{$policy}{'name'} . " (old)\n";
+	    print $field . "old.draw LINE2\n";
+	    print $field . "old.info Numer of computers having an old version of the " .$profiles{$policy}{'name'} . " profile.\n";
+	}
+    }
+}
+
+sub computers_fetch {
+    my ($sec,$min,$hour,$mday,$mon,$year,$wday,
+	$yday,$isdst)=localtime(time-86400);
+    my $oneday = sprintf "%4d-%02d-%02d %02d:%02d:%02d",
+      $year+1900,$mon+1,$mday,$hour,$min,$sec;
+    ($sec,$min,$hour,$mday,$mon,$year,$wday,
+	$yday,$isdst)=localtime(time-604800);
+    my $sevendays = sprintf "%4d-%02d-%02d %02d:%02d:%02d",
+      $year+1900,$mon+1,$mday,$hour,$min,$sec;
+    ($sec,$min,$hour,$mday,$mon,$year,$wday,
+	$yday,$isdst)=localtime(time-2419200);
+    my $twentyeightdays = sprintf "%4d-%02d-%02d %02d:%02d:%02d",
+      $year+1900,$mon+1,$mday,$hour,$min,$sec;
+
+    my $dbh = DBI->connect("DBI:Sybase:$dsn", $dbuser, $dbpass, { PrintError => 1, AutoCommit => 1 });
+    my $sth = $dbh->prepare("SELECT COUNT(*) FROM Computer WHERE PendingAction = 0 AND LastHeartbeat < '$twentyeightdays'", {odbc_exec_direct => 1});
+    $sth->execute();
+    my($count) = $sth->fetchrow_array;
+    print "missing672.value $count\n";
+    my $sth = $dbh->prepare("SELECT COUNT(*) FROM Computer WHERE PendingAction = 0 AND LastHeartbeat < '$sevendays' AND LastHeartbeat >= '$twentyeightdays'", {odbc_exec_direct => 1});
+    $sth->execute();
+    my($count) = $sth->fetchrow_array;
+    print "missing168.value $count\n";
+    my $sth = $dbh->prepare("SELECT COUNT(*) FROM Computer WHERE PendingAction = 0 AND LastHeartbeat < '$oneday' AND LastHeartbeat >= '$sevendays'", {odbc_exec_direct => 1});
+    $sth->execute();
+    my($count) = $sth->fetchrow_array;
+    print "missing.value $count\n";
+    $sth = $dbh->prepare("SELECT COUNT(*) FROM Computer WHERE PendingAction = 0 AND LastHeartbeat >= '$oneday'", {odbc_exec_direct => 1});
+    $sth->execute();
+    ($count) = $sth->fetchrow_array;
+    print "computers.value $count\n";
+    $sth = $dbh->prepare("SELECT COUNT(*) FROM Computer WHERE PendingAction <> 0", {odbc_exec_direct => 1});
+    $sth->execute();
+    ($count) = $sth->fetchrow_array;
+    print "pending.value $count\n";
+}
+
+sub status_fetch {
+    my %alerts;
+    my $dbh = DBI->connect("DBI:Sybase:$dsn", $dbuser, $dbpass, { PrintError => 1, AutoCommit => 1 });
+    my $sth = $dbh->prepare("SELECT Level FROM AlertLevel ORDER BY Level", {odbc_exec_direct => 1});
+    $sth->execute();
+    while(my @row = $sth->fetchrow_array) {
+	$alerts{$row[0]} = 0;
+    }
+    $sth = $dbh->prepare("SELECT al.Level, COUNT(a.AlertLevel) FROM Alert a, AlertLevel al WHERE a.AlertLevel = al.Level AND a.ResolutionState <> 255 GROUP BY al.Level", 
+	{odbc_exec_direct => 1});
+    $sth->execute();
+    while(my @row = $sth->fetchrow_array) {
+	$alerts{$row[0]} = $row[1];
+    }
+    foreach my $level (sort(keys(%alerts))) {
+	printf "alert%d.value %d\n", $level, $alerts{$level};
+    }
+}
+
+sub deployments_fetch {
+    my %profiles = &deployments_general();
+    foreach my $policy (sort(keys(%profiles))) {
+	my $field = encode_base64($policy);
+	chomp($field);
+	print $field . ".value " . $profiles{$policy}{'count'} . "\n";
+	if($profiles{$policy}{'old'}) {
+	    print $field . "old.value " . $profiles{$policy}{'old'} . "\n";
+	}
+    }
+}
+
+sub deployments_general {
+    my %profiles;
+    $profiles{'00000000-0000-0000-0000-000000000000'}{'name'}     = "Unknown Policy";
+    $profiles{'00000000-0000-0000-0000-000000000000'}{'instance'} = "";
+    $profiles{'00000000-0000-0000-0000-000000000000'}{'count'}    = 0;
+    $profiles{'d3b75be9-7125-4db1-8b24-93004bd9d88e'}{'name'}     = "No Policy";
+    $profiles{'d3b75be9-7125-4db1-8b24-93004bd9d88e'}{'instance'} = "";
+    $profiles{'d3b75be9-7125-4db1-8b24-93004bd9d88e'}{'count'}    = 0;
+    my $dbh = DBI->connect("DBI:Sybase:$dsn", $dbuser, $dbpass, { PrintError => 1, AutoCommit => 1});
+    
+    my $sth = $dbh->prepare("SELECT Id, Name, LatestInstanceID From fcs_Profiles", {odbc_exec_direct => 1});
+    $sth->execute();
+    while(my @row = $sth->fetchrow_array) {
+	$profiles{lc($row[0])}{'name'}     = $row[1];
+	$profiles{lc($row[0])}{'instance'} = lc($row[2]);
+	$profiles{lc($row[0])}{'count'}    = 0;
+	$profiles{lc($row[0])}{'old'}      = 0;
+    }
+
+    $sth = $dbh->prepare("SELECT COUNT(*), a1.Value AS Policy, a2.Value AS Instance ".
+	"FROM Attribute a1, Attribute a2, ClassDefinition cd, ClassAttribute ca1, ClassAttribute ca2 ".
+	"WHERE ca2.ClassID = cd.ClassID ".
+	"AND cd.Name = 'Microsoft Forefront Client Security Agent' ".
+	"AND ca1.ClassAttributeName = 'Profile ID' " .
+	"AND ca2.ClassAttributeName = 'Profile Instance ID' ".
+	"AND a1.ClassAttributeID = ca1.ClassAttributeID ".
+	"AND a2.ClassAttributeID = ca2.ClassAttributeID ".
+	"AND a1.InstanceID = a2.InstanceID " .
+	"GROUP BY a1.Value, a2.Value ".
+	"ORDER BY Policy",
+	{odbc_exec_direct => 1});
+    $sth->execute();
+    while(my @row = $sth->fetchrow_array) {
+	if(!$row[1]) {
+	    $profiles{'00000000-0000-0000-0000-000000000000'}{'count'} += $row[0];
+	} elsif(lc($row[1]) eq 'd3b75be9-7125-4db1-8b24-93004bd9d88e') {
+	    $profiles{'d3b75be9-7125-4db1-8b24-93004bd9d88e'}{'count'} += $row[0];
+	} else {
+	    if(lc($row[2]) ne $profiles{lc($row[1])}{'instance'}) {
+		$profiles{lc($row[1])}{'old'} += $row[0];
+	    } else {
+		$profiles{lc($row[1])}{'count'} += $row[0];
+	    }
+	}
+    }
+    return %profiles;
+}
+
+exit 0;

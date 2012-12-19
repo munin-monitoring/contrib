@@ -1,0 +1,92 @@
+#!/usr/bin/perl -w
+#
+# Author: Jesse Waite
+# Plugin: earthquakes
+# License: GPL v2
+# Version: 1.0
+#
+# Plugin to retrieve earthquake data from earthquake.usgs.gov
+#
+# Parameters supported:
+#    config
+#    autoconf
+#
+# Requirements:
+#    LWP::Simple
+#
+#  $Log$
+#  v. 1.0 11/04/2008 Initial release.
+#  v. 1.1 11/08/2008 Fixed misspelling of GAUGE.
+#
+# Magic markers:
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use warnings;
+
+# place locations here seperated by commas
+# names must match Region from the link below
+my @regions = ("Southern California", 
+               "Central California", 
+               "Northern California", 
+               "Greater Los Angeles area");
+
+my $url = "http://earthquake.usgs.gov/eqcenter/catalogs/eqs1hour-M1.txt";
+
+# checks if LWP::Simple is installed
+my $ret = undef;
+eval { use LWP::Simple };
+if ($@) {
+  my $ret = "LWP::Simple not installed.";
+}
+
+if (defined $ARGV[0] and $ARGV[0] eq "autoconf")
+{
+  if (defined $ret)
+  {
+    print "no ($ret)\n";
+    exit 1;
+  } else {
+    print "yes\n";
+    exit 0;
+  }
+}
+
+if (defined $ARGV[0] and $ARGV[0] eq "config")
+{
+  print "graph_title Earthquakes by region\n";
+  print "graph_args --base 1000\n";
+  print "graph_category Other\n";
+  print "graph_info This graph shows earthquakes by region of magnitude 1.0 or greater.\n";
+  print "graph_vlabel Number of Earthquakes\n";  
+
+  for my $locale (@regions) {
+    $locale =~ s/\s/_/g;	# replace whitespace with underscores
+    print "$locale.label $locale\n";
+    print "$locale.type GAUGE\n";
+    print "$locale.draw LINE2\n";
+    print "$locale.warning 4\n";
+    print "$locale.critical 6\n";
+  } # end for loop
+  exit 0;
+} # end if
+
+# fetch the most recent earthquakes
+my $content = get($url);
+
+# pull the regions and count how many times they are mentioned
+for my $locale (@regions) {
+
+  my $i = 0;
+
+  foreach my $key (split(/[,|\n\r]/, $content)) {
+    $key =~ s/"//g;	# remove quotes
+    if ($key eq $locale) {
+      $i++;
+    }
+  } # end foreach loop
+  $locale =~ s/\s/_/g;	# replace whitespace with underscore
+  print "$locale.value $i\n";
+} # end if
+

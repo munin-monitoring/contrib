@@ -1,0 +1,36 @@
+#!/bin/bash
+#
+# Munin script to obtain the number o hosts
+#                  by kasandrapadisha@gmail.com
+#
+
+#----- Configuration variables
+database="cacti"
+hostname="localhost"
+user="admincacti"
+password="passwdcacti"
+
+
+#----- Configuration variables
+if [[ $1 != "" ]]; then
+    if [[ $1 == "autoconf" ]]; then
+        echo "yes"
+        exit 0
+    fi
+    if [[ $1 == "config" ]]; then
+        echo "graph_title Servidores consultados"
+        echo "graph_vlabel Numero servidores (s)"
+        echo "poller_hosts.label hosts(s)"
+        echo 'graph_category cacti'
+        exit 0
+    fi
+fi
+
+salida=`mysql -B -e "SELECT value FROM settings WHERE name='stats_poller' LIMIT 1" -h $hostname --user=$user --password=$password $database`
+
+if [[ $? != 0 ]]; then
+        echo "No se pudo ejecutar"
+        exit 0
+fi
+
+echo $salida | cut -f 6 -d":" | awk '{print"poller_hosts.value "$1}'

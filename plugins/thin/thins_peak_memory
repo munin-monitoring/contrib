@@ -1,0 +1,110 @@
+#!/usr/bin/env ruby
+# thin_peak_memory - 
+#     A munin plugin for Linux to monitor the maximum memory size
+#     that an each individual thin process has reached
+# 
+# For Linux ONLY !
+# DOES NOT WORK on OSX, Solaris or BSD.
+# only linux, because this script relies on proc filesystem
+#
+# Author: 
+#   Frederico de Souza Araujo - fred.the.master@gmail.com
+#   http://www.frederico-araujo.com
+#
+# Based on:
+#   thin_process_memory - 
+#       A munin plugin to monitor memory size of 
+#       each individual thin process
+#   by Ben VandenBos and Avvo, Inc.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 2 
+# as published by the Free Software Foundation.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+module Munin
+  class ThinPeakMemory
+    
+    def run
+      pids = get_pids()
+      port_list = Hash.new
+      pids.sort.each do |pid, port|
+        hwm = (pid_hwm(pid).to_i)/1024
+        puts "thin_#{port}.value #{hwm}"
+      end
+    end
+    
+    # only get VmHWM count for each pid
+    #  (Virtual Memory High Water Mark)
+    # Using Proc filesystem
+    # ONLY LINUX! because relies on proc filesystem
+    # TODO: make this work on OSX and Solaris,
+    #      so the whole unix gang is happy ;)
+    def pid_hwm(pid)
+      res = `grep "VmHWM" /proc/#{pid}/status`.split[1]
+      if res.match("cannot access")
+        return nil
+      else
+        return res
+      end
+    end
+    
+    # Get pis using lsof (list open files) 
+    #   look for listening tcp applications 
+    #   that match the name thin
+    def get_pids
+      pids_ports = []
+      pids = `pgrep thin`.split
+      pids.each do |t|
+        port = `lsof -p #{t} | grep LISTEN`.split[8]
+        port = port.split(":")[1]
+        pids_ports << [t,port]
+      end
+      pids_ports
+    end
+
+    def autoconf
+      get_pids().length > 0
+    end
+    
+  end
+end
+
+mpm = Munin::ThinPeakMemory.new
+
+case ARGV[0]
+when "config"
+  puts "graph_title Thin Peak Memory (High Water Mark)"
+  puts "graph_vlabel HWM"
+  puts "graph_category Thin"
+  puts "graph_args -l 0"
+  puts "graph_scale yes"
+  puts "graph_info Tracks the peak memory of thin processes, aka High Water Mark."
+  mpm.get_pids.sort.each do |pid,port|
+    puts "thin_#{port}.label thin_#{port}"
+    puts "thin_#{port}.info Peak Memory"
+    puts "thin_#{port}.type GAUGE"
+    puts "thin_#{port}.min 0"
+  end
+when "autoconf"
+  if mpm.autoconf
+    puts "yes"
+    exit 0
+  end
+  puts "no"
+  exit 1
+else
+  mpm.run
+end

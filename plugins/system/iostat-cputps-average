@@ -1,0 +1,79 @@
+#!/bin/sh
+#
+# Script to monitor iostat cpu|tps.
+#
+# Parameters understood:
+#
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+
+judge=`basename $0 | sed 's/^iostat_//g'`
+current=`date +%H":"%M":"%S`;
+tenMago=`date --date "10 minutes ago" +%H":"%M":"%S`
+export LANG=en_US.UTF-8
+
+# autoconf
+
+if [ "$1" == "autoconf" ]; then
+   if ( sar 1 1 >/dev/null 2>&1 ); then
+      echo yes
+      exit 0
+   else
+      if [ $? -eq 127 ]; then
+         echo "no (could not run \"sar\")"
+         exit 1
+      else
+         echo no
+         exit 1
+      fi
+   fi
+fi
+
+ARRAY=( `sar -p -d -s ${tenMago} -e ${current} | grep -v nodev | grep "Average" | awk '{ print $2 , $3 , $10 }'` )
+
+# config
+
+if [ "$1" == "config" ]; then
+        if [ "$judge" == cpu_average ]; then
+        echo 'graph_title iostat util'
+        echo 'graph_args --upper-limit 100 -l 0'
+        echo 'graph_vlabel %'
+        echo 'graph_category System'
+                for (( i=0 ; i<${#ARRAY[*]} ; i++ )) ; do
+                echo "_dev_${ARRAY[i]}.label ${ARRAY[i]}"
+                i=`expr $i + 2`
+                done
+        exit 0
+        fi
+
+        if [ "$judge" == tps_average ]; then
+        echo 'graph_title iostat tps'
+        echo 'graph_args -l 0'
+        echo 'graph_vlabel tps'
+        echo 'graph_category System'
+                for (( i=0 ; i<${#ARRAY[*]} ; i++ )) ; do
+                echo "_dev_${ARRAY[i]}.label ${ARRAY[i]}"
+                i=`expr $i + 2`
+                done
+        exit 0
+        fi
+fi
+
+# other
+
+if [ "$judge" == cpu_average ]; then
+for (( i=0 ; i<${#ARRAY[*]} ; i++ )) ; do
+        echo -n "_dev_${ARRAY[i]}.value "
+        i=`expr $i + 2`
+        echo "${ARRAY[i]}"
+done
+fi
+
+if [ "$judge" == tps_average ]; then
+for (( i=0 ; i<${#ARRAY[*]} ; i++ )) ; do
+        echo -n "_dev_${ARRAY[i]}.value "
+        i=`expr $i + 1`
+        echo "${ARRAY[i]}"
+        i=`expr $i + 1`
+done
+fi

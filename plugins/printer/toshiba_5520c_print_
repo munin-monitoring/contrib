@@ -1,0 +1,28 @@
+#!/bin/bash
+#
+# toshiba_5520c_print_ munin grabber script
+# 2009.01 by steve@kosada.com
+
+destination=`basename $0 | sed 's/^toshiba_5520c_print_//g'`
+
+if [ "$1" = "config" ]; then
+	echo "graph_title Toshiba 5520C: Pages Printed"
+	echo 'graph_vlabel Pages'
+	echo 'graph_args --lower-limit 0'
+	echo 'graph_category printer'
+
+	echo "printBlack.label Black"
+	echo "printBlack.draw AREA"
+
+	echo "printFullColor.label Full Color"
+	echo "printFullColor.draw STACK"
+
+	echo "printTwinColor.label Twin Color"
+	echo "printTwinColor.draw STACK"
+else
+	infopage=`wget -q -O - http://$destination:8080/TopAccess/Counter/TotalCount/List.htm | dos2unix | perl -p -e 's/\n/ /m'`
+
+	echo printFullColor.value			`echo $infopage | perl -p -e 's/^.+\<B\>Print Counter\<\/B\>.+?\{Full\ Color[^}]+\,([0-9]+)\}.+$/$1/'`
+	echo printTwinColor.value			`echo $infopage | perl -p -e 's/^.+\<B\>Print Counter\<\/B\>.+?\{Twin\ Color[^}]+\,([0-9]+)\}.+$/$1/'`
+	echo printBlack.value				`echo $infopage | perl -p -e 's/^.+\<B\>Print Counter\<\/B\>.+?\{Black[^}]+\,([0-9]+)\}.+$/$1/'`
+fi

@@ -1,0 +1,29 @@
+#!/bin/bash
+#
+# iperf_ munin grabber script
+# 2007.09 by steve@kosada.com
+#
+# before trying to use this script, make sure:
+#	- you have an iperf server running on the remote machine
+#	- you are able to successfully run iperf from the commandline.  e.g.,
+#		iperf --time 2 --parallel 4 --client $destination --format B
+
+destination=`basename $0 | sed 's/^iperf_//g'`
+
+if [ "$1" = "config" ]; then
+	echo "graph_title iperf to $destination"
+	echo 'graph_vlabel bytes/sec'
+	echo 'graph_args --lower-limit 0 --upper-limit 200000'
+	echo 'graph_category network'
+	echo 'graph_period second'
+	echo "graph_info This instance of iperf measures the transmit speed to $destination"
+
+	echo 'iperf.label iperf'
+	echo 'iperf.draw AREA'
+else
+	kbits=`iperf --time 2 --parallel 4 --client $destination --format B \
+		| grep Bytes \
+		| tr --squeeze-repeats ' ' \
+		| cut -d ' ' -f 8`
+	echo "iperf.value $kbits"
+fi

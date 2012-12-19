@@ -1,0 +1,150 @@
+#! /usr/local/bin/perl -w
+# anders@fupp.net, 2007-09-19
+# If you found this plugin useful, let me know. :-)
+#
+# Munin plugin to show:
+#
+# - number of user transactions per second.
+# - number of full index scans per second.
+# - any value from v$sysmetric, if extended.
+#
+# For making this plugin run, make sure that:
+#
+# 1) The user or group that munin-node runs as, has access to $ORACLE_HOME
+# and especially the library directories. Adding the user to a group to
+# give access is not enough, if so it needs to have the group as its primary
+# group.
+#
+# 2) The Perl installation indicated with the path on line 1, has DBI and
+# DBD::Oracle installed.
+#
+# 3) You use 32-bit libraries ($ORACLE_HOME/lib32) if your Perl is 32-bit,
+# and vice versa ($ORACLE_HOME/lib) for 64-bit.
+#
+# PS: A solution for 2 and 3 may be to use $ORACLE_HOME/perl/bin/perl.
+#
+# 4) Configuration variables below are set correctly.
+#
+# 5) That the user munin-node runs has, has access to a valid tnsnames.ora
+# file in $ORACLE_HOME/network/admin/tnsnames.ora or $HOME/.tnsnames.ora.
+# Some admins may prefer to have a separate tnsnames.ora for monitoring.
+#
+# 6) You link up this script to oracle_transactions or oracle_indexscans in
+# the plugins-dir.
+
+# --- configuration ---
+$ENV{'ORACLE_HOME'} = '/foo/oracle/10.2';
+$ENV{'LD_LIBRARY_PATH'} = '/foo/oracle/10.2/lib';
+$ENV{'HOME'} = '/home/munin';
+
+my $dbdriver="Oracle";
+my $dbhost="localhost";
+my $dbuser="myuser";
+my $dbpw="mypass";
+my $dbname="mydb";
+# --- end, configuration ---
+
+my $name = $0;
+# Remove extra chars
+$name =~ s@^.*?(\w+)$@$1@;
+# Remove base name for plugin
+$name =~ s@^oracle_@@;
+
+use DBI;
+$|=1;  # Flush stdout after every write.
+
+sub dbconnect {
+	if ($dbh = DBI->connect("dbi:$dbdriver:$dbname",$dbuser,$dbpw,{ PrintError => 1 })) {
+		return(1);
+	} else {
+		return(0);
+	}
+}
+
+sub dbdisconnect {
+	$dbh->disconnect;
+}
+
+sub listvalues {
+	if (dbconnect) {
+		$dbq = $dbh->prepare('select * from v$sysmetric');
+		$dbq->execute;
+		my $columns = $dbq->{NAME};
+		my $kolonner = "@$columns";
+
+		print "Kolonner: $kolonner\n";
+
+		while ( my @row = $dbq->fetchrow_array ) {
+			print "@row\n";
+		}
+		$dbq->finish;
+		dbdisconnect;
+	}
+}
+
+sub getvalues {
+	my $metric = shift;
+	my $label = shift;
+
+	if (dbconnect) {
+		$dbq = $dbh->prepare('select * from v$sysmetric');
+		$dbq->execute;
+		while ( my $row = $dbq->fetchrow_hashref() ) {
+			if ($row->{METRIC_NAME} eq "$metric") {
+				my $val = $row->{VALUE};
+				$val =~ s@,@.@;
+				if (substr($val,0,1) eq "." ) {
+					print "$label.value 0" . $val . "\n";
+				} else {
+					print "$label.value " . $val . "\n";
+				}
+
+				last;
+			}
+		}
+		$dbq->finish;
+		dbdisconnect;
+	}
+}
+
+sub printconfig {
+	if ($name eq "transactions") {
+		print "graph_title User transactions\n";
+		print "graph_vlabel transactions per second\n";
+		print "graph_category Oracle\n";
+		print "graph_info This graph shows the number of users transactions per second in Oracle\n";
+		print "graph_args --base 1000 -l 0\n";
+		print "transactions.label transactions\n";
+		print "transactions.type GAUGE\n";
+		print "transactions.graph yes\n";
+	} elsif ($name eq "indexscans") {
+		print "graph_title Full index scans\n";
+		print "graph_vlabel indexscans per second\n";
+		print "graph_category Oracle\n";
+		print "graph_info This graph shows the number of full index scans per second in Oracle\n";
+		print "graph_args --base 1000 -l 0\n";
+		print "indexscans.label indexscans\n";
+		print "indexscans.type GAUGE\n";
+		print "indexscans.graph yes\n";
+	} else {
+		print "No config for $name.\n";
+	}
+}
+
+sub dovalues {
+	if ($name eq "transactions") {
+		getvalues("User Transaction Per Sec", "transactions");
+	} elsif ($name eq "indexscans") {
+		getvalues("Full Index Scans Per Sec", "indexscans");
+	} else {
+		listvalues;
+	}
+}
+
+if ($ARGV[0] && $ARGV[0] eq "autoconf") {
+	print "yes\n";
+} elsif ($ARGV[0] && $ARGV[0] eq "config") {
+	printconfig;
+} else {
+	dovalues;
+}

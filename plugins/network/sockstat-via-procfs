@@ -1,0 +1,39 @@
+#!/usr/bin/env python
+
+import re
+import sys
+
+fields = (
+    ('sockets_used', 'sockets used'),
+    ('tcp_inuse', 'TCP inuse'),
+    ('tcp_orphan', 'TCP orphan'),
+    ('tcp_tw', 'TCP tw'),
+    ('tcp_alloc', 'TCP alloc'),
+    ('tcp_mem', 'TCP mem'),
+    ('udp_inuse', 'UDP inuse'),
+    ('udplite_inuse', 'UDPLITE inuse'),
+    ('raw_inuse', 'RAW inuse'),
+    ('frag_inuse', 'FRAG inuse'),
+    ('frag_memory', 'FRAG memory'),
+)
+
+if len(sys.argv) > 1:
+    arg = sys.argv[1]
+    if arg == 'autoconfig':
+        print 'yes'
+        sys.exit(0)
+    if arg == 'config':
+        print 'graph_title sockstat'
+        print 'graph_category network'
+        for name, label in fields:
+            print '%s.label %s' % (name, label)
+        sys.exit(0)
+
+re_num = re.compile('(\d+)')
+sockstat = open('/proc/net/sockstat').read()
+numbers = re_num.findall(sockstat)
+
+for i, (name, label) in enumerate(fields):
+    print '%s.value %s' % (name, numbers[i])
+
+sys.exit(0)

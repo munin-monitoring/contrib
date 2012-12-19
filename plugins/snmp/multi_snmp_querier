@@ -1,0 +1,241 @@
+#!/usr/bin/perl -w
+
+=head1 NAME
+
+multi_snmp_querier - Munin plugin to query several SNMP hosts
+
+=head1 SYNOPSIS
+
+This plugin is meant to be called from Munin. You should at least set the 
+'hosts' environment variable from Munin's configuration (i.e. 
+/etc/munin/munin.conf) to specify which hosts and how to query.
+
+=head1 DESCRIPTION
+
+ This plugin expects to receive the following environment variables:
+
+=over 4
+
+=item snmp_oid
+
+Which SNMP OID should we query on; it defaults to
+1.3.6.1.2.1.43.10.2.1.4.1.1 (total printed pages - of course, it only
+makes sense to query a printer on this ;-) ). 
+
+Other known and useful OIDs for printers are
+1.3.6.1.2.1.43.11.1.1.9.1.1 (total number of pages printed with this
+toner cartridge), 1.3.6.1.2.1.43.11.1.1.9.1.1 (total projected
+capacity of this toner cartridge - Note that for many makers, the
+literal '-2' is returning, meaning more or less "I don't know"), You
+might also be interested in 1.3.6.1.2.1.43.11.1.1.6.1.1 (toner type
+this printer uses), although as it is a constant string and not
+indicative of any kind of value, there's no use in putting it into
+Munin (at least, not via this plugin).
+
+Appropriate labels will be given when Munin requests for configuration
+on the above mentioned OIDs - Of course, other OIDs will get far more
+generic labels.
+
+=item hosts (REQUIRED!)
+
+Comma-separated list of hosts to send SNMP queries to. You can specify
+SNMP port and community to each of the hosts by listing them as
+community@host:port - Community defaults to public, port defaults to
+161. The following is a valid hosts declaration:
+
+    hosts='192.168.0.15, 192.168.0.18:162, private@192.168.0.20'
+
+It will query host 192.168.0.15 on port 161 with the 'private'
+community, host 192.168.0.18 on port 162 with the 'private' community
+and host 192.168.0.20 on port 161 with the 'public' community.
+
+=back
+
+=head1 DEPENDS ON
+
+L<Net::Ping>, L<Net::SNMP>
+
+=head1 SEE ALSO
+
+L<munin>, L<munin-node>
+
+=head1 TO DO
+
+Add a mechanism to specify the labels for unknown OIDs
+
+=head1 AUTHOR
+
+Gunnar Wolf <gwolf@gwolf.org>
+
+=head1 COPYRIGHT
+
+Copyright 2008 Gunnar Wolf, Instituto de Investigaciones
+Economicas, UNAM. This plugin is Free Software; you can
+redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation; version 2
+dated June, 1991, or any later version (at your choice).
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
+USA.
+
+=cut
+
+use strict;
+use Net::SNMP;
+use Net::Ping;
+
+my (%defaults, @hosts, $oid, %known_oids, $VERSION, $cmd_arg);
+
+$VERSION = '1.0'; # No, not a module, not used in any way - but where else? :)
+
+%defaults = (community => 'public',
+	     timeout => 1,
+	     port => 161,
+	     oid => '1.3.6.1.2.1.43.10.2.1.4.1.1');
+
+@hosts     = get_hosts($ENV{hosts});
+$oid = $ENV{snmp_oid} || $defaults{oid};
+
+%known_oids = ('1.3.6.1.2.1.43.10.2.1.4.1.1' =>
+	       { title => 'Pages',
+		 vlabel => 'Printed pages',
+		 category => 'Printer',
+		 info => 'Returns the total number of printed pages per defined printer',
+		 total => 'Total',
+		 units => 'pages'
+		 },
+	       '1.3.6.1.2.1.43.11.1.1.8.1.1' => 
+	       { title => 'Total projected capacity of this cartridge',
+		 vlabel => 'Total capacity',
+		 category => 'Printer',
+		 info => 'Returns the total projected capacity (in pages) of '.
+		     'the currently installed cartridge',
+		 total => 'Total',
+		 units => 'pages'
+		 },
+	       '1.3.6.1.2.1.43.11.1.1.9.1.1' => 
+	       { title => 'Pages printed with this cartridge',
+		 vlabel => 'Printed pages',
+		 category => 'Printer',
+		 info => 'Returns the total number of printed pages per ' .
+		     'defined printer with the current cartridge',
+		 total => 'Total',
+		 units => 'pages'
+		 },
+	       'default' => 
+	       { title => "Results for SNMP OID $oid",
+		 vlabel => 'units',
+		 category => 'Other',
+		 info => "Results for SNMP OID $oid",
+		 total => 'Total',
+		 units => 'units'
+	       }
+	       );
+
+die "Hosts not set - cannot continue" unless @hosts;
+
+$cmd_arg = $ARGV[0] || '';
+if($cmd_arg eq "config") {
+    my $labels = $known_oids{$oid} || $known_oids{default};
+    # See http://munin.projects.linpro.no/wiki/HowToWritePlugins for 
+    # explanation on the following fields
+    print "graph_title $labels->{title}\n";
+    print "graph_args --base 1000 -l 0\n";
+    print "graph_vlabel $labels->{vlabel}\n";
+    print "graph_scale no\n";
+    print "graph_category $labels->{category}\n";
+    print "graph_info $labels->{info}\n";
+    print "graph_total $labels->{total}\n";
+    for my $host (@hosts) {
+	my $addr = host_label_for($host->{addr});
+	print "${addr}_pages.label $addr\n";
+	print "${addr}_pages.draw AREA\n";
+	print "${addr}_pages.type DERIVE\n";
+	print "${addr}_pages.info $labels->{units} per minute\n";
+    }
+
+    exit 0;
+} elsif ($cmd_arg eq 'autoconf') {
+    print "yes\n";
+    exit 0;
+}
+
+for my $host (@hosts) {
+    my ($data, $addr);
+    $data = get_value_for($host);
+    $addr = host_label_for($host->{addr});
+    # We only use N/A as an internal marker - It would just confuse RRD.
+    next if $data eq 'N/A';
+    print "${addr}_pages.value $data\n";
+}
+
+exit 0;
+
+sub ck_alive{
+    my ($host, $ping);
+    $host = shift;
+    $ping = Net::Ping->new("tcp", 1);
+    $ping->ping($host);
+}
+      
+sub get_hosts {
+    # Hosts are defined in the 'hosts' environment variable. It's a list of
+    # hosts (and optionally ports) - We parse the list and arrange it neatly
+    # to be easily consumed.
+    my ($hostsdef, @hosts);
+    $hostsdef = shift;
+
+    for my $host (split(/,/, $hostsdef)) {
+	$host =~ s/\s//g;
+
+	$host =~ /^(?:(.*)@)?
+	    ([^:]+)
+	    (?::(\d+))?$/x;
+
+	push @hosts, {community => $1 || $defaults{community},
+		      addr => $2,
+		      port => $3 || $defaults{port} };
+
+    }
+
+    return @hosts;
+}
+
+sub get_value_for {
+    my ($host, $snmp, $data);
+    $host = shift;
+
+    ck_alive($host->{addr}) or return 'N/A';
+
+    $snmp = setup_snmp($host);
+    $data = $snmp->get_request($oid);
+
+    return 'N/A' unless $data->{$oid};
+    return $data->{$oid};
+}
+
+sub setup_snmp {
+    my ($host, $session, $error);
+    $host = shift;
+    ($session, $error) = Net::SNMP->session( -hostname => $host->{addr},
+					     -port => $host->{port},
+					     -community => $host->{community},
+					     -timeout => $defaults{timeout} );
+
+    $session or die "Error before query $host->{addr}:$host->{port}: $error";
+    return $session;
+}
+
+sub host_label_for {
+    my ($addr);
+    $addr = 'src_' . shift;
+    $addr =~ s/\./_/g; # Periods not allowed in variable names
+    return $addr;
+}

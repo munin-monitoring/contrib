@@ -1,0 +1,44 @@
+#!/bin/bash
+#
+# dell_5310n_pages_ munin grabber script
+# 2008.07 by steve@kosada.com
+
+destination=`basename $0 | sed 's/^dell_5310n_pages_//g'`
+password='Rah5xuuD'
+
+tmpWeb=/tmp/`basename $0`
+wget -q -O $tmpWeb http://root:$password@$destination/cgi-bin/dynamic/config/reports/devicestatistics.html
+
+#numTrays=`grep -c Letter $tmpWeb`
+trays=`grep '>Letter-' $tmpWeb | perl -p -e 's/^.+>Letter-([^<]+)<.+$/$1/' | perl -p -e 's/ //g'`
+
+
+if [ "$1" = "config" ]; then
+        echo "graph_title dell 5310n pages: $destination"
+        echo 'graph_vlabel count'
+	echo 'graph_args --lower-limit 0'
+        echo 'graph_category printer'
+
+	n=1
+	for t in $trays ;
+	do
+		echo "tray$n.label Tray $n: $t"
+		n=$(($n+1))
+	done
+	echo "total.label Total"
+else
+	tmpWebPage=`cat $tmpWeb | perl -p -e 's/[ \t\n\r]//g'`
+#echo $tmpWebPage
+
+	n=1
+	for t in $trays ;
+	do
+		#echo tray$n.value `echo $tmpWebPage | perl -p -e 's/^.+>Letter-$t<\/p><\/td><td><p>([0-9]+)<.+$/$1/'`
+		echo tray$n.value `echo $tmpWebPage | perl -p -e "s/^.+\>Letter-$t\<\/p\>\<\/td\>\<td\>\<p\>([0-9]+)\<.+\$/\\$1/"`
+		n=$(($n+1))
+	done
+	echo total.value    `grep '40\;\">Total' $tmpWeb | perl -p -e 's/^.+<p> ([0-9]+) <\/p>.+$/$1/'`
+fi
+
+
+rm $tmpWeb

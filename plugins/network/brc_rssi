@@ -1,0 +1,90 @@
+#!/bin/sh
+#
+# Munin plugin for WiFi access points with Broadcom chipset such as found
+# on hardware supported by OpenWRT.
+#
+# NOTE: NEEDS NON FREE UTILITY "wl"
+# Configuration:
+# [brc_rssi]
+#    env.WIFISIDE eth0   # Set the WiFi side interface. Used to filter arp entries. 
+#                        # On a openwrt box defaults to "nvram get lan_ifname" otherwise
+#                        # no default.
+#
+# Written by Nicolai Langfeldt (janl@linpro.no) 2007/02/18
+#
+# Bugs:
+# - Should have a persistent list of macs ever seen
+#
+# License: GPL v.2
+#
+#%# family=contrib
+#%# capabilities=autoconf
+#
+
+PATH=/usr/bin:/usr/sbin:/bin:/sbin
+export PATH
+
+AL="$(wl assoclist 2>&1)"
+WLERR=$?
+case $WLERR in
+    0) MACS="$(echo "$AL" | cut -d' ' -f2)";;
+esac
+
+do_ () {
+    # Fetch
+    for M in $MACS; do
+	RSSI=$(wl rssi $M | cut -d' ' -f3)
+        m=$(echo $M | tr -d ':')
+	echo rssi$m.value $RSSI
+    done
+}
+
+do_config () {
+    cat <<'EOF'
+graph_title WiFi AP RSSI
+graph_vlabel dB(?)
+graph_category network
+graph_info This plugin shows the RSSI (Received Signal Strength Indication) as reported by the Access Point (AP) driver. The plugin is specific to broadcom wireless chipsets such as used on WRT hardware. We're not <em>quite</em> sure about the units the RSSI is measured in as this is not documented. Both dB and dBm are apparently candidates.  Higher is better.
+EOF
+    # Atempt to find default. "Set default" and "assign default" syntax is
+    # not available in busybox (which is used in openwrt firmware) it seems.
+    # So work around it with case.
+    : ${WIFISIDE:=$(nvram get lan_ifname 2>/dev/null)}
+    : ${WIFISIDE:=$(awk '/:/ { gsub(/^ */,""); gsub(/:/," "); print $1; exit 0; }' /proc/net/wireless)}
+
+    HOSTS="$(cat /etc/hosts)"
+    ETHERS="$( ( cat /etc/etherss 2>/dev/null; awk '/'$WIFISIDE'$/ { print $4" "$1 }' /proc/net/arp ) | sort -u)"
+    for M in $MACS; do
+	m=$(echo $M | tr -d ':')
+	LABEL=$M
+        NAME=''
+	
+        IP=$(echo "$ETHERS" | awk '/^'$M'/ { print $2; }')
+	case $IP in
+		'') :;;
+		*)  LABEL=$IP
+		    # Make IP "RE safe"
+		    IP="$(echo $IP | sed 's/\./\\./g')"
+		    NAME=$(echo "$HOSTS" | awk '/^'$IP'/ { print $2; }')
+	esac
+	case $NAME in
+		'') :;;
+		*)  LABEL=$NAME;;
+	esac
+	echo rssi$m.label $LABEL
+    done
+}
+
+do_autoconf () {
+    case $WLERR in
+	0) echo yes; exit 0;;
+	127) echo "no ($AL)"; exit 1;;
+	*)   echo "no (wl error: $AL)"; exit 1;;
+        *) echo "no (no wl executable, or error)"; exit 1;;
+    esac
+}
+
+case $1 in
+     ''|config|autoconf)
+	eval do_$1;;
+esac

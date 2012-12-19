@@ -1,0 +1,101 @@
+#!/bin/sh
+#
+# Script to monitor disk usage.
+#
+# Parameters understood:
+#
+# 	config   (required)
+# 	autoconf (optional - used by munin-config)
+#
+# $Log$
+# Revision 1.5.2.5  2011/04/20 14:25:07  ward
+# Exclude tmpfs partitions from 'config'.
+#
+# Revision 1.5.2.4  2005/03/12 21:35:07  jimmyo
+# Correct history loss in linux/{df,df_inode}.
+#
+# Revision 1.5.2.3  2005/03/10 10:04:48  jimmyo
+# Fixed minor bug introduced with yesterdays change.
+#
+# Revision 1.5.2.2  2005/03/09 19:10:32  jimmyo
+# Made linux/df work properly with tmpfs and devmapper (Deb#298442).
+#
+# Revision 1.5.2.1  2005/02/16 22:50:14  jimmyo
+# linux/df* now ignores bind mounts.
+#
+# Revision 1.5  2004/12/09 20:27:45  jimmyo
+# Sort fields in df*-plugins alphabetically.
+#
+# Revision 1.4  2004/09/25 22:29:16  jimmyo
+# Added info fields to a bunch of plugins.
+#
+# Revision 1.3  2004/05/20 13:57:12  jimmyo
+# Set categories to some of the plugins.
+#
+# Revision 1.2  2004/05/18 22:04:30  jimmyo
+# Use "sed 1d" instead of "tail +2" in df plugins (patch by Olivier Delhomme).
+#
+# Revision 1.1  2004/01/02 18:50:01  jimmyo
+# Renamed occurrances of lrrd -> munin
+#
+# Revision 1.1.1.1  2004/01/02 15:18:07  jimmyo
+# Import of LRRD CVS tree after renaming to Munin
+#
+# Revision 1.2  2003/11/07 17:43:16  jimmyo
+# Cleanups and log entries
+#
+#
+#
+# Magic markers (optional - used by munin-config and installation
+# scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+MAXLABEL=20
+
+if [ "$1" = "autoconf" ]; then
+	echo yes
+	exit 0
+fi
+
+clean_name() {
+    echo $1 $7 $2 | sed 's/[\/.-]/_/g'| awk "{ 
+	if (\$3 == \"tmpfs\")
+		n=\$1\$2
+	else
+		n=\$1
+	print n
+	}"
+}
+
+
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title Filesystem usage (in %)'
+	echo 'graph_args --upper-limit 100 -l 0'
+	echo 'graph_vlabel %'
+	echo 'graph_category disk'
+	echo 'graph_info This graph shows disk usage on the machine.'
+	df -T -P -l -x none -x unknown -x udf -x iso9660 -x romfs -x ramfs -x tmpfs | sed 1d | grep -v "//" | sort | while read i; do
+		name=`clean_name $i`
+		echo -n "$name.label "
+		echo $i | awk "{ 
+			dir=\$7
+			if (length(dir) <= $MAXLABEL)
+				print dir
+			else
+				printf (\"...%s\n\", substr (dir, length(dir)-$MAXLABEL+4, $MAXLABEL-3)) 
+			print \"$name.info \" \$7 \" (\" \$2 \") -> \" \$1;
+		}"
+		echo "$name.warning 92"
+		echo "$name.critical 98"
+	done
+	exit 0
+fi
+
+df -T -P -l -x none -x unknown -x udf -x iso9660 -x romfs -x ramfs -x proc -x sysfs -x tmpfs -x udev | sed 1d | grep -v "//" | while read i; do
+	name=`clean_name $i`
+	echo -n "$name.value "
+	echo $i | awk '{ print $6 }' | cut -f1 -d%
+done

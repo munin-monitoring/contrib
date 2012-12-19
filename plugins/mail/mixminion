@@ -1,0 +1,128 @@
+#!/bin/sh
+#
+# plugin to monitor mixminion stats
+# pesco 2011, isc license
+
+# munin metadata:
+#%# capabilities=autoconf suggest
+
+PATH=/bin:/usr/bin:/usr/local/bin
+
+case $0 in
+    *_relay)
+	FIELDNAMES="AttemptedRelay SuccessfulRelay FailedRelay UnretriableRelay ReceivedPacket";;
+    *_exit)
+	FIELDNAMES="AttemptedDelivery SuccessfulDelivery FailedDelivery UnretriableDelivery";;
+    *)
+	FIELDNAMES="ReceivedConnection AttemptedConnect SuccessfulConnect FailedConnect";;
+esac
+
+case $1 in
+    autoconf)
+	# see if we got mixminion installed
+	if which mixminiond >/dev/null; then
+		echo "yes"
+	else
+		echo "no"
+	fi
+	exit 0;;
+    suggest)
+	desc="`cat /var/lib/mixminion/current-desc`"
+	echo connections
+	grep -q '^\[Incoming/MMTP\]' "$desc" && echo relay
+	grep -q '^\[Delivery/SMTP\]' "$desc" && echo exit
+	exit 0;;
+    config)
+	echo "graph_category mail"
+	echo "graph_args --base 1000 -l 0"
+	case $0 in
+	    *_relay)
+		cat <<'EOM'
+graph_title Mixminion relay
+graph_vlabel packets per second
+
+AttemptedRelay.label packets to relay
+AttemptedRelay.info Total number of packets that we attempted to relay
+AttemptedRelay.draw LINE2
+
+FailedRelay.label relay errors
+FailedRelay.info Number of packets that we (momentarily) failed to relay
+FailedRelay.draw AREASTACK
+
+UnretriableRelay.label permanent failures
+UnretriableRelay.info Number of packets that we permanently gave up trying to relay
+UnretriableRelay.draw AREASTACK
+
+SuccessfulRelay.label relay success
+SuccessfulRelay.info Number of packets that we successfully relayed
+SuccessfulRelay.draw AREASTACK
+SuccessfulRelay.graph no
+
+ReceivedPacket.label incoming packets
+ReceivedPacket.info Total number of packets that we received
+ReceivedPacket.draw LINE2
+EOM
+		;;
+	    *_exit)
+		cat <<'EOM'
+graph_title Mixminion exit
+graph_vlabel messages per second
+
+AttemptedDelivery.label messages to deliver
+AttemptedDelivery.info Total number of emails that we tried to deliver
+AttemptedDelivery.draw LINE2
+
+FailedDelivery.label delivery errors
+FailedDelivery.info Number of emails that we (momentarily) failed to deliver
+FailedDelivery.draw AREASTACK
+
+UnretriableDelivery.label permanent failures
+UnretriableDelivery.info Number of emails that we permanently gave up trying to deliver
+UnretriableDelivery.draw AREASTACK
+
+SuccessfulDelivery.label delivery successes
+SuccessfulDelivery.info Number of emails successfully delivered
+SuccessfulDelivery.draw AREASTACK
+SuccessfulDelivery.graph no
+EOM
+		;;
+	    *)
+		cat <<'EOM'
+graph_title Mixminion connections
+graph_vlabel connections in (-) / out (+) per second
+
+ReceivedConnection.label incoming
+ReceivedConnection.info number of successful incoming connections
+ReceivedConnection.graph no
+
+AttemptedConnect.label total conn's
+AttemptedConnect.info Total number of attempted outgoing connections
+AttemptedConnect.draw LINE2
+AttemptedConnect.negative ReceivedConnection
+
+FailedConnect.label conn. failures
+FailedConnect.info Number of failed outgoing connections
+FailedConnect.draw AREASTACK
+
+SuccessfulConnect.label successful
+SuccessfulConnect.info Number of successful in-/outgoin connections
+SuccessfulConnect.draw AREASTACK
+SuccessfulConnect.graph no
+EOM
+		;;
+	esac
+	for field in $FIELDNAMES; do
+		echo "$field.type DERIVE"
+		echo "$field.min 0"
+	done
+	exit 0;;
+esac
+
+mixminion server-stats 2>/dev/null | perl -e '
+	while(<STDIN>) {
+	  if(/^ *([[:alnum:]]+): *([.[:digit:]]+)/ &&
+             grep {$_ eq $1} @ARGV) {
+	    print "$1.value $2\n";
+	  }
+	}
+	' $FIELDNAMES

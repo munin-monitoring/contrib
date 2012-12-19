@@ -1,0 +1,168 @@
+#!/usr/bin/perl
+#
+# Plugin to monitor KDC server requests.
+# Based on kdc-log-analyze.pl script from heimdal.
+#
+# Contributed by Jan Rękorajski <baggins@pld-linux.org>
+#
+# Example configuration:
+#
+#  [heimdal_kdc_*]
+#	env.logdir /var/log
+#	env.logfile secure
+#	env.realms REALM1.COM REALM2.COM
+#
+use strict;
+use Munin::Plugin;
+
+my $LOGDIR  = $ENV{'logdir'}  || '/var/log';
+my $LOGFILE = $ENV{'logfile'} || 'secure';
+my @REALMS  = $ENV{'realms'} ? split(' ', $ENV{'realms'}) : ();
+
+my $pos    = undef;
+
+my $as_req = 0;
+my $no_such_princ = 0;
+my $tgs_req = 0;
+my $tgs_xrealm_out = 0;
+my $tgs_xrealm_in = 0;
+my $referrals = 0;
+my $pa_failed = 0;
+my %ip;
+
+$ip{'4'} = $ip{'6'} = 0;
+
+sub islocalrealm {
+	my ($princ) = @_;
+	my $realm;
+
+	foreach $realm (@REALMS) {
+		return 1 if ($princ eq $realm);
+		return 1 if ($princ =~ /[^@]+\@${realm}/);
+	}
+	return 0;
+}
+
+sub parseLogfile {
+    my ($fname, $start) = @_;
+
+    my ($LOGFILE,$rotated) = tail_open($fname,$start);
+
+    my $line;
+
+    while (<$LOGFILE>) {
+	chomp ($_);
+
+	if (/AS-REQ (.*) from IPv([46]):([0-9\.:a-fA-F]+) for (.*)$/) {
+		$as_req++;
+		$ip{$2}++;
+	} elsif (/TGS-REQ (.+) from IPv([46]):([0-9\.:a-fA-F]+) for (.*?)( \[.*\]){0,1}$/) {
+		$tgs_req++;
+		$ip{$2}++;
+
+		my $source = $1;
+		my $dest = $4;
+
+		if (!islocalrealm($source)) {
+			$tgs_xrealm_in++;
+		}
+		if ($dest =~ /krbtgt\/([^@]+)@[^@]+/) {
+			if (!islocalrealm($1)) {
+				$tgs_xrealm_out++;
+			}
+		}
+	} elsif (/: No such entry in the database/) {
+		$no_such_princ++;
+	} elsif (/Lookup .* succeeded$/) {
+		# Nothing
+	} elsif (/returning a referral to realm (.*) for server (.*) that was not found/) {
+		$referrals++;
+	} elsif (/Failed to decrypt PA-DATA -- (.+)$/) {
+		$pa_failed++;
+	}
+    }
+    return tail_close($LOGFILE);
+}
+
+if ( $ARGV[0] and $ARGV[0] eq "autoconf" ) {
+    print "no\n";
+    exit 0;
+}
+
+if ( $ARGV[0] and $ARGV[0] eq "config" ) {
+    print "graph_title Heimdal KDC requests\n";
+    print "graph_args --base 1000\n";
+    print "graph_vlabel requests / \${graph_period}\n";
+    print "graph_scale yes\n";
+    print "graph_category Heimdal\n";
+    print "ipv4.label IPv4 requests\n";
+    print "ipv4.type ABSOLUTE\n";
+    print "ipv4.min 0\n";
+    print "ipv6.label IPv6 requests\n";
+    print "ipv6.type ABSOLUTE\n";
+    print "ipv6.min 0\n";
+    print "lookupfail.label Failed lookups\n";
+    print "lookupfail.type ABSOLUTE\n";
+    print "lookupfail.min 0\n";
+    print "asreq.label AS-REQ requests\n";
+    print "asreq.type ABSOLUTE\n";
+    print "asreq.min 0\n";
+    print "tgsreq.label TGS-REQ requests\n";
+    print "tgsreq.type ABSOLUTE\n";
+    print "tgsreq.min 0\n";
+    print "pafail.label Preauth failed requests\n";
+    print "pafail.type ABSOLUTE\n";
+    print "pafail.min 0\n";
+    print "xrout.label Cross-realm tgs out\n";
+    print "xrout.type ABSOLUTE\n";
+    print "xrout.min 0\n";
+    print "xrin.label Cross-realm tgs in\n";
+    print "xrin.type ABSOLUTE\n";
+    print "xrin.min 0\n";
+    print "referrals.label Referrals\n";
+    print "referrals.type ABSOLUTE\n";
+    print "referrals.min 0\n";
+    exit 0;
+}
+
+my $logfile = "$LOGDIR/$LOGFILE";
+
+if (! -f $logfile) {
+    print "ipv4.value U\n";
+    print "ipv6.value U\n";
+    print "lookupfail.value U\n";
+    print "asreq.value U\n";
+    print "tgsreq.value U\n";
+    print "pafail.value U\n";
+    print "xrout.value U\n";
+    print "xrin.value U\n";
+    print "referrals.value U\n";
+    exit 1;
+}
+
+($pos) = restore_state();
+
+if (!defined($pos)) {
+    
+    # No state file present.  Avoid startup spike: Do not read log
+    # file up to now, but remember how large it is now, and next
+    # time read from there.
+
+    $pos = (stat $logfile)[7]; # File size
+} else {
+    $pos = parseLogfile ($logfile, $pos);
+}
+
+print "ipv4.value $ip{'4'}\n";
+print "ipv6.value $ip{'6'}\n";
+print "lookupfail.value $no_such_princ\n";
+print "asreq.value $as_req\n";
+print "tgsreq.value $tgs_req\n";
+print "pafail.value $pa_failed\n";
+print "xrout.value $tgs_xrealm_out\n";
+print "xrin.value $tgs_xrealm_in\n";
+print "referrals.value $referrals\n";
+
+save_state($pos);
+
+# vim:syntax=perl

@@ -1,0 +1,17 @@
+#!/bin/sh
+RID=${0##*trafic_ro_}
+
+if [ "$1" = "config" ]; then
+        echo graph_title $V 24h visitors for $RID
+        echo 'graph_args --base 1000'
+        echo 'graph_vlabel vizitatori_ultimele_24_ore'
+        echo 'graph_category Trafic_ro'
+        echo 'graph_info 24h visitors.'
+        echo "24h_visitors.label $RID"
+        echo "24h_visitors.info 24H visitors for $RID"
+        echo '24h_visitors.draw LINE2'
+        exit 0
+fi
+
+VISITORS="$(echo '<doc><item>munin</item></doc>' | curl curl --silent -X POST -H 'Content-type: text/xml' -d @- http://api.trafic.ro/rest/0.01/sumar-site/$RID |  xmlstarlet sel -t -m "/sumar-site/vizitatori_ultimele_24_ore" -v ".")"
+echo  "24h_visitors.value" $VISITORS;

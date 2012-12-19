@@ -1,0 +1,42 @@
+#!/bin/sh
+# ZFS ARC statistics for FreeBSD
+# Author alex@trull.org:
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+sysctl='/sbin/sysctl'
+
+case $1 in
+    config)
+	cat <<EOF
+graph_title ZFS ARC Counters
+graph_vlabel per second
+graph_scale no
+graph_category filesystem 
+graph_args -l 0
+graph_info FreeBSD ZFS ARC Utilisation - Counters
+EOF
+$sysctl kstat.zfs.misc.arcstats.hits kstat.zfs.misc.arcstats | awk '/hits/ || /miss/ || /hash/ || /deleted/ || /evict/ { { FS = "[.:]" } { displayname = $5; gsub("_"," ",displayname) } {print $5".label "displayname"\n"$5".type DERIVE\n"$5".min 0"} }' | grep -v "^\."
+	exit 0
+	;;
+    autoconf)
+	if [ ! -x ${sysctl} ]; then
+	    echo "no (${sysctl} is not executable)"
+	    exit 1
+	fi
+	ostype=`uname -s`
+	if [ ${ostype} = "FreeBSD" ]; then
+	    echo "yes"
+	    exit 0
+	fi
+	echo "no (You're OS is not supported by this plugin)"
+	exit 1
+	;;
+    suggest)
+	exit 0
+	;;
+esac
+
+$sysctl kstat.zfs.misc.arcstats.hits kstat.zfs.misc.arcstats |  awk '/hits/ || /miss/ || /hash/ || /deleted/ || /evict/ { { FS = "[.:]" } { displayname = $5; gsub("_"," ",displayname) } {print $5".value",$NF} }' | grep -v "^\."
+

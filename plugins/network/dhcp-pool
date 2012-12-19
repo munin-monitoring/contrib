@@ -1,0 +1,192 @@
+#!/usr/bin/perl -w
+#
+# Copyright (C) 2008 Rien Broekstra <rien@rename-it.nl>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+#
+# Munin plugin to measure saturation of DHCP pools.
+#
+# Configuration variables:
+#
+#       conffile     - path to dhcpd's configuration file (default "/etc/dhcpd.conf")
+#       leasefile    - path to dhcpd's leases file (default "/var/lib/dhcp/dhcpd.leases")
+#
+# Parameters:
+#
+#       config    (required)
+#
+# Version 1.0, 2-12-2008
+
+use POSIX;
+use Time::Local;
+use strict;
+
+my $CONFFILE = exists $ENV{'conffile'} ? $ENV{'conffile'} : "/etc/dhcpd.conf";
+my $LEASEFILE = exists $ENV{'leasefile'} ? $ENV{'leasefile'} : "/var/lib/dhcp/dhcpd.leases";
+
+if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
+
+}
+elsif ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
+    my (%pools, $start, $label);
+
+    # Print general information
+    print "graph_title DHCP pool usage (in %)\n";
+    print "graph_args --upper-limit 100 -l 0\n";
+    print "graph_vlabel %\n";
+    print "graph_category network\n";
+
+    # Determine the available IP pools
+    %pools = determine_pools();
+    
+    # Print a label for each pool
+    foreach $start (keys %pools) {
+	$label = ip2string($start);
+	$label =~ s/\./\_/g;
+	print "$label.label Pool ".ip2string($start)."\n";
+	print "$label.warning 75\n";
+	print "$label.critical 100\n";
+    }
+}
+else {
+    my (@activeleases, %pools, $start, $end, $size, $free, $label, $lease);
+    
+    # Determine all leased IP addresses 
+    @activeleases = determine_active_leases();
+    
+    # Determine the available IP pools
+    %pools = determine_pools();
+
+    # For each pool, count how many leases from that pool are currently active
+    foreach $start (keys %pools) {
+	$size = $pools{$start};
+	$end = $start+$size;
+	$free = $size;
+
+	foreach $lease (@activeleases) {
+	    if ($lease >= $start && $lease <= $end) {
+		$free--;
+	    }
+	}
+	$label = ip2string($start);
+	$label =~ s/\./\_/g;
+	print "$label.value ".sprintf("%.1f", 100*($size-$free)/$size)."\n";
+    }
+}
+
+# Parse dhcpd.conf for range statements.
+#
+# Returns a hash with start IP -> size
+sub determine_pools {
+    my (%pools, @conffile, $line, $start, $end, $size);
+
+    open(CONFFILE, "<${CONFFILE}") || exit -1;
+    @conffile = <CONFFILE>;
+    close (CONFFILE);
+
+    foreach $line (@conffile) {
+	if ($line =~ /range[\s]+([\d]+\.[\d]+\.[\d]+\.[\d]+)[\s]+([\d]+\.[\d]+\.[\d]+\.[\d]+)/) {
+	    $start = string2ip($1);
+	    $end = string2ip($2);
+	    $size = $end - $start;
+	    defined($start) || next;
+	    defined($end) || next;
+	    
+	    $pools{$start} = $size;
+	}
+    }
+    return %pools;
+}
+
+# Very simple parser for dhcpd.leases. This will break very easily if dhcpd decides to 
+# format the file differently. Ideally a simple recursive-descent parser should be used.
+#
+# Returns an array with currently leased IP's
+sub determine_active_leases {
+    my (@leasefile, $startdate, $enddate, $lease, @activeleases, $mytz, $line, %saw);
+
+    open(LEASEFILE, "<${LEASEFILE}") || exit -1;
+    @leasefile = <LEASEFILE>;
+    close (LEASEFILE);
+
+    @activeleases = ();
+
+    # Portable way of converting a GMT date/time string to timestamp is setting TZ to UTC, and then calling mktime()
+    $mytz = $ENV{'TZ'};
+    $ENV{'TZ'} = 'UTC 0';
+    tzset();
+
+    foreach $line (@leasefile) {
+	if ($line =~ /lease ([\d]+\.[\d]+\.[\d]+\.[\d]+)/) {
+	    $lease = string2ip($1);
+	    defined($lease) || next;
+
+	    undef $startdate;
+	    undef $enddate;
+	}
+	elsif ($line =~ /starts \d ([\d]{4})\/([\d]{2})\/([\d]{2}) ([\d]{2}):([\d]{2}):([\d]{2})/) {
+	    $startdate = mktime($6, $5, $4, $3, $2-1, $1-1900, 0, 0);
+	}
+	elsif ($line =~ /ends \d ([\d]{4})\/([\d]{2})\/([\d]{2}) ([\d]{2}):([\d]{2}):([\d]{2})/) {
+	    $enddate = mktime($6, $5, $4, $3, $2-1, $1-1900, 0, 0);
+	    if (defined($enddate) && defined($startdate) && defined($lease)) {
+		if ($startdate < time() && $enddate > time()) {
+		    push (@activeleases, $lease);
+		}
+	    }
+	}
+
+    }
+    
+    # Set TZ back to its original setting
+    if (defined($mytz)) {
+	$ENV{'TZ'} = $mytz;
+    }
+    else {
+	delete $ENV{'TZ'};
+    }
+    tzset();
+
+    # Sort the array, strip doubles, and return
+    return grep(!$saw{$_}++, @activeleases);
+}
+
+#
+# Helper routine to convert an IP address a.b.c.d into an integer
+#
+# Returns an integer representation of an IP address
+sub string2ip {
+    my $string = shift;
+    defined($string) || return undef;
+    if ($string =~ /([\d]+)\.([\d]+)\.([\d]+)\.([\d]+)/) {
+	if ($1 < 0 || $1 > 255 || $2 < 0 || $2 > 255 || $3 < 0 || $3 > 255 || $4 < 0 || $4 > 255) {
+	    return undef;
+	}
+	else {
+	    return $1 << 24 | $2 << 16 | $3 << 8 | $4;
+	}
+    }
+    return undef;
+}
+	    
+#
+# Returns a dotted quad notation of an 
+#
+sub ip2string {
+    my $ip = shift;
+    defined ($ip) || return undef;
+    return sprintf ("%d.%d.%d.%d", ($ip >> 24) & 0xff, ($ip >> 16) & 0xff, ($ip >> 8) & 0xff, $ip & 0xff);
+}

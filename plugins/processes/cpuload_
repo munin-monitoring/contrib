@@ -1,0 +1,29 @@
+#!/bin/bash
+#
+# Munin-plugin to monitor the CPU usage for one or more given process name(s)
+#
+# Use the environment variable "process" to define more than one process
+# name if required. Process names must be separated by comma, no whitespace.
+#
+# [cpuload_postfix]
+# env.process master,qmgmr,proxymap,pickup
+#
+# GNU GPL, Bjørn Ruberg
+
+# Find process names from env variables for the given plugin
+# If not, extract from filename.
+
+test -n "$process" || process=`echo $0 | cut -d _ -f 2`
+
+if [ "$1" = "config" ]; then
+    echo "graph_title CPU load for $process"
+    echo 'graph_category processes'
+    echo "graph_info This graph shows the CPU load for $process, as reported by 'ps'"
+    echo 'cpuload.label CPU load'
+    echo "cpuload.info CPU load of $process"
+    echo "cpuload.type GAUGE"
+    exit 0
+fi
+
+echo -n "cpuload.value "
+ps -C $process -o pcpu,comm --no-header | awk '{ sum += $1 } END { print sum }'

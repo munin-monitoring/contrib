@@ -1,0 +1,115 @@
+#!/usr/bin/perl
+#
+# 2007-06-01    Zoltan HERPAI <wigyori@uid0.hu>
+#
+# Credits goes for:
+# Adam Crews for his xen_cpu plugin
+# Mario Manno for his xen_traffic_all plugin
+#
+# Script to monitor the I/O usage of Xen domains
+# Version 0.1
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+# Location of xm tools
+$XM = '/usr/sbin/xm';
+$XMTOP = '/usr/sbin/xentop';
+
+# ah, parameters coming in 
+if ( defined($ARGV[0]))
+{
+        if ($ARGV[0] eq 'config') { $arg = 'config'; }
+        if ($ARGV[0] eq 'autoconf') { $arg = 'autoconf'; }
+        
+        if ( $arg eq 'autoconf' ) 
+        {
+                if ( -e $XM && -e $XMTOP )
+                {
+                        print "yes\n";
+                        exit 0;
+                }
+                else
+                {
+                        print "no ($XM and/or $XMTOP not found\n";
+                        exit 0;
+                }
+        }
+        
+        if ( $arg eq 'config' )
+        {
+                %cnf = (
+                        'graph_title' => 'Xen Domain I/O usage',
+                        'graph_args' => '--base 1024 -l 0',
+                        'graph_vlabel' => 'read (-), write (+)',
+                        'graph_category' => 'xen',
+                        'graph_info' => 'Display the I/O operations for each domain',
+                );
+                
+                @domains = `$XM list`;
+                shift(@domains); # we don't need the header line
+                
+                foreach $domain ( @domains )
+                {
+                        ($dom, undef) = split(/\s/, $domain);
+                        $dom =~ s/[-.]/_/g;
+                        
+                        $cnf{ $dom.'RD' . '.label' } = 'read';
+                        $cnf{ $dom.'RD' . '.type' } = 'COUNTER';
+                        $cnf{ $dom.'RD' . '.graph' } = 'no';
+                        $cnf{ $dom.'RD' . '.cdef' } = $dom.'RD,8,*';
+                        
+                        $cnf{ $dom.'WR' . '.label' } = $dom;
+                        $cnf{ $dom.'WR' . '.type' } = 'COUNTER';
+                        $cnf{ $dom.'WR' . '.negative' } = $dom.'RD';
+                        $cnf{ $dom.'WR' . '.cdef' } = $dom.'WR,8,*';
+                        
+                        if ( "$cnt" == "0" )
+                        {
+                                $cnf { "$dom" . '.draw' } = 'AREA';
+                        }
+                        $cnt++;
+                }
+                
+                foreach $key ( sort(keys(%cnf)) )
+                {
+                        print "$key $cnf{$key}\n";
+                }
+                exit 0;
+                
+        }
+}
+
+
+# No args, get rolling
+{
+        local $/ = undef;
+        @chunks = split(/^xentop - .*$/m, `$XMTOP -b -i1`);
+}
+
+@stats = split (/\n/, pop(@chunks));
+
+shift(@stats);
+shift(@stats);
+shift(@stats);
+shift(@stats);
+
+foreach $domain (@stats)
+{
+        $domain =~ s/^\s+//;
+        @tmp = split(/\s+/, $domain);
+        
+        $domname = $tmp[0];
+        $domname =~ s/[-.]/_/g;
+        $vbdrd = $tmp[14];
+        $vbdwr = $tmp[15];
+        
+        $vals{$domname."RD"}{'value'} = $vbdrd;
+        $vals{$domname."WR"}{'value'} = $vbdwr;
+}
+
+foreach $key ( sort(keys(%vals)) )
+{
+        print "$key.value " . ($vals{$key}{'value'}) . "\n";
+}
+        

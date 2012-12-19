@@ -1,0 +1,316 @@
+#!/usr/bin/perl
+#
+# Copyright (C) 2008 Gorlow Maxim [Sheridan]
+# Copyright (C) 2009 Andrey Yakovlev [Freedom]
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+
+#	apc_host_snmp_volt - IO voltage (volt)
+#	apc_host_snmp_freq - IO frequency (hz)
+#	apc_host_snmp_status - UPS status (online, off....)
+#	apc_host_snmp_temp - Temperature (c)
+#	apc_host_snmp_load - UPS and Battery load (%)
+#	apc_host_snmp_curr - Current (ampers)
+
+
+
+
+#
+#%# family=snmpauto
+#
+
+use strict;
+no strict 'refs';
+
+my $host      = $ENV{host}      || undef;
+my $community = $ENV{community} || "public";
+my $type      = "volt";
+my $response;
+
+if ($0 =~ /^(?:|.*\/)apc_([^_]*)_snmp_(.+)$/)
+{
+    $host = $1 until ($1 eq "");
+    $type = $2;
+    if ($host =~ /^([^:]+):(\d+)$/)
+    {
+			$host = $1;
+7			#$port = $2;
+    }
+}
+elsif (!defined($host)) {
+	die "# Error: couldn't understand what I'm supposed to monitor."; }
+
+my @snmpParam = ($community,$host);
+my @oidsList;
+my @modelList = ('1.3.6.1.4.1.318.1.1.1.1.1.1.0','1.3.6.1.4.1.318.1.1.1.1.2.3.0','1.3.6.1.4.1.318.1.1.1.2.2.3.0');
+
+if ($type eq "volt")
+{
+    @oidsList =    ('1.3.6.1.4.1.318.1.1.1.4.2.1.0',
+		    '1.3.6.1.4.1.318.1.1.1.3.2.1.0',
+		    '1.3.6.1.4.1.318.1.1.1.3.2.2.0',
+		    '1.3.6.1.4.1.318.1.1.1.3.2.3.0');
+}
+elsif ($type eq "freq")
+{
+		@oidsList = ['upsAdvOutputFrequency'],
+		    ['upsAdvInputFrequency'];
+}
+elsif ($type eq "status")
+{
+    @oidsList =  ('1.3.6.1.4.1.318.1.1.1.4.1.1.0 ');
+}
+elsif ($type eq "temp")
+{
+    @oidsList = 	('1.3.6.1.4.1.318.1.1.1.2.2.2.0',
+			 '1.3.6.1.4.1.318.1.1.10.2.3.2.1.4.1');
+}
+elsif ($type eq "load")
+{
+    @oidsList =	    ('1.3.6.1.4.1.318.1.1.1.4.2.3.0',
+		'1.3.6.1.4.1.318.1.1.1.2.2.1.0');
+}
+elsif ($type eq "curr")
+{
+    @oidsList = ('upsAdvOutputCurrent');
+}
+#if (defined $ARGV[0] and $ARGV[0] eq "snmpconf")																																																																										
+#{}
+
+if ($ARGV[0] and $ARGV[0] eq "config")
+{
+
+    my $model;
+    my $vLabel;
+    my $hLabel;
+    my $graph_args;
+   
+    if ($type eq "volt")
+    {
+		$vLabel = "Voltage";
+		$hLabel = "IO Voltage";
+		print "graph_order out in inmax inmin\n";
+		print "in.label Input\n";
+		print "in.type GAUGE\n";
+		print "in.info Input voltage.\n";
+		print "in.colour FFCC99\n";
+		print "in.draw AREA\n";
+		print "out.label Output\n";
+		print "out.type GAUGE\n";
+		print "out.info Output voltage.\n";
+		print "out.colour 009BCC\n";
+		print "out.draw AREA\n";
+		print "inmax.label Input max\n";
+		print "inmax.type GAUGE\n";
+		print "inmax.info Input voltage maximum.\n";
+		print "inmax.colour FF0033\n";
+		print "inmax.draw LINE1\n";
+		print "inmin.label Input min\n";
+		print "inmin.type GAUGE\n";
+		print "inmin.info Input voltage minimum.\n";
+		print "inmin.colour 66FF00\n";
+		print "inmin.draw LINE1\n";
+	
+    }
+    elsif ($type eq "freq")
+    {
+		$vLabel = "Frequency";
+		$hLabel = "IO Frequency";
+		print "graph_order in out\n";
+		print "out.label Output\n";
+		print "out.type GAUGE\n";
+		print "out.info Output frequency.\n";
+		print "out.draw LINE2\n";
+		print "in.label Input\n";
+		print "in.type GAUGE\n";
+		print "in.info Input frequency.\n";
+		print "in.draw LINE2\n";
+    }
+    elsif ($type eq "status")
+    {
+		$vLabel = "Status";
+		$hLabel = "Status";
+		print "state.label Status\n";
+		print "state.type GAUGE\n";
+		print "state.draw AREA\n";
+		print "state.min 1\n";
+		print "state.max 12\n";
+		print "unknown.label Unknown\n";
+		print "unknown.type GAUGE\n";
+		print "unknown.draw LINE3\n";
+		print "onLine.label Online\n";
+		print "onLine.type GAUGE\n";
+		print "onLine.draw LINE4\n";
+		print "onLine.min 0\n";
+		print "onLine.max 1\n";
+		print "onLine.warning 1:\n";
+		print "onBattery.label On Battery\n";
+		print "onBattery.type GAUGE\n";
+		print "onBattery.draw LINE4\n";
+		print "onBattery.min 0\n";
+		print "onBattery.max 1\n";
+		print "softwareBypass.label Software Bypass\n";
+		print "softwareBypass.type GAUGE\n";
+		print "softwareBypass.draw LINE3\n";
+		print "off.label Off\n";
+		print "off.type GAUGE\n";
+		print "off.draw LINE3\n";
+		print "rebooting.label Rebooting\n";
+		print "rebooting.type GAUGE\n";
+		print "rebooting.draw LINE3\n";
+		print "switchedBypass.label Switched Bypass\n";
+		print "switchedBypass.type GAUGE\n";
+		print "switchedBypass.draw LINE3\n";
+		print "hardwareFailureBypass.label HW Failure Bypass\n";
+		print "hardwareFailureBypass.type GAUGE\n";
+		print "hardwareFailureBypass.draw LINE3\n";
+    }
+    elsif ($type eq "temp")
+    {
+		$vLabel = "Temperature, C";
+		$hLabel = "Temperature";
+		$graph_args = "--upper-limit 35 -l 15";
+		print "graph_order batt sens1\n";
+		print "batt.label Battery temperature\n";
+		print "batt.type GAUGE\n";
+		print "batt.info Battery temperature.\n";
+		print "batt.draw LINE2\n";
+		print "batt.warning 15:30\n";
+		print "sens1.label Sensor temperature\n";
+		print "sens1.type GAUGE\n";
+		print "sens1.info Sensor temperature.\n";
+		print "sens1.draw LINE2\n";
+		print "sens1.warning 15:30\n";
+		print "sens1.critical 10:40\n";
+   }
+    elsif ($type eq "load")
+    {
+		$vLabel = "Percent";
+		$hLabel = "UPS load and Batt. capacity ";
+		$graph_args = "--upper-limit 110 -l 0";  # --rigid
+		print "graph_order load bcap\n";
+		print "load.label UPS load\n";
+		print "load.type GAUGE\n";
+		print "load.info UPS load.\n";
+		print "load.draw AREA\n";
+		print "load.warning 85\n";
+		print "load.critical 95\n";
+		print "bcap.label Battery capacity\n";
+		print "bcap.type GAUGE\n";
+		print "bcap.info Battery capacity.\n";
+		print "bcap.draw LINE2\n";
+		print "bcap.warning 20:\n";
+		print "bcap.critical 10:\n";
+    }
+    elsif ($type eq "curr")
+    {
+		$vLabel = "Ampers";
+		$hLabel = "Current";
+		print "out.label Output\n";
+		print "out.type GAUGE\n";
+		print "out.info Output current\n";
+		print "out.draw LINE2\n";
+    }
+
+		## common part
+    print "host_name $host\n" unless $host eq 'localhost';
+    my @response = getSnmpValueArr (\@snmpParam,\@modelList);
+    $response[0] =~ s/[\" ]//g;        # Ditch the quotes.
+    $response[1] =~ s/[\" ]//g;
+    my $rest = $response[2] /6000;
+    $model = "$response[0] [$response[1]] ";
+    print "graph_title $hLabel, $response[0]\n";
+    print "graph_args --base 1000 $graph_args\n";
+    print "graph_vlabel $vLabel\n";
+    print "graph_category Ups\n";
+    print "graph_info This graph shows the $hLabel ($vLabel) of $model <br> Onbattery remaining runtime <b>$rest</b> minutes.\n";
+
+    #all ok
+    exit 0;				    
+}
+
+# Get results
+my @response = getSnmpValueArr (\@snmpParam,\@oidsList);
+
+if ($type eq "volt")
+{
+    print "out.value $response[0]\n";
+    print "in.value $response[1]\n";
+    print "inmax.value $response[2]\n";
+    print "inmin.value $response[3]\n";
+}
+elsif ($type eq "freq")
+{
+    print "out.value $response[0]\n";
+    print "in.value $response[1]\n";
+}
+elsif ($type eq "status")
+{
+    my $unknown				= $response[0]==1  || 0;
+    my $onLine				= $response[0]==2  || 0;
+    my $onBattery			= $response[0]==3  || 0;
+    my $softwareBypass			= $response[0]==6  || 0;
+    my $off				= $response[0]==7  || 0;
+    my $rebooting			= $response[0]==8  || 0;
+    my $switchedBypass			= $response[0]==9  || 0;
+    my $hardwareFailureBypass		= $response[0]==10 || 0;
+    
+    print "state.value $response[0]\n";
+    print "unknown.value $unknown\n";
+    print "onLine.value $onLine\n";
+    print "onBattery.value $onBattery\n";
+    print "softwareBypass.value $softwareBypass\n";
+    print "off.value $off\n";
+    print "rebooting.value $rebooting\n";
+    print "switchedBypass.value $switchedBypass\n";
+    print "hardwareFailureBypass.value $hardwareFailureBypass\n";
+}
+elsif ($type eq "temp")
+{
+    print "batt.value $response[0]\n";
+    print "sens1.value $response[1]\n";
+}
+elsif ($type eq "load")
+{
+    print "load.value $response[0]\n";
+    print "bcap.value $response[1]\n";
+}
+elsif ($type eq "curr")
+{
+    print "out.value $response[0]\n";
+}
+
+sub getSnmpValueArr 
+{
+	my ($param, $oidlist ) = @_; 
+	my @result;
+
+	foreach my $oid (@$oidlist) {
+		 push ( @result, getSnmpValue($param,$oid) );
+  }
+ chomp @result;
+ return @result;
+}
+
+#
+# (\(community,IP),OID)
+sub getSnmpValue
+{
+	    my ($param, $oid) = @_;
+	    my ($comm, $ip) = @$param;
+			return `/usr/local/bin/bsnmpget -n -o quiet -s ${comm}\@${ip} -v 1 $oid`;
+}
+__END__

@@ -1,0 +1,114 @@
+#!/bin/sh
+#$Id: ipt-basic_ 96 2005-10-12 16:54:19Z grin $
+#
+# (C)Copyright Peter grin at grin dot hu Gervai, 2005
+# Released undel GPL v2.
+#
+# Plugin to monitor traffic through iptables.
+# This plugin was designed to monitor FORWARDING interfaces
+# on a router with only one-to-one forwarding (traffic goes into
+# one interface goes out to the other).
+#
+# You can initialise the required iptables by running it manually:
+#
+#   ipt-basic_ initialise
+#
+# You should create two symlinks to this module:
+#   ln -s ipt-basic_ ipt-basic_bytes
+#   ln -s ipt-basic_ ipt-basic_pkts
+#
+# This plugin is based on the ip_ plugin.
+#
+# Revisions:
+#  2006.01.00 - First release.
+#  2006.11.26 - Use -j RETURN in rules, and sort interfaces
+#  
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+# ipt_bytes, ipt_pkts
+TYPE=`basename $0 | sed 's/^ipt-basic_//g'`
+
+if [ "$TYPE" != "bytes" -a "$TYPE" != "pkts" ]; then
+	# if dear user forgot to use symlinks, default to ipt_bytes
+	TYPE='bytes'
+fi
+
+# name of our iptable
+TNAME='munin_node'
+iptables='/sbin/iptables'
+
+
+if [ "$1" = "autoconf" ]; then
+	if [ -r /proc/net/dev ]; then
+		RES=`$iptables -L $TNAME -nvx 2>&1 >/dev/null`
+		if [ $? -gt 0 ]; then
+			echo "no (could not run iptables as user `whoami`; $RES)"
+			exit 1
+		else
+			echo yes
+			exit 0
+		fi
+	else
+		echo "no (/proc/net/dev not found)"
+		exit 1
+	fi
+fi
+
+if [ "$1" = "suggest" ]; then
+        echo "no parameters required!"
+	exit 1
+fi
+
+
+if [ "$1" = "initialise" ]; then
+	# creates the required tables
+        $iptables -N $TNAME
+        $iptables -F $TNAME
+        # add to forward table (and delete dupe if exists
+        $iptables -D FORWARD -j $TNAME 2> /dev/null
+        $iptables -A FORWARD -j $TNAME
+        DEVS=`cat /proc/net/dev|egrep "(eth|ppp)" | cut -d: -f1 | sort`
+        for dev in $DEVS; do
+        	$iptables -A $TNAME -j RETURN -i $dev
+        done
+	exit 1
+fi
+
+IFACES=`$iptables -L munin_node -nvx | awk '$6 ~ /(eth|ppp)[0-9]/ { if (done[$6]!=1) {print $6; done[$6]=1;}}'`
+
+if [ "$1" = "config" ]; then
+
+        # echo "graph_order out in"
+        if [ "$TYPE" == "pkts" ]; then
+        	echo "graph_title pkts"
+	        echo 'graph_vlabel pkts per ${graph_period}'
+        else
+	        echo "graph_title traffic"
+	        echo 'graph_vlabel bits per ${graph_period}'
+        fi
+        echo 'graph_args --base 1000'
+	echo 'graph_category network'
+        echo 'graph_info This graph shows the traffic of the interfaces in bits per second, and should be precise above 50Mbps as well. All forwarded traffic is measured in the incoming counter of the given interface.'
+	
+        for iface in $IFACES; do
+        	echo "$iface.label ${iface}_received"
+                echo "$iface.type DERIVE"
+                echo "$iface.min 0"
+	        if [ "$TYPE" != "pkts" ]; then
+        	        # traf in BITS/sec
+                	echo "$iface.cdef $iface,8,*"
+                fi
+        done
+        exit 0
+fi;
+
+if [ "$TYPE" == "pkts" ]; then
+	$iptables -L munin_node -nvx | egrep "eth|ppp" | awk "{ print \$6 \".value \" \$1 }"
+else
+	$iptables -L munin_node -nvx | egrep "eth|ppp" | awk "{ print \$6 \".value \" \$2 }"
+fi

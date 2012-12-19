@@ -1,0 +1,309 @@
+#!/usr/bin/perl -w
+#
+# Plugin to monitor Flash Media Server connections.
+#
+# Parameters:
+#
+#       config   (required)
+#       autoconf (optional - only used by munin-config)
+#
+# Requirements:
+#
+#       libwww-perl (LWP) Perl library
+#	      Proc::ProcessTable Perl module
+#
+# Tested with:
+#       Debian 4.x ("Etch")
+#       Macromedia Flash Media Server 2.0.3 r68
+#       Adobe Flash Media Server 3.0.1 r123
+#       Adobe Flash Media Server 3.5.0 r405
+#
+# $Log$
+# Revision 2.1  2009/02/15 19:45:12  muzso
+# Added option to get stats based on netstat's output instead of FMS Admin
+# server. Rewrote usage documentation for easier and quicker reading.
+#
+# Revision 2.0  2009/01/24 20:03:23  muzso
+# Completely rewritten. Added ability to autoconfigure, added inline
+# documentation and brought to the standard of core Munin plugins.
+#
+# Revision 1.0  2007/09/12 18:14:43  Johan MATHE
+# Initial release.
+#
+# Usage
+# -----
+#
+# The plugin supports two methods for collecting network connection statistics
+# for the Flash Media Server:
+#
+# a.) Using the getServerStats() call of the HTTP API of Flash Media
+#     Administration Server. (This is the default.)
+#
+# b.) Using the "netstat" command (available on all sorts of Linux/Unix
+#     operating systems).
+#
+# You can configure the plugin to use the latter method by adding the
+# "use_netstat" variable to the [fms] section in the Munin node plugin config
+# file.
+# Eg.
+#   [fms]
+#   env.use_netstat yes
+#
+# IMHO the netstat method provides a lot more realistic number for FMS
+# connections, but I kept the FMS Admin stat method as default since that's
+# the "Adobe supported" way.
+#
+# Moreover you can use the plugin with autoconfiguration or by manually
+# supplying the required parameters (as variables in the Munin node plugin
+# config file).
+#
+# To use autoconfiguration, you've to run the plugin with root privileges, thus
+# specify the user in the Munin node plugin config file.
+# So the least you've to do to make this work is to create an [fms] section
+# in the node plugin config and add "user root".
+# Eg.
+#   [fms]
+#   user root
+#
+# For autoconfiguration you'll also need the following Perl module:
+#
+#   Proc::ProcessTable - Perl extension to access the unix process table
+#   http://search.cpan.org/perldoc?Proc::ProcessTable 
+#
+# On a Debian/Ubuntu system you can install this with the following command
+# (if APT is configured properly):
+#   apt-get install libproc-process-perl
+#
+# In Ubuntu and recent Debian (Lenny and later) versions this is renamed to
+# libproc-processtable-perl, but for now (at the time of writing)
+# libproc-process-perl still exists as a dummy package to provide backward
+# compatibility.
+#
+# If you're using the default statistic fetching method (the call to the FMS
+# Admin Server HTTP API), then you'll also need the following Perl module:
+#
+#   LWP - The World-Wide Web library for Perl
+#   Used modules: HTTP::Request, LWP::Simple, LWP::UserAgent
+#   http://search.cpan.org/perldoc?LWP
+#
+# On a Debian/Ubuntu system you can install this with the following command
+# (if APT is configured properly):
+#   apt-get install libwww-perl
+#
+# For access to the FMS Admin HTTP API you've to publish the "getServerStats()"
+# call. This means that you've to set "USERS.HTTPCOMMAND_ALLOW" to "true" in
+# ${FMS_DIR}/conf/fms.ini and in ${FMS_DIR}/conf/Users.xml set the value of the
+# node "Root/AdminServer/HTTPCommands/Allow" to contain "getServerStats" too
+# (by default it allows only "ping").
+#
+# That's all you've to know about the default (autoconfiguration) method of
+# running this plugin.
+#
+#
+# As for manual configuration ...
+#
+# Follow this example plugin entry in the Munin node plugin config to specify
+# the FMS Admin server parameters:
+#   [fms]
+#   env.fms_admin_host localhost
+#   env.fms_admin_port 1111
+#   env.fms_admin_username admin
+#   env.fms_admin_password the_admin_password
+#
+#   Usually fms_admin_host will be localhost (since most people want to monitor
+#   a local instance of FMS), but of course you can set it to any hostname.
+#
+#   It is strongly advised that you restrict access to the Munin node plugin
+#   config file. It should be readable only by the Munin node daemon since your
+#   FMS admin password should not be accessible by any other user.
+#   In case of Debian/Ubuntu the /etc/munin/plugin-conf.d/munin-node file is
+#   owned by root and the munin-node process runs with root privileges, so the
+#   correct permission is to have the file readable only by root.
+#
+# Manual configuration of the netstat method requires the following Munin node
+# plugin config:
+#   [fms]
+#   env.use_netstat yes
+#   env.fms_host 192.168.0.1
+#   env.fms_port 1935
+#
+#   The fms_host variable can be skipped if your FMS server listens on all IPs
+#   and not just a single IP.
+#   The fms_port variable must contain a comma-separated list of TCP ports that
+#   your FMS server listens on for incoming connections.
+#   In a default FMS installation this is the 1935 TCP port, but it can be
+#   an arbitrary list (eg. 1935,80,443).
+#
+#
+# Note: autoconfiguration works by going through the list of running processes
+#       and looking for the "fmsadmin" process. If found, we check for the
+#       existence of the "conf/fms.ini" file in the current working directory
+#       of the process. This works fine for all tested FMS versions.
+#       However it is possible that this method is not "universal" enough
+#       (and it requires the plugin to be run as root too) so using the manual
+#       configuration is always there as a backup solution.
+#       The manual config method does not require root privileges for the plugin
+#       to work.
+#
+#       In case something "bad" happens (eg. plugin is run as non-root and
+#       autoconfiguration is used) the plugin writes some informative message
+#       to stderr to make debugging easier. This should not affect the normal
+#       operation of munin-node since only the stdout of the plugins is used
+#       and that's always kept as munin-node expects.
+#
+#
+#
+# Magic markers (optional - used by munin-config and installation scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+
+
+use strict;
+use LWP::UserAgent;
+use LWP::Simple;
+use Proc::ProcessTable;
+
+if ( defined($ARGV[0]) and $ARGV[0] eq "config" ) {
+	print <<'END_CONFIG';
+graph_title Flash Media Server socket connections
+graph_args -l 0 --base 1000
+graph_vlabel active connections
+graph_category network
+graph_period second
+graph_info This graph shows the number of active socket connections to the Flash Media Server.
+fmserv_c.label connections
+fmserv_c.type GAUGE
+fmserv_c.min 0
+END_CONFIG
+	exit 0;
+}
+
+my ($usenetstat, $fmshost, $fmsport, $adminhost, $adminport, $adminusername, $adminpassword);
+
+if ( defined($ENV{use_netstat}) and length($ENV{use_netstat}) > 0 and lc($ENV{use_netstat}) ne "no") {
+	$usenetstat = "yes";
+} else {
+	$usenetstat = "no";
+}
+if ( defined($ENV{fms_host}) and length($ENV{fms_host}) > 0 ) {
+	$fmshost = $ENV{fms_host};
+}
+if ( defined($ENV{fms_port}) and length($ENV{fms_port}) > 0 ) {
+	$fmsport = $ENV{fms_port};
+}
+if ( defined($ENV{fms_admin_host}) and length($ENV{fms_admin_host}) > 0 ) {
+	$adminhost = $ENV{fms_admin_host};
+}
+if ( defined($ENV{fms_admin_port}) and length($ENV{fms_admin_port}) > 0 ) {
+	$adminport = $ENV{fms_admin_port};
+}
+if ( defined($ENV{fms_admin_username}) and length($ENV{fms_admin_username}) > 0 ) {
+	$adminusername = $ENV{fms_admin_username};
+}
+if ( defined($ENV{fms_admin_password}) and length($ENV{fms_admin_password}) > 0 ) {
+	$adminpassword = $ENV{fms_admin_password};
+}
+
+if ( !( ( $usenetstat eq "yes" and defined($fmshost) and defined($fmsport) ) or ( $usenetstat eq "no" and defined($adminhost) and defined($adminport) and defined($adminusername) and defined($adminpassword) ) ) ) {
+	# Autoconfiguration:
+	# 1. Find the "fmsadmin" process and assume that FMS is installed in the
+	#    current working directory of the process.
+	# 2. Look for the FMS config file in ${FMS_DIR}/conf/fms.ini.
+	# 3. Fetch host, port, admin username and password values from the
+	#    config file.
+	
+	# check that plugin is running with root privileges
+	if ( $> == 0 ) {
+		my $ProcTable = new Proc::ProcessTable;
+		PROC_LOOP: foreach my $proc (@{$ProcTable->table}) {
+			# match any filename starting with "fmsadmin"
+			# (this way the plugin might work on platforms other
+			#  than linux too)
+			if ( defined($proc->{fname}) and $proc->{fname} =~ /^fmsadmin/i and defined($proc->{cwd}) ) {
+				my $fms_config = $proc->{cwd} . "/conf/fms.ini";
+				if ( open(my $fp, '<', $fms_config) ) {
+					while (my $line = <$fp>) {
+						chomp($line);
+						if ( $line =~ /^ *SERVER\.ADMIN_USERNAME *= *([^ ].*) *$/ ) {
+							$adminusername = $1;
+						} elsif ( $line =~ /^ *SERVER\.ADMIN_PASSWORD *= *([^ ].*) *$/ ) {
+							$adminpassword = $1;
+						} elsif ( $line =~ /^ *SERVER\.ADMINSERVER_HOSTPORT *= *([^ ]*)/ ) {
+							my @data = split(":", $1);
+							if ( $#data > 0 ) {
+								if ( defined($data[0]) and length($data[0]) > 0 ) {
+									$adminhost = $data[0];
+								} else {
+									$adminhost = "localhost";
+								}
+								$adminport = $data[1];
+							}
+						} elsif ( $line =~ /^ *ADAPTOR\.HOSTPORT *= *([^ ]*)/ ) {
+							my @data = split(":", $1);
+							if ( $#data > 0 ) {
+								if ( defined($data[0]) and length($data[0]) > 0 ) {
+									$fmshost = $data[0];
+								} else {
+									$fmshost = "";
+								}
+								$fmsport = $data[1];
+							}
+						}
+						# exit the loop if we've got all parameters
+						last PROC_LOOP if ( $usenetstat eq "yes" and defined($fmshost) and defined($fmsport) ) or ( $usenetstat eq "no" and defined($adminhost) and defined($adminport) and defined($adminusername) and defined($adminpassword) );
+					}
+				} else {
+					print(STDERR "Can't open FMS config file (" . $fms_config . "): $!\n");
+				}
+				# exit the loop since we've already found the process
+				# that we were looking for, we just failed to find
+				# all required parameters in fms.ini (or failed to
+				# find fms.ini at all in (cwd of fmsadmin)/conf
+				last PROC_LOOP;
+			}
+		}
+	} else {
+		print(STDERR "Plugin must be run with root privileges for autoconfiguration to work!\n");
+	}
+}
+
+if ( defined($ARGV[0]) and $ARGV[0] eq "autoconf" ) {
+	if ( ( $usenetstat eq "yes" and defined($fmshost) and defined($fmsport) ) or ( $usenetstat eq "no" and defined($adminhost) and defined($adminport) and defined($adminusername) and defined($adminpassword) ) ) {
+		print("yes\n");
+		exit 0;
+	} else {
+		print("no\n");
+		exit 1;
+	}
+}
+
+if ( $usenetstat eq "yes" and defined($fmshost) and defined($fmsport) ) {
+	$fmsport =~ s/,/|/g;
+	my $sockets = `netstat -n`;
+	my $regex = ":(" . $fmsport . ")[^0-9]+[^:]*:[0-9]+[^0-9]+.*ESTABLISHED";
+	if ( defined($fmshost) and length($fmshost) > 0 ) {
+		$fmshost =~ s/\./\\./g;
+		$regex = $fmshost . $regex;
+	}
+	my $count = 0;
+	while ( $sockets =~ /$regex/g ) {
+		$count++;
+	}
+	print("fmserv_c.value ${count}\n");
+} elsif ( $usenetstat eq "no" and defined($adminhost) and defined($adminport) and defined($adminusername) and defined($adminpassword) ) {
+	my $ua = LWP::UserAgent->new(timeout => 30);
+	my $url = sprintf("http://%s:%d/admin/getServerStats?auser=%s\&apswd=%s", $adminhost, $adminport, $adminusername, $adminpassword);
+
+	my $response = $ua->request(HTTP::Request->new('GET', $url));
+
+	if ( $response->content =~ /<io>.*<connected>[^0-9]*([0-9]+)[^0-9]*<\/connected>.*<\/io>/is ) {
+		print("fmserv_c.value $1\n");
+	} else {
+		print("fmserv_c.value U\n");
+	}
+} else {
+	print(STDERR "Failed to get all parameters needed for the connection to the Flash Media Administration Server!\n");
+	print("fmserv_c.value U\n");
+}

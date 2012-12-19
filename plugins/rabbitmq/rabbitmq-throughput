@@ -1,0 +1,81 @@
+#!/bin/sh
+#
+# Plugin to monitor the queues of a virtual_host in RabbitMQ
+#
+# Usage: Link or copy into /etc/munin/node.d/
+#
+# Parameters
+#     env.vhost <AMQ virtual host>
+#     env.queue_warn <warning queuesize>
+#     env.queue_crit <critical queuesize>
+#
+# Magic markers (optional - only used by munin-config and some
+# installation scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+# If run with the "autoconf"-parameter, give our opinion on wether we
+# should be run on this system or not. This is optinal, and only used by
+# munin-config. In the case of this plugin, we should most probably
+# always be included.
+
+
+###########################################################################################################
+
+#rabbitmq-througput  : This plugin captures the througput of the rabbitmq server i.e rate of messages (published,acknoledged,deliver and deliver_get) per second. These values are captured from RabbitMQ management plugin.
+
+#Authour : Juned Memon
+#Website : www.TipsNtrapS.com
+#Email   : junedm@tipsntraps.com
+#Version :1.0
+
+#NOTE : Chnage the URL to access the  UI of RabbitMQ management 
+
+###########################################################################################################
+
+if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+fi
+
+curl -f -u guest:guest http://localhost:55672/api/overview | awk -F \" '{print $14"_"$16$17"\n"$22"_"$24$25"\n"$30"_"$32$33"\n"$38"_"$40$41}' | awk -F[:,] 'BEGIN {ORS = ""}{print $1} {printf" %2.4f\n",$2}' > /tmp/Throuphput.txt
+
+
+details=$(cat /tmp/Throuphput.txt  |awk '{print $1}')
+# If run with the "config"-parameter, give out information on how the
+# graphs should look.
+
+if [ "$1" = "config" ]; then
+
+        # The title of the graph
+        echo "graph_title RabbitMQ Throughput"
+        # Arguments to "rrdtool graph". In this case, tell it that the
+        # lower limit of the graph is '0', and that 1k=1000 (not 1024)
+        echo 'graph_args --base 1000 --vertical-label Bytes -l 0'
+        # The Y-axis label
+        echo 'graph_vlabel Throuphput'
+        # We want Cur/Min/Avg/Max unscaled (i.e. 0.42 load instead of
+        # 420 milliload)
+        #echo 'graph_scale no'
+        echo 'graph_category RabbitMQ'
+
+
+for detail in $details; do
+                echo "$detail.label $detail"
+                echo "$detail.info rate of  $detail"
+        done
+
+        echo  "graph_info Show  Throughput for RabbitMQ "
+
+        # Last, if run with the "config"-parameter, quit here (don't
+        # display any data)
+        exit 0
+fi
+
+# If not run with any parameters at all (or only unknown ones), do the
+# real work - i.e. display the data. Almost always this will be
+# "value" subfield for every data field.
+
+cat /tmp/Throuphput.txt | perl -nle'($q, $s) = split; $q =~ s/[.-=]/_/g; print("$q.value $s")'
+rm /tmp/Throuphput.txt

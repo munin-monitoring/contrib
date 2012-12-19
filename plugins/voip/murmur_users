@@ -1,0 +1,150 @@
+#!/usr/bin/php
+<?php
+error_reporting( E_ALL &!E_NOTICE); //to avoid of the crap generation
+
+/*///////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Murmur users online grahpher
+ver 0.2alpha 2008.12.02, 20:32 
+author _KaszpiR_ kaszpir at gmail dot com
+code is under GPL
+
+Requirements:
+- PHP installed in CLI (so you can run it in command line)
+  Make sure the first line of this file points to the working php cli interpreter
+- Murmur logfile readable by the munin user/group
+
+Notice:
+- script allows the usage of the 'config' and 'autoconf' parameters during startup, make fure you edt config section before running it
+- $limit - number of lines to tail from the lgo file, better keep it below 5000 for lower cpu load, 
+  aditionally on busy servers you can keep it really low, suggested 3x maximum number of users online
+- tested on 
+	PHP 5.2.6-3 with Suhosin-Patch 0.9.6.2 (cli) (built: Aug 21 2008 17:02:32)
+	murmur 1.1.4 precompiled binaries from sourceforge net, all running under debian etch
+- this is not the best way to get users connected to the murmur server, maybe in the beginnign of the 2009 gonna make another script
+
+Known issues and limitations:
+- counts all users on the server not respecting different server instances
+- if limit of 5000 log entries can sometimes be not enough on busy servers
+- can returrn wrong number of users due to the simple user tracking (by nick, should be more advanced but I'm too lazy,)
+  usually error is fixed after player performs any action on server like join/part channel or mute/unmute etc
+
+Todo:
+- get server id for parsing
+- get logs from MySQL
+- use DBUS or ICE instead of plain log file
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////*/
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+//configuration
+$limit=5000; //numbers of lines to process from log file
+$logfile="/home/kaszpir/murmur/murmur.log"; // path to the murmur log file
+
+//end of configuration
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+//autoconf test
+if(isset($argv[1]) && $argv[1] == "autoconf")
+{
+	if(is_readable($logfile))
+	{
+		fwrite(STDOUT, "Yes\n");
+	}
+	else 
+	{
+		fwrite(STDOUT, "No\n");
+		fwrite(STDERR, "check if '$logfile' exists and it is allowed to be read by munin user group\n");
+	}
+	return 0;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+//config, set rrd files
+if(isset($argv[1]) && $argv[1] == "config")
+{
+	if(is_readable($logfile))
+	{
+		fwrite(STDOUT, "graph_title Mumble Users\n");
+		fwrite(STDOUT, "graph_vlabel Connected Users\n");
+		fwrite(STDOUT, "graph_category VoIP\n");
+		fwrite(STDOUT, "graph_info This graph shows the number of connected users on a murmur server\n");
+		fwrite(STDOUT, "murmur.label Users on server\n");
+		fwrite(STDOUT, "murmur.type GAUGE\n");
+		return 0;
+		
+	}else {
+		echo "check if '$logfile' exists and it is allowed to be read by munin user group\n";
+		return 1;
+	}
+	return 0;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+// do the magic
+if(!$limit || ($limit >=5000 ) || $limit <= 0) $limit = 5000;
+$out = shell_exec("tail -n ".$limit." \"".$logfile."\"");
+$fp = split("\n",$out);
+if(!count(@$fp)) {
+	fwrite(STDOUT, "0\n");
+	return 1;
+	}
+//var_dump($fp);
+$online=0;
+$offline=0;
+$seen = array();
+for($i=count($fp);$i>(count($fp)-$limit);--$i)
+{
+	$l = trim($fp[$i]);
+	if(!$l) continue;
+	list(
+	$crap,
+	$w,
+	$date,
+	$time,
+	$serverid,
+	$id,
+	$nick,
+	$id2,
+	$msg,
+	) = preg_split("/<(.*)>(.*) (.*) ([0-9]) => <(.*)\:(.*)\((.*)\)>(.*)/",$fp[$i],-1,PREG_SPLIT_DELIM_CAPTURE);
+	if(!strlen(trim($nick))) continue;
+	if(!array_key_exists($nick,$seen)){
+	if(
+			strpos($msg," Connection closed")!==FALSE
+		||	strpos($msg," Tiemout")!==FALSE
+	){
+		$seen[$nick]['online'] = 0;		
+		$offline+=1;
+
+	}
+	else
+		{
+		$seen[$nick]['online'] = 1;		
+		$online+=1;
+	
+		}
+	}
+}
+
+fwrite(STDOUT,  "murmur.value ".$online."\n");
+//var_dump($seen);
+
+return 0;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+//end of file
+?>

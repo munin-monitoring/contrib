@@ -1,0 +1,36 @@
+#!/usr/bin/tclsh
+
+proc clean_fieldname arg {
+    return [regsub -all {[^A-Za-z]} $arg "_"]
+}
+
+proc main {argc argv} {
+    set queues [exec /usr/sbin/rabbitmqctl list_queues -q]
+    if {$argc > 0} {
+	switch [lindex $argv 0] {
+	    "config" {
+		puts "graph_title Number of messages in RabbitMQ queues"
+		puts "graph_vlabel messages"
+		puts "graph_category RabbitMQ"
+		foreach {q m} $queues {
+		    set clean [clean_fieldname $q]
+		    puts "$clean.label $q"
+		    puts "$clean.draw LINE3"
+                    puts "$clean.warning 300000"
+                    puts "$clean.critical 700000"
+		}
+	    }
+	    "autoconf" {
+		puts "yes"
+	    }
+	}
+    } else {
+	foreach {q m} $queues {
+	    set clean [clean_fieldname $q]
+	    puts "$clean.value $m"
+	}
+    }
+}
+
+main $argc $argv
+

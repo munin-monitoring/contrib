@@ -1,0 +1,50 @@
+#!/bin/sh
+#
+# Plugin to show Postfix statistics - needs pflogsumm
+#
+# Contributed by David Obando (david@cryptix.de) - 16.04.2007
+#
+#
+# Magic markers - optional - used by installation scripts and
+# munin-config:
+#
+#%# family=manual
+#%# capabilities=autoconf
+
+#set -xv
+
+case $1 in
+    config)
+        cat <<'EOF'
+system.type COUNTER
+graph_title Postfix statistics
+graph_vlabel Postfix statistics
+graph_category Mail
+graph_total Total
+received.label received
+delivered.label delivered
+forwarded.label forwarded
+deferred.label deferred
+bounced.label bounced
+rejected.label rejected
+held.label held
+discarded.label discarded
+EOF
+        exit 0;;
+esac
+
+
+TMP=`mktemp /tmp/tmp.XXXXXXXX`
+pflogsumm.pl --smtpd_stats -d today /var/log/syslog /var/log/syslog.0 | head -n 15 > $TMP
+
+cat <<EOF
+
+received.value `grep 'received' $TMP | awk '{print $1}'`
+delivered.value `grep 'delivered' $TMP | awk '{print $1}'`
+forwarded.value `grep 'forwarded' $TMP | awk '{print $1}'`
+deferred.value `grep 'deferred' $TMP | awk '{print $1}'`
+bounced.value `grep 'bounced' $TMP | awk '{print $1}'`
+rejected.value `grep 'rejected' $TMP | awk '{print $1}'`
+held.value `grep 'held' $TMP | awk '{print $1}'`
+discarded.value `grep 'discarded' $TMP | awk '{print $1}'`
+EOF

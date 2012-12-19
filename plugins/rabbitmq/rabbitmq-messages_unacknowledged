@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+
+#Author:  Juned Memon 
+#www.TipsNtrapS.com
+#mail:juned.memon@tipsntraps.com
+
+# If run with the "autoconf"-parameter, give our opinion on wether we
+# should be run on this system or not. This is optinal, and only used by
+# munin-config. In the case of this plugin, we should most probably
+# always be included.
+
+if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+fi
+
+# If run with the "config"-parameter, give out information on how the
+# graphs should look.
+
+VHOST="/"
+QUEUE="ViApiQueue"
+
+if [ "$1" = "config" ]; then
+
+        # The title of the graph
+        echo "graph_title RabbitMQ $VHOST Unacknowledged Messages"
+        # Arguments to "rrdtool graph". In this case, tell it that the
+        # lower limit of the graph is '0', and that 1k=1000 (not 1024)
+        echo 'graph_args --base 1000 -l 0'
+        # The Y-axis label
+        echo 'graph_vlabel unacknowledged'
+        # We want Cur/Min/Avg/Max unscaled (i.e. 0.42 load instead of
+        # 420 milliload)
+        #echo 'graph_scale no'
+        echo 'graph_category RabbitMQ'
+
+                echo "$QUEUE.label $QUEUE"
+                echo "$QUEUE.warning 10000"
+                echo "$QUEUE.critical 20000"
+                echo "$QUEUE.info Unacknowledged messages for $QUEUE"
+
+        echo "graph_info Lists how many Unacknowledged messages in queue $QUEUE"
+        # Last, if run with the "config"-parameter, quit here (don't
+        # display any data)
+        exit 0
+fi
+# If not run with any parameters at all (or only unknown ones), do the
+# real work - i.e. display the data. Almost always this will be
+# "value" subfield for every data field.
+rabbitmqctl list_queues -p $VHOST name messages_unacknowledged -q | grep $QUEUE |perl -nle'($q, $s) = split; $q =~ s/[.-=]/_/g; print("$q.value $s")'

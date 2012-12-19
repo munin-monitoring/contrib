@@ -1,0 +1,139 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+# must be run as root
+my $L7VSADM = q{ /usr/sbin/l7vsadm };
+
+if ( defined $ARGV[0] and $ARGV[0] eq 'autoconf' ) {
+        get_autoconf();
+}
+elsif ( defined $ARGV[0] and $ARGV[0] eq 'config' ) {
+        get_config();
+}
+else {
+        get_value();
+}
+exit 0;
+
+# -------------------------------------------------------------------------- #
+
+sub get_autoconf
+{
+    `$L7VSADM`;
+    if ( $? ) {
+        print qq{no ($L7VSADM something wrong ...)\n};
+        exit 1;
+    }
+
+    print qq{yes\n};
+}
+
+
+sub get_config
+{
+    my %l7vsadm = get_l7vsadm();
+
+    # print graph config
+    my $graph_order = join q{ }, keys %l7vsadm;
+    print << "END_graph_";
+graph_title Connections
+graph_args --base 1000 -l 0
+graph_vlabel connections / sec
+graph_info UltraMonkey-L7 Connections
+graph_category Ultramonkey-L7
+graph_order $graph_order
+END_graph_
+
+    # print graph config detail each hosts
+    foreach my $host ( sort keys %l7vsadm ) {
+        print << "END_hosts_";
+$host.label $host
+$host.type COUNTER
+$host.draw AREASTACK
+END_hosts_
+    }
+}
+
+
+sub get_value
+{
+    my %l7vsadm = get_l7vsadm();
+
+    foreach my $host ( sort keys %l7vsadm ) {
+        my $value = $l7vsadm{$host}->{InactConn};
+        print qq{$host.value $value\n};
+    }
+}
+
+
+sub get_l7vsadm
+{
+    my @l7vsadm_output = `$L7VSADM`;
+    if ( $? ) {
+        exit 1;
+    }
+
+    my @lines = map { s{ \s* -> \s* }{}xms; $_ } grep /->/, @l7vsadm_output;
+    my $header = shift @lines;
+    my @header_columns = split /\s+/, $header;
+    shift @header_columns;
+
+    my %l7vsadm = ();
+    foreach ( @lines ) {
+        my ( $host, @values ) = split /\s+/, $_;
+        my %value_hash = ();
+        @value_hash{ @header_columns } = @values;
+        $l7vsadm{$host} = \%value_hash;
+    }
+
+    %l7vsadm;
+}
+
+
+__END__
+# -------------------------------------------------------------------------- #
+This program must be run as root.
+add settings like below.
+
+--- /etc/munin/plugin-conf.d/munin-node ---
+[ultramonkeyl7]
+user root
+--- /etc/munin/plugin-conf.d/munin-node ---
+
+# -------------------------------------------------------------------------- #
+get_l7vsadm : l7vsadm output to hash
+
+--- l7vsadm output ---
+Layer-7 Virtual Server version 3.0.1
+Prot LocalAddress:Port ProtoMod Scheduler
+  -> RemoteAddress:Port           Forward Weight ActiveConn InactConn
+TCP ldb001:mysql sessionless lc
+  -> db002:mysql                  Masq    1      0          2796
+  -> db003:mysql                  Masq    1      0          259
+  -> db004:mysql                  Masq    1      0          6
+--- l7vsadm output ---
+
+--- hash ---
+$VAR1 = {
+          'db002:mysql' => {
+                             'ActiveConn' => '0',
+                             'Forward' => 'Masq',
+                             'InactConn' => '2796',
+                             'Weight' => '1'
+                           },
+          'db003:mysql' => {
+                              'ActiveConn' => '0',
+                              'Forward' => 'Masq',
+                              'InactConn' => '259',
+                              'Weight' => '1'
+                            },
+          'db004:mysql' => {
+                             'ActiveConn' => '0',
+                             'Forward' => 'Masq',
+                             'InactConn' => '6',
+                             'Weight' => '1'
+                           },
+--- hash ---
+

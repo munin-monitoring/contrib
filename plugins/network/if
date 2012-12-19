@@ -1,0 +1,1588 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+
+=head1 NAME
+
+if - Multigraph plugin to monitor network wired and wireless interfaces
+
+=head1 INTERPRETATION
+
+In the general graphs made key fields for each interface, a subsidiary graphs for each interface there are detailed
+
+This plugin displays the following charts:
+Traffic, bytes
+Traffic, packets
+Average packet size
+Interface errors
+WiFi interface errors
+WiFi interface signal and noise
+WiFi interface link quality
+Interface utilisation
+
+Virtual interface names prefixes with '~'
+
+=head1 CONFIGURATION
+
+This plugin is configurable environment variables.
+env.exclude         - Removing interfaces from graphs, default empty
+env.include         - Includes interfaces into graphs, default empty
+env.if_max_bps      - Maximum interface bps. Avialable suffixes: k, M, G, default empty
+env.protexct_peaks  - Protect graph peaks, default 'no'
+env.min_packet_size - Minimal network packet size, default 20
+Example:
+ [if]
+    env.exclude lo
+    env.include wlan0 tun0
+    env.wlan0_max_bps 54M
+    env.eth0_max_bps 1G
+    env.protect_peaks yes
+
+Protect peak:
+1. Protect wifi signal and noise values, all values > 0 print as NaN
+2. protect all percent values. All values > 100 print as NaN
+3. Protect bps values. env.if_max_bps must be set. All values > max_bps prints as 0
+4. protect pps values. env.if_max_bps must be set. All values > max_bps/minimal packet size, prints as 0
+
+=head1 AUTHOR
+
+Gorlow Maxim aka Sheridan <sheridan@sheridan-home.ru> (email and jabber)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=cut
+
+use strict;
+use warnings;
+use IO::Dir;
+use Munin::Plugin;
+use Data::Dumper;
+
+# ------------------------------------------------------------- constants ---------------------
+my $exclude         = $ENV{exclude}         || '';
+my $include         = $ENV{include}         || '-';
+my $protect_peacks  = $ENV{protect_peaks}   || 'no';
+my $min_packet_size = $ENV{min_packet_size} || 20;
+my $ifpath          = '/sys/class/net';
+# ----------------------------------- global -----------------
+my $interfaces = {};
+
+# ------------------------ avialable graphs -------------------------
+my $graphs =
+{
+  'if_bytes' =>
+  {
+    'munin' =>
+    {
+      'category' => 'network',
+      'args'     => '--base 1024',
+      'title'    => ':if: traffic, bytes', 
+      'vlabel'   => 'Bytes in (-) / out (+), avg. per second',
+      'info'     => 'This graph shows the traffic in bytes of the :if:, averaged value per second from last update'
+    },
+    'per_if_fields'  => [qw(rx_bytes tx_bytes)],
+    'general_fields' => [qw(rx_bytes tx_bytes)]
+  },
+  'if_packets' => 
+  {
+    'munin' =>
+    {
+      'category' => 'network',
+      'args'     => '--base 1000',
+      'title'    => ':if: traffic, packets', 
+      'vlabel'   => 'Packets in (-) / out (+), avg. per second',
+      'info'     => 'This graph shows the traffic in packets of the :if:, averaged value per second from last update'
+    },
+    'per_if_fields'  => [qw(rx_packets tx_packets rx_compressed tx_compressed rx_dropped tx_dropped multicast)],
+    'general_fields' => [qw(rx_packets tx_packets)]
+  },
+  'if_errors' => 
+  {
+    'munin' =>
+    {
+      'category' => 'network',
+      'args'     => '--base 1000',
+      'title'    => ':if: errors',
+      'vlabel'   => 'Errors RX (-) / TX (+)',
+      'info'     => 'This graph shows the errors of the :if: from last update',
+      'scale'    => 'no'
+    },
+    'per_if_fields'  => [qw(rx_errors tx_errors rx_fifo_errors tx_fifo_errors rx_crc_errors rx_frame_errors rx_length_errors rx_missed_errors rx_over_errors collisions tx_aborted_errors tx_carrier_errors tx_heartbeat_errors tx_window_errors)],
+    'general_fields' => [qw(rx_errors tx_errors)]
+  },
+  'if_wifi_sino' =>
+  {
+    'munin' =>
+    {
+      'category' => 'wifi',
+      'args'     => '--base 1000 -u 0',
+      'title'    => ':if: signal and noise levels',
+      'vlabel'   => 'dB',
+      'info'     => 'This graph shows the WiFi signal and noise levels of the :if:',
+      'scale'    => 'no'
+    },
+    'per_if_fields'  => [qw(signal noise)],
+    'general_fields' => [qw(signal)]
+  },
+  'if_wifi_link_quality' =>
+  {
+    'munin' =>
+    {
+      'category' => 'wifi',
+      'args'     => '--base 1000',
+      'title'    => ':if: link quality',
+      'vlabel'   => '%',
+      'info'     => 'This graph shows the WiFi link quality of the :if:',
+      'scale'    => 'no'
+    },
+    'per_if_fields'  => [qw(link)],
+    'general_fields' => [qw(link)]
+  },
+  'if_wifi_errors' =>
+  {
+    'munin' =>
+    {
+      'category' => 'wifi',
+      'args'     => '--base 1000',
+      'title'    => ':if: errors',
+      'vlabel'   => 'Errors RX (-) / TX (+)',
+      'info'     => 'This graph shows the WiFi errors of the :if: from last update',
+      'scale'    => 'no'
+    },
+    'per_if_fields'  => [qw(nwid fragment crypt beacon retries misc)],
+    'general_fields' => [qw(rx_wifierr tx_wifierr)]
+  },
+  'if_utilisation' =>
+  {
+    'munin' =>
+    {
+      'category' => 'network',
+      'args'     => '--base 1000',
+      'title'    => ':if: utilisation',
+      'vlabel'   => '%',
+      'info'     => 'This graph shows utilisation of the :if:',
+      'scale'    => 'no'
+    },
+    'per_if_fields'  => [qw(rx_percent tx_percent)],
+    'general_fields' => [qw(rx_percent tx_percent)]
+  },
+  'if_avgpacketsize' =>
+  {
+    'munin' =>
+    {
+      'category' => 'network',
+      'args'     => '--base 1024',
+      'title'    => ':if: avgerage packet size',
+      'vlabel'   => 'bytes',
+      'info'     => 'This graph shows average packet size of the :if:'
+    },
+    'per_if_fields'  => [qw(rx_size tx_size)],
+    'general_fields' => [qw(rx_size tx_size)]
+  }
+};
+
+#-------------------------- avialable fields -------------------------
+# info:
+# 'munin' => {} - just copy fields to munin config
+# 'source' => - field data source
+#    {
+#      'type' =>  types:
+#         'file' - data just cat from file
+#           'location' => file location
+#         'calculated' => calculated data
+#         {
+#            'type' - types:
+#               'percent',
+#                 'full' => 
+#                 {
+#                    'source' => 'interface',
+#                    'name' => 'bps'
+#                 },
+#                 'part' => 
+#                 {
+#                   'source' => 'field',
+#                   'name' => 'tx_bytes'
+#                 }
+#              'division',
+#                'dividend' =>
+#                {
+#                  'source' => 'field',
+#                  'name' => 'rx_bytes'
+#                },
+#                'divider' =>
+#                {
+#                  'source' => 'field',
+#                  'name' => 'rx_packets'
+#                }
+#              'sum',
+#                'sum' => [qw(nwid fragment crypt)]
+#
+#          }
+#    }
+# 'difference'    => difference types:
+#     count      - just count from last update
+#     per_secund - count from last update / time difference per last update
+# 'negative' => - if field under zero line
+#    {
+#      'type' => types:
+#        'dummy' - dummy field, not draw
+#          'value' => '' - value for dummy field in update
+#        'field' - exists field, must be included in graph
+#          'name' => '' - field name
+#    }
+# 'peack_protect' => protect peaks. Using munin field.max and field.min and truncate data to NaN
+#       protect types
+#        'max_interface_bps'     - maximum: max interface bps (if configured), minimum - zero
+#        'packet_size_range'     - maximum: mtu, minimum: minimal packet size (may be configured)
+#        'max_interface_pps'     - maximum: max interface bps/minimum packt size (if configured), minimum - zero
+#        'percents'              - maximum: 100, minimum: 0
+#        'min_number:max_number' - no comments :)
+my $fields =
+{
+  'collisions' =>
+  {
+    'munin' =>
+    {
+      'label' => 'Collisions'         ,
+      'info'  => 'Transmit collisions',
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/collisions'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'multicast' => 
+  {
+    'munin' =>
+    {
+     'type'  => 'GAUGE',
+     'draw'  => 'LINE1',
+     'label' => 'Multicast packets',
+     'info'  => 'Multicast packets received'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/multicast'
+    },
+    'negative' =>
+    {
+      'type'  => 'dummy',
+      'value' => 'NaN'
+    },
+    'difference'    => 'per_secund'
+  },
+  # --------------------------------------------------------------------------
+  'rx_bytes' => 
+  { 
+    'munin' =>
+    {
+     'type'  => 'GAUGE',
+     'draw'  => 'LINE1',
+     'label' => 'RX bytes',
+     'info'  => 'RX bytes'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/rx_bytes'
+    },
+    'peack_protect' => 'max_interface_bps',
+    'negative' =>
+    {
+      'type' => 'field',
+      'name' => 'tx_bytes'
+    },
+    'difference' => 'per_secund'
+  },
+  # --------------------------------------------------------------------------
+  'rx_compressed' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'RX compressed packets',
+      'info'  => 'Compressed packets',
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/rx_compressed'
+    },
+    'peack_protect' => 'max_interface_pps',
+    'negative' =>
+    {
+      'type' => 'field',
+      'name' => 'tx_compressed'
+    },
+    'difference' => 'per_secund'
+  },
+  # --------------------------------------------------------------------------
+  'rx_crc_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE', 
+      'draw'  => 'LINE1', 
+      'label' => 'CRC errors' , 
+      'info'  => 'CRC errors'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/rx_crc_errors'
+    },
+    'negative' =>
+    {
+      'type'  => 'dummy',
+      'value' => 'NaN'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'rx_dropped' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'RX dropped packets',
+      'info'  => 'Dropped frames'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/rx_dropped'
+    },
+    'negative' =>
+    {
+      'type' => 'field',
+      'name' => 'tx_dropped'
+    },
+    'difference' => 'per_secund'
+  },
+  # --------------------------------------------------------------------------
+  'rx_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'RX errors',
+      'info'  => 'Bad packets'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/rx_errors'
+    },
+    'negative' =>
+    {
+      'type' => 'field',
+      'name' => 'tx_errors'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'rx_fifo_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'RX FIFO errors',
+      'info'  => 'FIFO overrun errors'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/rx_fifo_errors'
+    },
+    'negative' =>
+    {
+      'type' => 'field',
+      'name' => 'tx_fifo_errors'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'rx_frame_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Frame format errors',
+      'info'  => 'Frame format errors'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/rx_frame_errors'
+    },
+    'negative' =>
+    {
+      'type'  => 'dummy',
+      'value' => 'NaN'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'rx_length_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Length errors',
+      'info'  => 'Length errors'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/rx_length_errors'
+    },
+    'negative' =>
+    {
+      'type'  => 'dummy',
+      'value' => 'NaN'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'rx_missed_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Missed packetss',
+      'info'  => 'Missed packets'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/rx_missed_errors'
+    },
+    'negative' =>
+    {
+      'type'  => 'dummy',
+      'value' => 'NaN'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'rx_over_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Overrun errors',
+      'info'  => 'Overrun errors'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/rx_over_errors'
+    },
+    'negative' =>
+    {
+      'type'  => 'dummy',
+      'value' => 'NaN'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'rx_packets' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'RX packets',
+      'info'  => 'RX packets'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/rx_packets'
+    },
+    'peack_protect' => 'max_interface_pps',
+    'negative' =>
+    {
+      'type' => 'field',
+      'name' => 'tx_packets'
+    },
+    'difference' => 'per_secund'
+  },
+  # --------------------------------------------------------------------------
+  'tx_aborted_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Aborted frames',
+      'info'  => 'Aborted frames'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/tx_aborted_errors'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'tx_bytes' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'TX bytes',
+      'info'  => 'TX bytes'
+    },
+    'source' =>
+    {
+      'type' => 'file',
+      'location' => $ifpath.'/:if:/statistics/tx_bytes'
+    },
+    'peack_protect'  => 'max_interface_bps',
+    'difference'     => 'per_secund'
+  },
+  # --------------------------------------------------------------------------
+  'tx_carrier_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Carrier errors',
+      'info'  => 'Carrier errors'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/tx_carrier_errors'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'tx_compressed' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'TX compressed packets',
+      'info'  => 'Compressed packets'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/tx_compressed'
+    },
+    'peack_protect' => 'max_interface_pps',
+    'difference'    => 'per_secund'
+  },
+  # --------------------------------------------------------------------------
+  'tx_dropped' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'TX dropped packets',
+      'info'  => 'Dropped frames'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/tx_dropped'
+    },
+    'difference' => 'per_secund'
+  },
+  # --------------------------------------------------------------------------
+  'tx_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'TX errors',
+      'info'  => 'Transmit problems'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/tx_errors'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'tx_fifo_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'TX FIFO errors',
+      'info'  => 'FIFO errors'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/tx_fifo_errors'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'tx_heartbeat_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Heartbeat errors',
+      'info'  => 'Heartbeat errors'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/tx_heartbeat_errors'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'tx_packets' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'TX packets',
+      'info'  => 'TX packets'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/tx_packets'
+    },
+    'peack_protect' => 'max_interface_pps',
+    'difference'    => 'per_secund'
+  },
+  # --------------------------------------------------------------------------
+  'tx_window_errors' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Window errors',
+      'info'  => 'Window errors'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/statistics/tx_window_errors'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'signal' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Signal level',
+      'info'  => 'WiFi signal level'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/wireless/level',
+      'prepare'  => ':data:=:data:-256'
+    },
+#    'cdef'  => '-256,+',
+    'peack_protect'  => '-256:0'
+  },
+  # --------------------------------------------------------------------------
+  'noise' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Noise level',
+      'info'  => 'WiFi noise level'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/wireless/noise',
+      'prepare'  => ':data:=:data:-256'
+    },
+#    'cdef'  => '-256,+',
+    'peack_protect' => '-256:0'
+  },
+  # --------------------------------------------------------------------------
+  'link' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Signal quality',
+      'info'  => 'WiFi signal quality'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/wireless/link'
+    },
+    'peack_protect' => 'percent'
+  },
+  # --------------------------------------------------------------------------
+  'rx_percent' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'RX Utilisation',
+      'info'  => 'RX utilisation'
+    },
+    'source' =>
+    {
+      'type' => 'calculated',
+      'calculated' =>
+      {
+        'type' => 'percent',
+        'full' => 
+        {
+          'source' => 'interface',
+          'name'   => 'bps'
+        },
+        'part' => 
+        {
+          'source' => 'field',
+          'name'   => 'rx_bytes'
+        }
+      }
+    },
+    'peack_protect' => 'percent',
+    'negative' =>
+    {
+      'type' => 'field',
+      'name' => 'tx_percent'
+    }
+  },
+  # --------------------------------------------------------------------------
+  'tx_percent' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'TX Utilisation',
+      'info'  => 'TX utilisation'
+    },
+    'source' =>
+    {
+      'type' => 'calculated',
+      'calculated' =>
+      {
+        'type' => 'percent',
+        'full' => 
+        {
+          'source' => 'interface',
+          'name'   => 'bps'
+        },
+        'part' => 
+        {
+          'source' => 'field',
+          'name'   => 'tx_bytes'
+        }
+      }
+    },
+    'peack_protect' => 'percent'
+  },
+  # --------------------------------------------------------------------------
+  'rx_size' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'RX packet size',
+      'info'  => 'Average RX packet size'
+    },
+    'source' =>
+    {
+      'type' => 'calculated',
+      'calculated' =>
+      {
+        'type' => 'division',
+        'dividend' =>
+        {
+          'source' => 'field',
+          'name'   => 'rx_bytes'
+        },
+        'divider' =>
+        {
+          'source' => 'field',
+          'name'   => 'rx_packets'
+        }
+      }
+    },
+    'peack_protect' => 'packet_size_range',
+    'negative' =>
+    {
+      'type' => 'field',
+      'name' => 'tx_size'
+    }
+  },
+  # --------------------------------------------------------------------------
+  'tx_size' =>
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'TX packet size',
+      'info'  => 'Average TX packet size'
+    },
+    'source' =>
+    {
+      'type' => 'calculated',
+      'calculated' =>
+      {
+        'type' => 'division',
+        'dividend' =>
+        {
+          'source' => 'field',
+          'name'   => 'tx_bytes'
+        },
+        'divider' =>
+        {
+          'source' => 'field',
+          'name'   => 'tx_packets'
+        }
+      }
+    },
+    'peack_protect' => 'packet_size_range'
+  },
+  # --------------------------------------------------------------------------
+  'retries' => 
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Max. retries reached',
+      'info'  => 'Max MAC retries num reached'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/wireless/retries'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'nwid' => 
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Wrong nwid/essid',
+      'info'  => 'Wrong nwid/essid'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/wireless/nwid'
+    },
+    'negative' =>
+    {
+      'type'  => 'dummy',
+      'value' => 'NaN'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'misc' => 
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Other',
+      'info'  => 'Others cases'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/wireless/misc'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'fragment' => 
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'MAC reassemby',
+      'info'  => 'Can\'t perform MAC reassembly'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/wireless/fragment'
+    },
+    'negative' =>
+    {
+      'type'  => 'dummy',
+      'value' => 'NaN'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'beacon' => 
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Missed beacons',
+      'info'  => 'Missed beacons/superframe'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/wireless/beacon'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'crypt' => 
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'Code/decode',
+      'info'  => 'Unable to code/decode (WEP)'
+    },
+    'source' =>
+    {
+      'type'     => 'file',
+      'location' => $ifpath.'/:if:/wireless/crypt'
+    },
+    'negative' =>
+    {
+      'type'  => 'dummy',
+      'value' => 'NaN'
+    },
+    'difference' => 'count'
+  },
+  # --------------------------------------------------------------------------
+  'rx_wifierr' => 
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'RX errors',
+      'info'  => 'Total RX Wifi Errors'
+    },
+    'source' =>
+    {
+      'type' => 'calculated',
+      'calculated' =>
+      {
+        'type' => 'sum',
+        'sum'  => [qw(nwid fragment crypt)]
+      }
+    },
+    'negative' =>
+    {
+      'type' => 'field',
+      'name' => 'tx_wifierr'
+    }
+  },
+  # --------------------------------------------------------------------------
+  'tx_wifierr' => 
+  {
+    'munin' =>
+    {
+      'type'  => 'GAUGE',
+      'draw'  => 'LINE1',
+      'label' => 'TX errors',
+      'info'  => 'Total TX Wifi errors'
+    },
+    'source' =>
+    {
+      'type' => 'calculated',
+      'calculated' =>
+      {
+        'type' => 'sum',
+        'sum'  => [qw(misc beacon retries)]
+      }
+    }
+  }
+};
+
+# ----------------- main ----------------
+
+need_multigraph();
+
+if (defined($ARGV[0]) and ($ARGV[0] eq 'autoconf')) 
+{
+  printf("%s\n", -e $ifpath ? "yes" : "no ($ifpath not exists)");
+  exit (0);
+}
+$interfaces = get_interfaces();
+if (defined($ARGV[0]) and ($ARGV[0] eq 'config')) 
+{
+  print_config();
+  exit (0);
+}
+print_values();
+exit(0);
+
+
+# ====================================== both config and values ===========================
+# ---------------  read sysfs file (one file - one value) --------------
+sub get_file_content
+{
+  my $file = $_[0];
+  return 'NaN' if (-z $file);
+  open (FH, '<', $file) or die "$! $file \n";
+  my $content = <FH>;
+  close (FH);
+  chomp $content;
+  #print "$content\n";
+  return trim($content);
+}
+
+# ------------------ build interface list and his options -------------------------
+sub get_interfaces
+{
+  my $interfaces;
+  my $ifdir = IO::Dir->new($ifpath);
+  if(defined $ifdir)
+  {
+    my $if;
+    while (defined ($if = $ifdir->read))
+    {
+      next if $if =~ m/\./;
+      unless($if =~ m/$include/)
+      {
+       next unless get_file_content(sprintf("%s/%s/operstate", $ifpath, $if)) =~ m/(up|unknown)/;
+       next if $exclude =~ m/$if/;
+      }
+      my $mtufile = sprintf("%s/%s/mtu", $ifpath, $if);
+      if(-e $mtufile)
+      {
+        $interfaces->{$if}{'mtu'} = get_file_content($mtufile);
+      }
+      my $bps = $ENV{"${if}_max_bps"} || undef;
+      if(defined($bps))
+      {
+        my ($num, $suff) = $bps =~ /(\d+)(\w)/;
+        if   ($suff eq 'k') { $bps = $num * 1000 / 8; }
+        elsif($suff eq 'M') { $bps = $num * 1000 * 1000 / 8; }
+        elsif($suff eq 'G') { $bps = $num * 1000 * 1000 * 1000 / 8; }
+        $interfaces->{$if}{'bps'} = $bps;
+      }
+      if (-e sprintf("/sys/devices/virtual/net/%s", $if)) { $interfaces->{$if}{'virtual'} = 1; }
+      $interfaces->{$if}{'name'} = exists($interfaces->{$if}{'virtual'}) ? sprintf("~%s", $if) : $if;
+    }
+    my ($maxlen, $tl) = (0, 0);
+    for (keys %{$interfaces}) { $tl = length($interfaces->{$_}{'name'}); $maxlen = $tl if $tl > $maxlen;  }
+    for (keys %{$interfaces}) { $interfaces->{$_}{'name'} = sprintf("[%${maxlen}s]", $interfaces->{$_}{'name'}); }
+  }
+  else { die "$ifpath not exists\n"; }
+  
+  return $interfaces;
+}
+
+# ----------------------- trim whitespace at begin and end of string ------------
+sub trim
+{
+  my($string)=@_;
+  for ($string) { s/^\s+//; s/\s+$//; }
+  return $string;
+}
+
+# ------------------------ replacing :if: from strings to need value ----------------------
+sub replace_if_template
+{
+  my ($string, $replacement) = @_[0..1];
+  $string =~ s/:if:/$replacement/g;
+  return $string;
+}
+
+# --------------------------- calculating range values for peack_protect --------------------------
+sub get_peak_range
+{
+  my ($field, $if) = @_[0..1];
+  my $range = {};
+  return $range unless defined($fields->{$field}{'peack_protect'});
+  # percent
+  if ($fields->{$field}{'peack_protect'} eq 'percent')
+  {
+    $range->{'max'} = 100;
+    $range->{'min'} = 0;
+  }
+  # numbers
+  elsif ($fields->{$field}{'peack_protect'} =~ m/[-\d]+:[-\d]+/)
+  {
+    my @r = split(/:/, $fields->{$field}{'peack_protect'});
+    $range->{'max'} = $r[1];
+    $range->{'min'} = $r[0];
+  }
+  # bytes per sec
+  elsif($fields->{$field}{'peack_protect'} eq 'max_interface_bps' and defined ($interfaces->{$if}{'bps'}))
+  {
+    $range->{'max'} = $interfaces->{$if}{'bps'};
+    $range->{'min'} = 0;
+  }
+  # packets per sec 
+  elsif($fields->{$field}{'peack_protect'} eq 'max_interface_pps' and defined ($interfaces->{$if}{'bps'}))
+  {
+    $range->{'max'} = $interfaces->{$if}{'bps'}/$min_packet_size;
+    $range->{'min'} = 0;
+  }
+  # packets size range
+  elsif($fields->{$field}{'peack_protect'} eq 'packet_size_range' and defined ($interfaces->{$if}{'mtu'}))
+  {
+    $range->{'max'} = $interfaces->{$if}{'mtu'};
+    $range->{'min'} = $min_packet_size;
+  }
+  return $range;
+}
+
+
+# ----------------------------- checking avialability of fields -------------------------
+sub check_field_avialability
+{
+  my ($if, $field) = @_[0..1];
+  unless(exists($fields->{$field}{'avialable'}{$if}))
+  {
+    # -------------------- file ----------------
+    if($fields->{$field}{'source'}{'type'} eq 'file')
+    {
+      my $file = $fields->{$field}{'source'}{'location'};
+      $file =~ s/:if:/$if/g;
+      $fields->{$field}{'avialable'}{$if} = 1 if (-e $file);
+    }
+    #---------------------------- calculated ----------------
+    elsif ($fields->{$field}{'source'}{'type'} eq 'calculated')
+    {
+      #------------------------------ percent ------------------------
+      if($fields->{$field}{'source'}{'calculated'}{'type'} eq 'percent')
+      {
+        my %avialable;
+        for my $a ('full', 'part')
+        {
+          if($fields->{$field}{'source'}{'calculated'}{$a}{'source'} eq 'interface')
+          {
+            $avialable{$a} = exists($interfaces->{$if}{$fields->{$field}{'source'}{'calculated'}{$a}{'name'}});
+          }
+          elsif($fields->{$field}{'source'}{'calculated'}{$a}{'source'} eq 'field')
+          {
+            $avialable{$a} = check_field_avialability($if, $fields->{$field}{'source'}{'calculated'}{$a}{'name'});
+          }
+        }
+        $fields->{$field}{'avialable'}{$if} = ($avialable{'full'} and $avialable{'part'});
+      }
+      #------------------------------ division ------------------------
+      elsif($fields->{$field}{'source'}{'calculated'}{'type'} eq 'division')
+      {
+        my %avialable;
+        for my $a ('dividend', 'divider')
+        {
+          if($fields->{$field}{'source'}{'calculated'}{$a}{'source'} eq 'interface')
+          {
+            $avialable{$a} = exists($interfaces->{$if}{$fields->{$field}{'source'}{'calculated'}{$a}{'name'}});
+          }
+          elsif($fields->{$field}{'source'}{'calculated'}{$a}{'source'} eq 'field')
+          {
+            $avialable{$a} = check_field_avialability($if, $fields->{$field}{'source'}{'calculated'}{$a}{'name'});
+          }
+        }
+        $fields->{$field}{'avialable'}{$if} = ($avialable{'dividend'} and $avialable{'divider'});
+      }
+      #------------------------------ sum ------------------------
+      elsif($fields->{$field}{'source'}{'calculated'}{'type'} eq 'sum')
+      {
+        my $count = 0;
+        for my $a (@{$fields->{$field}{'source'}{'calculated'}{'sum'}})
+        {
+          $count++ if (check_field_avialability($if, $a));
+        }
+        $fields->{$field}{'avialable'}{$if} = ($count == scalar(@{$fields->{$field}{'source'}{'calculated'}{'sum'}}));
+      }
+    }
+  }
+  return $fields->{$field}{'avialable'}{$if};
+}
+
+
+# ==================================  config-only ==============================
+# --------------- concatenate field names ------------------
+sub concat_names
+{
+  my ($f1, $f2, $if) = @_[0..2];
+  my $name = $f1;
+  if ($f1 ne $f2)
+  {
+    my @a = split(' ', $f1);
+    my @b = split(' ', $f2);
+    my ($t, $ra, $rb) = ('','','');
+    for (my $i = scalar(@a) - 1; $i >= 0; $i--)
+    {
+      #printf("%s %s\n", $a[$i], $b[$i]);
+      if   ($a[$i] eq $b[$i]) { $t = sprintf("%s %s", $a[$i], $t); }
+      else { $ra = sprintf("%s %s", $a[$i], $ra); $rb = sprintf("%s %s", $b[$i], $rb); }
+    }
+    $name = trim(sprintf("%s/%s %s", trim($ra), trim($rb), trim($t)));
+  }
+  if (exists($interfaces->{$if}))
+  {
+    $name = sprintf ("%s %s", $interfaces->{$if}{'name'}, $name);
+  }
+  return $name;
+}
+
+# --------------------------- generating graph field ----------------------
+sub generate_field
+{
+  my ($config, $graph_name, $field, $if, $is_general_graph) = @_[0..4];
+  return '' unless(check_field_avialability($if, $field));
+  my $field_graph_name = $is_general_graph ? sprintf("%s_%s", $if, $field) : $field;
+  for my $option (keys %{$fields->{$field}{'munin'}}) 
+  {
+    next if exists($config->{$graph_name}{'fields'}{$field_graph_name}{$option});
+    $config->{$graph_name}{'fields'}{$field_graph_name}{$option} = replace_if_template($fields->{$field}{'munin'}{$option}, $interfaces->{$if}{'name'}); 
+  }
+  if(exists($fields->{$field}{'cdef'}))
+  {
+    $config->{$graph_name}{'fields'}{$field_graph_name}{'cdef'} = sprintf("%s,%s", $field_graph_name, $fields->{$field}{'cdef'});
+  }
+  if(exists($fields->{$field}{'negative'}))
+  {
+    my ($up_field_name, $down_field_name) = ('', $field_graph_name);
+    my ($up_field, $down_field) = ('', $field);
+    if($fields->{$down_field}{'negative'}{'type'} eq 'field')
+    {
+      $up_field = $fields->{$down_field}{'negative'}{'name'};
+      $up_field_name = $is_general_graph ? sprintf("%s_%s", $if, $up_field) : $up_field;
+      $config->{$graph_name}{'fields'}{$up_field_name}{'label'} = 
+        concat_names($fields->{$down_field}{'munin'}{'label'}, $fields->{$up_field}{'munin'}{'label'}, $is_general_graph ? $if : '');
+    }
+    elsif($fields->{$down_field}{'negative'}{'type'} eq 'dummy')
+    {
+      $up_field_name = $is_general_graph ? sprintf("%s_%s_dummy", $if, $down_field) : sprintf("%s_dummy", $down_field);
+      $config->{$graph_name}{'fields'}{$up_field_name}{'label'} = 
+        concat_names($fields->{$down_field}{'munin'}{'label'}, $fields->{$down_field}{'munin'}{'label'}, $is_general_graph ? $if : '');
+      $config->{$graph_name}{'fields'}{$up_field_name}{'info'} = $fields->{$down_field}{'munin'}{'info'};
+    }
+    $config->{$graph_name}{'fields'}{$up_field_name}{'negative'} = $down_field_name;
+    $config->{$graph_name}{'fields'}{$down_field_name}{'graph'} = 'no';
+    $config->{$graph_name}{'fields'}{$down_field_name}{'label'} = 'none';
+  }
+  # Fix field label on general graphs
+  if ($is_general_graph and not $config->{$graph_name}{'fields'}{$field_graph_name}{'label'} =~ m/$if/)
+  {
+    $config->{$graph_name}{'fields'}{$field_graph_name}{'label'} = sprintf ("%s %s", $interfaces->{$if}{'name'}, $fields->{$field}{'munin'}{'label'});
+  }
+  # do peaks protect
+  if($protect_peacks ne 'no' and exists($fields->{$field}{'peack_protect'}))
+  {
+    my $range = get_peak_range($field, $if);
+    for my $a (qw(min max))
+    {
+      if (exists($range->{$a}))
+      {
+        $config->{$graph_name}{'fields'}{$field_graph_name}{$a} = $range->{$a};
+      }
+    }
+  }
+  return $field_graph_name;
+}
+
+# ------------------------------- generating graph ----------------------------
+sub generate_graph
+{
+  my ($config, $graph, $if, $is_general_graph) = @_[0..4];
+  my @order = ();
+  my $graph_name = $is_general_graph ? $graph : sprintf("%s.%s", $graph, $if);
+  if($is_general_graph)
+  {
+    for my $field (@{$graphs->{$graph}{'general_fields'}})
+    {
+      for my $general_if (keys %{$interfaces}) 
+      {
+        my $res_field = generate_field($config, $graph_name, $field, $general_if, 1);
+        push(@order, $res_field) if $res_field ne '';
+      }
+    }
+  }
+  else
+  {
+    for my $field (@{$graphs->{$graph}{'per_if_fields'}})
+    {
+      my $res_field = generate_field($config, $graph_name, $field, $if, 0);
+      push(@order, $res_field) if $res_field ne '';
+    }
+  }
+  if(scalar(@order) > 0)
+  {
+    for my $option (keys %{$graphs->{$graph}{'munin'}}) 
+    {
+      $config->{$graph_name}{'graph'}{$option} = replace_if_template($graphs->{$graph}{'munin'}{$option}, $is_general_graph ? 'All interfaces' : $interfaces->{$if}{'name'}); 
+    }
+    $config->{$graph_name}{'graph'}{'order'} = join(' ', @order); # if scalar(@order) > 1;
+    unless($is_general_graph)
+    {
+      $config->{$graph_name}{'graph'}{'category'} = $if;
+    }
+  }
+}
+
+# ------------------------ generate general and per-interface graphs ------------------------------
+sub generate_graphs
+{
+  my ($config, $graph) = @_[0..1];
+  generate_graph($config, $graph, '', 1);
+  for my $if (keys %{$interfaces}) 
+  {
+    generate_graph($config, $graph, $if, 0);
+  }
+}
+
+# ---------------------------------------------------------- config ------------------------------------------------------
+sub print_config
+{
+  my $config = {};
+  my $graph;
+  for $graph (keys %{$graphs}) { generate_graphs($config, $graph); }
+  #-------------------- print ---------------
+  for $graph (sort  keys %{$config})
+  {
+    printf ("multigraph %s\n", $graph);
+    for my $option (sort keys %{$config->{$graph}{'graph'}})
+    {
+      printf ("graph_%s %s\n", $option, $config->{$graph}{'graph'}{$option});
+    }
+    for my $field (sort keys %{$config->{$graph}{'fields'}})
+    {
+      for my $type (sort keys %{$config->{$graph}{'fields'}{$field}})
+      {
+        printf ("%s.%s %s\n", $field, $type, $config->{$graph}{'fields'}{$field}{$type});
+      }
+    }
+    print "\n";
+  }
+}
+
+# ===========================================  values ==========================================================
+# ------------------------------- calculate percent --------------------------
+sub percent
+{
+  my ($full, $current) = @_[0..1];
+  return $current/($full/100);
+}
+
+# ----------------------------------- saving state data using munin --------------------
+sub save_state_data
+{
+  my $data = $_[0];
+  my $d = Data::Dumper->new([$data]);
+  $d->Indent(0);
+  save_state($d->Dump);
+}
+
+# -------------------------------- loading previous state data using munin -------------------
+sub restore_state_data
+{
+  my $VAR1;
+  my $states = (restore_state())[0];
+  eval $states if defined $states;
+  return $VAR1;
+}
+
+# -------------------- protect field data from under zero value (for example prev tx_bytes = 10000, interface reset, current tx_bytes = 100, 100-1000=-900)
+sub underzero_protect
+{
+  my ($a, $b) = @_[0..1];
+  return $a > $b ? $b : $b - $a;
+}
+
+# ------------------- calculating difference from last stored data ---------------------------------
+sub calc_diff
+{
+  my ($raw_data, $raw_prev_data, $if, $field) = @_[0..4];
+  return $raw_data->{$if}{$field} unless (exists($fields->{$field}{'difference'}) and defined($raw_prev_data));
+  if    ($fields->{$field}{'difference'} eq 'count'     ) { return underzero_protect($raw_prev_data->{$if}{$field}, $raw_data->{$if}{$field}); }
+  elsif ($fields->{$field}{'difference'} eq 'per_secund') { return underzero_protect($raw_prev_data->{$if}{$field}, $raw_data->{$if}{$field}) / ($raw_data->{'timestamp'} - $raw_prev_data->{'timestamp'}); }
+}
+
+# ---------------------- protecting values from peaks ------------------------
+sub protect_data_peak
+{
+  my ($field, $if, $value) = @_[0..2];
+  my $range = get_peak_range($field, $if);
+  return $value if (
+                     $protect_peacks ne 'no'    or
+                     (
+                      $value ne 'NaN'           and
+                      exists($range->{'max'})   and
+                      $value <= $range->{'max'} and
+                      $value >= $range->{'min'}
+                     )
+                   );
+  return 'NaN';
+}
+
+# --------------------------------- loading or calculating fields values ----------------------------
+sub get_field_data
+{
+  my ($data, $raw_data, $raw_prev_data, $if, $field) = @_[0..4];
+  unless (exists($data->{$if}{$field}))
+  {
+    # ----------------------------  file source ------------------------------------------------------------
+    if($fields->{$field}{'source'}{'type'} eq 'file' and not exists($raw_data->{$if}{$field}))
+    {
+      $raw_data->{$if}{$field} = get_file_content(replace_if_template($fields->{$field}{'source'}{'location'}, $if));
+      $data->{$if}{$field} = calc_diff($raw_data, $raw_prev_data, $if, $field);
+    }
+    # ----------------------------  calculated source ------------------------------------------------------------
+    elsif($fields->{$field}{'source'}{'type'} eq 'calculated')
+    {
+      # -------------------------------- percent ---------------------------
+      if($fields->{$field}{'source'}{'calculated'}{'type'} eq 'percent')
+      {
+        my $percents = {};
+        for my $pf (qw(full part))
+        {
+          if ($fields->{$field}{'source'}{'calculated'}{$pf}{'source'} eq 'interface')
+          {
+            $percents->{$pf} = $interfaces->{$if}{$fields->{$field}{'source'}{'calculated'}{$pf}{'name'}};
+          }
+          elsif ($fields->{$field}{'source'}{'calculated'}{$pf}{'source'} eq 'field')
+          {
+            $percents->{$pf} = get_field_data($data, $raw_data, $raw_prev_data, $if, $fields->{$field}{'source'}{'calculated'}{$pf}{'name'});
+          }
+        }
+        $data->{$if}{$field} = percent($percents->{'full'}, $percents->{'part'});
+      }
+      # -------------------------------- division ---------------------------
+      if($fields->{$field}{'source'}{'calculated'}{'type'} eq 'division')
+      {
+        my $division = {};
+        for my $df (qw(dividend divider))
+        {
+          if ($fields->{$field}{'source'}{'calculated'}{$df}{'source'} eq 'interface')
+          {
+            $division->{$df} = $interfaces->{$if}{$fields->{$field}{'source'}{'calculated'}{$df}{'name'}};
+          }
+          elsif ($fields->{$field}{'source'}{'calculated'}{$df}{'source'} eq 'field')
+          {
+            $division->{$df} = get_field_data($data, $raw_data, $raw_prev_data, $if, $fields->{$field}{'source'}{'calculated'}{$df}{'name'});
+          }
+        }
+        $data->{$if}{$field} = $division->{'divider'} != 0 ? $division->{'dividend'}/$division->{'divider'} : 'NaN';
+      }
+      # -------------------------------- sum ---------------------------
+      if($fields->{$field}{'source'}{'calculated'}{'type'} eq 'sum')
+      {
+        my $sum = 0;
+        for my $s (@{$fields->{$field}{'source'}{'calculated'}{'sum'}})
+        {
+          $sum += get_field_data($data, $raw_data, $raw_prev_data, $if, $s);
+        }
+        $data->{$if}{$field} = $sum;
+      }
+    }
+    if(exists($fields->{$field}{'source'}{'prepare'}))
+    {
+      my $eval = $fields->{$field}{'source'}{'prepare'};
+      $eval =~ s/:data:/\$data->{\$if}{\$field}/g;
+      eval $eval;
+    }
+    $data->{$if}{$field} = protect_data_peak($field, $if, $data->{$if}{$field});
+  }
+  return $data->{$if}{$field};
+}
+
+# ------------------------- preparing value for print ----------------------------
+sub prepare_value
+{
+  my ($values, $field, $field_name, $graph_name, $if, $data, $raw_data, $raw_prev_data) = @_[0..7];
+  if(check_field_avialability($if, $field))
+  {
+    $values->{$graph_name}{$field_name} = get_field_data($data, $raw_data, $raw_prev_data, $if, $field);
+    if(exists($fields->{$field}{'negative'}) and $fields->{$field}{'negative'}{'type'} eq 'dummy')
+    {
+      $values->{$graph_name}{$field_name.'_dummy'} = $fields->{$field}{'negative'}{'value'};
+    }
+  }
+}
+
+# --------------------------------- print field.value value for every graph ----------------------
+sub print_values
+{
+  my $data     = {};
+  my $raw_data = {};
+  my $raw_prev_data = restore_state_data();
+  my $values   = {};
+  $raw_data->{'timestamp'} = time();
+  for my $graph (keys %{$graphs})                                                                                     {
+    for my $field (@{$graphs->{$graph}{'general_fields'}})                                                          {
+      for my $if (keys %{$interfaces})                                                                            {
+        prepare_value($values, $field, sprintf("%s_%s", $if, $field), $graph, $if, $data, $raw_data, $raw_prev_data); } } }
+  for my $if (keys %{$interfaces}) 
+  {
+    for my $graph (keys %{$graphs}) 
+    {
+        my $graph_name = sprintf("%s.%s", $graph, $if);
+        for my $field (@{$graphs->{$graph}{'per_if_fields'}})
+        {
+          prepare_value($values, $field, $field, $graph_name, $if, $data, $raw_data, $raw_prev_data);
+        }
+    }
+  }
+  save_state_data($raw_data);
+  exit (0) unless defined ($raw_prev_data); # first update need just for collect and save data
+  # ------------------------ print ------------------------
+  for my $graph (sort (keys %{$values}))
+  {
+    printf ("multigraph %s\n", $graph);
+    for my $field (sort keys %{$values->{$graph}})
+    {
+      printf("%s.value %s\n", $field, $values->{$graph}{$field});
+    }
+    print "\n";
+  }
+}

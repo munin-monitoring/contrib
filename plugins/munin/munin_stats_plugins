@@ -1,0 +1,174 @@
+#!/usr/bin/env perl
+use 5.010;
+use strict;
+use warnings;
+use autodie;
+use Munin::Plugin;
+use File::Temp qw(tempdir tempfile);
+use Time::HiRes qw(gettimeofday tv_interval);
+use File::Spec::Functions qw(catfile);
+use File::Basename qw(basename);
+
+=head1 NAME
+
+munin_stats_plugins - Report the time it takes to run all munin plugins
+
+=head1 SYNOPSIS
+
+In F</etc/munin/plugin-conf.d/munin-node>, because we invoke plugins
+with munin-run, some of which may need root privileges:
+
+    [munin_stats_plugins]
+    user root
+
+Put this in cron somewhere:
+
+    # Refresh the statistics
+    MUNIN_STATS_PLUGINS_RELOAD=1 munin-run munin_stats_plugins
+
+E.g.:
+
+    40 4  * * * root MUNIN_STATS_PLUGINS_RELOAD=1 munin-run munin_stats_plugins
+
+Then run it:
+
+    # Get the statistics
+    munin-run munin_stats_plugins
+
+=head1 DESCRIPTION
+
+Runs all the munin plugins in F</etc/munin/plugins> and reports the
+time it takes to run each one with C<system> and L<Time::HiRes>. Since
+running all the plugins again on each munin-update run would lead to
+epic recursive failure, you have to reload the statistics database
+yourself by reloading it in cron somewhere.
+
+=head1 AUTHOR
+
+E<AElig>var ArnfjE<ouml>rE<eth> Bjarmason <avar@cpan.org>
+
+=head1 LICENSE
+
+This program is in the public domain.
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+my $statedir  = $ENV{MUNIN_PLUGSTATE};
+my $statefile = $0; $statefile =~ s[^.*/][];
+my $cache = catfile($statedir, $statefile . '-cache');
+my $cache_tmp = "$cache.tmp";
+
+my @plugins = parse_plugin_time($cache);
+
+# We should reload our data
+if (not $ARGV[0] and $ENV{MUNIN_STATS_PLUGINS_RELOAD}) {
+    $ARGV[0] = 'reload';
+}
+
+given ($ARGV[0]) {
+    when ("reload") {
+        # Plugin names
+        my @plugs = plugin_names();
+
+        # Run all the plugins
+        my $time = plugin_times(@plugs);
+
+        write_plugin_times($cache_tmp, $cache, $time);
+    }
+    when ("config") {
+        print <<END;
+graph_title Munin plugin processing time
+graph_scale yes
+graph_vlabel seconds
+graph_category munin
+graph_info Shows the processing time of munin plugins in seconds
+END
+        for my $plugin (@plugins) {
+            my ($time, $name) = @$plugin;
+            my $fieldname = clean_fieldname($name);
+            print <<END;
+$fieldname.label $name
+$fieldname.info The processing time of $name
+$fieldname.draw AREASTACK
+END
+        }
+    }
+    default {
+        for my $plugin (@plugins) {
+            my ($time, $name) = @$plugin;
+            my $fieldname = clean_fieldname($name);
+            print <<END;
+$fieldname.value $time
+END
+        }
+    }
+}
+
+sub slurp {
+    do {
+        local (@ARGV, $/) = shift;
+        scalar <>;
+    };
+}
+
+sub parse_plugin_time
+{
+    my ($file) = @_;
+
+    my $cont = slurp($file);
+
+    my @plugins;
+    while ($cont =~ /^ (?<time>[\d.]+) \s+ (?<plugin>.*) $/mgx) {
+        push @plugins => [ $+{time} => $+{plugin} ];
+    }
+
+    # Sort by size
+    @plugins = sort { $b->[0] <=> $a->[0] } @plugins;
+
+    @plugins;
+}
+
+sub plugin_names {
+    map { basename $_ } grep { -x } glob "/etc/munin/plugins/*";
+}
+
+sub plugin_times {
+    my (@p) = @_;
+    my %time;
+
+    my $dir = tempdir("munin-stats-plugins-XXXX", CLEANUP => 1, TMPDIR => 1);
+
+    for my $plugin (@p) {
+        my ($fh, $file) = tempfile(DIR => $dir);
+        my $t0 = [gettimeofday];
+        if (system qq[MUNIN_STATS_PLUGINS_RELOAD=0 munin-run "$plugin" >"$file" 2>&1]) {
+            my $cont = slurp($file);
+            die "munin-run: Failed to run plugin $plugin: $?, output: $cont";
+        }
+        my $t1 = [gettimeofday];
+
+        my $elapsed = tv_interval($t0, $t1);
+        $time{$plugin} = sprintf "%0.2f", $elapsed;
+    }
+
+    return \%time;
+}
+
+sub write_plugin_times {
+    my ($tmp, $real, $time) = @_;
+
+    # Write out the runtimes to a tempfile
+    open my $fh, ">", $cache_tmp;
+    while (my ($p, $t) = each %$time) {
+        say $fh "$t $p";
+    }
+    close $fh;
+
+    # Rename the temp to the real thing. If we wrote it to begin
+    # with we might have a race condition.
+    rename $cache_tmp, $cache;
+}

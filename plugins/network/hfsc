@@ -1,0 +1,154 @@
+#!/bin/sh
+#
+# Munin plugin for HFSC Traffic Shaping Statistics
+#
+# It shows the general statistic graph of a used net bandwidth per a user.
+#
+# This plugin was tailored to the HFSC solution
+# presented at http://www.elessar.one.pl/article_kernel2.6.php
+#
+# You can find the plugin description and the installation notes here:
+# http://www.elessar.one.pl/article_munin.php
+#
+###
+# Written by Rafal Rajs 
+# Date: 2007/06/19
+# Email: elessar1@poczta.wp.pl
+# WWW: http://www.elessar.one.pl
+###
+
+#path to the file with global defs
+. /etc/scripts/globals
+
+
+# imported from HFSC script
+# set class numbers
+
+N_CLASS_D_1=70
+N_CLASS_D_2=100
+N_CLASS_U_1=130
+N_CLASS_U_2=160
+SH_TMP="/etc/scripts/tmp.txt"
+
+if [ "$1" = "config" ]; then
+
+        echo "graph_title HFSC Traffic Shaping Stats"
+        echo 'graph_vlabel bytes per ${graph_period}'
+	echo 'graph_category network'
+
+	j=1
+
+	while [ $j -le $L_USERS ]
+	do
+	        echo "${USERNAMES[${j}]}.label ${USERNAMES[${j}]}"
+	        echo "${USERNAMES[${j}]}.type COUNTER"
+
+		if [ $j == 1 ]; then
+		        echo "${USERNAMES[${j}]}.draw AREA"
+		else
+		        echo "${USERNAMES[${j}]}.draw STACK"
+		fi;
+
+	        echo "${USERNAMES[${j}]}.info Stats for ${USERNAMES[${j}]} - ${USER_IP[${j}]}"
+	        echo "${USERNAMES[${j}]}.min 0"
+	        echo "${USERNAMES[${j}]}.max 130000"
+
+		j=$[$j+1]
+
+	done;
+
+#customized colours
+	echo 'Serwer.colour 000000'
+
+        exit 0
+
+fi;
+
+#### DOWNLOAD
+
+temp1=`/sbin/tc -s class show dev imq0 > $SH_TMP`
+
+
+while read line
+do
+	test_hfsc=`echo $line | grep "hfsc"`
+
+	j=1
+
+        while [ $j -le $L_USERS ]
+        do
+		case $test_hfsc in
+
+		*hfsc[\ ]1:$[$N_CLASS_D_1+$j]*)
+		# check  N_CLASS_D_1 stats for every user
+			read line
+			temp1=`echo $line | awk '{ print $2; }'`
+			STAT_USER[$j]=$[${STAT_USER[$j]}+$temp1]
+#			echo "N_CLASS_D_1="$temp1
+#			echo "N_CLASS_D_1_SUM "$j" ="${STAT_USER[$j]}
+		;;
+		*hfsc[\ ]1:$[$N_CLASS_D_2+$j]*)
+		# check  N_CLASS_D_2 stats for every user
+			read line
+			temp1=`echo $line | awk '{ print $2; }'`
+			STAT_USER[$j]=$[${STAT_USER[$j]}+$temp1]
+#			echo "N_CLASS_D_2="$temp1
+#			echo "N_CLASS_D_2_SUM "$j" ="${STAT_USER[$j]}
+		;;
+		esac
+
+                j=$[$j+1]
+
+        done;
+
+done < $SH_TMP
+
+#### UPLOAD
+
+temp1=`/sbin/tc -s class show dev imq1 > $SH_TMP`
+
+
+while read line
+do
+	test_hfsc=`echo $line | grep "hfsc"`
+
+	j=1
+
+        while [ $j -le $L_USERS ]
+        do
+		case $test_hfsc in
+
+		*hfsc[\ ]1:$[$N_CLASS_U_1+$j]*)
+		# check  N_CLASS_U_1 stats for every user
+			read line
+			temp1=`echo $line | awk '{ print $2; }'`
+			STAT_USER[$j]=$[${STAT_USER[$j]}+$temp1]
+#			echo "N_CLASS_U_1="$temp1
+#			echo "N_CLASS_U_1_SUM "$j" ="${STAT_USER[$j]}
+		;;
+		*hfsc[\ ]1:$[$N_CLASS_U_2+$j]*)
+		# check  N_CLASS_U_2 stats for every user
+			read line
+			temp1=`echo $line | awk '{ print $2; }'`
+			STAT_USER[$j]=$[${STAT_USER[$j]}+$temp1]
+#			echo "N_CLASS_U_2="$temp1
+#			echo "N_CLASS_U_2_SUM "$j" ="${STAT_USER[$j]}
+		;;
+		esac
+
+                j=$[$j+1]
+
+        done;
+
+done < $SH_TMP
+
+j=1
+while [ $j -le $L_USERS ]
+do
+	echo ${USERNAMES[${j}]}".value "${STAT_USER[$j]}
+	j=$[$j+1]
+done;
+
+
+## clean temp file
+temp1=`echo "" > $SH_TMP`

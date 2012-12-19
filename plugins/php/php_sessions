@@ -1,0 +1,72 @@
+#!/bin/sh
+#
+# Copyright (C) 2006-2008 Benjamin Schweizer. All rights reserved.
+#
+#
+# Abstract
+# ~~~~~~~~
+# munin plugin that logs active apache sessions
+#
+# Authors
+# ~~~~~~~
+# Benjamin Schweizer <code at benjamin-schweizer dot de>
+# Ronan Guilloux <ronan at coolforest dot net>
+# Andras Kemeny <subpardaemon at gmail dot com>
+
+# Copy this to your node's config file (default: plugin-conf.d/munin-node):
+#  [php_sessions]
+#  user root
+#  env.sessiondir /var/lib/php/session
+#
+# Modify env.sessiondir to match your system's setting. This should be fine
+# on most systems.
+#
+# Changes
+# ~~~~~~~
+# 2011-02-13, subpardaemon: add env.sessiondir, make sure find uses
+#                           the given path (it hadn't before)
+# 2011-01-01, guilloux : find commands & plugin conf improvements
+# 2008-10-15, schweizer: added active sessions
+# 2008-10-10, schweizer: forked from munin_squid_efficiency
+# 2006-10-11, schweizer: initial release.
+#
+# Todo
+# ~~~~
+# - we'll see
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+SESSDIR=${sessiondir:-"/var/lib/php/session"}
+
+if [ "$1" = "autoconf" ]; then
+    test -d "$SESSDIR" > /dev/null 2>&1
+        if [ $? ]; then
+                echo yes
+                exit 0
+        else
+                echo "no (session directory not found)"
+                exit 1
+        fi
+fi
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title Apache/PHP Sessions'
+        echo 'graph_info This graph shows active Apache/PHP sessions.'
+        echo 'graph_category apache'
+        echo "graph_args --lower-limit 0"
+        echo 'graph_vlabel n'
+
+        echo 'sessions.label total sessions'
+        echo 'asessions.label active sessions'
+
+        exit 0
+fi
+
+ACTIVE_SESSIONS_NUM=`find $SESSDIR/ -type f -iname "sess_*" -amin -5 | wc -l`
+TOTAL_SESSIONS_NUM=`find $SESSDIR/ -type f -iname "sess_*" | wc -l`
+
+echo "sessions.value ${TOTAL_SESSIONS_NUM}"
+echo "asessions.value ${ACTIVE_SESSIONS_NUM}"
+
+# eof.

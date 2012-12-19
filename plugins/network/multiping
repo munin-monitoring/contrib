@@ -1,0 +1,102 @@
+#!/usr/bin/perl -w
+#
+# Copyright (C) 2008 Thomas Gutzler (thomas.gutzler@gmail.com)
+# original shell script by Jimmy Olsen
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+#
+# Plugin to monitor ping times
+#
+# Parameters:
+#
+# 	ping_args      - Arguments to ping (default "-c 2 -w 1")
+# 	ping_args2     - Arguments after the host name (required for Solaris)
+# 	ping           - Ping program to use
+# 	hosts          - List of comma-separated hosts to ping (IP address or FQDN)
+# 	names          - Friendly display name of each host given in the "hosts" parameter (comma-separated list).
+# 	                 If not set, "hosts" elements will be used
+#
+# Arguments for Solaris:
+#      ping_args      -s
+#      ping_args2     56 2
+#
+# Tips for very fast ping replies
+#   (thanks to Alex Davies and Nicolai Langfeldt):
+# Apparently, old versions of munin can't handle scientific notation of values
+# so, if you're getting replies like this from your node:
+# site1.value 5.2e-05
+# and your graph looks like a flat line, remove the -o argument from graph_args
+#
+# Configuration example
+# [multiping]
+# env.hosts www.google.com,www.yahoo.com
+# env.names Google,Yahoo
+# env.ping_args -A -c 5 -w 2
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+
+my @hosts = exists $ENV{hosts} ? split(/,/, $ENV{hosts}) : 'www.google.com.au';
+my @names = exists $ENV{names} ? split(/,/, $ENV{names}) : @hosts;
+my $ping_cmd = exists $ENV{ping} ? $ENV{ping} : 'ping';
+my $ping_args = exists $ENV{ping_args} ? $ENV{ping_args} : '-c 2 -w 1';
+my $ping_args2 = exists $ENV{ping_args2} ? $ENV{ping_args2} : '';
+
+if ($#hosts != $#names) {
+	print "unequal amount of hosts and names\n";
+	exit 1;
+}
+
+if ((exists $ARGV[0]) && ($ARGV[0] eq "autoconf")) {
+	my @ping = `$ping_cmd $ping_args $hosts[0] $ping_args2`;
+	chomp @ping;
+	my $ping = join(" ", @ping);
+	if ($ping =~ m@min/avg/max@) {
+		print "yes\n";
+		exit 0;
+	} else {
+		print "no\n";
+		exit 1;
+	}
+}
+
+if ((exists $ARGV[0]) && ($ARGV[0] eq "config")) {
+	print "graph_title Ping times\n";
+	print "graph_args --base 1000 -o\n";
+	print "graph_vlabel seconds\n";
+	print "graph_category network\n";
+	print "graph_info This graph shows ping RTT statistics.\n";
+    for (my $site=1; $site<=$#hosts+1; $site++) {
+		print "site$site.label $names[$site-1]\n";
+		print "site$site.info Ping RTT statistics for $hosts[$site-1].\n";
+		print "site$site.draw LINE2\n";
+		print "site${site}_packetloss.label $names[$site-1] packet loss\n";
+		print "site${site}_packetloss.graph no\n";
+	}
+    exit 0;
+}
+
+for (my $site=1; $site<=$#hosts+1; $site++) {
+	my $host = $hosts[$site-1];
+	my @ping = `$ping_cmd $ping_args $host $ping_args2`;
+	chomp @ping;
+	my $ping = join(" ", @ping);
+	print "site".$site.".value ".($1 / 1000)."\n" if ($ping =~ m@min/avg/max.*\s\d+(?:\.\d+)?/(\d+(?:\.\d+)?)/\d+(?:\.\d+)?@);
+	print "site".$site."_packetloss.value $1\n" if ($ping =~ /(\d+)% packet loss/);
+}
+

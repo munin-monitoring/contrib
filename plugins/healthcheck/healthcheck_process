@@ -1,0 +1,92 @@
+#!/bin/bash
+#
+#healthcheck on munin
+#check process and alert.
+#
+#programed by rti (hiroyuki fujie) super.rti@gmail.com @super_rti
+#LICENSE: NYSL (public domain)
+#
+#config file
+#      /etc/munin/plugin-conf.d/munin-node
+#
+#example minimum config
+#---------------------------------------------------
+#[healthcheck_process]
+#env.process_1 httpd
+#---------------------------------------------------
+#
+#chcek two process
+#---------------------------------------------------
+#[healthcheck_process]
+#env.process_1 httpd
+#env.process_2 samba
+#---------------------------------------------------
+#
+#chcek three process
+#---------------------------------------------------
+#[healthcheck_process]
+#env.process_1 httpd
+#env.process_2 samba
+#env.process_3 mysqld
+#---------------------------------------------------
+#
+#
+#
+
+#edakari speed up.
+CHECKMAX=`env | grep process_ | wc -l`
+let CHECKMAX="$CHECKMAX + 1"
+
+if [ "$1" = "autoconf" ]; then
+    if [ $CHECKMAX -le 1 ]; then
+         echo no
+         exit 1
+    fi
+    echo yes
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+    echo 'graph_title process memory Usage(MB)'
+    echo "graph_args --base 1000 -l 0 --vertical-label MB"
+    echo 'graph_scale no'
+    echo 'graph_vlabel process memory'
+    echo 'graph_category healthcheck'
+    echo 'graph_info This graph shows the Memory used by process'
+
+    for(( I = 1; I < $CHECKMAX; ++I ))
+    do
+         eval process=\$process_${I}
+         eval alertmemory=\$alertmemory_${I}
+         if [ "x${process}" = "x" ]; then
+              continue
+         fi
+
+         echo "$process.label $process"
+         echo "$process.info Memory used by $process"
+         echo "$process.draw LINE2"
+         echo "$process.min -10"
+         echo "$process.critical 0:"
+    done
+
+    exit 0
+fi
+
+for(( I = 1; I < $CHECKMAX; ++I ))
+do
+     eval process=\$process_${I}
+     if [ "x${process}" = "x" ]; then
+         continue
+     fi
+
+     vrets=(`ps u --no-headers -C $process | awk 'BEGIN { count = 0 ; sum = 0; } { count ++ ; sum += $6/1024 ; } END { printf("%d %d\n",count,sum); }'`)
+     count=${vrets[0]}
+     value=${vrets[1]}
+     if [ $count -le 0 ]; then
+         echo "$process.value -10"
+         echo "$process.extinfo process down"
+     else
+         echo "$process.value $value"
+     fi
+done

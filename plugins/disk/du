@@ -1,0 +1,89 @@
+#!/bin/bash
+
+#################################################################
+#
+# Plugin to monitor the size of the specified directory
+#
+#################################################################
+#
+# Parameters understood:
+#
+# 	config   (required)
+# 	autoconf (optional - checks if the path exists etc, not so advanced feature)
+#
+#################################################################
+#
+# Requirements
+# - bash (or change first line to sh instead of bash or any other shell)
+# - existing and readable directory to scan
+# - du command, it exists on most of the *nix operating systems 
+#
+#################################################################
+# 
+# Configuration
+#
+# directory to check
+DIR="/var/cache/apache2/"
+
+# unique id, just in case you got multiple such scripts, change id as needed (i guess it shoudl be obsolete, not tested)
+ID=1;
+
+# - make sure that user/group that executes this script has acess to the directory you ahve configured
+#  otherwise run it as another user, edit plugins-conf.d/munin-node and stuff it with example below code (not suggested)
+# remeber to remove hashes from the beginning of the lines
+#
+#  [du]
+#   user root
+#
+# - by default the value is in MegaBytes, to change it you should edit below line in the script to something else, recognizeable by du (see man du)
+#   du -sm $DIR    in MB
+#   du -sk $DIR    in KB
+#
+#################################################################
+#
+# Changelog
+#
+# Revision 0.1 Tue 03 Feb 2009 02:16:02 PM CET _KaszpiR_
+# - initial release, 
+# 
+#################################################################
+# Magick markers (optional - used by munin-config and som installation
+# scripts):
+#%# family=auto
+#%# capabilities=autoconf
+
+#################################################################
+#################################################################
+
+if [ "$1" = "autoconf" ]; then
+	if [ -d $DIR ]; then
+	    echo "yes"
+	    exit 0
+	else
+		echo "no (check your path)"
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+
+	echo "graph_title Directory size: $DIR"
+	echo "graph_vlabel size MB"
+	echo "graph_category disk"
+	echo "graph_info Size of $DIR"
+	echo "dir$ID.label size"
+	echo "dir$ID.min 0"
+	echo "dir$ID.info Shows du -sm for specified directory"
+
+	exit 0
+fi
+
+echo -n "dir$ID.value "
+if [ -d $DIR ]; then
+    SIZE=`du -sm $DIR | cut -f1`
+    echo $SIZE
+    exit 0
+else
+    echo "U"
+    exit 1
+fi

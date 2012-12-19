@@ -1,0 +1,184 @@
+#!/bin/bash
+#
+# File:        snmp__fn
+# Description: SNMP plugin to monitor open sessions, sslvpn, CPU and Memory on a
+#              Fortinet Fortigate firewall.
+# 
+# Author:      Thom Diener <munin@tmd.ch>
+# License:     This program is free software; you can redistribute it and/or
+#              modify it under the terms of the GNU General Public License
+#              as published by the Free Software Foundation; version 2 dated 
+#              June, 1991.
+#
+# Version:     v1.00 30.10.2011 First draft of the fortigate plugin
+#              v1.01 19.01.2012 OID to MIB changed, plugins gets faster
+#              v1.02 25.01.2012 MIB file availability check added
+#              v1.03 01.04.2012 Update to work with Firmware v4.00MR3Patch6
+#
+# Parameters:  config   (required)
+#              autoconf (optional)
+#
+# Usage:       place in /etc/munin/plugins/ (or link it there using ln -s)
+#              (Example: ln -s /usr/share/munin/plugins/snmp__fn \
+#              /etc/munin/plugins/snmp_foo.example.com_fn)
+#
+#              Add global community string 
+#              vi /etc/munin/plugin-conf.d/munin-node
+#              [snmp_*]
+#              env.community private
+#              timeout 45   # In case low latency or timeout
+#
+# Fortigate    Activate snmp on your Fortigate firewall. 
+#              Fortigate documentation at https://support.fortinet.com 
+#
+# MIB          Download and copy the original Fortigate MIB defintion files to:
+#              /usr/share/snmp/mibs/FORTINET-CORE-MIB.mib.txt
+#              /usr/share/snmp/mibs/FORTINET-FORTIGATE-MIB.mib
+#
+# Testing      This plugin has been tested with the following OS/software: 
+#              
+#              Appliance/Firmware:
+#              Fortigate-50B 3.00-b0662(MR6 Patch 1)  work with v1.00-1.02
+#              Fortigate-50B 3.00-b0678(MR6 Patch 6)  work with v1.00-1.02
+#              Fortigate-50B 4.00-b0178(MR1 Patch 1)  work with v1.00-1.02
+#              Fortigate-50B 4.00-b0217(MR1 Patch 10) work with v1.00-1.02
+#              Fortigate-50B 4.00-b0217(MR2 Patch 4)  work with v1.00-1.02
+#              Fortigate-50B 4.00-b0521(MR3 Patch 6)  work with v1.03
+#              
+#              Munin-Version:
+#              Munin 1.4.4 (1.4.4-1ubuntu1) 
+#              OS-Version:    
+#              Ubuntu 10.04.3 LTS (lucid) x86_32/64
+#
+#%# family=manual
+#
+#set -x
+
+### Constants ------------------------------------------------------------------
+SNMPCLIENT=`basename $0 | sed 's/^snmp_//g' | cut -d "_" -f1`
+MIBFILE="/usr/share/snmp/mibs/FORTINET-FORTIGATE-MIB.mib"
+FNTYPE=`echo $MIBFILE | cut -d "." -f1 | cut -d "/" -f6`
+if [ -r $MIBFILE ]; then
+ SNMPGET="/usr/bin/snmpget -m $MIBFILE  -c $community -v 2c $SNMPCLIENT"
+else
+ echo No, MIB definition file not available or readable.
+ exit 1
+fi
+UNIT="Fortinet Fortigate Unit"
+
+
+### Variables ------------------------------------------------------------------
+FGTcpu="$FNTYPE::fgSysCpuUsage.0"
+fnSysMemUsage="$FNTYPE::fgSysMemUsage.0"
+fnSysSesCount="$FNTYPE::fgSysSesCount.0"
+fnVPNSslStatsLoginUsers="$FNTYPE::fgVpnSslStatsLoginUsers.1"
+fnVPNSslStatsActiveWebSessions="$FNTYPE::fgVpnSslStatsActiveWebSessions.1"
+fnVPNSslStatsActiveTunnels="$FNTYPE::fgVpnSslStatsActiveTunnels.1"
+
+SCPU=`$SNMPGET $FGTcpu        | cut -d ":" -f4 | cut -d " " -f2`
+SMEM=`$SNMPGET $fnSysMemUsage | cut -d ":" -f4 | cut -d " " -f2`
+SCNT=`$SNMPGET $fnSysSesCount | cut -d ":" -f4 | cut -d " " -f2`
+USER=`$SNMPGET $fnVPNSslStatsLoginUsers | cut -d ":" -f4 | cut -d " " -f2`
+WEBS=`$SNMPGET $fnVPNSslStatsActiveWebSessions | cut -d ":" -f4 | cut -d " " -f2`
+ATUN=`$SNMPGET $fnVPNSslStatsActiveTunnels | cut -d ":" -f4 | cut -d " " -f2`
+
+
+### Functions ------------------------------------------------------------------
+
+autoconf()
+{
+    if [ $SCPU ]; then
+          echo yes, OID $FGTcpu can be readed.
+    else
+          echo no, one or multiple OID can not be readed.
+          exit 1
+    fi
+
+    if [ $SMEM ]; then
+          echo yes, OID $fnSysMemUsage can be readed.
+    else
+          echo no, one or multiple OID can not be readed.
+          exit 1
+    fi
+    if [ $SCNT ]; then
+          echo yes, OID $fnSysSesCount can be readed.
+    else
+          echo no, one or multiple OID can not be read.
+          exit 1
+    fi
+exit 0
+}
+
+config()
+{
+  echo "multigraph fn_cpu"
+  echo "host_name $SNMPCLIENT"
+  echo "graph_title $UNIT - CPU usage"
+  echo 'graph_category system'
+  echo 'graph_vlabel %'
+  echo 'graph_info This graph shows current CPU usage.'
+  echo 'graph_args --base 1000 -r --lower-limit 0 --upper-limit 100'
+  echo 'forticpu.label CPU'
+  echo 'forticpu.info CPU usage'
+  echo 'forticpu.draw AREA'
+  echo ''
+  echo "multigraph fn_memory"
+  echo "host_name $SNMPCLIENT"
+  echo "graph_title $UNIT - Memory usage"
+  echo 'graph_category system'
+  echo 'graph_vlabel %'
+  echo 'graph_info This graph shows current memory usage.'
+  echo 'graph_args --base 1000 -r --lower-limit 0 --upper-limit 100'
+  echo 'fortimemory.label Memory'
+  echo 'fortimemory.info Memory usage'
+  echo 'fortimemory.draw AREA'
+  echo ''
+  echo "multigraph fn_sessions"
+  echo "host_name $SNMPCLIENT"
+  echo "graph_title $UNIT - Sessions"
+  echo 'graph_category Other'
+  echo 'graph_vlabel Active Sessions'
+  echo 'graph_info Active session count on the Fortigate firewall'
+  echo 'fortisessions.label Sessions'
+  echo 'fortisessions.info Active session count'
+  echo 'fortisessions.draw AREA'
+  echo ''
+  echo "multigraph fn_vpnsessions"
+  echo "host_name $SNMPCLIENT"
+  echo "graph_title $UNIT - SSLvpn Sessions"
+  echo 'graph_category Other'
+  echo 'graph_vlabel Sessions/Users'
+  echo 'graph_info Loged in users with SSLvpn (WebSession or Tunnel-Mode)' 
+  echo 'fortiuser.label Users'
+  echo 'fortiuser.info Loged in SSLvpn users'
+  echo 'fortiwebs.label WebSessions'
+  echo 'fortiwebs.info Active SSLvpn WebSessions'
+  echo 'fortiatun.label ActiveTunnels'
+  echo 'fortiatun.info Active SSLvpn Tunnels'
+  exit 0
+}
+
+values()
+{
+echo "multigraph fn_cpu"
+echo "forticpu.value $SCPU"
+echo ""
+echo "multigraph fn_memory"
+echo "fortimemory.value $SMEM"
+echo ""
+echo "multigraph fn_sessions"
+echo "fortisessions.value $SCNT"
+echo ""
+echo "multigraph fn_vpnsessions"
+echo "fortiuser.value $USER"
+echo "fortiwebs.value $WEBS"
+echo "fortiatun.value $ATUN"
+}
+
+### Main -----------------------------------------------------------------------
+
+if [ "$1" = "autoconf" ]; then autoconf
+fi
+if [ "$1" = "config" ]; then config
+fi
+values

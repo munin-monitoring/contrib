@@ -1,0 +1,103 @@
+#!/bin/sh
+#################################################################
+# Title : Qstat plugin for Munin                                #
+# Author : Benjamin DUPUIS - Poil								#
+# Email : poil@quake.fr											#
+# First release :  18/10/2007									#
+#---------------------------------------------------------------#
+# Edited: Rouven David Naﬂl - peperoni							#
+# Edit : 09/01/2009												#
+# Plugin edited for COD4+COD5									#
+# Email: peperoni@sac-esports.de								#
+#---------------------------------------------------------------#
+#################################################################
+# Variable :													#
+#---------------------------------------------------------------#
+# Set path to QSTAT												#
+qstat_exe='/usr/local/bin/qstat'								#
+# Set the Group for munin to be displayed e.x. games or COD4	#
+munin_group='games'												#
+#---------------------------------------------------------------#
+# End of config
+script_name=$(basename $0)
+#################################################################
+
+#################################################################
+#       Help		                   		                    #
+#---------------------------------------------------------------#
+usage() {
+	echo 'For testing the script, run qstatcod4and5_ cods IP PORT'
+	echo ' - GameType : cods ... run qstat for seeing available gametype'
+	echo 'For munin you must ln -s /usr/share/munin/plugins/qstatcod4and5_ /etc/munin/plugins/cod4_cods_IP_PORT'
+	echo 'Example you will test this COD4 Server: 123.456.789.123:28960
+	echo 'your symlink looks like this: ln -s /usr/share/munin/plugins/cod4server /etc/munin/plugins/cod4_cods_123.456.789.123_28960'
+	echo 'Perhaps you must have to set qstat_exe path, actually on'${qstat_exe};
+	echo 'Have Fun'
+}
+
+config() {
+	if [ "${script_name}" != "qstatcod4and5_" ]; then
+                gametype=$(echo ${script_name} | cut -d_ -f2)
+                ip=$(echo ${script_name} | cut -d_ -f3)
+                port=$(echo ${script_name} | cut -d_ -f4)
+        else
+                gametype=$1
+                ip=$2
+                port=$3
+        fi
+
+echo "graph_title Number of players on ${gametype} - ${ip}:${port}
+graph_vlabel players
+graph_category ${munin_group}
+player.label players"
+}
+
+#################################################################
+#       Quake Stat, call qstat	                                #
+#---------------------------------------------------------------#
+quake_stat() {
+	if [ "${script_name}" != "qstatcod4and5_" ]; then
+		gametype=$(echo ${script_name} | cut -d_ -f2)
+		ip=$(echo ${script_name} | cut -d_ -f3)
+		port=$(echo ${script_name} | cut -d_ -f4)
+	else
+		gametype=$1
+		ip=$2
+		port=$3
+	fi
+
+	if [ ! -z ${gametype} ] && [ ! -z ${gametype} ] && [ ! -z ${gametype} ]; then
+		dummy=$(${qstat_exe} -P -pa -sort P -${gametype} ${ip}:${port} | grep frags | wc -l)
+		playervalue=$dummy
+		
+		if [ -z "${playervalue}" ]; then
+			playervalue=0
+		fi
+
+		echo "player.value "${playervalue};
+	else
+		echo "player.value U"
+	fi
+}
+
+#################################################################
+#	Main 							#
+#---------------------------------------------------------------#
+case $1 in
+	config)
+		config
+		exit 0
+   	;;
+	help | ?)
+		usage
+		exit 0
+	;;
+	autoconf)
+		echo "no (edit the script for set qstat path)"
+	;;
+	*)
+		quake_stat $1 $2 $3
+		exit 0
+	;;
+esac
+

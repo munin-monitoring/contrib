@@ -1,0 +1,133 @@
+#!/bin/bash
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+case $1 in
+    config)
+	GRAPH_ORDER=""
+	COUNTER=1
+	while [ $COUNTER -gt 0 ]; do
+	    FILE_PATH="file${COUNTER}_path"
+	    
+	    # Is the path for this file specified?
+	    eval FILE=\$$FILE_PATH
+	    if [ "$FILE" == "" ]; then
+		break;
+	    fi
+	    
+	    # It is! Add it to the graphs.
+	    GRAPH_ORDER="$GRAPH_ORDER file_$COUNTER"
+	    
+	    # Does this file have a specified label?
+	    LABEL_COUNTER="file${COUNTER}_label"
+	    eval LABEL=\$$LABEL_COUNTER
+	    if [ "$LABEL" == "" ]; then
+		LABEL=`basename $FILE`
+	    fi
+	    
+	    # Associated warning level?
+	    WARNING="file${COUNTER}_warning"
+	    eval WARNING=\$$WARNING
+	    if [ "$WARNING" != "" ]; then
+		echo "file_$COUNTER.warning $WARNING"
+	    fi
+
+	    # Associated critical level?
+	    CRITICAL="file${COUNTER}_critical"
+	    eval CRITICAL=\$$CRITICAL
+	    if [ "$CRITICAL" != "" ]; then
+		echo "file_$COUNTER.critical $CRITICAL"
+	    fi
+
+	    echo "file_$COUNTER.label $LABEL"
+	    echo "file_$COUNTER.type GAUGE"
+	    echo "file_$COUNTER.min 0"
+	    let COUNTER=COUNTER+1
+	done;
+	
+	echo "graph_order $GRAPH_ORDER"
+	echo "graph_title File age"
+	echo 'graph_args --base 1000 -l 0'
+	echo 'graph_vlabel seconds'
+	echo 'graph_category disk'
+
+	exit 0
+	;;
+esac
+
+
+COUNTER=1
+while [ $COUNTER -gt 0 ]; do
+    FILE_COUNTER="file${COUNTER}_path"
+    eval FILE=\$$FILE_COUNTER
+    if [ "$FILE" == "" ]; then
+	break;
+    fi
+    
+    # If the file isn't readable, say it's zero.    
+    if [ ! -r "$FILE" ]; then
+	VALUE=0
+    else
+        VALUE=$(($(date +%s) - $(stat -c '%Y' "$FILE")))
+    fi
+    
+    echo "file_$COUNTER.value $VALUE"
+    let COUNTER=COUNTER+1
+done;
+exit
+
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+file_age - Monitors the age of files.
+
+=head1 CONFIGURATION
+
+Since there is no way for the plugin to guess which files you want monitored, you're going to have to set each file up separately. Put the following in a file in your plugin-conf.d directory.
+
+[file_age]
+    user root						# May not be necessary, depending on which files you want monitored.
+
+    env.file1_path		/var/log/syslog		# Mandatory, complete path to file.
+    env.file1_label		System syslog		# Optional label if you don't want the file name to be displayed.
+    env.file1_warning		86400			# Optional warning level. Measured in seconds. 86400 is one day of seconds.
+    env.file1_critical		864000			# Optional critical level. Measured in seconds.
+
+Continue with file2, file3, etc...
+
+Here, have some seconds:
+
+    3600	One hour
+    7300	Two hours
+    10800	Three hours
+    21600	Six hours
+    43200	Twelve hours
+    86400	One day
+    172800	Two days
+    259200	Three days
+    604800	One week
+
+=head1 AUTHOR
+
+Edward Plainview <it@sverigedemokraterna.se>
+
+=head1 DONATIONS
+
+If you wish to donate money for this plugin, please read https://it.sverigedemokraterna.se/donera/
+
+=head1 LICENSE
+
+GPLv3
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+
+=head1 VERSION
+
+1.0 released 2012-02-26
+
+=cut

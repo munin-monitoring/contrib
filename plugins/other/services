@@ -1,0 +1,85 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+services - Plugin to monitor number of processes of different services
+
+=head1 CONFIGURATION
+
+This plugin uses the following configuration variables
+
+ [services]
+   env.datafile		- Path to file which contains list of services (default: /root/munin/services.list)
+
+Datafile should contain lines which are used to detect number of running processes (ps ax | grep "LINE FROM FILE").
+If a number of processes of some service is below 1 (e.g. 0) critical event happens (configure your munin.conf about "contact.NAME.command" to send mail or something else;
+also nice line is 'contact.NAME.always_send critical' - not to stop sending alerts after critical event appears the first time).
+
+Datafile may contain comment lines (begin with "#"), empty lines and even regular expressions (WARNING - not tested, use carefully)
+Example of datafile:
+#############################
+# This line is a comment and next lines are names of some services
+sshd
+smbd
+nmbd
+lighttpd
+# Next line is an empty line
+
+named
+# Next line is a name of service with a path
+/usr/local/sbin/upsd
+# Next line is a line with spaces
+BackupPC -d
+#############################
+
+This plugin does not draw any graphs. It is only written to send alerts via mail or something else.
+
+=head1 AUTHOR
+
+Copyright (C) 2010, Sergey Urushkin
+
+=head1 LICENSE
+
+GPLv3
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=autoconf
+
+=cut
+
+DATAFILE=${datafile:-/root/munin/services.list}
+
+SERVICES=`[ -r "$DATAFILE" ] && grep -v '^[[:space:]]*\(#.*\|\)$' "$DATAFILE" | sed 's/[[:space:]]/___/g'`
+
+[ -z "$SERVICES" ] && echo "Datafile is empty or not readable" 2>&1 && exit 1
+
+if [ "$1" = "autoconf" ]
+then
+    echo "yes"
+    exit 0
+fi
+
+if [ "$1" = "config" ]
+then
+    echo "graph_title Running services"
+    echo "graph no"
+    for SERV in ${SERVICES}
+    do
+	SERVW=`echo "$SERV" | sed 's/___/ /g'`
+	echo "$SERV.label $SERVW"
+	echo "$SERV.critical 1:"
+    done
+    exit 0
+fi
+
+for SERV in ${SERVICES}
+do
+    SERVW=`echo "$SERV" | sed 's/___/[[:space:]]*/g'`
+    VALUE=`ps ax | grep "$SERVW" | grep -v grep | wc -l | tr -d '[[:space:]]'`
+    echo "$SERV.value $VALUE"
+done
