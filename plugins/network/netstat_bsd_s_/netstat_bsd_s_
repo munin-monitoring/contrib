@@ -1,0 +1,331 @@
+#!/usr/bin/env ruby
+
+# netstat_bsd_s revision 2 (Mar 2012)
+#
+# This plugin shows various statistics from 'netstat -s'
+#
+# Required privileges: none
+#
+# OS:
+# 	Supposed: BSD
+# 	Tested:   FreeBSD 8.2
+#
+# Author: Artem Sheremet <dot.doom@gmail.com>
+#
+
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+# original filename
+PLUGIN_NAME = 'netstat_bsd_s_'
+
+$debug_mode = ARGV.first == 'debug'
+
+class String
+	def escape
+		self.gsub /[^\w]/, '_'
+	end
+
+	unless method_defined? :start_with?
+		def start_with?(str)
+			self[0...str.size] == str
+		end
+	end
+end
+
+class Graph
+	def initialize(name, protocol, parse_expr)
+		@name, @protocol, @parse_expr = name, protocol, parse_expr
+	end
+
+	def config
+		config_options = []
+
+		# first, build a list of multigraphs (one graph per unit)
+		# Hash key is unit, and the value is array of labels
+		multigraphs = {}
+		@parse_expr.each { |expr, descr|
+			descr.each { |entry|
+				labels_array = (multigraphs[entry.first] ||= [])
+				labels_array.push entry.last
+			}
+		}
+
+		multigraphs.each_pair { |unit, labels|
+			# now just add options to the config
+
+			config_options += [
+				"multigraph #{name(unit)}",
+				"graph_title Netstat: #{@protocol}: #{@name}#{" (#{unit})" if multigraphs.size > 1}",
+				"graph_category netstat",
+				"graph_vlabel per second",
+				"graph_order #{labels.map(&:escape).join(' ')}"
+			]
+
+			config_options.push "graph_args --base 1024" if unit == :bytes
+
+			labels.each { |label|
+				label_esc = label.escape
+				config_options += [
+					"#{label_esc}.type DERIVE",
+					"#{label_esc}.min 0",
+					"#{label_esc}.draw LINE",
+					"#{label_esc}.label #{label}"
+				]
+			}
+		}
+
+		config_options
+	end
+
+	def fetch(data)
+		output_data = []
+
+		# first build a set of multigraphs, one per unit.
+		# Hash key is unit, and the value is a hash of 'escaped label' => 'value'
+		multigraphs = {}
+		@parse_expr.each { |expr, descr|
+			index = data.index { |line| line =~ expr }
+			if index
+				data.delete_at index
+				$~[1..-1].zip(descr).each { |value, info|
+					unit, label = info
+					(multigraphs[unit] ||= {})[label.escape] = value
+				}
+			else
+				warn "no line found for #{expr}, #{descr}" if $debug_mode
+			end
+		}
+
+		multigraphs.each_pair { |unit, values|
+			output_data.push "multigraph #{name(unit)}"
+			output_data += values.map { |label, value| "#{label}.value #{value}" }
+		}
+
+		output_data
+	end
+
+	def name(unit)
+		"#{PLUGIN_NAME}#{@protocol}_#{@name.escape}_#{unit}"
+	end
+end
+
+def graphs_for(protocol)
+	case protocol
+	# order of the graps in each section is important for parsing.
+	# At the same time, it is not important for munin, so we are OK placing it in parsing order here.
+	when 'tcp'
+		[
+			Graph.new('sent', protocol, [
+				# for each match of the regexp, there is a matching entry in the array.
+				# First element of an entry is unit name, and the second is label.
+				# It could be reasonable to add third etc as warning and critical values.
+				
+				[ /(\d+) packets sent$/, [ [ :packets, 'total' ] ] ],
+				[ /(\d+) data packets \((\d+) bytes\)$/, [ [ :packets, 'data' ], [ :bytes, 'data' ] ] ],
+				[ /(\d+) data packets \((\d+) bytes\) retransmitted$/, [ [ :packets, 'retransmitted' ], [ :bytes, 'retransmitted' ] ] ],
+				[ /(\d+) data packets unnecessarily retransmitted$/, [ [ :packets, 'unnecessarily retransmitted' ] ] ],
+				[ /(\d+) resends initiated by MTU discovery$/, [ [ :packets, 'resends initiated by MTU discovery' ] ] ],
+				[ /(\d+) ack-only packets \((\d+) delayed\)$/, [ [ :packets, 'ack-only' ], [ :packets, 'ack-only delayed' ] ] ],
+				[ /(\d+) URG only packets$/, [ [ :packets, 'URG only' ] ] ],
+				[ /(\d+) window probe packets$/, [ [ :packets, 'window probe' ] ] ],
+				[ /(\d+) window update packets$/, [ [ :packets, 'window update' ] ] ],
+				[ /(\d+) control packets$/, [ [ :packets, 'control' ] ] ]
+			]),
+
+			Graph.new('received', protocol, [
+				[ /(\d+) packets received$/, [ [ :packets, 'total' ] ] ],
+				[ /(\d+) acks \(for (\d+) bytes\)$/, [ [ :packets, 'acks' ], [ :bytes, 'acks' ] ] ],
+				[ /(\d+) duplicate acks$/, [ [ :packets, 'duplicate acks' ] ] ],
+				[ /(\d+) acks for unsent data$/, [ [ :packets, 'acks for unsent data' ] ] ],
+				[ /(\d+) packets \((\d+) bytes\) received in-sequence$/, [ [ :packets, 'in-sequence' ], [ :bytes, 'in-sequence' ] ] ],
+				[ /(\d+) completely duplicate packets \((\d+) bytes\)$/, [ [ :packets, 'completely duplicate' ], [ :bytes, 'completely duplicate' ] ] ],
+				[ /(\d+) old duplicate packets$/, [ [ :packets, 'old duplicate' ] ] ],
+				[ /(\d+) packets with some dup\. data \((\d+) bytes duped\)$/, [ [ :packets, 'some dup. data' ], [ :bytes, 'partial dups' ] ] ],
+				[ /(\d+) out-of-order packets \((\d+) bytes\)$/, [ [ :packets, 'out-of-order' ], [ :bytes, 'out-of-order' ] ] ],
+				[ /(\d+) packets \((\d+) bytes\) of data after window$/, [ [ :packets, 'data after window' ], [ :bytes, 'data after window' ] ] ],
+				[ /(\d+) window probes$/, [ [ :packets, 'window probes' ] ] ],
+				[ /(\d+) window update packets$/, [ [ :packets, 'window update' ] ] ],
+				[ /(\d+) packets received after close$/, [ [ :packets, 'after close' ] ] ],
+				[ /(\d+) discarded for bad checksums$/, [ [ :packets, 'bad checksums' ] ] ],
+				[ /(\d+) discarded for bad header offset field$/, [ [ :packets, 'bad header offset flds' ] ] ],
+				[ /(\d+) discarded because packet too short$/, [ [ :packets, 'too short' ] ] ],
+				[ /(\d+) discarded due to memory problems$/, [ [ :packets, 'discarded: memory problems' ] ] ],
+				[ /(\d+) ignored RSTs in the windows$/, [ [ :packets, 'ignored RSTs in windows' ] ] ],
+				[ /(\d+) segments updated rtt \(of (\d+) attempts\)$/, [ [ :packets, 'RTT: updated' ], [ :packets, 'RTT: attempts to update' ] ] ]
+			]),
+
+			Graph.new('connections', protocol, [
+				[ /(\d+) connection requests$/, [ [ :connections, 'requests' ] ] ],
+				[ /(\d+) connection accepts$/, [ [ :connections, 'accepts' ] ] ],
+				[ /(\d+) bad connection attempts$/, [ [ :connections, 'bad attempts' ] ] ],
+				[ /(\d+) listen queue overflows$/, [ [ :connections, 'listen queue overflows' ] ] ],
+				[ /(\d+) connections established \(including accepts\)$/, [ [ :connections, 'established' ] ] ],
+				[ /(\d+) connections closed \(including (\d+) drops\)$/, [ [ :connections, 'closed' ], [ :connections, 'dropped' ] ] ],
+				[ /(\d+) connections updated cached RTT on close$/, [ [ :connections, 'closed & upd cached RTT' ] ] ],
+				[ /(\d+) connections updated cached RTT variance on close$/, [ [ :connections, 'closed & upd cached RTT variance' ] ] ],
+				[ /(\d+) connections updated cached ssthresh on close$/, [ [ :connections, 'closed & upd cached ssthresh' ] ] ],
+				[ /(\d+) embryonic connections dropped$/, [ [ :connections, 'embryonic dropped' ] ] ]
+			]),
+
+			Graph.new('timeouts', protocol, [
+				[ /(\d+) retransmit timeouts$/, [ [ :connections, 'retransmit' ] ] ],
+				[ /(\d+) connections dropped by rexmit timeout$/, [ [ :connections, 'retransmit: dropped' ] ] ],
+				[ /(\d+) persist timeouts$/, [ [ :connections, 'persist' ] ] ],
+				[ /(\d+) connections dropped by persist timeout$/, [ [ :connections, 'persist: dropped' ] ] ],
+				[ /(\d+) Connections \(fin_wait_2\) dropped because of timeout$/, [ [ :connections, 'fin_wait_2: dropped' ] ] ],
+				[ /(\d+) keepalive timeouts$/, [ [ :connections, 'keepalive' ] ] ],
+				[ /(\d+) keepalive probes sent$/, [ [ :connections, 'keepalive: probes sent' ] ] ],
+				[ /(\d+) connections dropped by keepalive$/, [ [ :connections, 'keepalive: dropped' ] ] ]
+			]),
+
+			Graph.new('correct predictions', protocol, [
+				[ /(\d+) correct ACK header predictions$/, [ [ :predictions, 'ACK header' ] ] ],
+				[ /(\d+) correct data packet header predictions$/, [ [ :predictions, 'data packet header' ] ] ]
+			]),
+
+			Graph.new('SYN', protocol, [
+				[ /(\d+) syncache entries added$/, [ [ :entries, 'cache added' ] ] ],
+				[ /(\d+) cookies sent$/, [ [ :entries, 'cookies sent' ] ] ],
+				[ /(\d+) cookies received$/, [ [ :entries, 'cookies received' ] ] ],
+				[ /(\d+) retransmitted$/, [ [ :entries, 'retransmitted' ] ] ],
+				[ /(\d+) dupsyn$/, [ [ :entries, 'duplicates' ] ] ],
+				[ /(\d+) dropped$/, [ [ :entries, 'dropped' ] ] ],
+				[ /(\d+) completed$/, [ [ :entries, 'completed' ] ] ],
+				[ /(\d+) bucket overflow$/, [ [ :entries, 'bucket overflow' ] ] ],
+				[ /(\d+) cache overflow$/, [ [ :entries, 'cache overflow' ] ] ],
+				[ /(\d+) reset$/, [ [ :entries, 'reset' ] ] ],
+				[ /(\d+) stale$/, [ [ :entries, 'stale' ] ] ],
+				[ /(\d+) aborted$/, [ [ :entries, 'aborted' ] ] ],
+				[ /(\d+) badack$/, [ [ :entries, 'bad ACK' ] ] ],
+				[ /(\d+) unreach$/, [ [ :entries, 'unreachable' ] ] ],
+				[ /(\d+) zone failures$/, [ [ :entries, 'zone failures' ] ] ],
+			]),
+
+			Graph.new('SACK', protocol, [
+				[ /(\d+) SACK recovery episodes$/, [ [ :packets, 'recovery episodes' ] ] ],
+				[ /(\d+) segment rexmits in SACK recovery episodes$/, [ [ :packets, 'segment rexmits' ] ] ],
+				[ /(\d+) byte rexmits in SACK recovery episodes$/, [ [ :bytes, 'bytes rexmitted' ] ] ],
+				[ /(\d+) SACK options \(SACK blocks\) received$/, [ [ :packets, 'options blocks rcvd' ] ] ],
+				[ /(\d+) SACK options \(SACK blocks\) sent$/, [ [ :packets, 'options blocks sent' ] ] ],
+				[ /(\d+) SACK scoreboard overflow$/, [ [ :packets, 'scoreboard overflow' ] ] ]
+			]),
+
+			Graph.new('ECN', protocol, [
+				[ /(\d+) packets with ECN CE bit set$/, [ [ :packets, 'CE bit' ] ] ],
+				[ /(\d+) packets with ECN ECT\(0\) bit set$/, [ [ :packets, 'ECT(0) bit' ] ] ],
+				[ /(\d+) packets with ECN ECT\(1\) bit set$/, [ [ :packets, 'ECT(1) bit' ] ] ],
+				[ /(\d+) successful ECN handshakes$/, [ [ :packets, 'successfull handshakes' ] ] ],
+				[ /(\d+) times ECN reduced the congestion window$/, [ [ :packets, 'congestion window reduced' ] ] ]
+			])
+		]
+	when 'udp'
+		[
+			Graph.new('received', protocol, [
+				[ /(\d+) datagrams received$/, [ [ :packets, 'total' ] ] ],
+				[ /(\d+) with incomplete header$/, [ [ :packets, 'incomplete header' ] ] ],
+				[ /(\d+) with bad data length field$/, [ [ :packets, 'bad data length field' ] ] ],
+				[ /(\d+) with bad checksum$/, [ [ :packets, 'bad checksum' ] ] ],
+				[ /(\d+) with no checksum$/, [ [ :packets, 'no checksum' ] ] ],
+				[ /(\d+) dropped due to no socket$/, [ [ :packets, 'dropped: no socket' ] ] ],
+				[ /(\d+) broadcast\/multicast datagrams undelivered$/, [ [ :packets, '*cast undelivered' ] ] ],
+				[ /(\d+) dropped due to full socket buffers$/, [ [ :packets, 'dropped: no buffers' ] ] ],
+				[ /(\d+) not for hashed pcb$/, [ [ :packets, 'not for hashed pcb' ] ] ],
+				[ /(\d+) delivered$/, [ [ :packets, 'delivered' ] ] ]
+			]),
+
+			Graph.new('sent', protocol, [
+				[ /(\d+) datagrams output$/, [ [ :packets, 'total' ] ] ],
+				[ /(\d+) times multicast source filter matched$/, [ [ :packets, 'multicast src filter match' ] ] ]
+			])
+		]
+	when 'ip'
+		[
+			Graph.new('received', protocol, [
+				[ /(\d+) total packets received$/, [ [ :packets, 'total' ] ] ],
+				[ /(\d+) bad header checksums$/, [ [ :packets, 'bad header checksum' ] ] ],
+				[ /(\d+) with size smaller than minimum$/, [ [ :packets, 'size smaller than min' ] ] ],
+				[ /(\d+) with data size < data length$/, [ [ :packets, 'data size < data length' ] ] ],
+				[ /(\d+) with ip length > max ip packet size$/, [ [ :packets, 'ip length > max ip packet sz' ] ] ],
+				[ /(\d+) with header length < data size$/, [ [ :packets, 'header length < data size' ] ] ],
+				[ /(\d+) with data length < header length$/, [ [ :packets, 'data length < header length' ] ] ],
+				[ /(\d+) with bad options$/, [ [ :packets, 'bad options' ] ] ],
+				[ /(\d+) with incorrect version number$/, [ [ :packets, 'incorrect version' ] ] ],
+				[ /(\d+) fragments received$/, [ [ :packets, 'fragments' ] ] ],
+				[ /(\d+) fragments dropped \(dup or out of space\)$/, [ [ :packets, 'frags dropped: dup/out of spc' ] ] ],
+				[ /(\d+) fragments dropped after timeout$/, [ [ :packets, 'frags dropped: timeout' ] ] ],
+				[ /(\d+) packets reassembled ok$/, [ [ :packets, 'reassembled ok' ] ] ],
+				[ /(\d+) packets for this host$/, [ [ :packets, 'for this host' ] ] ],
+				[ /(\d+) packets for unknown\/unsupported protocol$/, [ [ :packets, 'for unknown/unsup protocol' ] ] ],
+				[ /(\d+) packets forwarded \((\d+) packets fast forwarded\)$/, [ [ :packets, 'forwarded' ], [ :packets, 'fast forwarded' ] ] ],
+				[ /(\d+) packets not forwardable$/, [ [ :packets, 'not forwardable' ] ] ],
+				[ /(\d+) packets received for unknown multicast group$/, [ [ :packets, 'unknown multicast grp' ] ] ]
+			]),
+
+			Graph.new('sent', protocol, [
+				[ /(\d+) packets sent from this host$/, [ [ :packets, 'total' ] ] ],
+				[ /(\d+) redirects sent$/, [ [ :packets, 'redirect' ] ] ],
+				[ /(\d+) packets sent with fabricated ip header$/, [ [ :packets, 'fabricated IP head' ] ] ],
+				[ /(\d+) output packets dropped due to no bufs, etc\.$/, [ [ :packets, 'dropped: no bufs, etc' ] ] ],
+				[ /(\d+) output packets discarded due to no route$/, [ [ :packets, 'discarded: no route' ] ] ],
+				[ /(\d+) output datagrams fragmented$/, [ [ :packets, 'fragmented' ] ] ],
+				[ /(\d+) fragments created$/, [ [ :packets, 'fragments created' ] ] ],
+				[ /(\d+) datagrams that can't be fragmented$/, [ [ :packets, "can't be fragmented" ] ] ],
+				[ /(\d+) tunneling packets that can't find gif$/, [ [ :packets, 'tunneling, gif not found' ] ] ],
+				[ /(\d+) datagrams with bad address in header$/, [ [ :packets, 'bad address in header' ] ] ]
+			])
+		]
+	when 'arp'
+		[
+			Graph.new('sent', protocol, [
+				[ /(\d+) ARP requests sent$/, [ [ :packets, 'requests' ] ] ],
+				[ /(\d+) ARP replies sent$/, [ [ :packets, 'replies' ] ] ]
+			]),
+
+			Graph.new('received', protocol, [
+				[ /(\d+) ARP packets received$/, [ [ :packets, 'total' ] ] ],
+				[ /(\d+) ARP requests received$/, [ [ :packets, 'requests' ] ] ],
+				[ /(\d+) ARP replies received$/, [ [ :packets, 'replies' ] ] ],
+				[ /(\d+) total packets dropped due to no ARP entry$/, [ [ :packets, 'dropped: no entry' ] ] ]
+			]),
+
+			Graph.new('entries', protocol, [
+				[ /(\d+) ARP entrys timed out$/, [ [ :entries, 'timed out' ] ] ],
+				[ /(\d+) Duplicate IPs seen$/, [ [ :entries, 'duplicate IPs seen' ] ] ]
+			])
+		]
+	end
+end
+
+proto_name = File.basename($0, '.*').escape
+proto_name.slice! 0, PLUGIN_NAME.size if proto_name.start_with? PLUGIN_NAME
+
+proto_name = 'tcp' if proto_name.empty?
+
+def netstat_s_protocols
+	`netstat -s`.select { |line|
+		line =~ /^\w+:$/
+	}.map! { |proto| proto.strip[0..-2] }
+end
+
+def netstat_s(protocol)
+	`netstat -sp #{protocol}`.select { |line| not line.start_with? protocol }
+end
+
+case ARGV.first
+when 'autoconf'
+	puts `uname -s`.include?('FreeBSD') ? 'yes' : 'no'
+when 'suggest'
+	puts netstat_s_protocols.map(&:escape).join $/
+when 'config'
+	graphs_for(proto_name).each { |graph|
+		puts graph.config.join $/
+	}
+else
+	data = netstat_s(proto_name)
+	graphs_for(proto_name).each { |graph|
+		puts graph.fetch(data).join $/
+	}
+
+	warn "not parsed:\n#{data.join}" unless data.empty? if $debug_mode
+end

@@ -1,0 +1,298 @@
+#!/usr/bin/perl -w
+
+# re-write of python version of pgbouncer stats
+# data from stats, pools (cleint, server)
+
+use strict;
+use Munin::Plugin;
+use DBD::Pg;
+
+# check that multigraph is avaailable
+need_multigraph();
+# get the script name
+my $plugin_name = $Munin::Plugin::me;
+# set the DB connection vars
+my $db_user = $ENV{'pgbouncer_user'}  || 'postgres';
+my $db_port = $ENV{'pgbouncer_port'}  || '6432';
+my $db_host = $ENV{'pgbouncer_host'}  || 'localhost';
+my $db_pass = $ENV{'pgbouncer_pass'}  || '';
+my $db_name = 'pgbouncer';
+my @data = ();
+# get the DB (pool) name we want to fetch
+$plugin_name =~ /pgbouncer_(.*)$/;
+my $pool_name = $1;
+# bail if no name
+if (!$pool_name)
+{
+	print "Cannot get pool name\n";
+	exit 1; 
+}
+
+# command line arguments for autconf and config
+if (defined($ARGV[0]))
+{
+	# autoconf, nothing to do
+	if ($ARGV[0] eq 'autoconf')
+	{
+		my $dbh = DBI->connect("DBI:Pg:dbname=$db_name;host=$db_host;port=$db_port", $db_user, $db_pass);
+		if (!$dbh)
+		{
+			print "no\n";
+			exit 1;
+		}
+		else
+		{
+			print "yes\n";
+			exit 0;
+		}
+		$dbh->disconnect();
+	}
+
+	if ($ARGV[0] eq 'config')
+	{
+		# create the basic RRD
+		# stats: average connections
+		print "multigraph ".$plugin_name."_stats_avg_req\n";
+		print "graph_title PgBouncer $pool_name average connections\n";
+		print "graph_args --base 1000\n"; # numbers not bytes
+		print "graph_vlabel Average connections\n";
+		print "graph_scale no\n"; # so we do not print "micro, milli, kilo, etc"
+    	print "graph_category pgbouncer\n";
+		print $pool_name."_avg_req.type GAUGE\n";
+		print $pool_name."_avg_req.label Avg Req\n";
+		print $pool_name."_avg_req.min 0\n";
+		print $pool_name."_avg_req.draw LINE2\n";
+		# stats: average time for query
+		print "multigraph ".$plugin_name."_stats_avg_query\n";
+		print "graph_title PgBouncer $pool_name average query time\n";
+		print "graph_args --base 1000\n"; # numbers not bytes
+		print "graph_vlabel Average time per query (microseconds)\n";
+    	print "graph_category pgbouncer\n";
+		print $pool_name."_avg_query.type GAUGE\n";
+		print $pool_name."_avg_query.label Avg Time\n";
+		print $pool_name."_avg_query.min 0\n";
+		print $pool_name."_avg_query.draw LINE2\n";
+		# stats: in/out bytes
+		print "multigraph ".$plugin_name."_stats_bytesinout\n";
+		print "graph_title PgBouncer $pool_name average bytes received/sent\n";
+		print "graph_args --base 1024\n"; # numbers in bytes
+		print "graph_vlabel Average bytes received (-)/sent (+)\n";
+    	print "graph_category pgbouncer\n";
+		# bytes received
+		print $pool_name."_avg_recv.type GAUGE\n";
+		print $pool_name."_avg_recv.label Avg received\n";
+		print $pool_name."_avg_recv.min 0\n";
+		print $pool_name."_avg_recv.draw LINE1\n";
+		print $pool_name."_avg_recv.graph no\n";
+		# bytes sent
+		print $pool_name."_avg_sent.type GAUGE\n";
+		print $pool_name."_avg_sent.label Avg rcvd/sent\n";
+		print $pool_name."_avg_sent.min 0\n";
+		print $pool_name."_avg_sent.draw LINE1\n";
+		print $pool_name."_avg_sent.negative ".$pool_name."_avg_recv\n";
+		# pools: server (sv_)
+		print "multigraph ".$plugin_name."_pools_server\n";
+		print "graph_title PgBouncer $pool_name servers\n";
+		print "graph_category pgbouncer\n";
+		print "graph_args --base 1000\n"; # numbers not bytes
+		print "graph_vlabel Server connections\n";
+		print "graph_scale no\n";
+		# active connections
+		print $pool_name."_server_active.label active\n";
+		print $pool_name."_server_active.min 0\n";
+		print $pool_name."_server_active.type GAUGE\n";
+		print $pool_name."_server_active.draw AREA\n";
+		# idle connections
+		print $pool_name."_server_idle.label idle\n";
+		print $pool_name."_server_idle.min 0\n";
+		print $pool_name."_server_idle.type GAUGE\n";
+		print $pool_name."_server_idle.draw STACK\n";
+		# used connections
+		print $pool_name."_server_used.label used\n";
+		print $pool_name."_server_used.min 0\n";
+		print $pool_name."_server_used.type GAUGE\n";
+		print $pool_name."_server_used.draw STACK\n";
+		# tested connections
+		print $pool_name."_server_tested.label tested\n";
+		print $pool_name."_server_tested.min 0\n";
+		print $pool_name."_server_tested.type GAUGE\n";
+		print $pool_name."_server_tested.draw STACK\n";
+		# logged in connections
+		print $pool_name."_server_login.label login\n";
+		print $pool_name."_server_login.min 0\n";
+		print $pool_name."_server_login.type GAUGE\n";
+		print $pool_name."_server_login.draw STACK\n";
+		# pools: client (cl_)
+		print "multigraph ".$plugin_name."_pools_client\n";
+		print "graph_title PgBouncer $pool_name clients\n";
+		print "graph_category pgbouncer\n";
+		print "graph_args --base 1000\n"; # numbers not bytes
+		print "graph_vlabel Client connections\n";
+		print "graph_scale no\n";
+		# active client connections
+		print $pool_name."_client_active.label active\n";
+		print $pool_name."_client_active.min 0\n";
+		print $pool_name."_client_active.type GAUGE\n";
+		print $pool_name."_client_active.draw AREA\n";
+		# waiting client connections
+		print $pool_name."_client_waiting.label waiting\n";
+		print $pool_name."_client_waiting.min 0\n";
+		print $pool_name."_client_waiting.type GAUGE\n";
+		print $pool_name."_client_waiting.draw STACK\n";
+		# pools: maxwait (longest waiting connection, should be 0)
+		print "multigraph ".$plugin_name."_pools_maxwait\n";
+		print "graph_title PgBouncer $pool_name maximum waiting time\n";
+		print "graph_args --base 1000\n"; # numbers not bytes
+		print "graph_vlabel Maximum wait time (seconds)\n";
+    	print "graph_category pgbouncer\n";
+		print $pool_name."_maxwait.type GAUGE\n";
+		print $pool_name."_maxwait.label Wait Time\n";
+		print $pool_name."_maxwait.min 0\n";
+		print $pool_name."_maxwait.draw LINE2\n";
+		print $pool_name."_maxwait.warning 1\n"; # warn if not 0
+		print $pool_name."_maxwait.critical 10\n"; # go critical if 10 seconds waiting
+		# END graph
+		exit 0;
+	}
+}
+
+# connect to data
+my $dbh = DBI->connect("DBI:Pg:dbname=$db_name;host=$db_host;port=$db_port", $db_user, $db_pass) 
+	 or die ("Cannot connect to database");
+# go trough each set and get the data
+foreach my $get ('pools', 'stats')
+{
+	# prep and execute the show query
+	my $pre = $dbh->prepare("SHOW $get")
+		or die ("Cannot prepare query");
+	$pre->execute()
+		or die ("Cannot execute statement");
+	while (@data = $pre->fetchrow)
+	{
+		# first defines the pool
+		if ($data[0] eq $pool_name)
+		{
+			# print values for the stats: average reqeust, average query time, bytes in/out
+			if ($get eq 'stats')
+			{
+				print "multigraph ".$plugin_name."_".$get."_avg_req\n";
+				print $pool_name."_avg_req.value ".$data[5]."\n";
+				print "multigraph ".$plugin_name."_".$get."_avg_query\n";
+				print $pool_name."_avg_query.value ".$data[8]."\n";
+				print "multigraph ".$plugin_name."_".$get."_bytesinout\n";
+				print $pool_name."_avg_recv.value ".$data[6]."\n";
+				print $pool_name."_avg_sent.value ".$data[7]."\n";
+			}
+			# print data for the pools: server, client
+			if ($get eq 'pools')
+			{
+				print "multigraph ".$plugin_name."_".$get."_server\n";
+				print $pool_name."_server_active.value ".$data[4]."\n";
+				print $pool_name."_server_idle.value ".$data[5]."\n";
+				print $pool_name."_server_used.value ".$data[6]."\n";
+				print $pool_name."_server_tested.value ".$data[7]."\n";
+				print $pool_name."_server_login.value ".$data[8]."\n";
+				print "multigraph ".$plugin_name."_".$get."_client\n";
+				print $pool_name."_client_active.value ".$data[2]."\n";
+				print $pool_name."_client_waiting.value ".$data[3]."\n";
+				print "multigraph ".$plugin_name."_".$get."_maxwait\n";
+				print $pool_name."_maxwait.value ".$data[9]."\n";
+			}
+		}
+	}
+}
+# close connection
+$dbh->disconnect();
+
+exit 0;
+
+__END__
+
+=head1 NAME
+
+pgbouncer_ is a plugin to get the pool and stat values for a single pgbouncer pool name
+
+=head1 APPLICATION
+
+perl and DBD::Pg is required, and pgbounce must been installed with a correct setup access for a stat account
+
+=head1 CONFIGURATION
+
+the plugin that will be run needs to have the pool name after the plguin base name.
+
+=head2 plugin configuration
+
+eg: pgbouncer_foo will run for the pool named foo.
+
+see SHOW POOLS database list for the pool name
+
+=head2 munin plugin config file
+
+in the plugin config file under the [pgbouncer] name the access information ca be set.
+
+eg:
+  [pgbouncer*]
+    env.pgbouncer_pass barfoo
+
+more extended would be:
+  [pgbouncer*]
+    env.pgbouncer_pass barfoo
+    env.pgbouncer_user bar
+    env.pgbouncer_port 6542
+    env.pgbouncer_host localhost
+
+The database name is always pgbouncer
+
+=head1 OUTPUT
+
+The plugin will output 5 graphs in the group pgbouncer
+
+=head2 Average bytes received/sent
+
+This graph will show the average bytes sent and received by the pgbouncer for this pool
+
+=head2 Avaerage connections
+
+This graph will show the average amount of connections to the pgbouncer for this pool 
+
+=head2 Average query time
+
+This graph shows the average query time as processed by the pgbouncer for this pool in microseconds. The data will be shorted by standard SI. eg, m = milli, k = kilo.
+
+So 4.61K is 4610 milliseconds
+
+=head2 Client connections
+
+This graph shows the active and waiting client connections to pgbouncer for this pool
+
+=head2 Server connections
+
+This graph shows the server connections to pgbouncer for this pool. The following data sets are shown: active, idle, used, tested, login
+
+=head2 Max wait
+
+how long the oldest cllient the queue has waited, should be always 0
+
+=head1 ACKNOWLEDGEMENTS
+
+Original idea derived from a simple python script by Dimitri Fontaine
+
+=head1 SEE ALSO
+
+See further info on stats and pools on the pgbouncer homepage:
+  http://pgbouncer.projects.postgresql.org/doc/usage.html#_show_commands
+
+=head1 VERSION
+
+1.0
+
+=head1 AUTHOR
+
+Clemens Schwaighofer <gullevek@gullevek.org>
+
+=head1 LICENSE
+
+GPLv2
+
+
+=cut

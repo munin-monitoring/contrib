@@ -22,6 +22,10 @@ VERSION = "muninnode-from-hell v0.1"
 modules = {}
 
 class MuninPlugin:
+    def __init__(self):
+        self.current_load = None
+        self.current_locks = None
+
     def sleep_fetch(self, conf):
         period = None
         if conf.get("mode") == "sleepy" and conf.get("sleepyness"):
@@ -36,14 +40,26 @@ class MuninPlugin:
     def sleep_config(self, conf):
         return self.sleep_fetch(conf)
 
+    def find_load(self):
+        # At about a thousand node instances you get this:
+        #IOError: [Errno 24] Too many open files: '/proc/loadavg'
+        # cache it for a bit..
+        if (not self.current_load) or random.randint(0,100) == 1:
+            load = open("/proc/loadavg", "r").read()
+            load, rest = load.split(" ", 1)
+            self.current_load = float(load)
+        return self.current_load
+            
+    def find_locks(self):
+        if (not self.current_locks) or random.randint(0,100) == 1:
+            fp = open("/proc/locks", "r")
+            self.current_locks = len(fp.readlines())
+        return self.current_locks 
 
 class load(MuninPlugin):
     def fetch(self, conf):
         self.sleep_fetch(conf)
-        load = open("/proc/loadavg", "r").read()
-        load, rest = load.split(" ", 1)
-        load = float(load)
-        return "load.value %.2f" % load
+        return "load.value %.2f" % self.find_load()
 
     def config(self, conf):
         self.sleep_config(conf)
@@ -60,9 +76,7 @@ modules["load"] = load()
 class locks(MuninPlugin):
     def fetch(self, conf):
         self.sleep_fetch(conf)
-        fp = open("/proc/locks", "r")
-        fdata = fp.readlines()
-        return "locks.value %i" % len(fdata)
+        return "locks.value %i" % self.find_locks()
 
     def config(self, conf):
         self.sleep_config(conf)
@@ -110,6 +124,38 @@ class always_critical(always_warning):
         return self.conftext.replace("LEVEL","critical")
 modules["always_critical"] = always_critical()
 
+class failing_plugin(MuninPlugin):
+    "A really broken plugin"
+    def fetch(self, conf):
+        return "# Bad exit"
+
+    def config(self, conf):
+        return "# Bad exit"
+modules["failing_plugin"] = failing_plugin()
+
+class failing_plugin2(MuninPlugin):
+    def fetch(self, conf):
+        return "# Bad exit"
+
+    def config(self, conf):
+        return """graph_title Config works, fetch fails
+graph_vlabel Level
+graph_category failing
+generic.label generic_label_here
+generic.info never_really_used"""
+modules["failing_plugin2"] = failing_plugin2()
+
+class failing_plugin3(MuninPlugin):
+    def config(self, conf):
+        return """graph_title A plugin with two dses but only fetch value for one
+graph_args --base 1000 -l 0
+fivemin.label 1 minute load
+onemin.label 5 minute load"""
+    def fetch(self, conf):
+        return "onemin.value 1"
+modules["failing_plugin3"] = failing_plugin3()
+
+
 class graph_area(MuninPlugin):
     "A plugin that uses STACK and AREA. From proc_pri. Use: testing the grapher"
     def fetch(self, conf):
@@ -139,10 +185,7 @@ modules["graph_area"] = graph_area()
 class utf8_graphcat(MuninPlugin):
     "A plugin with a graph category which has UTF-8 in it"
     def fetch(self, conf):
-        load = open("/proc/loadavg", "r").read()
-        load, rest = load.split(" ", 1)
-        load = float(load)
-        return "apples.value %.2f" % load
+        return "apples.value %.2f" % self.find_load()
 
     def config(self, conf):
         return """graph_title Example UTF-8 graph
@@ -156,10 +199,7 @@ modules["utf8_graphcat"] = utf8_graphcat()
 class utf8_graphname(MuninPlugin):
     "A plugin with a UTF-8 name"
     def fetch(self, conf):
-        load = open("/proc/loadavg", "r").read()
-        load, rest = load.split(" ", 1)
-        load = float(load)
-        return "apples.value %.2f" % load
+        return "apples.value %.2f" % self.find_load()
 
     def config(self, conf):
         return """graph_title Example UTF-8 graph
@@ -264,7 +304,7 @@ def start_servers(instances):
 
 
 def usage():
-    print "Usage: %s [--run] [--verbose] [--muninconf] <configfile>" % sys.argv[0]
+    print "Usage: %s [--run] [--verbose] [--muninconf] <configfile> <configfileN>" % sys.argv[0]
 
 def main():
     if len(sys.argv) <= 2:
@@ -276,7 +316,12 @@ def main():
         verbose = True
 
     config = ConfigParser.RawConfigParser()
-    config.read(sys.argv[-1])
+    for configfile in sys.argv[1:]:
+        if not configfile.endswith(".conf"):
+            continue
+        if verbose:
+            print "Reading config file %s" % configfile
+        config.read(configfile)
 
     instancekeys = [ key for key in config.sections() if key.startswith("instance:") ]
     servers = {}
@@ -330,14 +375,14 @@ def main():
                 instanceconfig[k] = v
 
             instanceconfig["plugins"] = plugins
-            if "--verbose" in sys.argv:
-                instanceconfig["verbose"] = True
+            instanceconfig["verbose"] = verbose
 
             instanceconfig["name"] = "%s-%s" % (instancename, portinstance)
             instanceconfig["expanded_port"] = portinstance
 
             instances.append(instanceconfig)
             # XXX: need to store what handlers we should have.
+    print instances
 
     # output sample munin config for the poller
     if "--muninconf" in sys.argv:

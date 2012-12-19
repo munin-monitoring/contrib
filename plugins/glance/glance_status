@@ -1,0 +1,103 @@
+#!/usr/bin/env python
+#
+# Plugin to monitor used size of a tenant in glance
+#
+# To monitor the used size of a tenant in glance do:
+# E.g.
+#    ln -s /usr/share/munin/plugins/glance_size_ /etc/munin/plugins/glance_size_<tenant_uuid>
+#
+# Needs following minimal configuration in plugin-conf.d/glance:
+#   [glance_*]
+#   user glance
+#
+# Magic markers
+#%# capabilities=autoconf
+#%# family=auto
+
+
+import sys
+import os
+
+try: 
+    from sqlalchemy.orm import exc, joinedload
+    
+    from glance.common.cfg import CommonConfigOpts
+    from glance.registry.db import models
+    from glance.registry.db.api import get_session, configure_db
+except ImportError:
+    succesful_import = False
+else:
+    succesful_import = True
+
+def load_conf():
+    CONF = CommonConfigOpts(project="glance", prog="glance-registry")
+    CONF()
+    
+    # Hide missing logger warning message
+    sys.stderr = open(os.devnull, 'w')
+    configure_db(CONF)
+    sys.stderr = sys.__stderr__
+
+possible_status = [ 'queued', 'saving', 'active', 'killed', 'deleted', 'pending_delete' ]
+
+def print_config():
+    print 'graph_title Glance images status'
+    print 'graph_vlabel images'
+    print 'graph_args --lower-limit 0'
+    print 'graph_category glance'
+    print 'graph_scale no'
+    print 'graph_info This graph show number of images by status'
+
+    for status in possible_status:
+        print '%s.label %s' % (status, status)
+        print '%s.draw LINE2' % status
+        print '%s.info %s image(s)' % (status, status)
+
+def request(**kwargs):
+
+    session = get_session()
+    try:
+        query = session.query(models.Image).\
+                        options(joinedload(models.Image.properties)).\
+                        options(joinedload(models.Image.members))
+        if kwargs:
+           query = query.filter_by(**kwargs)
+
+        images = query.all()
+
+    except exc.NoResultFound:
+        return []
+    return images
+
+def print_values():
+    images = request()
+
+    n_image_by_status = {}
+    for image in images:
+        n_image_by_status[image["status"]] = n_image_by_status.get(image["status"], 0) + 1
+
+    for status in possible_status: 
+        print '%s.value %s' % (status, n_image_by_status.get(status, 0))
+
+if __name__ == '__main__':
+    argv = sys.argv[:]
+
+    if len(argv) > 1:
+        if argv[1] == 'config':
+            print_config()
+        elif argv[1] == 'autoconf':
+            if not succesful_import:  
+                print 'no (failed import glance and/or sqlachemy module)'
+                sys.exit(0)
+            try:
+                load_conf()
+                get_session()
+            except:
+                print 'no (failed to connect glance backend, check user)'
+                sys.exit(0)
+            print 'yes'
+
+    elif succesful_import:
+        load_conf()
+        print_values()
+

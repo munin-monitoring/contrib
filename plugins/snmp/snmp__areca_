@@ -1,0 +1,292 @@
+#!/usr/bin/python
+
+# Copyright (C) 2009 - 2012 Andreas Thienemann <andreas@bawue.net>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Library General Public License as published by
+# the Free Software Foundation; version 2 only
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Library General Public License for more details.
+#
+# You should have received a copy of the GNU Library General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
+
+"""
+=head1 NAME
+
+snmp__areca_ - Munin plugin to get temperature, voltage or fan speed values
+from Areca network enabled RAID controllers via SNMP.
+
+=head1 APPLICABLE SYSTEMS
+
+All machines with a SNMP capable ARECA raid controller.
+
+=head1 CONFIGURATION
+
+Make sure your Areca controller is accessible via SNMP from the munin host:
+snmpwalk -v 1 -c snmp_community ip.add.re.ss
+
+The plugin is a wildcard plugin and can thus be used to retrieve different
+values depending on the name of the file.
+
+Linking it as snmp_10.8.1.230_areca_fan would retrieve the fan speed values from
+the Areca controller at 10.8.1.230.
+
+Valid values are fan, temp and volt.
+
+Add the following to your /etc/munin/plugin-conf.d/snmp__areca file:
+
+ [snmp_ip.add.re.ss_*]
+ community private
+ version 1
+
+Then test the plugin by calling the following commands:
+
+munin-run snmp_10.8.1.230_areca_temp config
+munin-run snmp_10.8.1.230_areca_temp
+
+Both commands should output sensible data without failing.
+
+=head1 INTERPRETATION
+
+The plugin shows the temperature in Celsius or the fanspeed in rotations per minute.
+
+=head1 MAGIC MARKERS
+
+  #%# family=contrib
+  #%# capabilities=
+
+=head1 VERSION
+
+0.0.1
+
+=head1 BUGS
+
+None known. If you know of any, please raise a ticket at https://trac.bawue.org/munin/wiki/areca__snmp_
+
+=head1 AUTHOR
+
+Andreas Thienemann <andreas@bawue.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+"""
+
+import pprint
+import time
+import sys
+import re
+import os
+from pysnmp import v1, v2c, role, asn1
+
+request_conf = {
+	"volt" : {
+		"label"  : "Voltages",
+		"vlabel" : "Volt",
+		"graph"  : "--base 1000 --logarithmic",
+		"oid"    : ".1.3.6.1.4.1.18928.1.2.2.1.8"
+	},
+	"fan"  : {
+		"label"  : "Fans",
+		"vlabel" : "RPM",
+		"graph"  : "--base 1000 -l 0",
+		"oid"    : ".1.3.6.1.4.1.18928.1.2.2.1.9"
+	},
+	"temp" : {
+		"label"  : "Temperatures",
+		"vlabel" : "Celsius",
+		"graph"  : "--base 1000 -l 0",
+		"oid"   : ".1.3.6.1.4.1.18928.1.2.2.1.10"
+	}
+}
+
+# Sanity check and parsing of the commandline
+host = None
+port = 161
+request = None
+try:
+	match = re.search("^(?:|.*\/)snmp_([^_]+)_areca_(.+)$", sys.argv[0])
+	host = match.group(1)
+	request =  match.group(2)
+	match = re.search("^([^:]+):(\d+)$", host)
+	if match is not None:
+		host = match.group(1)
+		port = match.group(2)
+except:
+	pass
+
+if host is None or request is None:
+        print "# Error: Incorrect filename. Cannot parse host or request."
+	sys.exit(1)
+
+# Parse env variables
+if os.getenv("community") is not None:
+	community = os.getenv("community")
+else:
+	community = "public"
+if os.getenv("version") is not None:
+	version = os.getenv("version")
+else:
+	version = "1"
+
+
+def get_data():
+	# Fetch the data
+	results = snmpwalk(request_conf[request]["oid"])
+
+	# parse data
+	vals = []
+	for i in range(0, len(results)):
+		idx, res = results[i][0].split(request_conf[request]["oid"])[1].split(".")[1:], results[i][1]
+		if idx[1] == '1':
+			vals.append([])
+			vals[int(idx[2])-1].append(res)
+		if idx[1] == '2':
+			vals[int(idx[2])-1].append(res)
+		if idx[1] == '3':
+			if request == "volt":
+				res = float(res)/1000
+			vals[int(idx[2])-1].append(res)
+
+	return vals
+
+def snmpwalk(root):
+
+	# Create SNMP manager object
+	client = role.manager((host, port))
+
+	# Create a SNMP request&response objects from protocol version
+	# specific module.
+	try:
+		req = eval('v' + version).GETREQUEST()
+		nextReq = eval('v' + version).GETNEXTREQUEST()
+		rsp = eval('v' + version).GETRESPONSE()
+
+	except (NameError, AttributeError):
+		print '# Unsupported SNMP protocol version: %s\n%s' % (version, usage)
+		sys.exit(-1)
+
+	# Store tables headers
+	head_oids = [root]
+
+	encoded_oids = map(asn1.OBJECTID().encode, head_oids)
+
+	result = [];
+
+	while 1:
+
+		# Encode OIDs, encode SNMP request message and try to send
+		# it to SNMP agent and receive a response
+		(answer, src) = client.send_and_receive(req.encode(community=community, encoded_oids=encoded_oids))
+
+		# Decode SNMP response
+		rsp.decode(answer)
+        
+		# Make sure response matches request (request IDs, communities, etc)
+		if req != rsp:
+			raise 'Unmatched response: %s vs %s' % (str(req), str(rsp))
+
+		# Decode BER encoded Object IDs.
+		oids = map(lambda x: x[0], map(asn1.OBJECTID().decode, rsp['encoded_oids']))
+
+		# Decode BER encoded values associated with Object IDs.
+		vals = map(lambda x: x[0](), map(asn1.decode, rsp['encoded_vals']))
+
+		# Check for remote SNMP agent failure
+		if rsp['error_status']:
+ 			# SNMP agent reports 'no such name' when walk is over
+			if rsp['error_status'] == 2:
+				# Switch over to GETNEXT req on error
+				# XXX what if one of multiple vars fails?
+				if not (req is nextReq):
+					req = nextReq
+					continue
+				# One of the tables exceeded
+				for l in oids, vals, head_oids:
+					del l[rsp['error_index']-1]
+			else:
+				raise 'SNMP error #' + str(rsp['error_status']) + ' for OID #' + str(rsp['error_index'])
+
+		# Exclude completed OIDs
+		while 1:
+			for idx in range(len(head_oids)):
+				if not asn1.OBJECTID(head_oids[idx]).isaprefix(oids[idx]):
+					# One of the tables exceeded
+					for l in oids, vals, head_oids:
+						del l[idx]
+					break
+			else:
+				break
+
+		if not head_oids:
+			return result
+
+		# Print out results
+		for (oid, val) in map(None, oids, vals):
+			result.append((oid, str(val)))
+			# print oid + ' ---> ' + str(val)
+
+		# BER encode next SNMP Object IDs to query
+		encoded_oids = map(asn1.OBJECTID().encode, oids)
+
+		# Update request object
+		req['request_id'] = req['request_id'] + 1
+
+		# Switch over GETNEXT PDU for if not done
+		if not (req is nextReq):
+			req = nextReq
+
+	raise "error"
+
+
+def print_config():
+	print "graph_title " + request_conf[request]["label"]
+	print "graph_vlabel " + request_conf[request]["vlabel"]
+	print "graph_args " + request_conf[request]["graph"]
+	print "graph_category sensors"
+	print "host_name", host
+	for dataset in get_data():
+		if request == "volt":
+			if dataset[1] == "Battery Status":
+				continue
+			else:
+				print request + dataset[0] + ".label", dataset[1]
+				ref_val = float(dataset[1].split()[-1][:-1])
+				print request + dataset[0] + ".warning", str(ref_val * 0.95) + ":" + str(ref_val * 1.05)
+				print request + dataset[0] + ".critical", str(ref_val * 0.80) + ":" + str(ref_val * 1.20)
+		if request == "temp":
+			print request + dataset[0] + ".label", dataset[1]
+			if dataset[1].startswith("CPU"):
+				print request + dataset[0] + ".warning", 55
+				print request + dataset[0] + ".critical", 60
+			if dataset[1].startswith("System"):
+				print request + dataset[0] + ".warning", 40
+				print request + dataset[0] + ".critical", 45
+		if request == "fan":
+			print request + dataset[0] + ".label", dataset[1]
+			print request + dataset[0] + ".warning", 2400
+			print request + dataset[0] + ".critical", 2000
+
+	sys.exit(0)
+
+
+if "config" in sys.argv[1:]:
+	print_config()
+elif "snmpconf" in sys.argv[1:]:
+	print "require 1.3.6.1.4.1.18928.1.2.2.1.8.1.1"
+	sys.exit(0)
+else:
+	for dataset in get_data():
+		# Filter Battery Status (255 == Not installed)
+		if request == "volt" and dataset[1] == "Battery Status":
+			continue
+		print request + dataset[0] + ".value", dataset[2]
+	sys.exit(0)

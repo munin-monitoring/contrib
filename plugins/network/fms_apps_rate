@@ -113,6 +113,8 @@ use Proc::ProcessTable;
 
 my ($host, $port, $username, $password);
 
+sub name_filter { my ($n) = @_; $n =~ s/[^a-zA-Z0-9_]/_/g; $n }
+
 sub get_apps {
 	my @applist;
 	my $ua = LWP::UserAgent->new(timeout => 30);
@@ -123,7 +125,6 @@ sub get_apps {
 		my $apps = $1;
 		while ( $apps =~ /<_[0-9]+> *([^<]*) *<\/_[0-9]+>/gi ) {
 			my $appname = $1;
-			$appname =~ s/[^a-zA-Z0-9_]/_/g;
 			push(@applist, $appname);
 		}
 	}
@@ -218,10 +219,11 @@ END_GRAPH_CONFIG
 			my @apps = get_apps();
 			if ( $#apps >= 0 ) {
 				foreach my $app (@apps) {
+					my $symbol = name_filter($app);
 					print <<"END_APP_CONFIG";
-fms_app_total_$app.label $app
-fms_app_total_$app.type DERIVE
-fms_app_total_$app.min 0
+fms_app_total_$symbol.label $app
+fms_app_total_$symbol.type DERIVE
+fms_app_total_$symbol.min 0
 END_APP_CONFIG
 				}
 				exit 0;
@@ -241,13 +243,14 @@ if ( defined($host) and defined($port) and defined($username) and defined($passw
 	if ( $#apps >= 0 ) {
 		my $ua = LWP::UserAgent->new(timeout => 30);
 		foreach my $app (@apps) {
+			my $symbol = name_filter($app);
 			my $url = sprintf("http://%s:%d/admin/getAppStats?auser=%s\&apswd=%s\&app=%s", $host, $port, $username, $password, $app);
 			my $response = $ua->request(HTTP::Request->new('GET', $url));
 			if ( $response->content =~ /<data>.*<total_connects>[^0-9]*([0-9]+)[^0-9]*<\/total_connects>.*<\/data>/is ) {
-				print("fms_app_total_$app.value $1\n");
+				print("fms_app_total_$symbol.value $1\n");
 			} else {
 				print(STDERR "Failed to get total number of played streams for the \"$app\" application from the Flash Media Administration Server!\n");
-				print("fms_app_total_$app.value U\n");
+				print("fms_app_total_$symbol.value U\n");
 			}
 		}
 		exit 0;

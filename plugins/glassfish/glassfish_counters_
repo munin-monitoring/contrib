@@ -1,0 +1,96 @@
+#!/bin/bash
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+glassfish_counters_ - Wildcard-plugin to monitor counters in GlassFish
+
+=head1 CONFIGURATION
+
+This plugin does need the full path to the asadmin script:
+  [glassfish_counters_*]
+        env.ASADMIN /usr/local/glassfish/bin/asadmin
+
+This is a wildcard plugin. To monitor an subtree, link
+glassfish_counters_<subtree> to this file. E.g.
+
+  ln -s /usr/share/munin/plugins/glassfish_counters_ \
+        /etc/munin/plugins/glassfish_counters_server.web.request
+
+...will monitor server.web.request.*
+
+To ignore certain counters, just add more "IGNORE" lines on top of
+the awk script. (XXX: Fixme for env.)
+
+=head1 AUTHOR
+Philipp Buehler
+
+=head1 LICENSE
+
+BSD 2-clause
+
+=head1 VERSION
+
+  $Id: glassfish_counters_.in$
+  0.0.1
+
+=cut
+[ -z $ASADMIN ] && {
+        echo "ASADMIN not set in node configuration"
+        exit 1
+        } || MUN_AS_ADMIN=${ASADMIN}
+
+check_link () {
+        scriptname=${0##*/}
+        myself=${scriptname##*_}
+        if [ "x$myself" = "x" ] ; then
+                echo "plugin must be symlinked, e.g. to glassfish_counters_server.web.request"
+                exit 1
+        fi
+}
+
+SUBTREE=${0##*glassfish_counters_}
+
+case $1 in
+    suggest)
+                echo "not implemented"
+                exit 0
+        ;;
+    config)
+                check_link
+                $MUN_AS_ADMIN get -t --monitor=true "${SUBTREE}.*" | \
+                awk 'BEGIN{ FS="[ = ]"}
+                        /requestcount/ { next; } # IGNORE
+                        /dotted-name/ { myself = $NF
+                                print "graph_title GlassFish", myself
+                                print "graph_vlabel count"
+                                print "graph_category glassfish"
+                                print "graph_info this shows available counters from", myself
+                                next
+                                }
+                        /-name / { nwhat = split($1, what, ".")
+                                gsub(/-name/, "", what[nwhat])
+                                print what[nwhat] ".label " $NF
+                                print what[nwhat] ".type GAUGE"
+                                }
+                        /-description / { nwhat = split($1, what, ".")
+                                gsub(/-description/, "", what[nwhat])
+                                $1 = ""; line = $0
+                                gsub(/^   /,"", line)
+                                print what[nwhat] ".info " line
+                                }
+                '
+                exit 0
+        ;;
+esac
+
+check_link
+$MUN_AS_ADMIN get -t --monitor=true "${SUBTREE}.*" | \
+awk 'BEGIN{ FS="[ = ]" }
+        /requestcount/ { next;} # IGNORE
+        /-count / { nwhat = split($1, what, ".")
+                gsub(/-count/, "", what[nwhat])
+                print what[nwhat] ".value " $NF}
+'

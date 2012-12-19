@@ -1,0 +1,133 @@
+#!/bin/sh
+# -*- sh -*-
+
+: <<EOF
+
+=head1 NAME
+
+varnish_devicedetect - Plugin to graph the device usage ratio of
+website visitors
+
+=head1 APPLICABLE SYSTEMS
+
+Servers running varnish, and using the "varnish-devicedetect" VCL
+(https://github.com/varnish/varnish-devicedetect)
+
+=head1 CONFIGURATION
+
+The plugin runs "varnishlog", and graphs the last 5 minutes of log
+entries.
+
+This configuration section shows the defaults of the plugin
+
+=over 2
+
+  [varnish_devicedetect]
+  env.devices bot mobile-android mobile-iphone pc tablet-android tablet-ipad
+
+=back
+
+The "devices" list is a space separated list of devices, which should
+match the headers set by the varnish-devicedect VCL.
+
+=head1 INTERPRETATION
+
+This plugin reads data from the Varnish shared memory log, and
+presents a stacked percentage graph of the device types of your
+website visitors for all entries present in the log, for the last 5
+minutes.
+
+The percentage shown per device is that of all devices, not just the
+ones specified by env.devices.
+
+=head1 AUTHOR
+
+© 2012 - Stig Sandbeck Mathisen <ssm@fnord.no>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+EOF
+
+devices=${devices:-bot mobile-android mobile-iphone pc tablet-android tablet-ipad}
+export devices
+
+print_config() {
+  printf "graph_title Varnish device detection\n"
+  printf "graph_vlabel percent\n"
+  printf "graph_category varnish\n"
+  printf "graph_args --rigid --lower-limit 0 --upper-limit 100\n"
+
+  for device in $devices; do
+    printf "%s.label %s\n" $device $device
+    printf "%s.type GAUGE\n" $device
+    printf "%s.draw AREASTACK\n" $device
+  done
+}
+
+autoconf() {
+    if $(which varnishlog >/dev/null); then
+        printf "yes\n"
+    else
+        printf "no (no varnishlog in path)\n"
+        return 1
+    fi
+}
+
+print_values() {
+  varnishlog -d -i TxHeader -i ReqEnd -I X-UA-Device: \
+    | awk '
+  BEGIN {
+    start_time = systime() - 300
+    active = 0
+
+    # Initialize the devices array, so we print all, even the ones
+    # with zero value.
+
+    split(ENVIRON["devices"], devices)
+    for (device in devices) {
+      seen_devices[devices[device]] = 0
+    }
+  }
+
+  active == 0 && $2 == "ReqEnd" && $5 >= start_time {
+    active = 1
+  }
+  active == 1 && $2 == "TxHeader" && $4 == "X-UA-Device:" {
+    total++;
+    seen_devices[$5]++
+  }
+
+  END {
+    for (device in devices) {
+
+      if (total > 0)
+        percentage = seen_devices[devices[device]] / total * 100.0
+      else
+        percentage = 0
+
+      printf "%s.value %f\n", devices[device], percentage
+    }
+  }
+'
+}
+
+case $1 in
+  autoconf)
+    autoconf
+    ;;
+  config)
+    print_config
+    ;;
+  *)
+    print_values
+    ;;
+esac
