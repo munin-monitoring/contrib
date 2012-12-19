@@ -1,0 +1,194 @@
+#!/usr/bin/perl
+# vim: set filetype=perl sw=4 tabstop=4 expandtab smartindent: #
+
+=head1 NAME
+
+  du - Plugin to monitor multiple directories size
+
+=head1 AUTHOR AND COPYRIGHT
+
+  Copyright 2011-2012 Luc Didry <luc AT didry.org>
+
+=head1 HOWTO CONFIGURE AND USE :
+
+=over
+
+=item - /etc/munin/plugin-conf.d/du_
+
+     [du]
+     user root
+     env.interval 20 # INTERVAL OF DU POLLING IN MINUTES
+     env.dirs /home/foo /home/bar # DIRECTORIES TO POLL
+     env.suppr /home/ # PLEASE USE \# INSTEAD OF #
+     timeout 900 # 15 MINUTES IN SECONDS
+
+=item - /etc/munin/plugins-enabled
+
+     ln -svf ../plugins-available/site/du
+
+
+=item - restart Munin node
+
+     sudo killall -TERM munin-node
+
+=back
+
+=head1 CREDITS
+
+  Based on the 'du_multidirs-v2' initially written in Bash by Christian Kujau <lists@nerdbynature.de> and modified by dano229.
+  This script was based on the 'homedirs' plugin, initially written in Perl by Philipp Gruber <pg@flupps.net>
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 LICENSE
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=cut
+
+use warnings;
+use strict;
+use Munin::Plugin;
+use POSIX qw(setsid);
+
+my $PLUGIN_NAME = "du";
+my $CACHEFILE="$Munin::Plugin::pluginstatedir/du.cache";
+my $TEMPFILE="$Munin::Plugin::pluginstatedir/du.tmp";
+my $LOCKFILE="$Munin::Plugin::pluginstatedir/du.lock";
+my $TIMEFILE="$Munin::Plugin::pluginstatedir/du.time";
+
+##### autoconf
+if( (defined $ARGV[0]) && ($ARGV[0] eq "autoconf") ) {
+    print "yes\n";
+    ## Done !
+    munin_exit_done();
+}
+
+## In the parent, it's just a regular munin plugin which reads a file with the infos
+##### config
+if( (defined $ARGV[0]) && ($ARGV[0] eq "config") ) {
+    print "graph_title Directory usage\n";
+    print "graph_args --base 1024 -l 1\n";
+    print "graph_vlabel Bytes\n";
+    print "graph_category disk\n";
+    print "graph_total total\n";
+    print "graph_info This graph shows the size of several directories\n";
+
+    my $foo = 0;
+    open (FILE, "<", $CACHEFILE) or munin_exit_fail();
+    while(defined (my $bar = <FILE>)) {
+        if ($bar =~ m/(\d+)\s+(.+)/) {
+            my $dir = $2;
+            clean_path(\$dir);
+            print "$dir.label $dir\n";
+            if ($foo++) {
+                print "$dir.draw STACK\n";
+            } else {
+                print "$dir.draw AREA\n";
+            }
+        }
+    }
+    close(FILE);
+    ## Done !
+    munin_exit_done();
+}
+
+##### fetch
+open (FILE, "<", $CACHEFILE) or munin_exit_fail();
+while(defined (my $foo = <FILE>)) {
+    if ($foo =~ m/(\d+)\s+(.+)/) {
+        my ($field, $value) = ($2, $1);
+        clean_path(\$field);
+        print $field, ".value ", $value, "\n";
+    }
+}
+close(FILE);
+daemonize();
+
+#
+##
+### PUBLIC FONCTIONS
+###############################################################################
+## Used to create the fork
+sub daemonize {
+    chdir '/'               or die "Can't chdir to /: $!";
+    defined(my $pid = fork) or die "Can't fork: $!";
+    munin_exit_done() if $pid;
+    open STDIN, '/dev/null' or die "Can't read /dev/null: $!";
+    open STDOUT, '>/dev/null' or die "Can't write to /dev/null: $!";
+    open STDERR, '>&STDOUT' or die "Can't dup stdout: $!";
+    setsid                  or die "Can't start a new session: $!";
+    ## In the child, let's get the du infos if necessary
+    if (cache_is_too_old() && du_not_running()) {
+        my $dirs = $ENV{dirs};
+        system("touch $LOCKFILE; du -sb $dirs > $TEMPFILE; cat $TEMPFILE > $CACHEFILE; rm $LOCKFILE; date +%s > $TIMEFILE;");
+    }
+    exit;
+} ## daemonize
+
+## Used to remove the beginning of the paths if wanted
+sub clean_path {
+    my ($path) = @_;
+    if (defined $ENV{suppr}) {
+        my $pattern = $ENV{suppr};
+        $$path =~ s#^($pattern)##;
+    }
+} ## clean_path
+
+## Do you really need I told you what this functions are going to check ?
+sub cache_is_too_old {
+    return 1 if (! -e $TIMEFILE);
+    my ($time) = `cat $TIMEFILE`;
+    chomp $time;
+    return 1 if ( (time - $time) > ($ENV{interval}*60) );
+    return 0;
+} ## cache_is_too_old
+
+sub du_not_running {
+    if (-e $LOCKFILE) {
+        my ($time) = `cat $TIMEFILE`;
+        chomp $time;
+        if ( (time - $time) > ($ENV{interval}*60*60) ) {
+            # The cache is really old (60xinterval) => Maybe the lockfile wasn't properly deleted.
+            # Let's delete it.
+            system("rm $LOCKFILE;");
+            return 1;
+        } else {
+	        return 0;
+        }
+    } else {
+        return 1;
+    }
+}
+
+sub munin_exit_done {
+    __munin_exit(0);
+} ## sub munin_exit_done
+
+sub munin_exit_fail {
+    __munin_exit(1);
+} ## sub munin_exit_fail
+
+#
+##
+### INTERNALS FONCTIONS
+###############################################################################
+sub __munin_exit {
+    my $exitcode = shift;
+    exit($exitcode) if(defined $exitcode);
+    exit(1);
+} ## sub __munin_exit

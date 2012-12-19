@@ -1,0 +1,81 @@
+#!/bin/sh
+#
+# Wildcard-plugin to monitor FreeBSD em(4) and igb(4) network interfaces
+# using sysctl dev.em.0.mac_stats 64-bit counters
+# To monitor an # interface, link ifem_<interface> to this file. E.g.
+#
+#    ln -s /usr/share/munin/node/plugins-auto/ifem_ /etc/munin/node.d/ifem_em0
+#
+# ...will monitor em0.
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+
+INTERFACE=`basename $0 | sed 's/^ifem_//g'`
+
+if [ "$1" = "autoconf" ]; then
+	if [ -x /sbin/sysctl ]; then
+		echo yes
+		exit 0
+	else
+		echo "no (/sbin/sysctl not found)"
+		exit 0
+	fi
+fi
+
+if [ "$1" = "suggest" ]; then
+	if [ -x /sbin/sysctl ]; then
+		/sbin/sysctl -q dev.em dev.igb | /usr/bin/awk -F '.' '/mac_stats\.total_pkts_recvd/{print $2$3;}'
+		exit 0
+	else
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+
+	echo "graph_order rbytes obytes" 
+	echo "graph_title $INTERFACE traffic"
+	echo 'graph_args --base 1000'
+	echo 'graph_vlabel bits per ${graph_period} in (-) / out (+)'
+	echo 'graph_category network'
+	echo "graph_info This graph shows the traffic of the $INTERFACE network interface. Please note that the traffic is shown in bits per second, not bytes."
+	echo 'rbytes.label received'
+        echo 'rbytes.type COUNTER'
+        echo 'rbytes.graph no'
+        echo 'rbytes.cdef rbytes,8,*'
+        echo 'obytes.label bps'
+	echo 'obytes.type COUNTER'
+	echo 'obytes.negative rbytes'
+	echo 'obytes.cdef obytes,8,*'
+	echo "obytes.info Traffic sent (+) and received (-) on the $INTERFACE network interface."
+	exit 0
+fi
+
+oid=`echo $INTERFACE | sed -E 's/^(em|igb)([0-9]+)$/dev\.\1\.\2\.mac_stats/g'`
+rbytes='U'
+obytes='U'
+
+while read ev val; do
+   case "$ev" in
+	"$oid.good_octets_recvd:")
+	   rbytes="$val"
+	   ;;
+        "$oid.good_octets_txd:")
+	   obytes="$val"
+	   ;;
+        "$oid.good_octest_txd:")
+	   obytes="$val"
+	   ;;
+   esac
+done << EOF
+$(/sbin/sysctl -q $oid 2>/dev/null)
+EOF
+
+printf "rbytes.value ${rbytes}\nobytes.value ${obytes}\n"
+
+

@@ -1,0 +1,42 @@
+#!/usr/bin/perl
+
+    use Carp;
+    use strict;
+    use Asterisk::AMI;
+    do './get_fax_stats.pl';
+
+    my $ret = undef;
+    if ( ! eval "require Asterisk::AMI;" ) {
+        $ret = "Asterisk::AMI not found";
+    };
+
+    if ( $ARGV[ 0 ] and $ARGV[ 0 ] eq "config" ) {
+        print "graph_title Asterisk active fax channels\n";
+        print "graph_args --base 1000 -l 0\n";
+        print "graph_vlabel channels\n";
+        print "graph_category asterisk\n";
+        print "channels.draw AREA\n";
+        print "channels.label channels\n";
+        exit 0;
+    };
+
+    #my $host     = exists $ENV{ 'host' } ? $ENV{ 'host' } : "127.0.0.1";
+    #my $port     = exists $ENV{ 'port' } ? $ENV{ 'port' } : "5038";
+    #my $username = $ENV{ 'username' };
+    #my $secret   = $ENV{ 'secret'   };
+
+    our $username = 'manager';
+    our $host     = '127.0.0.1';
+    our $port     = '5038';
+    our $secret   = 'insecure';
+    our $timeout  = '5';
+
+    my %faxstats = get_fax_stats();
+
+    my $channels = $faxstats{'Digium G.711'}{'Licensed Channels'};
+    print "channels.value $channels\n";
+
+    exit( 0 );
+
+
+

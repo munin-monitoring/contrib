@@ -1,0 +1,216 @@
+#!/usr/bin/php
+<?php
+
+/*
+ * README
+ * This plugin makes use of the GameQ library to be able to query many different
+ * types of game servers and display the results in munin. You can see a list of
+ * supported games at http://gameq.sourceforge.net/#games
+ *
+ * This plugin has 2 environment variables:
+ * game_config_file - Defaults to /etc/munin/munin-game.ini. The location of the config file
+ * game_state_file - Defaults to /var/lib/munin/plugin-state/game. The location of the munin state directory
+ *
+ * (Probably) FAQ
+ * Q: Why PHP?
+ * A: The GameQ library is written in PHP, so it was either that or rewrite the entire library.
+ *
+ * Q: Why have you used a config file instead of environment variables?
+ * A: Way too much to fit data inside an environment variable unfortunately. Imagine
+ *    trying to fit information about 50 servers all inside one variable.
+ *
+ * Q: I want to ask you a question!
+ * A: I'm on most IRC networks under the nick Azelphur, or email me. support@azelphur.com
+ *
+ * Q: It's not working!
+ * A: Try running ./game autoconf, it'll probably tell you what's up.
+ */
+
+// Check environment variables
+$var = getenv('game_config_file');
+$config = ($var) ? $var : "/etc/munin/munin-game.ini";
+$var = getenv('game_state_file');
+$state = ($var) ? $var : "/var/lib/munin/plugin-state/game";
+
+function p($str) {
+    // Quick function to print a string with an EOL on the end
+    echo $str . PHP_EOL;
+}
+
+function printMultigraph($ini_array, $machine_name, $title, $info, $max) {
+    // Print out a standard graph config.
+    p("multigraph $machine_name");
+    p("graph_title $title");
+    p("graph_vlabel players");
+    p("graph_category gameserver");
+    p("graph_info $info");
+    p("graph_printf %6.0lf");
+    
+    if (isset($ini_array['settings'][$machine_name . '_colour']))
+        p("players.colour " . $ini_array['settings'][$machine_name . '_colour']);
+
+    if (isset($ini_array['settings'][$machine_name . '_draw']))
+        p("players.draw " . $ini_array['settings'][$machine_name . '_draw']);
+
+    p("players.label players");
+    p("players.info Number of players");
+    p("players.min 0");
+    p("players.max $max");
+}
+
+function printValue($machine_name, $value) {
+    // Print a value
+    p("multigraph $machine_name");
+    p("players.value " . $value);
+}
+
+function queryServers($ini_array) {
+    // Query all game servers and return the results
+
+    require "gameq/GameQ.php";
+
+    // Populate the $servers array from the ini file, ready to pass to GameQ
+    $servers = array();
+    foreach ($ini_array as $section => $value) {
+        if ($section != 'settings')
+            $servers[$section] = array($value['game'], $value['address'], $value['port']);
+    }
+
+    // Create a new GameQ object and pass it a list of servers
+    $gq = new GameQ();
+    $gq->addServers($servers);
+
+    // Set timeout from the config file
+    $gq->setOption('timeout', $ini_array['settings']['timeout']);
+    $gq->setOption('sock_count', $ini_array['settings']['sock_count']);
+    $gq->setOption('sock_start', $ini_array['settings']['sock_start']);
+
+    // This filter makes sure a subset of data is always available, next to the normal data
+    $gq->setFilter('normalise');
+
+    // Send request(s)
+    $results = $gq->requestData();
+
+    return $results;
+}
+
+// Parse command line arguments if required.
+if (isset($_SERVER['argv'][1])) {
+    if ($_SERVER['argv'][1] == 'config') {
+        // Load our config.ini
+        $ini_array = parse_ini_file($config, true);
+
+        // Load games.ini so we can show pretty game names
+        $games = parse_ini_file('gameq/GameQ/games.ini', true);
+
+        // Query the game servers
+        $results = queryServers($ini_array);
+        // Cache the query in the state file
+        $fp = fopen($state, 'w+') or die("I could not open state file."); 
+        fwrite($fp, serialize($results)); 
+        fclose($fp);
+
+
+        // Loop through each server, printing graphs.
+        foreach ($results as $name => $server) {
+            // If sub graphs and the game total graphs are enabled, make this be a sub-graph.
+            if ($ini_array['settings']['show_game_total'] && $ini_array['settings']['enable_sub_graphs'])
+                $machine_name = "gameserver_" . $ini_array[$name]['game'] . ".$name";
+            else
+                $machine_name = "gameserver_" . $ini_array[$name]['game'] . "_$name";
+            $title = $ini_array[$name]['name'] . " players";
+            $info = "The number of players connected to the " . $games[$ini_array[$name]['game']]['name'] . " server";
+            printMultigraph($ini_array, $machine_name, $title, $info, $server['gq_maxplayers']);
+        }
+
+        // Game total graphs.
+        if ($ini_array['settings']['show_game_total']) {
+            $game_total_max = array();
+
+            // Count players connected to each game
+            foreach ($results as $name => $server) {
+                if (!isset($game_total_max[$ini_array[$name]['game']]))
+                    $game_total_max[$ini_array[$name]['game']] = $server['gq_maxplayers'];
+                else
+                    $game_total_max[$ini_array[$name]['game']] += $server['gq_maxplayers'];
+            }
+
+            // Print all the game total graphs.
+            foreach ($game_total_max as $game => $total)
+            {
+                $machine_name = "gameserver_" . $game;
+                $title = "Total " . $games[$game]['name'] . " players";
+                $info = "Total players connected to all " . $games[$game]['name'] . " servers";
+                printMultigraph($ini_array, $machine_name, $title, $info, $total);
+            }
+        }
+
+        // Global total graph
+        if ($ini_array['settings']['show_global_total']) {
+            $total_max = 0;
+            // Add up all the players connected to all the servers
+            foreach ($results as $name => $server) {
+                $total_max += $server['gq_maxplayers'];
+            }
+
+            printMultigraph($ini_array, "gameserver", "Total Players", "Total players connected to all servers", $total_max);
+        }
+    }
+    if ($_SERVER['argv'][1] == 'autoconf') {
+        if (!@include("gameq/GameQ.php"))
+            p("no (GameQ Library not found)");
+        elseif (!file_exists($config))
+            p("no ($config not found)");
+        else
+            p("yes");
+    }
+    die();
+}
+
+// No command line arguments, print values.
+
+// Load our config.ini
+$ini_array = parse_ini_file($config, true);
+
+// Load games.ini so we can show pretty game names
+$games = parse_ini_file('gameq/GameQ/games.ini', true);
+
+$results = unserialize(file_get_contents($state)); 
+
+// Print individual game values
+foreach ($results as $name => $server){
+    if ($ini_array['settings']['show_game_total'] && $ini_array['settings']['enable_sub_graphs'])
+        $machine_name = "gameserver_" . $ini_array[$name]['game'] . ".$name";
+    else
+        $machine_name = "gameserver_" . $ini_array[$name]['game'] . "_$name";
+    printValue($machine_name, $server['gq_numplayers']);
+}
+
+// Print game total values
+if ($ini_array['settings']['show_game_total']) {
+    $game_total = array();
+    foreach ($results as $name => $server) {
+        // Add up counts for the total graph
+        if (!isset($game_total_max[$ini_array[$name]['game']]))
+            $game_total[$ini_array[$name]['game']] = $server['gq_numplayers'];
+        else
+            $game_total[$ini_array[$name]['game']] += $server['gq_numplayers'];
+    }
+    foreach ($game_total as $game => $total)
+    {
+        $machine_name = "gameserver_" . $game;
+        printValue($machine_name, $total);
+    }
+}
+
+// Are global totals enabled?
+if ($ini_array['settings']['show_global_total']) {
+    $total = 0;
+    foreach ($results as $name => $server) {
+        $total += $server['gq_numplayers'];
+    }
+    printValue("gameserver", $total);
+}
+
+
+?>

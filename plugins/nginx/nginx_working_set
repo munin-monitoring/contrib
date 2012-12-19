@@ -1,0 +1,38 @@
+#!/bin/bash
+#
+# Munin plugin for monitoring Nginx working set
+#
+# by Mike Koss, Feb 12, 2012 - MIT License
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+case $1 in
+config)
+    cat <<'EOF'
+graph_title NGINX Working Set
+graph_vlabel WS Bytes
+graph_category nginx
+graph_args --base 1024
+ws.label Working Set
+EOF
+    exit 0
+    ;;
+
+autoconf)
+    if [ "$(pidof nginx)" == "" ]; then
+        echo no
+    else
+        echo yes
+    fi
+    exit 0
+    ;;
+esac
+
+KBS=$(ps -o rss --no-heading -p $(pidof nginx))
+total=0
+for size in $KBS
+do
+    total=$(($total + $size * 1024))
+done
+echo ws.value $total
