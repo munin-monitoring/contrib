@@ -1,0 +1,159 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+
+use strict;
+use Munin::Plugin;
+use Munin::Plugin::SNMP;
+use feature qw(switch say);
+use Switch;
+
+need_multigraph();
+
+my %vols;
+
+sub do_collect {
+    my $input;
+    my @tmp;
+    my $ssh = $ENV{'ssh'} || '/usr/bin/ssh';
+    my $sshuser = $ENV{'sshuser'} || $ENV{'USER'};
+    my $sshopts = $ENV{'sshopts'} || "";
+
+    my ($host, undef, undef, undef) = Munin::Plugin::SNMP->config_session();
+
+    $input=`$ssh $sshopts $sshuser\@$host reallocate status`;
+
+    my $hit=0;
+    my $key="";
+    my $value=0;
+
+    foreach my $line (split(/\n/, $input)) {
+        if (($line =~ m/^\/vol/  || ($line =~ m/^aggr/ ) && !$hit)) {
+                ($key= "$line") =~ s/(\/vol\/|^)(.*?)\:\ /$2/;
+                $hit=1;
+	} 
+        if ($line =~ m/State/ && $hit ) {
+            @tmp = split(/:/, $line);
+            switch ($tmp[1]) {
+                case m/Idle/ { $value = 0 } #reallocate idle intialising
+                case m/Reallocating/ { $value = 1 } #reallocate active
+                case m/Redirect/ { $value = 2 } #redirect active
+                case m/Quiesce/ { $value = 3 } #quiesce reallocate paused
+                else { $value = 5 }
+            }
+        $hit=0;
+        $vols{$key} = $value;
+        } 
+    }
+}
+
+sub do_config_root {
+    my ($host) = @_;
+
+    print "multigraph reallocate_status\n";
+    print "graph_title $host Reallocation status\n";
+    print "graph_args --base 1000 --lower-limit 0 --rigid\n";
+    print "graph_vlabel reallocation status\n";
+    print "graph_category reallocate\n";
+    print "graph_info This graph shows the reallocation status for $host\n";
+
+    foreach my $state ("reallocating", "redirecting") {
+        print "$state.label $state\n";
+        print "$state.min 0\n";
+        print "$state.draw AREASTACK\n";
+        print "$state.type GAUGE\n";
+    }
+
+}
+sub do_config_vol {
+    my ($host,$vol) = @_;
+    my $extrainfo = '';
+
+    print "multigraph reallocate_status.$vol\n";
+
+    print "graph_title reallocate_status status for vol $vol\n";
+    print "graph_args --base 1000 --lower-limit 0 --rigid\n";
+    print "graph_vlabel reallocate_status status\n";
+    print "graph_category reallocate\n";
+    print "graph_info This graph shows reallocate_status status for the $vol vol.$extrainfo\n";
+
+    foreach my $state ("reallocating", "redirecting", "debug") {
+        print "$state.label $state\n";
+        print "$state.min 0\n";
+        print "$state.draw AREASTACK\n";
+        print "$state.type GAUGE\n";
+        print "$state.info This is the $state status of $vol.\n";
+    }
+
+}
+
+
+sub do_fetch_root {
+    my $status = 0;
+    my $reallocating = 0;
+    my $redirecting = 0;
+	
+    foreach my $vol (keys %vols) {
+
+        $status = $vols{$vol};
+	switch ($status) {
+	    case 1 { $reallocating++ } #reallocation 
+            case 2 { $redirecting++ } #redirection
+      	}
+    }
+    print "multigraph reallocate_status\n";
+    print "reallocating.value $reallocating\n";
+    print "redirecting.value $redirecting\n";
+}
+
+sub do_fetch_vol {
+    my($vol) = @_;
+    my $status = 0;
+    my $reallocating = 0;
+    my $redirecting = 0;
+    my $debug = 0;
+
+    $status = $vols{$vol};
+    switch ($status) {
+        case 0 {   } #reallocate idle
+        case 1 { $reallocating = 1 } #reallocate intialising
+        case 2 { $redirecting = 1 } #reallocate runnung
+        case 3 { } #reallocate paused
+        else { $debug = 1 }
+    }
+       
+    print "multigraph reallocate_status.$vol\n";
+    print "reallocating.value $reallocating\n";
+    print "redirecting.value $redirecting\n";
+    print "debug.value $debug\n";
+}
+
+sub do_config {
+
+    my ($host, undef, undef, undef) = Munin::Plugin::SNMP->config_session();
+
+    print "host_name $host\n" unless $host eq 'localhost';
+
+    foreach my $vol (sort keys %vols) {
+        do_config_vol($host,$vol);
+    }
+
+    do_config_root($host);
+}
+
+
+sub do_fetch {
+
+    foreach my $vol (sort  keys %vols) {
+        do_fetch_vol($vol);
+    }
+    do_fetch_root();
+}
+
+do_collect();
+
+if ($ARGV[0] and $ARGV[0] eq "config") {
+    do_config();
+    exit 0;
+}
+
+do_fetch();
