@@ -1,46 +1,36 @@
-#!/usr/bin/perl
-# -*- perl -*-
-# vim: ft=perl
-=pod
+#!/usr/local/bin/perl
+# -*- perl
 
-=encoding UTF-8
+=pod
 
 =head1 NAME
 
-
-=head1 APPLICABLE SYSTEMS
-
-
+zfs_usage_ - Script to monitor zfs pool usage
 
 =head1 CONFIGURATION
 
 Create one symlink per zpool for exampe zfs_usage_system
 
-=head1 INTERPRETATION
+=head1 AUTHOR
 
-
-=head1 BUGS
-
+2012, Claudius Herder 
 
 =head1 MAGIC MARKERS
 
-
-=head1 VERSION
-
-
-=head1 AUTHOR
-
-Claudius Herder
+ #%# family=auto
+ #%# capabilities=autoconf suggest
 
 =cut
 
-  use strict;
-  use warnings;
-  use Munin::Plugin;
-  need_multigraph();
+use strict;
+use warnings;
+use Munin::Plugin;
+need_multigraph();
 
 my $filesystems;
 my $zpool;
+my $zpoolexec="/sbin/zpool";
+my $zfsexec="/sbin/zfs";
 
 my $properties = {
   available           =>  "Read-only property that identifies the amount of disk"
@@ -145,20 +135,13 @@ my @order = (
 "volsize",
 );
 
-if ($0 =~ /zfs_usage_(.+)*$/) {
-    $zpool = $1;
-}
-die ("Can't run without a symlinked name\n") if $0 =~ /zfs_usage_$/;
-
 sub do_collect {
 
-    my $fslist;
-    $fslist=(`zfs list -H -r -o name $zpool`);
+    my $fslist=(`$zfsexec list -H -r -o name $zpool`);
 
-    my $fsget;
     my @params = join(',',( keys %{$properties} ));
 
-    $fsget="zfs get -H -p @params";
+    my $fsget="$zfsexec get -H -p @params";
 
     foreach my $fsname (split(/\n/,$fslist)) {
 	    foreach my $line (split(/\n/, `$fsget $fsname` )) {
@@ -241,6 +224,21 @@ sub do_config {
     }
 }
 
+sub do_autoconf {
+
+        if (`which $zpoolexec 2>/dev/null` =~ m{^/}) {
+                print "yes\n";
+        } else {
+                print "no ($zpoolexec could not be found)\n";
+        }
+        exit 0;
+}
+
+
+sub do_suggest {
+    my $poollist=(`zpool list -H  -o name`);
+    print "$poollist";
+}
 
 sub do_fetch {
 
@@ -249,16 +247,34 @@ sub do_fetch {
     }
 }
 
-do_collect();
+
 
 if ($ARGV[0]) {
     if ($ARGV[0] eq "config") {
-        do_config();
+        if ($0 =~ /zfs_usage_(.+)*$/) {
+            $zpool = $1;
+            do_collect();
+            do_config();
+         }
         exit 0;
     }
+    elsif ($ARGV[0] eq "autoconf") {
+        do_autoconf();
+        exit 0;
+    }
+    elsif ($ARGV[0] eq "suggest") {
+        do_suggest();
+        exit 0;
+    }
+}    
+else {
+    if ($0 =~ /zfs_usage_(.+)*$/) {
+        $zpool = $1;
+            do_collect();
+            do_fetch();
+    }
+        die ("Can't run without a symlinked name\n") if $0 =~ /zfs_usage_$/;	
 }
-
-do_fetch();
 
 exit 0;
 
