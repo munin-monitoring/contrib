@@ -1,0 +1,101 @@
+#!/bin/bash
+#
+# Plugin to monitor Bind9 Name Server Resolver Stats
+#
+# Author:
+#    Dave Fennell <dave@microtux.co.uk>
+#
+# Created:
+#    20th December 2012
+#
+# Usage:
+#    Place in /etc/munin/plugins/ (or link it there using ln -s)
+#
+# Parameters:
+#    config   (required)
+#
+
+# change those to reflect your bind configuration (use plugin configuration)
+# stat file
+if [ "$stat_file" = "" ]; then
+	stat_file="/var/cache/bind/named.stats"
+fi
+
+# rndc path
+if [ "$rndc" = "" ]; then
+	rndc="/usr/sbin/rndc"
+fi
+
+# The section we are looking for in the stats.
+section="Resolver Statistics"
+lines=18
+
+# Config mode.
+if [ "$1" = "config" ]; then
+	echo 'graph_args --lower-limit 0'
+	echo 'graph_category network'
+	echo 'graph_info '${section}' for the Bind9 Name Server'
+	echo 'graph_scale no'
+	echo 'graph_title Bind9 '${section}
+	echo 'graph_vlabel requests/sec'
+
+	# Output the stat configs.
+	grep "++ ${section} ++" ${stat_file} -A${lines} | while read num name
+	do
+		if [ "$num" = "++" ]; then
+			continue;
+		fi
+
+		if [ ${num:0:1} = "[" ]; then
+			continue;
+		fi
+
+		# Shorten some names.
+		label=${name//queries with /}
+		label=${label//</below}
+		label=${label//>/above}
+
+		# All lowercase.
+		label=$(echo "$label" | tr 'A-Z' 'a-z')
+
+		# Now change names to all have no spaces.
+		key=${label//[ -]/_}
+
+		echo ${key}.label ${label}
+		echo ${key}.info ${name}
+		echo ${key}.type COUNTER
+	done
+
+	exit 0
+fi
+
+# Blank the stats file (else stats are appended not replaced)
+rm ${stat_file}
+
+# Ask to bind to build new one
+${rndc} stats
+
+# Output the stats.
+grep "++ ${section} ++" ${stat_file} -A${lines} | while read num name
+do
+	if [ "$num" = "++" ]; then
+		continue;
+	fi
+
+	if [ ${num:0:1} = "[" ]; then
+		continue;
+	fi
+
+	# Shorten some names.
+	label=${name//queries with /}
+	label=${label//</below}
+	label=${label//>/above}
+
+	# All lowercase.
+	label=$(echo "$label" | tr 'A-Z' 'a-z')
+
+	# Now change names to all have no spaces.
+	key=${label//[ -]/_}
+
+	echo ${key}.value ${num}
+done
