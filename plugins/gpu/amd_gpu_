@@ -1,0 +1,235 @@
+#!/bin/bash
+# -*- bash -*-
+
+: << =cut
+
+=head1 NAME
+
+amd_gpu_ - Wildcard plugin to monitor AMD GPUs. Uses aticonfig utility,
+usually bundled with AMD GPU driver, to obtain information. To use this
+plugin you have to make sure aticonfig will run without an active X
+server (i.e. without anyone being logged in via the GUI). For more 
+information on this visit this link: 
+http://www.mayankdaga.com/running-opencl-applications-remotely-on-amd-gpus/
+
+=head1 CONFIGURATION
+
+This is a wildcard plugin. The wildcard prefix link name should be the 
+value to monitor.
+
+This plugin uses the following configuration variables:
+
+ [amd_gpu_*]
+  env.aticonfexec - Location of aticonfig executable.
+  user root
+
+=head2 DEFAULT CONFIGURATION
+
+The default configuration is to set "env.aticonfexec" to /usr/bin/aticonfig.
+
+=head2 EXAMPLE WILDCARD USAGE
+
+C<ln -s /usr/share/munin/plugins/amd_gpu_ /etc/munin/plugins/amd_gpu_temp>
+
+...will monitor the temperature of available AMD GPUs.
+
+=head1 AUTHOR
+
+Nuno Fachada
+faken@fakenmc.com
+
+=head1 LICENSE
+
+ GNU General Public License, version 2
+ http://www.gnu.org/licenses/gpl-2.0.html 
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=cut
+
+# Determine name of parameter to monitor
+name=`basename $0 | sed 's/^amd_gpu_//g'`
+
+# Get location of aticonfig executable or use default
+atiConfigExec=${aticonfexec:-'/usr/bin/aticonfig'}
+
+# Check if autoconf was requested
+if [ "$1" = "autoconf" ]; then
+	# Autoconf only returns yes if aticonfig exists and is executable 
+	if [ -x $atiConfigExec ]; then
+		echo yes
+		exit 0
+	else
+		echo "no (aticonfig executable not found)"
+		exit 0
+	fi
+fi
+
+# Check if suggest was requested
+if [ "$1" = "suggest" ]; then
+	echo "temp"
+	echo "clocks"
+	echo "fan"
+	echo "load"
+	echo "vcore"
+	exit 0
+fi
+
+# Get number of GPUs
+nGpusOutput=`$atiConfigExec --list-adapters`
+
+nGpus=`echo "$nGpusOutput" | wc -l`
+nGpus=$((nGpus - 2)) # Last two lines don't matter
+if [ $nGpus -eq 0 ]; then
+	# Exit if no GPUs found
+	echo "No AMD GPUs detected. Exiting."
+	exit 1
+fi
+
+# Check if config was requested
+if [ "$1" = "config" ]; then
+
+	# Configure graph depending on what which quantity will be plotted
+	case $name in
+		temp)
+			echo 'graph_title GPU temperature'
+			echo 'graph_args -l 0 -u 120'
+			echo 'graph_vlabel Degrees (C)'
+			echo 'graph_category gpu'
+			echo "graph_info Temperature information for AMD GPUs"
+			nGpusCounter=0
+			while [ $nGpusCounter -lt $nGpus ]
+			do
+				gpuName=`echo "$nGpusOutput" | grep "* 0" | cut -f 1,3 --complement -d " "`
+				echo "temp${nGpusCounter}.warning 75"
+				echo "temp${nGpusCounter}.critical 95"
+				echo "temp${nGpusCounter}.info Temperature information for $gpuName"
+				echo "temp${nGpusCounter}.label Temperature ($gpuName)"
+				: $(( nGpusCounter = $nGpusCounter + 1 ))
+			done 
+			;;
+		clocks)
+			# First determine max clock for each GPU...
+			read -a array <<< `$atiConfigExec --odgc | grep "Peak Range" |  grep -o "[0-9]*"`
+			maxclock=0
+			for element in "${array[@]}"
+			do
+				if [ "$element" -gt "$maxclock" ]; then
+					maxclock=$element
+				fi
+			done
+			# ...then output config data.
+			echo 'graph_title GPU clock'
+			echo "graph_args -l 0 -u $maxclock"
+			echo 'graph_vlabel MHz'
+			echo 'graph_category gpu'
+			echo "graph_info Core and memory clock info for AMD GPUs"
+			nGpusCounter=0
+			while [ $nGpusCounter -lt $nGpus ]
+			do
+				gpuName=`echo "$nGpusOutput" | grep "* 0" | cut -f 1,3 --complement -d " "`
+				echo "memclock${nGpusCounter}.info Memory clock information for $gpuName"
+				echo "memclock${nGpusCounter}.label Memory clock ($gpuName)"
+				echo "coreclock${nGpusCounter}.info Core clock information for $gpuName"
+				echo "coreclock${nGpusCounter}.label Core clock ($gpuName)"
+				: $(( nGpusCounter = $nGpusCounter + 1 ))
+			done 
+			;;
+		fan)
+			echo 'graph_title GPU fan speed'
+			echo 'graph_args -l 0 -u 100'
+			echo 'graph_vlabel Percentage'
+			echo 'graph_category gpu'
+			echo "graph_info Fan speed of AMD GPUs"
+			nGpusCounter=0
+			while [ $nGpusCounter -lt $nGpus ]
+			do
+				gpuName=`echo "$nGpusOutput" | grep "* 0" | cut -f 1,3 --complement -d " "`
+				echo "fan${nGpusCounter}.info Fan speed information for $gpuName"
+				echo "fan${nGpusCounter}.label Fan speed ($gpuName)"
+				: $(( nGpusCounter = $nGpusCounter + 1 ))
+			done 
+			;;
+		load)
+			echo 'graph_title GPU load'
+			echo 'graph_args -l 0 -u 100'
+			echo 'graph_vlabel Percentage'
+			echo 'graph_category gpu'
+			echo "graph_info GPU load"			
+			nGpusCounter=0
+			while [ $nGpusCounter -lt $nGpus ]
+			do
+				gpuName=`echo "$nGpusOutput" | grep "* 0" | cut -f 1,3 --complement -d " "`
+				echo "load${nGpusCounter}.info Load information for $gpuName"
+				echo "load${nGpusCounter}.label Load ($gpuName)"
+				: $(( nGpusCounter = $nGpusCounter + 1 ))
+			done 
+			;;
+		vcore)
+			echo 'graph_title GPU core voltage'
+			echo 'graph_vlabel mV'
+			echo 'graph_category gpu'
+			echo "graph_info GPU core voltage"
+			nGpusCounter=0
+			while [ $nGpusCounter -lt $nGpus ]
+			do
+				gpuName=`echo "$nGpusOutput" | grep "* 0" | cut -f 1,3 --complement -d " "`
+				echo "vcore${nGpusCounter}.info Vcore information for $gpuName"
+				echo "vcore${nGpusCounter}.label Core voltage ($gpuName)"
+				: $(( nGpusCounter = $nGpusCounter + 1 ))
+			done 
+			;;
+		*)
+			echo "Can't run without a proper symlink. Exiting."
+			echo "Try running munin-node-configure --suggest."
+			exit 1
+			;;
+	esac
+
+	exit 0
+fi
+
+# Get and print requested value for all available GPUs
+export DISPLAY=:0
+nGpusCounter=0
+while [ $nGpusCounter -lt $nGpus ]
+do
+	case $name in
+		temp)
+			value=`$atiConfigExec --adapter=$nGpusCounter --odgt | grep "Sensor 0: Temperature" | grep -o "[0-9]*\.[0-9]*"`
+			echo "temp${nGpusCounter}.value $value"
+			;;
+		clocks)
+			value=`$atiConfigExec --adapter=$nGpusCounter --odgc | grep "Current Clocks" | grep -o "[0-9]*"`
+			coreClock=`echo "$value" | sed -n 1p`
+			echo "coreclock${nGpusCounter}.value $coreClock"
+			memClock=`echo "$value" | sed -n 2p`
+			echo "memclock${nGpusCounter}.value $memClock"
+			;;
+		fan)
+			value=`$atiConfigExec --adapter=$nGpusCounter --pplib-cmd "get fanspeed 0" | grep "Fan Speed" | grep -o "[0-9]*"`
+			echo "fan${nGpusCounter}.value $value"
+			;;
+		load)
+			value=`$atiConfigExec --adapter=$nGpusCounter --odgc | grep "GPU load" | grep -o "[0-9]*"`
+			echo "load${nGpusCounter}.value $value"
+			;;
+		vcore)
+			value=`$atiConfigExec --adapter=$nGpusCounter --pplib-cmd "get activity" | grep "VDDC" | grep -o "[0-9]*"`
+			echo "vcore${nGpusCounter}.value $value"
+			;;
+		*)
+			echo "Can't run without a proper symlink. Exiting."
+			echo "Try running munin-node-configure --suggest."
+			exit 1
+			;;
+	esac
+	: $(( nGpusCounter = $nGpusCounter + 1 ))
+done
+
+
+
+
