@@ -1,0 +1,66 @@
+#!/bin/bash
+#
+# Plugin to monitor PgBouncer total server connections for all pools.
+#
+# Author:
+#    Dave Fennell <dave@microtux.co.uk>
+#
+# Created:
+#    20th December 2012
+#
+# Usage:
+#    Place in /etc/munin/plugins/ (or link it there using ln -s)
+#
+# Parameters:
+#    config   (required)
+#
+
+dbserver='' # '-h localhost'
+dbuser='postgres'
+
+# Pgbouncer Port Number
+port=6432
+
+# The psql command to use.
+cmd="psql ${dbserver} -U ${dbuser} -p ${port} pgbouncer -tc 'SHOW POOLS;' | grep -v '^$'"
+
+if [ "$1" = "config" ]; then
+	echo 'graph_args --lower-limit 0'
+	echo 'graph_category pgbouncer'
+	echo 'graph_info The sum of the active and idle server connections for each pool on the server.'
+	echo 'graph_scale no'
+	echo 'graph_title PgBouncer Pool Total Server Connections'
+	echo 'graph_vlabel server connections'
+
+	eval ${cmd} | while read pool sep user junk
+	do
+	        # Skip pgbouncer database itself.
+	        if [ "$user" = "pgbouncer" ]; then
+	                continue
+	        fi
+
+		test -z "${pool}" && continue
+
+	        echo ${pool}.label ${pool}
+	        echo ${pool}.info ${pool} connection pool
+	        echo ${pool}.type GAUGE
+	done
+
+   exit 0
+fi
+
+# Output looks like this:
+#  database         |   user    | cl_active | cl_waiting | sv_active | sv_idle | sv_used | sv_tested | sv_login | maxwait
+
+eval ${cmd} | while read pool sep user sep cl_active sep cl_waiting sep sv_active sep sv_idle sep sv_used sep sv_tested sep sv_login sep maxwait
+do
+	# Skip pgbouncer database itself.
+	if [ "$user" = "pgbouncer" ]; then
+		continue
+	fi
+
+	total=$(echo ${sv_active} + ${sv_idle} | bc)
+
+	echo ${pool}.value ${total}
+done
+
