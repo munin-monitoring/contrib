@@ -26,26 +26,34 @@ if [ "$rndc" = "" ]; then
 	rndc="/usr/sbin/rndc"
 fi
 
+# Blank the stats file (else stats are appended not replaced)
+rm ${stat_file}
+
+# Ask to bind to build new one
+${rndc} stats
+
 # The section we are looking for in the stats.
 section="Name Server Statistics"
-lines=10
+
+# Get all the lines in the section:
+# - cat the file
+# - use sed to get lines after (and excluding) the section start tag
+# - use sed to get lines up to (and excluding) the next section start tag
+# - use grep to remove any lines starting with a [
+cmd='cat "/var/cache/bind/named.stats" | sed "0,/^\+\+ '${section}' \+\+/d" | sed -e "/^\+\+/,\$d" | grep -v "^\["'
 
 # Config mode.
 if [ "$1" = "config" ]; then
 	echo 'graph_args --lower-limit 0'
-	echo 'graph_category network'
+	echo 'graph_category dns'
 	echo 'graph_info '${section}' for the Bind9 Name Server'
 	echo 'graph_scale no'
 	echo 'graph_title Bind9 '${section}
 	echo 'graph_vlabel requests/sec'
 
 	# Output the stat configs.
-	grep "++ ${section} ++" ${stat_file} -A${lines} | while read num name
+	eval ${cmd} | while read num name
 	do
-		if [ "$num" = "++" ]; then
-			continue;
-		fi
-
 		# Shorten some names.
 		label=${name//queries resulted in /}
 		label=${label// answer/}
@@ -64,19 +72,9 @@ if [ "$1" = "config" ]; then
 	exit 0
 fi
 
-# Blank the stats file (else stats are appended not replaced)
-rm ${stat_file}
-
-# Ask to bind to build new one
-${rndc} stats
-
 # Output the stats.
-grep "++ ${section} ++" ${stat_file} -A${lines} | while read num name
+eval ${cmd} | while read num name
 do
-	if [ "$num" = "++" ]; then
-		continue;
-	fi
-
 	# Shorten some names.
 	label=${name//queries resulted in /}
 	label=${label// answer/}
