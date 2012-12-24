@@ -15,7 +15,7 @@ Create one symlink per zpool for exampe zfs_usage_system
 
 =head1 AUTHOR
 
-2012, Claudius Herder 
+2012, Claudius Herder
 
 =head1 MAGIC MARKERS
 
@@ -95,7 +95,7 @@ my $properties = {
 
   type                =>  "Read-only property that identifies the dataset type as"
                          ." filesystem (file system or clone), volume, or"
-                	     ." snapshot.",
+                             ." snapshot.",
 
   used                =>  "Read-only property that identifies the amount of disk"
                          ." space consumed by a dataset and all its descendents.",
@@ -142,7 +142,6 @@ my @order = (
 );
 
 sub do_collect {
-
     my $fslist=(`$zfsexec list -H -r -o name $zpool`);
 
     my @params = join(',',( keys %{$properties} ));
@@ -150,8 +149,8 @@ sub do_collect {
     my $fsget="$zfsexec get -H -p @params";
 
     foreach my $fsname (split(/\n/,$fslist)) {
-	    foreach my $line (split(/\n/, `$fsget $fsname` )) {
-	        my ($name, $key, $value, undef ) = (split(/\t/,$line));
+        foreach my $line (split(/\n/, `$fsget $fsname` )) {
+            my ($name, $key, $value, undef ) = (split(/\t/,$line));
             ($name =~ s/\//_/g);
             $filesystems->{$name}->{$key}=$value;
         }
@@ -173,11 +172,11 @@ sub do_config_fs {
         print "graph_title ZFS usage for zpool $zpool\n";
         print "graph_info This graph shows used bytes of zpool $zpool\n";
     }
-    print "graph_args --base 1024 --lower-limit 0 --rigid\n";    
+    print "graph_args --base 1024 --lower-limit 0 --rigid\n";
     print "graph_vlabel bytes \n";
     print "graph_category zfs\n";
     print "graph_order @order\n";
-    
+
     foreach my $key ( keys %{$filesystems->{$fs}}) {
         if ( $key ne "type" ) {
             if ( $filesystems->{$fs}->{type} eq "volume" && $key =~ /quota/ ) {
@@ -224,20 +223,18 @@ sub do_fetch_fs {
 }
 
 sub do_config {
-
     foreach my $fs ( sort keys %{$filesystems}) {
         do_config_fs($fs);
     }
 }
 
 sub do_autoconf {
-
-        if (`which $zpoolexec 2>/dev/null` =~ m{^/}) {
-                print "yes\n";
-        } else {
-                print "no ($zpoolexec could not be found)\n";
-        }
-        exit 0;
+    if (`which $zpoolexec 2>/dev/null` =~ m{^/}) {
+        print "yes\n";
+    } else {
+        print "no ($zpoolexec could not be found)\n";
+    }
+    exit 0;
 }
 
 
@@ -247,7 +244,6 @@ sub do_suggest {
 }
 
 sub do_fetch {
-
     foreach my $fs ( sort keys %{$filesystems}) {
         do_fetch_fs($fs);
     }
@@ -260,15 +256,14 @@ sub do_setpool {
     elsif ($0 =~ /zfs_usage_(.+)*$/) {
         $zpool = $1;
     }
-
 }
 
 if ($ARGV[0]) {
     if ($ARGV[0] eq "config") {
-            do_setpool();
-            do_collect();
-            do_config();
-            exit 0;
+        do_setpool();
+        do_collect();
+        do_config();
+        exit 0;
     }
     elsif ($ARGV[0] eq "autoconf") {
         do_autoconf();
@@ -278,11 +273,11 @@ if ($ARGV[0]) {
         do_suggest();
         exit 0;
     }
-}    
+}
 else {
-         do_setpool();
-         do_collect();
-         do_fetch();
+    do_setpool();
+    do_collect();
+    do_fetch();
 }
 
 exit 0;
