@@ -67,16 +67,31 @@ use strict;
 use Munin::Plugin;
 use IO::Socket;
 
-sub readreply {
-  my $socket = shift;
-  my $line;
-  my $return;
+sub asterisk_command {
+  my ($socket, $command) = @_;
+  my $line, my $reply;
 
-  while ( $line = $socket->getline and $line ne "\r\n" ) {
-    $return .= $line;
+  $socket->print("Action: command\nCommand: $command\n\n");
+
+  # Response: (Error|Follows|???)
+  $line = $socket->getline;
+  if ($line ne "Response: Follows\r\n") {
+    while ( $line = $socket->getline and $line ne "\r\n" ) {}
+    return undef;
   }
 
-  return $return;
+  # Privilege: Command
+  $line = $socket->getline;
+
+  # Until we get the --END COMMAND-- marker, it's the command's output.
+  while ( $line = $socket->getline and $line ne "--END COMMAND--\r\n" ) {
+    $reply .= $line;
+  }
+
+  # And then wait for the empty line that says we're done
+  while ( $line = $socket->getline and $line ne "\r\n" ) {}
+
+  return $reply;
 }
 
 $0 =~ /asterisk(?:_(.+))$/;
@@ -101,14 +116,15 @@ if ( $socket ) {
   $socket->getline;
 
   $socket->print("Action: login\nUsername: $username\nSecret: $secret\nEvents: off\n\n");
-  my $auth_status = readreply $socket;
+  my $response_status = $socket->getline;
 
-  if ( $auth_status !~ /^Response: Success/ ) {
-    $auth_status =~ s/.*\nMessage: (.*)\r\n/$1/;
-    $error = "Asterisk authentication error: " . $auth_status;
-    $socket->close();
-    $socket = undef;
+  if ( $response_status ne "Response: Success\r\n" ) {
+    my $response_message = $socket->getline;
+    $response_message =~ s/Message: (.*)\r\n/$1/;
+    $error = "Asterisk authentication error: " . $response_message;
   }
+
+  while ( $line = $socket->getline and $line ne "\r\n" ) {}
 }
 
 if ( $ARGV[0] and $ARGV[0] eq 'autoconf' ) {
@@ -155,28 +171,20 @@ END
 }
 
 # if we arrive here and we don't have a socket, it's time to exit.
-die $error unless $socket;
+die $error if $error;
 
-$socket->print("Action: command\nCommand: core show channels\n\n");
-#Response: Follows
+my $channels_response = asterisk_command($socket, "core show channels");
 #Channel              Location             State   Application(Data)
 #Zap/pseudo-198641660 s@frompstn:1         Rsrvd   (None)
 #Zap/1-1              4@frompstn:1         Up      MeetMe(5500)
 #2 active channels
 #1 active call
-#--END COMMAND--
-my $channels_response = readreply $socket;
-$channels_response = undef if $channels_response =~ /Response: Error/;
 
-$socket->print("Action: command\nCommand: voicemail show users\n\n");
-#Response: Follows
+my $voicemail_response = asterisk_command($socket, "voicemail show users");
 #Context    Mbox  User                      Zone       NewMsg
 #default    1234  Example Mailbox                           1
 #other      1234  Company2 User                             0
 #2 voicemail users configured.
-#--END COMMAND--
-my $voicemail_response = readreply $socket;
-$voicemail_response = undef if $voicemail_response =~ /Response: Error/;
 
 $socket->close();
 
