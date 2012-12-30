@@ -11,7 +11,10 @@ This plugin will produce multiple graphs showing:
 
  - total number of active channels (replaces asterisk_channels),
    together with breakdown of specific channel types (replaces
-   asterisk_channelstypes).
+   asterisk_channelstypes);
+
+ - the number of messages in all voicemail boxes (replaces
+   asterisk_voicemail).
 
 =head1 CONFIGURATION
 
@@ -136,6 +139,16 @@ $channel.label $channel channels
 END
   }
 
+print <<END;
+
+multigraph asterisk_voicemail
+graph_title Asterisk voicemail messages
+graph_args --base 1000 -l 0
+graph_vlabel messages
+graph_category asterisk
+messages.label Total messages
+END
+
   unless ( ($ENV{MUNIN_CAP_DIRTYCONFIG} || 0) == 1 ) {
     exit 0;
   }
@@ -154,6 +167,16 @@ $socket->print("Action: command\nCommand: core show channels\n\n");
 #--END COMMAND--
 my $shown_channels = readreply $socket;
 
+$socket->print("Action: command\nCommand: voicemail show users\n\n");
+#Response: Follows
+#Context    Mbox  User                      Zone       NewMsg
+#default    1234  Example Mailbox                           1
+#other      1234  Company2 User                             0
+#2 voicemail users configured.
+#--END COMMAND--
+my $voicemail_response = readreply $socket;
+$voicemail_response = undef if $voicemail_response =~ /Response: Error/;
+
 $socket->close();
 
 my $active_channels = 'U';
@@ -170,4 +193,17 @@ foreach my $channel (@CHANNELS) {
   print "$channel.value " .
     scalar(grep(/^$channel\//, @channels_list))
       . "\n";
+}
+
+print "\nmultigraph asterisk_voicemail\n";
+if ( !$voicemail_response or $voicemail_response =~ /no voicemail users/ ) {
+  print "total.value U\n";
+} else {
+  my $messages = 0;
+  foreach my $line (split(/\r\n/, $voicemail_response)) {
+    next unless $line =~ / ([0-9]+)$/;
+    $messages += $1;
+  }
+
+  print "total.value $messages\n";
 }
