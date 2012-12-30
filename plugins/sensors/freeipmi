@@ -6,6 +6,10 @@
 
 =head1 CONFIGURATION
 
+You'll need at have at least version 1.1.5 of ipmi-tools installed for this plugin
+to function correctly. Version 1.2.1 or higher is needed in order to get automated
+high and low warnings.
+
 =head2 ENVIRONMENT VARIABLES
 
 When used to monitor a foreign host, this plugins use the variables
@@ -19,7 +23,7 @@ foreign host it should be, e.g., 'freeipmi_192.168.0.253'.
 
 =head1 AUTHOR
 
-Diego Elio Pettenò <flameeyes@flameeyes.eu>.
+Diego Elio Pettenò <flameeyes@flameeyes.eu>, Bart ten Brinke <info@retrosync.com>
 
 =head1 LICENSE
 
@@ -41,18 +45,21 @@ my $IPMISENSORS = $ENV{'ipmisensors'} || 'ipmi-sensors';
 
 $0 =~ /freeipmi(?:_(.+))$/;
 my $hostname = $1;
+my $sensor_test = `$IPMISENSORS --output-sensor-thresholds 2>/dev/null`;
+my $sensor_test_retval=$?;
 
-$IPMISENSORS .= " --quiet-cache --comma-separated-output --no-header-output --ignore-not-available-sensors --sensor-types=Temperature,Fan,Current,Voltage --output-sensor-thresholds";
+$IPMISENSORS .= " --quiet-cache --comma-separated-output --no-header-output --ignore-not-available-sensors --sensor-types=Temperature,Fan,Current,Voltage";
+$IPMISENSORS .= " --output-sensor-thresholds" if ($sensor_test_retval == 0);
 $IPMISENSORS .= " --hostname=$hostname" if defined($hostname);
 $IPMISENSORS .= " --username=$ENV{IPMI_USERNAME}" if defined($ENV{IPMI_USERNAME});
 $IPMISENSORS .= " --password=$ENV{IPMI_PASSWORD}" if defined($ENV{IPMI_PASSWORD});
 
-my $output=`$IPMISENSORS --output-sensor-thresholds 2>/dev/null`;
+my $output=`$IPMISENSORS 2>/dev/null`;
 my $retval=$?;
 
 if ( defined $ARGV[0] and $ARGV[0] eq 'autoconf' ) {
   if ($retval >= 1) {
-    print "no (ipmi-sensors died)\n";
+    print "no (ipmi-sensors died, do you have version 1.1.5 or higher?)\n";
   } elsif ($retval == -1) {
     print "no (ipmi-sensors not found)\n";
   } elsif ($output eq "\n") {
@@ -109,11 +116,18 @@ foreach my $line (@data) {
 		value => $dataline[3],
 		label => $dataline[1]
 	       );
-  $sensor{lwarn} = $dataline[7] ne "N/A" ? $dataline[7] : '';
-  $sensor{hwarn} = $dataline[8] ne "N/A" ? $dataline[8] : '';
 
-  $sensor{lcrit} = $dataline[6] ne "N/A" ? $dataline[6] : '';
-  $sensor{hcrit} = $dataline[9] ne "N/A" ? $dataline[9] : '';
+	$sensor{lwarn} = '';
+	$sensor{hwarn} = '';
+	$sensor{lcrit} = '';
+	$sensor{hcrit} = '';
+
+	if ($sensor_test_retval == 0) {
+		$sensor{lwarn} = $dataline[7] ne "N/A" ? $dataline[7] : '';
+		$sensor{hwarn} = $dataline[8] ne "N/A" ? $dataline[8] : '';
+		$sensor{lcrit} = $dataline[6] ne "N/A" ? $dataline[6] : '';
+		$sensor{hcrit} = $dataline[9] ne "N/A" ? $dataline[9] : '';
+	}
 
   my $type;
   if ( $dataline[2] eq "Temperature" ) {
@@ -158,7 +172,7 @@ END
     }
   }
 
-  unless ( $ENV{MUNIN_CAP_DIRTYCONFIG} == 1 ) {
+  unless ( $ENV{MUNIN_CAP_DIRTYCONFIG} && $ENV{MUNIN_CAP_DIRTYCONFIG} == 1 ) {
     exit 0;
   }
 }
