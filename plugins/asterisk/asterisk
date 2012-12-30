@@ -1,0 +1,141 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+
+=head1 NAME
+
+asterisk - Multigraph-capable plugin to monitor Asterisk
+
+=head1 CONFIGURATION
+
+The following configuration parameters are used by this plugin
+
+ [asterisk]
+  env.host     - hostname to connect to
+  env.port     - port number to connect to
+  env.username - username used for authentication
+  env.secret   - secret used for authentication
+
+The "username" and "secret" parameters are mandatory, and have no
+defaults.
+
+=head2 DEFAULT CONFIGURATION
+
+ [asterisk]
+  env.host 127.0.0.1
+  env.port 5038
+
+=head2 WILDCARD CONFIGURATION
+
+It's possible to use the plugin in a virtual-node capacity, in which
+case the host configuration will default to the hostname following the
+underscore:
+
+ [asterisk_someserver]
+  env.host someserver
+  env.port 5038
+
+=head1 AUTHOR
+
+Copyright (C) 2005 Rodolphe Quiedeville <rodolphe@quiedeville.org>
+Copyright (C) 2012 Diego Elio Pettenò <flameeyes@flameeyes.eu>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+use strict;
+use Munin::Plugin;
+use IO::Socket;
+
+sub readreply {
+  my $socket = shift;
+  my $line;
+  my $return;
+
+  while ( $line = $socket->getline and $line ne "\r\n" ) {
+    $return .= $line;
+  }
+
+  return $return;
+}
+
+$0 =~ /asterisk(?:_(.+))$/;
+my $hostname = $1;
+
+my $peeraddr = $ENV{'host'} || $hostname || '127.0.0.1';
+my $peerport = $ENV{'port'} || '5038';
+
+my $username = $ENV{'username'};
+my $secret   = $ENV{'secret'};
+
+my $line, my $error;
+my $socket = new IO::Socket::INET(PeerAddr => $peeraddr,
+				  PeerPort => $peerport,
+				  Proto => 'tcp')
+  or $error = "Could not create socket: $!";
+
+if ( $socket ) {
+  # This will consume the "Asterisk Call Manager" welcome line.
+  $socket->getline;
+
+  $socket->print("Action: login\nUsername: $username\nSecret: $secret\nEvents: off\n\n");
+  my $auth_status = readreply $socket;
+
+  if ( $auth_status !~ /^Response: Success/ ) {
+    $auth_status =~ s/.*\nMessage: (.*)\r\n/$1/;
+    $error = "Asterisk authentication error: " . $auth_status;
+    $socket->close();
+    $socket = undef;
+  }
+}
+
+if ( $ARGV[0] and $ARGV[0] eq 'autoconf' ) {
+  if ( $error ) {
+    print "no ($error)\n";
+  } else {
+    print "yes\n";
+  }
+
+  exit 0;
+} elsif ( $ARGV[0] and $ARGV[0] eq 'config' ) {
+  print "host_name $hostname" if $hostname;
+
+  print <<END;
+
+multigraph asterisk_channels
+graph_title Asterisk active channels
+graph_args --base 1000 -l 0
+graph_vlabel channels
+graph_category asterisk
+channels.draw AREA
+channels.label channels
+END
+
+  unless ( ($ENV{MUNIN_CAP_DIRTYCONFIG} || 0) == 1 ) {
+    exit 0;
+  }
+}
+
+# if we arrive here and we don't have a socket, it's time to exit.
+die $error unless $socket;
+
+$socket->print("Action: command\nCommand: core show channels\n\n");
+my $shown_channels = readreply $socket;
+
+my $channels = 'U';
+$channels = $1 if $shown_channels =~ /\n([0-9]+) active channels/;
+
+print <<END;
+
+multigraph asterisk_channels
+channels.value $channels
+END
+
+$socket->close();
