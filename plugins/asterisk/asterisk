@@ -5,6 +5,14 @@
 
 asterisk - Multigraph-capable plugin to monitor Asterisk
 
+=head1 NOTES
+
+This plugin will produce multiple graphs showing:
+
+ - total number of active channels (replaces asterisk_channels),
+   together with breakdown of specific channel types (replaces
+   asterisk_channelstypes).
+
 =head1 CONFIGURATION
 
 The following configuration parameters are used by this plugin
@@ -14,6 +22,7 @@ The following configuration parameters are used by this plugin
   env.port     - port number to connect to
   env.username - username used for authentication
   env.secret   - secret used for authentication
+  env.channels - The channel types to look for
 
 The "username" and "secret" parameters are mandatory, and have no
 defaults.
@@ -23,6 +32,7 @@ defaults.
  [asterisk]
   env.host 127.0.0.1
   env.port 5038
+  env.channels Zap IAX2 SIP
 
 =head2 WILDCARD CONFIGURATION
 
@@ -75,6 +85,8 @@ my $peerport = $ENV{'port'} || '5038';
 my $username = $ENV{'username'};
 my $secret   = $ENV{'secret'};
 
+my @CHANNELS = exists $ENV{'channels'} ? split ' ',$ENV{'channels'} : qw(Zap IAX2 SIP);
+
 my $line, my $error;
 my $socket = new IO::Socket::INET(PeerAddr => $peeraddr,
 				  PeerPort => $peerport,
@@ -114,9 +126,15 @@ graph_title Asterisk active channels
 graph_args --base 1000 -l 0
 graph_vlabel channels
 graph_category asterisk
-channels.draw AREA
-channels.label channels
+total.label channels
 END
+
+  foreach my $channel (@CHANNELS) {
+    print <<END;
+$channel.draw AREASTACK
+$channel.label $channel channels
+END
+  }
 
   unless ( ($ENV{MUNIN_CAP_DIRTYCONFIG} || 0) == 1 ) {
     exit 0;
@@ -127,15 +145,29 @@ END
 die $error unless $socket;
 
 $socket->print("Action: command\nCommand: core show channels\n\n");
+#Response: Follows
+#Channel              Location             State   Application(Data)
+#Zap/pseudo-198641660 s@frompstn:1         Rsrvd   (None)
+#Zap/1-1              4@frompstn:1         Up      MeetMe(5500)
+#2 active channels
+#1 active call
+#--END COMMAND--
 my $shown_channels = readreply $socket;
 
-my $channels = 'U';
-$channels = $1 if $shown_channels =~ /\n([0-9]+) active channels/;
+$socket->close();
+
+my $active_channels = 'U';
+$active_channels = $1 if $shown_channels =~ /\n([0-9]+) active channels/;
 
 print <<END;
 
 multigraph asterisk_channels
-channels.value $channels
+total.value $active_channels
 END
 
-$socket->close();
+my @channels_list = split(/\r\n/, $shown_channels);
+foreach my $channel (@CHANNELS) {
+  print "$channel.value " .
+    scalar(grep(/^$channel\//, @channels_list))
+      . "\n";
+}
