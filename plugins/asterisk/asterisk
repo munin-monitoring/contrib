@@ -14,7 +14,10 @@ This plugin will produce multiple graphs showing:
    asterisk_channelstypes);
 
  - the number of messages in all voicemail boxes (replaces
-   asterisk_voicemail).
+   asterisk_voicemail);
+
+ - the number of active MeetMe conferences and users connected to them
+   (replace asterisk_meetme and asterisk_meetmeusers, respectively).
 
 =head1 CONFIGURATION
 
@@ -165,6 +168,16 @@ graph_category asterisk
 messages.label Total messages
 END
 
+print <<END;
+
+multigraph asterisk_meetme
+graph_title Asterisk meetme statistics
+graph_args --base 1000 -l 0
+graph_category asterisk
+users.label Connected users
+conferences.label Active conferences
+END
+
   unless ( ($ENV{MUNIN_CAP_DIRTYCONFIG} || 0) == 1 ) {
     exit 0;
   }
@@ -186,6 +199,13 @@ my $voicemail_response = asterisk_command($socket, "voicemail show users");
 #other      1234  Company2 User                             0
 #2 voicemail users configured.
 
+my $meetme_response = asterisk_command($socket, "meetme list");
+#Conf Num       Parties        Marked     Activity  Creation
+#5500           0001           N/A        00:00:03  Static
+#* Total number of MeetMe users: 1
+
+# After all the data is fetched we can proceed to process it, the
+# connection can be closed as we don't need any more data.
 $socket->close();
 
 my $active_channels = 'U';
@@ -215,4 +235,27 @@ if ( !$voicemail_response or $voicemail_response =~ /no voicemail users/ ) {
   }
 
   print "total.value $messages\n";
+}
+
+print "\nmultigraph asterisk_meetme\n";
+if ( !$meetme_response ) {
+  print <<END;
+users.value U
+conferences.value U
+END
+} else {
+  if ( $meetme_response =~ /No active/ ) {
+    print <<END;
+users.value 0
+conferences.value 0
+END
+  } else {
+    my @meetme_list = split(/\r\n/, $meetme_response);
+
+    my $users = pop(@meetme_list);
+    $users =~ s/^Total number of MeetMe users: ([0-9]+)$/$1/;
+
+    print "users.value $users\n";
+    print "conferences.value " . (scalar(@meetme_list)-1) . "\n";
+  }
 }
