@@ -165,7 +165,8 @@ $socket->print("Action: command\nCommand: core show channels\n\n");
 #2 active channels
 #1 active call
 #--END COMMAND--
-my $shown_channels = readreply $socket;
+my $channels_response = readreply $socket;
+$channels_response = undef if $channels_response =~ /Response: Error/;
 
 $socket->print("Action: command\nCommand: voicemail show users\n\n");
 #Response: Follows
@@ -180,7 +181,7 @@ $voicemail_response = undef if $voicemail_response =~ /Response: Error/;
 $socket->close();
 
 my $active_channels = 'U';
-$active_channels = $1 if $shown_channels =~ /\n([0-9]+) active channels/;
+$active_channels = $1 if $channels_response =~ /\n([0-9]+) active channels/;
 
 print <<END;
 
@@ -188,11 +189,11 @@ multigraph asterisk_channels
 total.value $active_channels
 END
 
-my @channels_list = split(/\r\n/, $shown_channels);
+my @channels_list = split(/\r\n/, $channels_response) if $channels_response;
 foreach my $channel (@CHANNELS) {
-  print "$channel.value " .
-    scalar(grep(/^$channel\//, @channels_list))
-      . "\n";
+  print "$channel.value ";
+  print $channels_response ? scalar(grep(/^$channel\//, @channels_list)) : "U";
+  print "\n";
 }
 
 print "\nmultigraph asterisk_voicemail\n";
