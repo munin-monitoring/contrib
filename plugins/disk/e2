@@ -63,20 +63,23 @@ fi
 if [ "$1" = "config" ]; then
 
 	echo "graph_category disk"
+	args="-l 0"
 	case "$plugin" in
 	mounts)	
 		echo "graph_vlabel times"
 		echo "graph_title Ext2 Filesystem mount details"
 		;;
 	checked)
-		echo "graph_vlabel seconds"
+		echo "graph_vlabel days"
 		echo "graph_title Ext2 Filesystem fsck interval"
 		;;
 	writes)	
-		echo "graph_vlabel GB"
+		args="$args --base 1024"
+		echo "graph_vlabel bytes"
 		echo "graph_title Ext2 Filesystem lifetime writes$blkdevAppend"
 		;;
 	esac
+	echo "graph_args $args"
 	
 	if [ -z "$blkdev" ]; then
 		lse2
@@ -93,15 +96,18 @@ if [ "$1" = "config" ]; then
 			echo "${name}_maxmounts.draw LINE1"
 			;;
 		checked)
-			echo "${name}_last.label Seconds since checked$blkdevAppend2"
+			echo "${name}_last.label Since checked$blkdevAppend2"
 			echo "${name}_last.draw LINE2"
+			echo "${name}_last.cdef ${name}_last,86400,/"
 			echo "${name}_interval.label Check interval$blkdevAppend2"
 			echo "${name}_interval.draw LINE1"
+			echo "${name}_interval.cdef ${name}_interval,86400,/"
 			;;
 		writes)
 			echo "${name}_writes.label Lifetime writes$blkdevAppend2"
-			echo "${name}_writes.type COUNTER"
+			echo "${name}_writes.type GAUGE"
 			echo "${name}_writes.draw LINE2"
+			echo "${name}_writes.cdef ${name}_writes,1073741824,*"
 			;;
 		esac
 	done
@@ -135,3 +141,4 @@ while read name mounts maxmounts last interval writes; do
 		;;
 	esac
 done
+
