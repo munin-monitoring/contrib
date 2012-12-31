@@ -1,0 +1,137 @@
+#!/bin/bash
+
+
+print_details() {
+	local myname
+	while read line; do
+		key=${line%%:*}
+		val=`echo ${line#*:}`
+		val1=${val%% *}
+		[ -z "$line" ] && break
+		
+		case "$key" in
+		"Mount count")		myname=$1; mc=$val ;;
+		"Maximum mount count")	mmc=$val ;;
+		"Last checked")		lcts=`date +%s -d "$val" 2>/dev/null` ;;
+		"Check interval")	ciis=$val1 ;;
+		"Lifetime writes")	lwGB=$val1 ;;
+		esac
+	done
+	[ -n "$myname" ] && echo "$myname ${mc:-0} ${mmc:-0} ${lcts:-0} ${ciis:-0} ${lwGB:-0}"
+}
+
+lse2() {
+	for name in {h,s}d{a..z}{1..16}; do
+		if [ -b /dev/$name ]; then
+			LANG=C dumpe2fs /dev/$name 2>/dev/null | print_details "$name"
+		fi
+	done
+}
+
+
+if [ "$1" = "autoconf" ]; then
+	if [ -x "`dumpe2fs`" ]; then
+		echo yes
+		exit 0
+	else
+		echo no
+		exit 1
+	fi
+fi
+if [ "$1" = "suggest" ]; then
+	lse2 | while read name rest; do
+		echo mounts_$name
+		echo checked_$name
+		echo writes_$name
+	done
+	exit 0
+fi
+
+
+self=${0##*/}
+self=${self#*_}
+plugin=${self%%_*}
+if [ -n "${self//[!_]/}" ]; then
+	blkdev=${self#*_}
+	blkdevAppend=" ($blkdev)"
+else
+	blkdev=
+	blkdevAppend=
+fi
+
+
+if [ "$1" = "config" ]; then
+
+	echo "graph_category disk"
+	case "$plugin" in
+	mounts)	
+		echo "graph_vlabel times"
+		echo "graph_title Ext2 Filesystem mount details"
+		;;
+	checked)
+		echo "graph_vlabel seconds"
+		echo "graph_title Ext2 Filesystem fsck interval"
+		;;
+	writes)	
+		echo "graph_vlabel GB"
+		echo "graph_title Ext2 Filesystem lifetime writes$blkdevAppend"
+		;;
+	esac
+	
+	if [ -z "$blkdev" ]; then
+		lse2
+	else
+		LANG=C dumpe2fs /dev/$blkdev 2>/dev/null | print_details "$blkdev"
+	fi | \
+	while read name mounts maxmounts last interval writes; do
+		[ -z "$blkdev" ] && blkdevAppend2=" ($name)" || blkdevAppend2=
+		case "$plugin" in
+		mounts)
+			echo "${name}_mounts.label Mount count$blkdevAppend2"
+			echo "${name}_mounts.draw LINE2"
+			echo "${name}_maxmounts.label Max. mount count$blkdevAppend2"
+			echo "${name}_maxmounts.draw LINE1"
+			;;
+		checked)
+			echo "${name}_last.label Seconds since checked$blkdevAppend2"
+			echo "${name}_last.draw LINE2"
+			echo "${name}_interval.label Check interval$blkdevAppend2"
+			echo "${name}_interval.draw LINE1"
+			;;
+		writes)
+			echo "${name}_writes.label Lifetime writes$blkdevAppend2"
+			echo "${name}_writes.type COUNTER"
+			echo "${name}_writes.draw LINE2"
+			;;
+		esac
+	done
+
+	exit 0
+fi
+
+
+
+## fetch ##
+
+if [ -z "$blkdev" ]; then
+	lse2
+else
+	LANG=C dumpe2fs /dev/$blkdev 2>/dev/null | print_details "$blkdev"
+fi | \
+while read name mounts maxmounts last interval writes; do
+	case "$plugin" in
+	mounts)
+		echo "${name}_mounts.value $mounts"
+		echo "${name}_maxmounts.value $maxmounts"
+		;;
+	checked)
+		now=`date +%s`
+		past=$(( now - last ))
+		echo "${name}_last.value $past"
+		echo "${name}_interval.value $interval"
+		;;
+	writes)
+		echo "${name}_writes.value $writes"
+		;;
+	esac
+done
