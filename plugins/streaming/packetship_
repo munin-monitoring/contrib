@@ -38,10 +38,7 @@ fi
 # Fetch the XML formatted stats from packetship.
 xml=$(wget -q -O - http://${hostname}/${url})
 
-# Disk stats are from '<ps:disk>' to '</ps:disk>'
-disk_stats=$(echo "$xml" | sed "0,/<ps:disk>/d" | sed -e "/<\/ps:disk>/,\$d" | grep $mode)
-network_stats=$(echo "$xml" | sed "0,/<ps:network>/d" | sed -e "/<\/ps:network>/,\$d" | grep $mode)
-
+# Function to do simple string parsing of XML data.
 read_dom () {
 	local IFS=\>
 	read -d \< ENTITY CONTENT
@@ -58,7 +55,24 @@ read_dom () {
 	return 0
 }
 
-# echo $stats
+# Get the number of pumps from the xml feed.
+pumps_line=$(echo "$xml" | grep "<ps:pumps")
+
+while read_dom; do
+	if [ "$TAG_NAME" != "" ]; then
+		break
+	fi
+done <<< "$pumps_line"
+
+eval $ATTRIBUTES
+actual_pumps=$total
+fake_pumps=$total
+
+# If there are no pumps then pretend there is one
+# (so we get something on the graph).
+if [ "$actual_pumps" == 0 ]; then
+	fake_pumps=1
+fi
 
 # Config mode.
 if [ "$1" = "config" ]; then
@@ -74,21 +88,23 @@ if [ "$1" = "config" ]; then
 		echo 'graph_vlabel bandwidth (Mbit/sec)'
 	fi
 
-	echo "disk_value.label Disk current"
-	echo "disk_value.info Disk current" ${mode}
-	echo "disk_value.type GAUGE"
+	for pump in $(seq $fake_pumps); do
+		echo "pump"${pump}"_disk_value.label Pump" ${pump} "Disk current"
+		echo "pump"${pump}"_disk_value.info Current Pump" ${pump} "disk" ${mode}
+		echo "pump"${pump}"_disk_value.type GAUGE"
 
-	echo "disk_max.label Disk max"
-	echo "disk_max.info Disk max" ${mode}
-	echo "disk_max.type GAUGE"
+		echo "pump"${pump}"_disk_max.label Pump" ${pump} "Disk max"
+		echo "pump"${pump}"_disk_max.info Limit of Pump" ${pump} "disk" ${mode}
+		echo "pump"${pump}"_disk_max.type GAUGE"
 
-	echo "network_value.label Network current"
-	echo "network_value.info Network current" ${mode}
-	echo "network_value.type GAUGE"
+		echo "pump"${pump}"_network_value.label Pump" ${pump} "Network current"
+		echo "pump"${pump}"_network_value.info Current Pump" ${pump} "network" ${mode}
+		echo "pump"${pump}"_network_value.type GAUGE"
 
-	echo "network_max.label Network max"
-	echo "network_max.info Network max" ${mode}
-	echo "network_max.type GAUGE"
+		echo "pump"${pump}"_network_max.label Pump" ${pump} "Network max"
+		echo "pump"${pump}"_network_max.info Limit of Pump" ${pump} "network" ${mode}
+		echo "pump"${pump}"_network_max.type GAUGE"
+	done
 
 	# If dirty config capability is enabled then fall through
 	# to output the data with the config information.
@@ -97,26 +113,47 @@ if [ "$1" = "config" ]; then
 	fi
 fi
 
-while read_dom; do
-	# Ignore empty tags (First loop)
-	if [ "$TAG_NAME" = "" ]; then
-		continue
-	fi
+# If there are no pumps then output fake pump1 data and end.
+if [ "$actual_pumps" == 0 ]; then
+	echo "pump1_disk_value.value" 0
+	echo "pump1_disk_max.value" 0
+	echo "pump1_network_value.value" 0
+	echo "pump1_network_max.value" 0
+	exit
+fi
 
-	eval $ATTRIBUTES
+pumps_section=$(echo "$xml" | sed "0,/<ps:pumps/d" | sed -e "/<\/ps:pumps/,\$d")
 
-	echo "disk_value.value" $used
-	echo "disk_max.value" $max
-done <<< "$disk_stats"
+for pump in $(seq $actual_pumps); do
+	pump_section=$(echo "$pumps_section" | sed "0,/<ps:pump id=.pump"${pump}"./d" | sed -e "/<\/ps:pump/,\$d")
 
-while read_dom; do
-	# Ignore empty tags (First loop)
-	if [ "$TAG_NAME" = "" ]; then
-		continue
-	fi
+	# Disk stats are from '<ps:disk>' to '</ps:disk>'
+	disk_stats=$(echo "$pump_section" | sed "0,/<ps:disk>/d" | sed -e "/<\/ps:disk>/,\$d" | grep $mode)
+	network_stats=$(echo "$pump_section" | sed "0,/<ps:network>/d" | sed -e "/<\/ps:network>/,\$d" | grep $mode)
 
-	eval $ATTRIBUTES
+	# Output disk values for this pump.
+	while read_dom; do
+		# Ignore empty tags (First loop)
+		if [ "$TAG_NAME" = "" ]; then
+			continue
+		fi
 
-	echo "network_value.value" $used
-	echo "network_max.value" $max
-done <<< "$network_stats"
+		eval $ATTRIBUTES
+
+		echo "pump"${pump}"_disk_value.value" $used
+		echo "pump"${pump}"_disk_max.value" $max
+	done <<< "$disk_stats"
+
+	# Output network values for this pump
+	while read_dom; do
+		# Ignore empty tags (First loop)
+		if [ "$TAG_NAME" = "" ]; then
+			continue
+		fi
+
+		eval $ATTRIBUTES
+
+		echo "pump"${pump}"_network_value.value" $used
+		echo "pump"${pump}"_network_max.value" $max
+	done <<< "$network_stats"
+done
