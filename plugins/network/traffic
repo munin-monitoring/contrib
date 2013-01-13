@@ -21,6 +21,7 @@ If trouble reading files, use:
 =over
 
 =item 2012.09.20: Initial version by Arturo Borrero Gonzalez <aborrero@cica.es>
+=item 2013.01.12: Added percentage graphing by Michiel Holtkamp <michiel@supermind.nl>
 
 =back
 
@@ -39,6 +40,7 @@ GPLv2
 if [ "$1" == "config" ]
 then
         cat <<'EOF'
+multigraph traffic
 graph_title Throughput by IP protocol
 graph_vlabel bits per ${graph_period}
 graph_category network
@@ -55,6 +57,32 @@ total.label Total bps
 total.min 0
 total.type DERIVE
 total.draw LINE1
+EOF
+
+		# Adapted from http://munin-monitoring.org/wiki/PercentGraphHowto
+		cat <<'EOF'
+multigraph traffic_percent
+graph_scale no
+graph_title Throughput of IP protocols by percentage
+graph_vlabel Percentage
+graph_order IPv4=traffic.IPv4 IPv6=traffic.IPv6 total=traffic.total IPv4_percent=traffic.total IPv6_percent=traffic.total total_percent=traffic.total
+graph_category network
+graph_args --upper-limit 100 -l 0 -r
+IPv4.label no
+IPv6.label no
+total.label no
+total_percent.label no
+IPv4.graph no
+IPv6.graph no
+total.graph no
+total_percent.graph no
+total_percent.cdef total,0.0000001,+
+IPv4_percent.label IPv4
+IPv4_percent.cdef IPv4,total_percent,/,100,*
+IPv4_percent.draw AREASTACK
+IPv6_percent.label IPv6
+IPv6_percent.cdef IPv6,total_percent,/,100,*
+IPv6_percent.draw AREASTACK
 EOF
         exit 0
 fi
