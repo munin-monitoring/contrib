@@ -15,6 +15,20 @@ int processes(int argc, char **argv);
 int swap(int argc, char **argv);
 int uptime(int argc, char **argv);
 
+int busybox(int argc, char **argv) {
+	if(argc < 2) {
+		fprintf(stderr, "missing parameter\n");
+		return 1;
+	}
+	if(0 != strcmp(argv[1], "listplugins")) {
+		fprintf(stderr, "unknown parameter\n");
+		return 1;
+	}
+	puts("cpu\nentropy\nforks\nfw_packets\ninterrupts\nload\n"
+		"open_files\nopen_inodes\nprocesses\nswap\nuptime");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	char *progname;
 	progname = basename(argv[0]);
@@ -43,6 +57,10 @@ int main(int argc, char **argv) {
 			if(!strcmp(progname+1, "oad"))
 				return load(argc, argv);
 			break;
+		case 'm':
+			if(!strcmp(progname+1, "unin-plugins-busybox"))
+				return busybox(argc, argv);
+			break;
 		case 'o':
 			if(!strcmp(progname+1, "pen_files"))
 				return open_files(argc, argv);
@@ -62,6 +80,6 @@ int main(int argc, char **argv) {
 				return uptime(argc, argv);
 			break;
 	}
-	fprintf(stderr, "function not specified\n");
+	fprintf(stderr, "unknown basename\n");
 	return 1;
 }
