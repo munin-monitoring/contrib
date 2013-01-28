@@ -37,10 +37,13 @@ int interrupts(int argc, char **argv) {
 		return 1;
 	}
 	while(fgets(buff, 256, f)) {
-		if(!strncmp(buff, "intr ", 5))
-			printf("intr.value %s", buff+5);
-		else if(!strncmp(buff, "ctxt ", 5))
-			printf("ctx.value %s", buff+5);
+		if(!strncmp(buff, "intr ", 5)) {
+			buff[5 + strcspn(buff + 5, " \t\n")] = '\0';
+			printf("intr.value %s\n", buff+5);
+		} else if(!strncmp(buff, "ctxt ", 5)) {
+			buff[5 + strcspn(buff + 5, " \t\n")] = '\0';
+			printf("ctx.value %s\n", buff+5);
+		}
 	}
 	fclose(f);
 	return 0;

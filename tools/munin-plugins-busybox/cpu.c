@@ -42,7 +42,7 @@ int cpu(int argc, char **argv) {
 			}
 
 			puts("graph_title CPU usage");
-			if(extinfo == 7)
+			if(extinfo >= 7)
 				puts("graph_order system user nice idle iowait irq softirq");
 			else
 				puts("graph_order system user nice idle");
@@ -87,7 +87,7 @@ int cpu(int argc, char **argv) {
 					"user.cdef user,%d,/\n"
 					"nice.cdef nice,%d,/\n"
 					"idle.cdef idle,%d,/\n", ncpu, ncpu, ncpu, ncpu);
-			if(extinfo == 7) {
+			if(extinfo >= 7) {
 				puts("iowait.label iowait\n"
 					"iowait.draw STACK\n"
 					"iowait.min 0");
