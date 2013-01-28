@@ -111,6 +111,26 @@ int cpu(int argc, char **argv) {
 						"irq.cdef irq,%d,/\n"
 						"softirq.cdef softirq,%d,/\n", ncpu, ncpu, ncpu);
 			}
+			if(extinfo >= 8) {
+				puts("steal.label steal\n"
+					"steal.draw STACK\n"
+					"steal.min 0");
+				printf("steal.max %d\n", 100 * ncpu);
+				puts("steal.type DERIVE\n"
+					"steal.info The time that a virtual CPU had runnable tasks, but the virtual CPU itself was not running");
+				if(scaleto100)
+					printf("steal.cdef steal,%d,/\n", ncpu);
+			}
+			if(extinfo >= 9) {
+				puts("guest.label guest\n"
+					"guest.draw STACK\n"
+					"guest.min 0");
+				printf("guest.max %d\n", 100 * ncpu);
+				puts("guest.type DERIVE\n"
+					"guest.info The time spent running a virtual CPU for guest operating systems under the control of the Linux kernel.");
+				if(scaleto100)
+					printf("guest.cdef guest,%d,/\n", ncpu);
+			}
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf")) {
@@ -149,6 +169,12 @@ int cpu(int argc, char **argv) {
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
 			printf("softirq.value %ld\n", atol(s) * 100 / hz);
+			if(!(s = strtok(NULL, " \t")))
+				return 0;
+			printf("steal.value %ld\n", atol(s) * 100 / hz);
+			if(!(s = strtok(NULL, " \t")))
+				return 0;
+			printf("guest.value %ld\n", atol(s) * 100 / hz);
 			return 0;
 		}
 	}
