@@ -5,5 +5,6 @@
 
 int writeyes(void);
 int writeno(const char *);
+int getenvint(const char *, int);
 
 #endif

@@ -12,7 +12,7 @@
 int cpu(int argc, char **argv) {
 	FILE *f;
 	char buff[256], *s;
-	int ncpu=0, extinfo=0, scaleto100=0;
+	int ncpu=0, extinfo=0, scaleto100=0, hz;
 	if(argc > 1) {
 		if(!strcmp(argv[1], "config")) {
 			s = getenv("scaleto100");
@@ -111,6 +111,26 @@ int cpu(int argc, char **argv) {
 						"irq.cdef irq,%d,/\n"
 						"softirq.cdef softirq,%d,/\n", ncpu, ncpu, ncpu);
 			}
+			if(extinfo >= 8) {
+				puts("steal.label steal\n"
+					"steal.draw STACK\n"
+					"steal.min 0");
+				printf("steal.max %d\n", 100 * ncpu);
+				puts("steal.type DERIVE\n"
+					"steal.info The time that a virtual CPU had runnable tasks, but the virtual CPU itself was not running");
+				if(scaleto100)
+					printf("steal.cdef steal,%d,/\n", ncpu);
+			}
+			if(extinfo >= 9) {
+				puts("guest.label guest\n"
+					"guest.draw STACK\n"
+					"guest.min 0");
+				printf("guest.max %d\n", 100 * ncpu);
+				puts("guest.type DERIVE\n"
+					"guest.info The time spent running a virtual CPU for guest operating systems under the control of the Linux kernel.");
+				if(scaleto100)
+					printf("guest.cdef guest,%d,/\n", ncpu);
+			}
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf")) {
@@ -125,29 +145,36 @@ int cpu(int argc, char **argv) {
 		return 1;
 	}
 	while(fgets(buff, 256, f)) {
+		hz = getenvint("HZ", 100);
 		if(!strncmp(buff, "cpu ", 4)) {
 			fclose(f);
 			if(!(s = strtok(buff+4, " \t")))
 				break;
-			printf("user.value %s\n", s);
+			printf("user.value %ld\n", atol(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				break;
-			printf("nice.value %s\n", s);
+			printf("nice.value %ld\n", atol(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				break;
-			printf("system.value %s\n", s);
+			printf("system.value %ld\n", atol(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				break;
-			printf("idle.value %s\n", s);
+			printf("idle.value %ld\n", atol(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("iowait.value %s\n", s);
+			printf("iowait.value %ld\n", atol(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("irq.value %s\n", s);
+			printf("irq.value %ld\n", atol(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("softirq.value %s\n", s);
+			printf("softirq.value %ld\n", atol(s) * 100 / hz);
+			if(!(s = strtok(NULL, " \t")))
+				return 0;
+			printf("steal.value %ld\n", atol(s) * 100 / hz);
+			if(!(s = strtok(NULL, " \t")))
+				return 0;
+			printf("guest.value %ld\n", atol(s) * 100 / hz);
 			return 0;
 		}
 	}
