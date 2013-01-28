@@ -12,7 +12,7 @@
 int cpu(int argc, char **argv) {
 	FILE *f;
 	char buff[256], *s;
-	int ncpu=0, extinfo=0, scaleto100=0;
+	int ncpu=0, extinfo=0, scaleto100=0, hz;
 	if(argc > 1) {
 		if(!strcmp(argv[1], "config")) {
 			s = getenv("scaleto100");
@@ -125,29 +125,30 @@ int cpu(int argc, char **argv) {
 		return 1;
 	}
 	while(fgets(buff, 256, f)) {
+		hz = getenvint("HZ", 100);
 		if(!strncmp(buff, "cpu ", 4)) {
 			fclose(f);
 			if(!(s = strtok(buff+4, " \t")))
 				break;
-			printf("user.value %s\n", s);
+			printf("user.value %ld\n", atol(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				break;
-			printf("nice.value %s\n", s);
+			printf("nice.value %ld\n", atol(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				break;
-			printf("system.value %s\n", s);
+			printf("system.value %ld\n", atol(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				break;
-			printf("idle.value %s\n", s);
+			printf("idle.value %ld\n", atol(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("iowait.value %s\n", s);
+			printf("iowait.value %ld\n", atol(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("irq.value %s\n", s);
+			printf("irq.value %ld\n", atol(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("softirq.value %s\n", s);
+			printf("softirq.value %ld\n", atol(s) * 100 / hz);
 			return 0;
 		}
 	}
