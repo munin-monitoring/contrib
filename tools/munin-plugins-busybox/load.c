@@ -7,28 +7,18 @@
 
 int load(int argc, char **argv) {
 	FILE *f;
-	int warn, crit;
 	float val;
-	char *s;
 	if(argc > 1) {
 		if(!strcmp(argv[1], "config")) {
-			s = getenv("load_warn");
-			if(s)
-				warn = atoi(s);
-			else
-				warn = 10;
-			s = getenv("load_crit");
-			if(s)
-				crit = atoi(s);
-			else
-				crit = 120;
 			puts("graph_title Load average\n"
 				"graph_args --base 1000 -l 0\n"
 				"graph_vlabel load\n"
 				"graph_scale no\n"
 				"graph_category system\n"
 				"load.label load");
-			printf("load.warning %d\nload.critical %d\n", warn, crit);
+			printf("load.warning %d\nload.critical %d\n",
+					getenvint("load_warn", 10),
+					getenvint("load_crit", 120));
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf"))
