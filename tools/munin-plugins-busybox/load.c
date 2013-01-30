@@ -16,9 +16,7 @@ int load(int argc, char **argv) {
 				"graph_scale no\n"
 				"graph_category system\n"
 				"load.label load");
-			printf("load.warning %d\nload.critical %d\n",
-					getenvint("load_warn", 10),
-					getenvint("load_crit", 120));
+			print_warncrit("load");
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf"))

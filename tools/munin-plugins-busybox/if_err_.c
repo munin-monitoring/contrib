@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include "common.h"
 
 #define PROC_NET_DEV "/proc/net/dev"
 
@@ -74,6 +75,8 @@ int if_err_(int argc, char **argv) {
 				"trans.type COUNTER\n"
 				"trans.negative rcvd\n"
 				"trans.warning 1");
+			print_warncrit("rcvd");
+			print_warncrit("trans");
 			return 0;
 		}
 	}

@@ -18,6 +18,7 @@ int forks(int argc, char **argv) {
 				"forks.min 0\n"
 				"forks.max 100000\n"
 				"forks.info The number of forks per second.");
+			print_warncrit("forks");
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf")) {
