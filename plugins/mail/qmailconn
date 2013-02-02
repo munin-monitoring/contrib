@@ -2,13 +2,20 @@
 #
 # Plugin to show amount of smtp-connections per hour
 #
-# Contributed by Håkon Nessjøen <lunatic@cpan.org>
+# Contributed by Hï¿½kon Nessjï¿½en <lunatic@cpan.org>
+#
+# Modified by Massimiliano Cianelli <massimiliano@cianelli.eu>
+# 2013-02-02 - Added support for Greylist and simscan Virus\Spam detect
+#              Added LOGPATH env var
 #
 # Magic markers - optional - used by installation scripts and
 # munin-config:
 #
 #%# family=manual
 #%# capabilities=autoconf
+
+# get: env.logpath
+LOGPATH=${logpath:-/var/log/qmail/qmail-smtpd/}
 
 if [ "$1" = "autoconf" ]; then
         echo yes
@@ -17,26 +24,41 @@ fi
 
 if [ "$1" = "config" ]; then
 
-        echo 'graph_title Qmail SMTP connections'
-        echo 'graph_args --base 1000 -l 0 '
-        echo 'graph_vlabel connections/hour'
-        echo 'graph_category Mail'
-        echo 'graph_order rbl accepted total'
-        echo 'rbl.label RBL rejected connections'
-        echo 'rbl.min 0'
-        echo 'rbl.draw AREA'
-				echo 'accepted.label Accepted connections'
-				echo 'accepted.min 0'
-				echo 'accepted.draw STACK'
-				echo 'total.label Total connections'
-				echo 'total.min 0'
-				echo 'total.draw LINE1'
+	echo 'graph_title Qmail SMTP connections'
+	echo 'graph_args --base 1000 -l 0 '
+	echo 'graph_vlabel connections/hour'
+	echo 'graph_category mail'
+	echo 'graph_order rbl greylisted accepted simscan_spam simscan_virus total'
+	echo 'rbl.label RBL rejected connections'
+	echo 'rbl.min 0'
+	echo 'rbl.draw AREA'
+	echo 'greylisted.label Greylisted connections'
+	echo 'greylisted.min 0'
+	echo 'greylisted.draw STACK'
+	echo 'accepted.label Accepted connections'
+	echo 'accepted.min 0'
+	echo 'accepted.draw STACK'
+	echo 'simscan_spam.label Rejected SPAM'
+	echo 'simscan_spam.min 0'
+	echo 'simscan_spam.draw STACK'
+	echo 'simscan_virus.label Rejected VIRUS'
+	echo 'simscan_virus.min 0'
+	echo 'simscan_virus.draw STACK'
+	echo 'total.label Total connections'
+	echo 'total.min 0'
+	echo 'total.draw LINE1'
         exit 0
 fi
 
-rbl=`cat /var/log/qmail/smtpd/@* /var/log/qmail/smtpd/current | grep -c rblsmtp`
-accepted=`cat /var/log/qmail/smtpd/@* /var/log/qmail/smtpd/current | grep -c 'tcpserver: ok'`
+rbl=`cat $LOGPATH/@* $LOGPATH/current | grep -c rblsmtp`
+accepted=`cat $LOGPATH/@* $LOGPATH/current | grep -c 'tcpserver: ok'`
+greylisted=`cat  $LOGPATH/@* $LOGPATH/current | grep -ce "jgreylist\[[[:digit:]]\+\]: .\+\: GREY"`
+simscan_spam=`cat  $LOGPATH/@* $LOGPATH/current | grep -ce "simscan:\[[[:digit:]]\+\]:SPAM"`
+simscan_virus=`cat  $LOGPATH/@* $LOGPATH/current | grep -ce "simscan:\[[[:digit:]]\+\]:VIRUS"`
 
 echo -n "rbl.value " && ( echo $rbl || echo U )
 echo -n "accepted.value " && ( echo $accepted || echo U )
-echo "total.value $[$rbl + $accepted]"
+echo -n "greylisted.value " && ( echo $greylisted || echo U )
+echo -n "simscan_spam.value " && ( echo $simscan_spam || echo U )
+echo -n "simscan_virus.value " && ( echo $simscan_virus || echo U )
+echo "total.value $(expr $rbl + $accepted + $greylisted)"
