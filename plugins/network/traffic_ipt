@@ -1,0 +1,128 @@
+#!/bin/bash
+# -*- bash -*-
+
+: << =cut
+
+=head1 NAME
+
+traffic - Plugin to monitor the traffic (throughput) by IP protocols.
+
+=head1 CONFIGURATION
+
+To make this plugin work, you need to add rules to your firewall.
+They are empty rules, we only use them to count traffic, not do anything
+with them. To make this plugin work correctly, these rules have to
+in the beginning of the chain(s), or else traffic that matches rules
+above will not be counted (you can use this to your advantage of course).
+
+The rules can be added with:
+iptables -I INPUT
+iptables -I OUTPUT
+ip6tables -I INPUT
+ip6tables -I OUTPUT
+
+If trouble reading output, use:
+
+ [traffic_ipt]
+ user root
+
+=head1 AUTHORS
+
+=over
+
+=item 2012.09.20: Initial version by Arturo Borrero Gonzalez <aborrero@cica.es>
+
+=item 2013.01.12: Added percentage graphing by Michiel Holtkamp <michiel@supermind.nl>
+
+=item 2013.02.03: Converted to use iptables/ip6tables by Michiel Holtkamp <michiel@supermind.nl>
+
+=back
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+
+if [ "$1" == "config" ]
+then
+        cat <<'EOF'
+multigraph traffic_ipt
+graph_title Throughput by IP protocol
+graph_vlabel bits per ${graph_period}
+graph_category network
+graph_args --base 1000 --upper-limit 100 -l 0
+IPv4.label IPv4 bps
+IPv4.min 0
+IPv4.type DERIVE
+IPv4.draw AREA
+IPv6.label IPv6 bps
+IPv6.min 0
+IPv6.type DERIVE
+IPv6.draw STACK
+total.label Total bps
+total.min 0
+total.type DERIVE
+total.draw LINE1
+EOF
+
+		# Adapted from http://munin-monitoring.org/wiki/PercentGraphHowto
+		cat <<'EOF'
+multigraph traffic_ipt_percent
+graph_scale no
+graph_title Throughput of IP protocols by percentage
+graph_vlabel Percentage
+graph_order IPv4=traffic_ipt.IPv4 IPv6=traffic_ipt.IPv6 total=traffic_ipt.total IPv4_percent=traffic_ipt.total IPv6_percent=traffic_ipt.total total_percent=traffic_ipt.total
+graph_category network
+graph_args --upper-limit 100 -l 0 -r
+IPv4.label no
+IPv6.label no
+total.label no
+total_percent.label no
+IPv4.graph no
+IPv6.graph no
+total.graph no
+total_percent.graph no
+total_percent.cdef total,0.0000001,+
+IPv4_percent.label IPv4
+IPv4_percent.cdef IPv4,total_percent,/,100,*
+IPv4_percent.draw AREASTACK
+IPv6_percent.label IPv6
+IPv6_percent.cdef IPv6,total_percent,/,100,*
+IPv6_percent.draw AREASTACK
+EOF
+        exit 0
+fi
+
+
+ipv4=0
+ipv6=0
+
+IPv4_bytes=$(iptables -L -n -v -x | egrep '^\W+[0-9]+\W+[0-9]+\W+all\W+--\W+\*\W+\*\W+0.0.0.0/0\W+0.0.0.0/0\W+$' | while read pkts bytes rest; do echo $bytes; done)
+if [ -z "$IPv4_bytes" ];
+then
+	echo "W: Unable to read rule from iptables, please add rules" >&2
+else
+	ipv4=$(echo $IPv4_bytes | sed -e 's/ / + /' | bc -l)
+fi
+
+IPv6_bytes=$(ip6tables -L -n -v -x | egrep '^\W+[0-9]+\W+[0-9]+\W+all\W+\*\W+\*\W+::/0\W+::/0\W+$' | while read pkts bytes rest; do echo $bytes; done)
+if [ -z "$IPv6_bytes" ];
+then
+	echo "W: Unable to read rule from ip6tables, please add rules" >&2
+else
+	ipv6=$(echo $IPv6_bytes | sed -e 's/ / + /' | bc -l)
+fi
+
+echo "IPv4.value $ipv4"
+echo "IPv6.value $ipv6"
+echo "total.value $( echo $ipv4 + $ipv6 | bc )"
+
+exit 0
+
