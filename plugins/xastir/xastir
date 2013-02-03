@@ -1,0 +1,117 @@
+#!/bin/bash
+
+## Copyright (C) 2012 Robert Kilian <robertkilian@ostechnologies.net> 
+##
+## This file is part of the Xastir plugin for Munin.
+##
+## Xastir-Munin is free software; you can redistribute it and/or
+## modify it under the terms of the GNU General Public
+## License as published by the Free Software Foundation;
+## either version 3 of the License, or (at your option) any
+## later version.
+##
+## Xastir-Munin is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied
+## warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+## PURPOSE.  See the GNU General Public License for more
+## details.
+##
+## You should have received a copy of the GNU General Public
+## License along with Xastir-Munin; see the file COPYING.  If not,
+## see <http://www.gnu.org/licenses/>.
+##
+## Version 0.1 -- 07.26.12
+##
+
+## Be sure to correctly edit the STATION_CALL, XASTIRDIR, and LOGDIR variables
+##
+## STATION_CALL: The callsign used by Xastir (include suffix if one is in use)
+## XASTIRDIR: The directory where Xastir's data, config, etc files are found.  Typically ~/.xastir
+## LOGDIR:  Logs are typically stored in ~/.xastir/logs.  Ensure that permissions are set appropriately to allow the munin user to read these logs
+
+# Location of active instance of Xastir
+XASTIRDIR="/home/USERNAME/.xastir"
+
+# Grab the station's callsign from Xastir config
+# this currently does not derive the station call correctly when called by the server, but works using munin-run...
+#STATION_CALL=`grep ^STATION_CALLSIGN:.* $XASTIRDIR/config/xastir.cnf | awk -F":" '{print $2}'`
+STATION_CALL=""
+
+# Location of Xastir's logs (this can be a symlink to where Xastir actually writes the logs)
+LOGDIR="/var/log/xastir/logs"
+
+
+case $1 in
+   config)
+        cat <<'EOM'
+
+graph_title Xastir Packet Stats
+graph_vlabel Packets
+graph_category ham_radio
+graph_scale no
+graph_printf %.0lf
+
+igatetonet.label IGate - RF to Net
+igatetonet.type COUNTER
+igatetonet.min 0
+igatetonet.max 500
+igatetonet.LINE1
+
+message.label Message RX
+message.type COUNTER
+message.min 0
+message.max 500
+message.draw LINE1
+
+messagetx.label Message TX
+messagetx.type COUNTER
+messagetx.min 0
+messagetx.max 500
+messagetx.draw LINE1
+
+net.label Net RX
+net.type COUNTER
+net.min 0
+net.max 500
+net.draw LINE1
+
+nettx.label Net TX
+nettx.type COUNTER
+nettx.min 0
+nettx.max 500
+nettx.draw LINE1
+
+tnc.label TNC RX
+tnc.type COUNTER
+tnc.min 0
+tnc.max 500
+tnc.draw LINE1
+
+tnctx.label TNC TX
+tnctx.type COUNTER
+tnctx.min 0
+tnctx.max 500
+tnctx.draw LINE1
+
+EOM
+        exit 0;;
+esac
+
+# Parse logs for various values
+IGATETONET=`cat $LOGDIR/igate.log | grep -e '^IGATE RF' | wc -l`
+MESSAGE=`cat $LOGDIR/message.log | grep -v '^\#' | grep -v ^$STATION_CALL | wc -l`
+MESSAGETX=`cat $LOGDIR/message.log | grep -v '^\#' | grep ^$STATION_CALL | wc -l`
+NET=`cat $LOGDIR/net.log | grep -v '^\#' | grep -v ^$STATION_CALL | wc -l`
+NETTX=`cat $LOGDIR/net.log | grep -v '^\#' | grep ^$STATION_CALL | wc -l`
+TNC=`cat $LOGDIR/tnc.log | grep -v '^\#' | grep -v ^$STATION_CALL | wc -l`
+TNCTX=`cat $LOGDIR/tnc.log | grep -v '^\#' | grep ^$STATION_CALL | wc -l`
+
+# Display values 
+echo "igatetonet.value $IGATETONET"
+echo "message.value $MESSAGE"
+echo "messagetx.value $MESSAGETX"
+echo "net.value $NET"
+echo "nettx.value $NETTX"
+echo "tnc.value $TNC"
+echo "tnctx.value $TNCTX"
+
