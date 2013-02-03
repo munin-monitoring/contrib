@@ -12,6 +12,7 @@ int uptime(int argc, char **argv) {
 				"graph_vlabel uptime in days\n"
 				"uptime.label uptime\n"
 				"uptime.draw AREA");
+			print_warncrit("uptime");
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf"))

@@ -23,6 +23,8 @@ int interrupts(int argc, char **argv) {
 				"ctx.max 100000\n"
 				"intr.min 0\n"
 				"ctx.min 0");
+			print_warncrit("intr");
+			print_warncrit("ctx");
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf")) {

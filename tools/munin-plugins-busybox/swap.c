@@ -23,7 +23,8 @@ int swap(int argc, char **argv) {
 				"swap_out.max 100000\n"
 				"swap_out.min 0\n"
 				"swap_out.negative swap_in");
-
+			print_warncrit("swap_in");
+			print_warncrit("swap_out");
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf")) {
