@@ -17,6 +17,7 @@ int entropy(int argc, char **argv) {
 				"graph_info This graph shows the amount of entropy available in the system.\n"
 				"entropy.label entropy\n"
 				"entropy.info The number of random bytes available. This is typically used by cryptographic applications.");
+			print_warncrit("entropy");
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf"))

@@ -19,7 +19,8 @@ int open_inodes(int argc, char **argv) {
 				"used.info The number of currently open inodes.\n"
 				"max.label inode table size\n"
 				"max.info The size of the system inode table. This is dynamically adjusted by the kernel.");
-
+			print_warncrit("used");
+			print_warncrit("max");
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf")) {
