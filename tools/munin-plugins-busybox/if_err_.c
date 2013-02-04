@@ -37,20 +37,18 @@ int if_err_(int argc, char **argv) {
 				for(s=buff;*s == ' ';++s)
 					;
 				i = 0;
-				if(!strncmp(s, "eth", 3))
-					i = 3;
-				else if(!strncmp(s, "wlan", 4))
-					i = 4;
-				else if(!strncmp(s, "ath", 3))
-					i = 3;
-				else if(!strncmp(s, "ra", 2))
-					i = 2;
-				if(i == 0)
+				if(!strncmp(s, "lo:", 3))
 					continue;
-				while(isdigit(s[i]))
+				if(!strncmp(s, "sit", 3)) {
+					for(i=3; isdigit(s[i]); ++i)
+						;
+					if(s[i] == ':')
+						continue;
+				}
+				while(s[i] != ':' && s[i] != '\0')
 					++i;
 				if(s[i] != ':')
-					continue;
+					continue; /* a header line */
 				s[i] = '\0';
 				puts(s);
 			}
