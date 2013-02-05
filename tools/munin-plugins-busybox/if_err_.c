@@ -113,5 +113,6 @@ int if_err_(int argc, char **argv) {
 		fwrite(s, 1, i, stdout);
 		putchar('\n');
 	}
+	fclose(f);
 	return 0;
 }
