@@ -25,10 +25,8 @@ int processes(int argc, char **argv) {
 		if(!strcmp(argv[1], "autoconf"))
 			return writeyes();
 	}
-	if(!(d = opendir("/proc"))) {
-		fputs("cannot open /proc\n", stderr);
-		return 1;
-	}
+	if(!(d = opendir("/proc")))
+		return fail("cannot open /proc");
 	while((e = readdir(d))) {
 		for(s=e->d_name;*s;++s)
 			if(!isdigit(*s))

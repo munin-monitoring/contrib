@@ -23,21 +23,14 @@ int open_inodes(int argc, char **argv) {
 			print_warncrit("max");
 			return 0;
 		}
-		if(!strcmp(argv[1], "autoconf")) {
-			if(0 == access(FS_INODE_NR, R_OK))
-				return writeyes();
-			else
-				return writeno(FS_INODE_NR " not readable");
-		}
+		if(!strcmp(argv[1], "autoconf"))
+			return autoconf_check_readable(FS_INODE_NR);
 	}
-	if(!(f=fopen(FS_INODE_NR, "r"))) {
-		fputs("cannot open " FS_INODE_NR "\n", stderr);
-		return 1;
-	}
+	if(!(f=fopen(FS_INODE_NR, "r")))
+		return fail("cannot open " FS_INODE_NR);
 	if(2 != fscanf(f, "%d %d", &nr, &freen)) {
 		fclose(f);
-		fputs("cannot read from " FS_INODE_NR "\n", stderr);
-		return 1;
+		return fail("cannot read from " FS_INODE_NR);
 	}
 	fclose(f);
 	printf("used.value %d\nmax.value %d\n", nr-freen, nr);

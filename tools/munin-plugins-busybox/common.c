@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,12 +11,13 @@ int writeyes(void) {
 	return 0;
 }
 
-int writeno(const char *s) {
-	if(s)
-		printf("no (%s)\n", s);
-	else
-		puts("no");
-	return 1;
+int autoconf_check_readable(const char *path) {
+	if(0 == access(path, R_OK))
+		return writeyes();
+	else {
+		printf("no (%s is not readable, errno=%d)\n", path, errno);
+		return 1;
+	}
 }
 
 int getenvint(const char *name, int defvalue) {
@@ -63,4 +65,10 @@ void print_critical(const char *name) {
 void print_warncrit(const char *name) {
 	print_warning(name);
 	print_critical(name);
+}
+
+int fail(const char *message) {
+	fputs(message, stderr);
+	fputc('\n', stderr);
+	return 1;
 }

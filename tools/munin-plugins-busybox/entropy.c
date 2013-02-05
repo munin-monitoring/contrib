@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 #include "common.h"
 
 #define ENTROPY_AVAIL "/proc/sys/kernel/random/entropy_avail"
@@ -21,16 +22,13 @@ int entropy(int argc, char **argv) {
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf"))
-			return writeyes();
+			return autoconf_check_readable(ENTROPY_AVAIL);
 	}
-	if(!(f=fopen(ENTROPY_AVAIL, "r"))) {
-		fputs("cannot open " ENTROPY_AVAIL "\n", stderr);
-		return 1;
-	}
+	if(!(f=fopen(ENTROPY_AVAIL, "r")))
+		return fail("cannot open " ENTROPY_AVAIL);
 	if(1 != fscanf(f, "%d", &entropy)) {
-		fputs("cannot read from " ENTROPY_AVAIL "\n", stderr);
 		fclose(f);
-		return 1;
+		return fail("cannot read from " ENTROPY_AVAIL);
 	}
 	fclose(f);
 	printf("entropy.value %d\n", entropy);

@@ -9,27 +9,20 @@
 
 int if_err_(int argc, char **argv) {
 	char *interface;
+	size_t interface_len;
 	FILE *f;
 	char buff[256], *s;
 	int i;
 
 	interface = basename(argv[0]);
-	if(strncmp(interface, "if_err_", 7) != 0) {
-		fputs("if_err_ invoked with invalid basename\n", stderr);
-		return 1;
-	}
+	if(strncmp(interface, "if_err_", 7) != 0)
+		return fail("if_err_ invoked with invalid basename");
 	interface += 7;
+	interface_len = strlen(interface);
 
 	if(argc > 1) {
-		if(!strcmp(argv[1], "autoconf")) {
-			if(access(PROC_NET_DEV, R_OK) == 0) {
-				puts("yes");
-				return 0;
-			} else {
-				puts("no (/proc/net/dev not found)");
-				return 1;
-			}
-		}
+		if(!strcmp(argv[1], "autoconf"))
+			return autoconf_check_readable(PROC_NET_DEV);
 		if(!strcmp(argv[1], "suggest")) {
 			if(NULL == (f = fopen(PROC_NET_DEV, "r")))
 				return 1;
@@ -83,9 +76,9 @@ int if_err_(int argc, char **argv) {
 	while(fgets(buff, 256, f)) {
 		for(s=buff;*s == ' ';++s)
 			;
-		if(0 != strncmp(s, interface, strlen(interface)))
+		if(0 != strncmp(s, interface, interface_len))
 			continue;
-		s += strlen(interface);
+		s += interface_len;
 		if(*s != ':')
 			continue;
 		++s;

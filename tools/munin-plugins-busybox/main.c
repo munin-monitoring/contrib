@@ -1,6 +1,7 @@
 #include <libgen.h>
 #include <string.h>
 #include <stdio.h>
+#include "common.h"
 
 int cpu(int argc, char **argv);
 int entropy(int argc, char **argv);
@@ -16,14 +17,10 @@ int swap(int argc, char **argv);
 int uptime(int argc, char **argv);
 
 int busybox(int argc, char **argv) {
-	if(argc < 2) {
-		fprintf(stderr, "missing parameter\n");
-		return 1;
-	}
-	if(0 != strcmp(argv[1], "listplugins")) {
-		fprintf(stderr, "unknown parameter\n");
-		return 1;
-	}
+	if(argc < 2)
+		return fail("missing parameter");
+	if(0 != strcmp(argv[1], "listplugins"))
+		return fail("unknown parameter");
 	puts("cpu\nentropy\nforks\nfw_packets\ninterrupts\nload\n"
 		"open_files\nopen_inodes\nprocesses\nswap\nuptime");
 	return 0;
@@ -80,6 +77,5 @@ int main(int argc, char **argv) {
 				return uptime(argc, argv);
 			break;
 	}
-	fprintf(stderr, "unknown basename\n");
-	return 1;
+	return fail("unknown basename");
 }

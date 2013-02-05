@@ -8,7 +8,7 @@ int interrupts(int argc, char **argv) {
 	char buff[256];
 	if(argc > 1) {
 		if(!strcmp(argv[1], "config")) {
-			puts("graph_title Interrupts & context switches\n"
+			puts("graph_title Interrupts and context switches\n"
 				"graph_args --base 1000 -l 0\n"
 				"graph_vlabel interrupts & ctx switches / ${graph_period}\n"
 				"graph_category system\n"
@@ -27,17 +27,11 @@ int interrupts(int argc, char **argv) {
 			print_warncrit("ctx");
 			return 0;
 		}
-		if(!strcmp(argv[1], "autoconf")) {
-			if(0 == access(PROC_STAT, R_OK))
-				return writeyes();
-			else
-				return writeno(PROC_STAT " not readable");
-		}
+		if(!strcmp(argv[1], "autoconf"))
+			return autoconf_check_readable(PROC_STAT);
 	}
-	if(!(f=fopen(PROC_STAT, "r"))) {
-		fputs("cannot open " PROC_STAT "\n", stderr);
-		return 1;
-	}
+	if(!(f=fopen(PROC_STAT, "r")))
+		return fail("cannot open " PROC_STAT);
 	while(fgets(buff, 256, f)) {
 		if(!strncmp(buff, "intr ", 5)) {
 			buff[5 + strcspn(buff + 5, " \t\n")] = '\0';
