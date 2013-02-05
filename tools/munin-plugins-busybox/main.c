@@ -14,6 +14,7 @@ int open_files(int argc, char **argv);
 int open_inodes(int argc, char **argv);
 int processes(int argc, char **argv);
 int swap(int argc, char **argv);
+int threads(int argc, char **argv);
 int uptime(int argc, char **argv);
 
 int busybox(int argc, char **argv) {
@@ -71,6 +72,10 @@ int main(int argc, char **argv) {
 		case 's':
 			if(!strcmp(progname+1, "wap"))
 				return swap(argc, argv);
+			break;
+		case 't':
+			if(!strcmp(progname+1, "hreads"))
+				return threads(argc, argv);
 			break;
 		case 'u':
 			if(!strcmp(progname+1, "ptime"))
