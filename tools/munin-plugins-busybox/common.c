@@ -16,7 +16,7 @@ int autoconf_check_readable(const char *path) {
 		return writeyes();
 	else {
 		printf("no (%s is not readable, errno=%d)\n", path, errno);
-		return 1;
+		return 0;
 	}
 }
 
