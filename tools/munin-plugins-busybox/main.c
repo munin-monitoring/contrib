@@ -34,49 +34,49 @@ int main(int argc, char **argv) {
 	progname = basename(argv[0]);
 	switch(*progname) {
 		case 'c':
-			if(!strcmp(progname+1, "cpu"+1))
+			if(!strcmp(progname, "cpu"))
 				return cpu(argc, argv);
 			break;
 		case 'e':
-			if(!strcmp(progname+1, "entropy"+1))
+			if(!strcmp(progname, "entropy"))
 				return entropy(argc, argv);
 			break;
 		case 'f':
-			if(!strcmp(progname+1, "forks"+1))
+			if(!strcmp(progname, "forks"))
 				return forks(argc, argv);
-			if(!strcmp(progname+1, "fw_packets"+1))
+			if(!strcmp(progname, "fw_packets"))
 				return fw_packets(argc, argv);
 			break;
 		case 'i':
-			if(!strcmp(progname+1, "interrupts"+1))
+			if(!strcmp(progname, "interrupts"))
 				return interrupts(argc, argv);
-			if(!strncmp(progname+1, "if_err_"+1, 6))
+			if(!strncmp(progname, "if_err_", 6))
 				return if_err_(argc, argv);
 			break;
 		case 'l':
-			if(!strcmp(progname+1, "load"+1))
+			if(!strcmp(progname, "load"))
 				return load(argc, argv);
 			break;
 		case 'm':
-			if(!strcmp(progname+1, "munin-plugins-busybox"+1))
+			if(!strcmp(progname, "munin-plugins-busybox"))
 				return busybox(argc, argv);
 			break;
 		case 'o':
-			if(!strcmp(progname+1, "open_files"+1))
+			if(!strcmp(progname, "open_files"))
 				return open_files(argc, argv);
-			if(!strcmp(progname+1, "open_inodes"+1))
+			if(!strcmp(progname, "open_inodes"))
 				return open_inodes(argc, argv);
 			break;
 		case 'p':
-			if(!strcmp(progname+1, "processes"+1))
+			if(!strcmp(progname, "processes"))
 				return processes(argc, argv);
 			break;
 		case 's':
-			if(!strcmp(progname+1, "swap"+1))
+			if(!strcmp(progname, "swap"))
 				return swap(argc, argv);
 			break;
 		case 'u':
-			if(!strcmp(progname+1, "uptime"+1))
+			if(!strcmp(progname, "uptime"))
 				return uptime(argc, argv);
 			break;
 	}
