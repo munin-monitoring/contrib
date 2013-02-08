@@ -21,6 +21,8 @@ int main(int argc, char *argv[]) {
 
 	char format[] = "vd:h:s:";
 
+	char line[LINE_MAX];
+
 	opterr = 1;
 
 	while ((optch = getopt(argc, argv, format)) != -1)
@@ -51,8 +53,30 @@ int main(int argc, char *argv[]) {
 		gethostname(host, HOST_NAME_MAX);
 	}
 
-	printf("verbose: %d, host: %s, plugin_dir: %s, spoolfetch_dir: %s\n", verbose, host, plugin_dir, spoolfetch_dir);
+	fprintf(stderr, "verbose: %d, host: %s, plugin_dir: %s, spoolfetch_dir: %s\n", verbose, host, plugin_dir, spoolfetch_dir);
 
+	printf("# munin node at %s\n", host);
+	while (fgets(line, LINE_MAX, stdin) != NULL) {
+		char* cmd;
+		char* arg;
+
+		line[LINE_MAX-1] = '\0';
+
+		cmd = strtok(line, " \t\n");
+		arg = strtok(line, " \t\n");
+
+		if (strlen(cmd) == 0) continue;
+
+		if (strcmp(cmd, "version") == 0) {
+		} else if (strcmp(cmd, "nodes") == 0) {
+		} else if (strcmp(cmd, "quit") == 0) {
+		} else if (strcmp(cmd, "list") == 0) {
+		} else if (strcmp(cmd, "config") == 0) {
+		} else if (strcmp(cmd, "fetch") == 0) {
+		} else if (strcmp(cmd, "cap") == 0) {
+		} else if (strcmp(cmd, "spoolfetch") == 0) {
+		}
+	}
 
 	return 0;
 }
