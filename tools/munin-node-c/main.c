@@ -63,7 +63,7 @@ int main(int argc, char *argv[]) {
 		cmd = strtok(line, " \t\n");
 		arg = strtok(line, " \t\n");
 
-		if (strlen(cmd) == 0) {
+		if (!cmd || strlen(cmd) == 0) {
 		} else if (strcmp(cmd, "version") == 0) {
 			printf("munin c node version: %s\n", VERSION);
 		} else if (strcmp(cmd, "nodes") == 0) {
