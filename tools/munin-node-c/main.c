@@ -63,16 +63,26 @@ int main(int argc, char *argv[]) {
 		cmd = strtok(line, " \t\n");
 		arg = strtok(line, " \t\n");
 
-		if (strlen(cmd) == 0) continue;
-
-		if (strcmp(cmd, "version") == 0) {
+		if (strlen(cmd) == 0) {
+		} else if (strcmp(cmd, "version") == 0) {
+			printf("munin c node version: %s\n", VERSION);
 		} else if (strcmp(cmd, "nodes") == 0) {
+			printf("%s\n", host);
+			printf(".\n");
 		} else if (strcmp(cmd, "quit") == 0) {
+			return(0);
 		} else if (strcmp(cmd, "list") == 0) {
 		} else if (strcmp(cmd, "config") == 0) {
 		} else if (strcmp(cmd, "fetch") == 0) {
 		} else if (strcmp(cmd, "cap") == 0) {
+			printf("cap ");
+			if (strlen(spoolfetch_dir)) {
+				printf("spool ");
+			}
+			printf("\n");
 		} else if (strcmp(cmd, "spoolfetch") == 0) {
+		} else {
+			printf("# unknown cmd: %s\n", cmd);
 		}
 	}
 
