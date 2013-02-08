@@ -5,6 +5,8 @@
 #include <ctype.h>
 #include "common.h"
 
+/* TODO: The upstream plugin does way more nowawdays. */
+
 int processes(int argc, char **argv) {
 	DIR *d;
 	struct dirent *e;
