@@ -64,6 +64,7 @@ int main(int argc, char *argv[]) {
 		arg = strtok(line, " \t\n");
 
 		if (!cmd || strlen(cmd) == 0) {
+			printf("# empty cmd\n");
 		} else if (strcmp(cmd, "version") == 0) {
 			printf("munin c node version: %s\n", VERSION);
 		} else if (strcmp(cmd, "nodes") == 0) {
