@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <limits.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <dirent.h>
 
 
 char VERSION[] = "1.0.0";
@@ -74,7 +76,24 @@ int main(int argc, char *argv[]) {
 		} else if (strcmp(cmd, "quit") == 0) {
 			return(0);
 		} else if (strcmp(cmd, "list") == 0) {
-			printf("# not implem yet cmd: %s\n", cmd);
+			DIR* dirp = opendir(plugin_dir);
+			struct dirent* dp;
+			while ((dp = readdir(dirp)) != NULL) {
+				char cmdline[LINE_MAX];
+				char* plugin_filename = dp->d_name;;
+
+				if (plugin_filename[0] == '.') {
+					/* No dotted plugin */
+					continue;
+				}
+
+				sprintf(cmdline, "%s/%s", plugin_dir, plugin_filename);
+				if (access(cmdline, X_OK) == 0) {
+					printf("%s ", plugin_filename);
+				}
+			}
+			printf("\n");
+			closedir(dirp);
 		} else if (
 				strcmp(cmd, "config") == 0 ||
 				strcmp(cmd, "fetch") == 0
