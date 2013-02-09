@@ -53,8 +53,6 @@ int main(int argc, char *argv[]) {
 		gethostname(host, HOST_NAME_MAX);
 	}
 
-	fprintf(stderr, "verbose: %d, host: %s, plugin_dir: %s, spoolfetch_dir: %s\n", verbose, host, plugin_dir, spoolfetch_dir);
-
 	printf("# munin node at %s\n", host);
 	while (fgets(line, LINE_MAX, stdin) != NULL) {
 		char* cmd;
