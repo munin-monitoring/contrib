@@ -72,6 +72,7 @@ int main(int argc, char *argv[]) {
 		} else if (strcmp(cmd, "quit") == 0) {
 			return(0);
 		} else if (strcmp(cmd, "list") == 0) {
+			printf("# not implem yet cmd: %s\n", cmd);
 		} else if (strcmp(cmd, "config") == 0) {
 		} else if (strcmp(cmd, "fetch") == 0) {
 		} else if (strcmp(cmd, "cap") == 0) {
@@ -81,6 +82,7 @@ int main(int argc, char *argv[]) {
 			}
 			printf("\n");
 		} else if (strcmp(cmd, "spoolfetch") == 0) {
+			printf("# not implem yet cmd: %s\n", cmd);
 		} else {
 			printf("# unknown cmd: %s\n", cmd);
 		}
