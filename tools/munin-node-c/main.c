@@ -99,7 +99,8 @@ int main(int argc, char *argv[]) {
 				strcmp(cmd, "fetch") == 0
 			) {
 			char cmdline[LINE_MAX];
-			if (! access(arg, X_OK)) {
+			sprintf(cmdline, "%s/%s", plugin_dir, arg);
+			if (access(cmdline, X_OK) == -1) {
 				printf("# unknown plugin: %s\n", arg);
 				continue;
 			}
