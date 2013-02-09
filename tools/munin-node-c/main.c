@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <limits.h>
+#include <stdlib.h>
 
 
 char VERSION[] = "1.0.0";
@@ -61,7 +62,7 @@ int main(int argc, char *argv[]) {
 		line[LINE_MAX-1] = '\0';
 
 		cmd = strtok(line, " \t\n");
-		arg = strtok(line, " \t\n");
+		arg = strtok(NULL, " \t\n");
 
 		if (!cmd || strlen(cmd) == 0) {
 			printf("# empty cmd\n");
@@ -74,8 +75,18 @@ int main(int argc, char *argv[]) {
 			return(0);
 		} else if (strcmp(cmd, "list") == 0) {
 			printf("# not implem yet cmd: %s\n", cmd);
-		} else if (strcmp(cmd, "config") == 0) {
-		} else if (strcmp(cmd, "fetch") == 0) {
+		} else if (
+				strcmp(cmd, "config") == 0 ||
+				strcmp(cmd, "fetch") == 0
+			) {
+			char cmdline[LINE_MAX];
+			if (! access(arg, X_OK)) {
+				printf("# unknown plugin: %s\n", arg);
+				continue;
+			}
+			sprintf(cmdline, "exec %s/%s %s", plugin_dir, arg, cmd);
+			system(cmdline);
+			printf(".\n");
 		} else if (strcmp(cmd, "cap") == 0) {
 			printf("cap ");
 			if (strlen(spoolfetch_dir)) {
