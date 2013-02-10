@@ -10,7 +10,7 @@
 
 char VERSION[] = "1.0.0";
 
-int verbose;
+int verbose = 0;
 
 char* host = "";
 char* plugin_dir = "plugins";
