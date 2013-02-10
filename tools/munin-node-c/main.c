@@ -102,6 +102,14 @@ int main(int argc, char *argv[]) {
 				strcmp(cmd, "fetch") == 0
 			) {
 			char cmdline[LINE_MAX];
+			if(arg == NULL) {
+				printf("# no plugin given\n");
+				continue;
+			}
+			if(arg[0] == '.' || strchr(arg, '/')) {
+				printf("# invalid plugin character");
+				continue;
+			}
 			sprintf(cmdline, "%s/%s", plugin_dir, arg);
 			if (access(cmdline, X_OK) == -1) {
 				printf("# unknown plugin: %s\n", arg);
