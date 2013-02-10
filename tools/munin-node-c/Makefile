@@ -17,7 +17,7 @@ plugins: plugins/.munin-plugins-busybox.installed
 
 plugins/.munin-plugins-busybox.installed:
 	mkdir -p plugins
-	cd ../munin-plugins-busybox && make
+	cd ../munin-plugins-busybox && $(MAKE)
 	cd plugins && for i in $$(find ../../munin-plugins-busybox -type l); do ln -s $$i; done
 	touch plugins/.munin-plugins-busybox.installed
 

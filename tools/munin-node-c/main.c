@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <dirent.h>
 
 
@@ -64,7 +65,10 @@ int main(int argc, char *argv[]) {
 		line[LINE_MAX-1] = '\0';
 
 		cmd = strtok(line, " \t\n");
-		arg = strtok(NULL, " \t\n");
+		if(cmd == NULL)
+			arg = NULL;
+		else
+			arg = strtok(NULL, " \t\n");
 
 		if (!cmd || strlen(cmd) == 0) {
 			printf("# empty cmd\n");
@@ -87,7 +91,7 @@ int main(int argc, char *argv[]) {
 					continue;
 				}
 
-				sprintf(cmdline, "%s/%s", plugin_dir, plugin_filename);
+				snprintf(cmdline, LINE_MAX, "%s/%s", plugin_dir, plugin_filename);
 				if (access(cmdline, X_OK) == 0) {
 					printf("%s ", plugin_filename);
 				}
@@ -99,13 +103,30 @@ int main(int argc, char *argv[]) {
 				strcmp(cmd, "fetch") == 0
 			) {
 			char cmdline[LINE_MAX];
-			sprintf(cmdline, "%s/%s", plugin_dir, arg);
+			pid_t pid;
+			if(arg == NULL) {
+				printf("# no plugin given\n");
+				continue;
+			}
+			if(arg[0] == '.' || strchr(arg, '/')) {
+				printf("# invalid plugin character");
+				continue;
+			}
+			snprintf(cmdline, LINE_MAX, "%s/%s", plugin_dir, arg);
 			if (access(cmdline, X_OK) == -1) {
 				printf("# unknown plugin: %s\n", arg);
 				continue;
 			}
-			sprintf(cmdline, "exec %s/%s %s", plugin_dir, arg, cmd);
-			system(cmdline);
+			if(0 == (pid = vfork())) {
+				execl(cmdline, arg, cmd, NULL);
+				/* according to vfork(2) we must use _exit */
+				_exit(1);
+			} else if(pid < 0) {
+				printf("# fork failed\n");
+				continue;
+			} else {
+				waitpid(pid, NULL, 0);
+			}
 			printf(".\n");
 		} else if (strcmp(cmd, "cap") == 0) {
 			printf("cap ");
