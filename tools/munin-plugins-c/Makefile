@@ -8,11 +8,11 @@ LINKS=cpu entropy forks fw_packets interrupts if_err_eth0 load open_files \
 
 %.o:%.c
 	${CC} ${CFLAGS} -c $< -o $@
-all:munin-plugins-busybox
-	strip -s munin-plugins-busybox
-	for l in ${LINKS}; do test -f $$l || ln -s munin-plugins-busybox $$l; done
-munin-plugins-busybox:${OBJS}
+all:munin-plugins-c
+	strip -s munin-plugins-c
+	for l in ${LINKS}; do test -f $$l || ln -s munin-plugins-c $$l; done
+munin-plugins-c:${OBJS}
 	${CC} ${CFLAGS} $^ -o $@
 clean:
-	rm -f munin-plugins-busybox ${OBJS} ${LINKS}
+	rm -f munin-plugins-c ${OBJS} ${LINKS}
 .PHONY:all clean
