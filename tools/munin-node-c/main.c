@@ -64,7 +64,10 @@ int main(int argc, char *argv[]) {
 		line[LINE_MAX-1] = '\0';
 
 		cmd = strtok(line, " \t\n");
-		arg = strtok(NULL, " \t\n");
+		if(cmd == NULL)
+			arg = NULL;
+		else
+			arg = strtok(NULL, " \t\n");
 
 		if (!cmd || strlen(cmd) == 0) {
 			printf("# empty cmd\n");
