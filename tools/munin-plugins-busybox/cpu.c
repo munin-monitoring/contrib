@@ -9,6 +9,8 @@
 #define SYSCRITICAL 50
 #define USRWARNING 80
 
+/* TODO: port support for env.foo_warning and env.foo_critical from mainline plugin */
+
 int cpu(int argc, char **argv) {
 	FILE *f;
 	char buff[256], *s;
@@ -19,10 +21,8 @@ int cpu(int argc, char **argv) {
 			if(s && !strcmp(s, "yes"))
 				scaleto100=1;
 
-			if(!(f=fopen(PROC_STAT, "r"))) {
-				fputs("cannot open " PROC_STAT "\n", stderr);
-				return 1;
-			}
+			if(!(f=fopen(PROC_STAT, "r")))
+				return fail("cannot open " PROC_STAT);
 			while(fgets(buff, 256, f)) {
 				if(!strncmp(buff, "cpu", 3)) {
 					if(isdigit(buff[3]))
@@ -36,10 +36,8 @@ int cpu(int argc, char **argv) {
 			}
 			fclose(f);
 
-			if(ncpu < 1 || extinfo < 4) {
-				fputs("cannot parse " PROC_STAT "\n", stderr);
-				return 1;
-			}
+			if(ncpu < 1 || extinfo < 4)
+				return fail("cannot parse " PROC_STAT);
 
 			puts("graph_title CPU usage");
 			if(extinfo >= 7)
@@ -133,17 +131,11 @@ int cpu(int argc, char **argv) {
 			}
 			return 0;
 		}
-		if(!strcmp(argv[1], "autoconf")) {
-			if(0 == access(PROC_STAT, R_OK))
-				return writeyes();
-			else
-				return writeno(PROC_STAT " not readable");
-		}
+		if(!strcmp(argv[1], "autoconf"))
+			return autoconf_check_readable(PROC_STAT);
 	}
-	if(!(f=fopen(PROC_STAT, "r"))) {
-		fputs("cannot open " PROC_STAT "\n", stderr);
-		return 1;
-	}
+	if(!(f=fopen(PROC_STAT, "r")))
+		return fail("cannot open " PROC_STAT);
 	while(fgets(buff, 256, f)) {
 		hz = getenvint("HZ", 100);
 		if(!strncmp(buff, "cpu ", 4)) {
@@ -179,6 +171,5 @@ int cpu(int argc, char **argv) {
 		}
 	}
 	fclose(f);
-	fputs("no cpu line found in " PROC_STAT "\n", stderr);
-	return 1;
+	return fail("no cpu line found in " PROC_STAT);
 }

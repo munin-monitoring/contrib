@@ -21,17 +21,11 @@ int forks(int argc, char **argv) {
 			print_warncrit("forks");
 			return 0;
 		}
-		if(!strcmp(argv[1], "autoconf")) {
-			if(0 == access(PROC_STAT, R_OK))
-				return writeyes();
-			else
-				return writeno(PROC_STAT " not readable");
-		}
+		if(!strcmp(argv[1], "autoconf"))
+			return autoconf_check_readable(PROC_STAT);
 	}
-	if(!(f=fopen(PROC_STAT, "r"))) {
-		fputs("cannot open " PROC_STAT "\n", stderr);
-		return 1;
-	}
+	if(!(f=fopen(PROC_STAT, "r")))
+		return fail("cannot open " PROC_STAT);
 	while(fgets(buff, 256, f)) {
 		if(!strncmp(buff, "processes ", 10)) {
 			fclose(f);
@@ -40,6 +34,5 @@ int forks(int argc, char **argv) {
 		}
 	}
 	fclose(f);
-	fputs("no processes line found in " PROC_STAT "\n", stderr);
-	return 1;
+	return fail("no processes line found in " PROC_STAT);
 }

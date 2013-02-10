@@ -17,19 +17,18 @@ int load(int argc, char **argv) {
 				"graph_category system\n"
 				"load.label load");
 			print_warncrit("load");
+			puts("graph_info The load average of the machine describes how many processes are in the run-queue (scheduled to run \"immediately\").\n"
+				"load.info 5 minute load average");
 			return 0;
 		}
 		if(!strcmp(argv[1], "autoconf"))
 			return writeyes();
 	}
-	if(!(f=fopen(PROC_LOADAVG, "r"))) {
-		fputs("cannot open " PROC_LOADAVG "\n", stderr);
-		return 1;
-	}
+	if(!(f=fopen(PROC_LOADAVG, "r")))
+		return fail("cannot open " PROC_LOADAVG);
 	if(1 != fscanf(f, "%*f %f", &val)) {
-		fputs("cannot read from " PROC_LOADAVG "\n", stderr);
 		fclose(f);
-		return 1;
+		return fail("cannot read from " PROC_LOADAVG);
 	}
 	fclose(f);
 	printf("load.value %.2f\n", val);

@@ -27,19 +27,13 @@ int swap(int argc, char **argv) {
 			print_warncrit("swap_out");
 			return 0;
 		}
-		if(!strcmp(argv[1], "autoconf")) {
-			if(0 == access(PROC_STAT, R_OK))
-				return writeyes();
-			else
-				return writeno(PROC_STAT " not readable");
-		}
+		if(!strcmp(argv[1], "autoconf"))
+			return autoconf_check_readable(PROC_STAT);
 	}
 	if(!access("/proc/vmstat", F_OK)) {
 		in=out=0;
-		if(!(f=fopen("/proc/vmstat", "r"))) {
-			fputs("cannot open /proc/vmstat\n", stderr);
-			return 1;
-		}
+		if(!(f=fopen("/proc/vmstat", "r")))
+			return fail("cannot open /proc/vmstat");
 		while(fgets(buff, 256, f)) {
 			if(!in && !strncmp(buff, "pswpin ", 7)) {
 				++in;
@@ -51,30 +45,22 @@ int swap(int argc, char **argv) {
 			}
 		}
 		fclose(f);
-		if(!(in*out)) {
-			fputs("no usable data on /proc/vmstat\n", stderr);
-			return 1;
-		}
+		if(!(in*out))
+			return fail("no usable data on /proc/vmstat");
 		return 0;
 	} else {
-		if(!(f=fopen(PROC_STAT, "r"))) {
-			fputs("cannot open " PROC_STAT "\n", stderr);
-			return 1;
-		}
+		if(!(f=fopen(PROC_STAT, "r")))
+			return fail("cannot open " PROC_STAT);
 		while(fgets(buff, 256, f)) {
 			if(!strncmp(buff, "swap ", 5)) {
 				fclose(f);
-				if(2 != sscanf(buff+5, "%d %d", &in, &out)) {
-					fputs("bad data on " PROC_STAT "\n",
-							stderr);
-					return 1;
-				}
+				if(2 != sscanf(buff+5, "%d %d", &in, &out))
+					return fail("bad data on " PROC_STAT);
 				printf("swap_in.value %d\nswap_out.value %d\n", in, out);
 				return 0;
 			}
 		}
 		fclose(f);
-		fputs("no swap line found in " PROC_STAT "\n", stderr);
-		return 1;
+		return fail("no swap line found in " PROC_STAT);
 	}
 }

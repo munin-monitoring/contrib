@@ -25,17 +25,11 @@ int fw_packets(int argc, char **argv) {
 				"forwarded.min 0");
 			return 0;
 		}
-		if(!strcmp(argv[1], "autoconf")) {
-			if(0 == access(PROC_NET_SNMP, R_OK))
-				return writeyes();
-			else
-				return writeno(PROC_NET_SNMP " not readable");
-		}
+		if(!strcmp(argv[1], "autoconf"))
+			return autoconf_check_readable(PROC_NET_SNMP);
 	}
-	if(!(f=fopen(PROC_NET_SNMP, "r"))) {
-		fputs("cannot open " PROC_NET_SNMP "\n", stderr);
-		return 1;
-	}
+	if(!(f=fopen(PROC_NET_SNMP, "r")))
+		return fail("cannot open " PROC_NET_SNMP);
 	while(fgets(buff, 1024, f)) {
 		if(!strncmp(buff, "Ip: ", 4) && isdigit(buff[4])) {
 			fclose(f);
@@ -57,6 +51,5 @@ int fw_packets(int argc, char **argv) {
 		}
 	}
 	fclose(f);
-	fputs("no ip line found in " PROC_NET_SNMP "\n", stderr);
-	return 1;
+	return fail("no ip line found in " PROC_NET_SNMP);
 }

@@ -18,14 +18,11 @@ int uptime(int argc, char **argv) {
 		if(!strcmp(argv[1], "autoconf"))
 			return writeyes();
 	}
-	if(!(f=fopen("/proc/uptime", "r"))) {
-		fputs("cannot open /proc/uptime\n", stderr);
-		return 1;
-	}
+	if(!(f=fopen("/proc/uptime", "r")))
+		return fail("cannot open /proc/uptime");
 	if(1 != fscanf(f, "%f", &uptime)) {
-		fputs("cannot read from /proc/uptime\n", stderr);
 		fclose(f);
-		return 1;
+		return fail("cannot read from /proc/uptime");
 	}
 	fclose(f);
 	printf("uptime.value %.2f\n", uptime/86400);

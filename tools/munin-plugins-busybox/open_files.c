@@ -5,20 +5,18 @@
 
 #define FS_FILE_NR "/proc/sys/fs/file-nr"
 
+/* TODO: support env.warning and friends after the upstream plugin is fixed */
+
 int open_files(int argc, char **argv) {
 	FILE *f;
 	int alloc, freeh, avail;
 	if(argc > 1) {
 		if(!strcmp(argv[1], "config")) {
-			if(!(f=fopen(FS_FILE_NR, "r"))) {
-				fprintf(stderr, "cannot open " FS_FILE_NR "\n");
-				return 1;
-			}
+			if(!(f=fopen(FS_FILE_NR, "r")))
+				return fail("cannot open " FS_FILE_NR);
 			if(1 != fscanf(f, "%*d %*d %d", &avail)) {
 				fclose(f);
-				fprintf(stderr, "cannot read from " FS_FILE_NR
-						"\n");
-				return 1;
+				return fail("cannot read from " FS_FILE_NR);
 			}
 			fclose(f);
 			puts("graph_title File table usage\n"
@@ -36,21 +34,14 @@ int open_files(int argc, char **argv) {
 					(int)(avail*0.92), (int)(avail*0.98));
 			return 0;
 		}
-		if(!strcmp(argv[1], "autoconf")) {
-			if(0 == access(FS_FILE_NR, R_OK))
-				return writeyes();
-			else
-				return writeno(FS_FILE_NR " not readable");
-		}
+		if(!strcmp(argv[1], "autoconf"))
+			return autoconf_check_readable(FS_FILE_NR);
 	}
-	if(!(f=fopen(FS_FILE_NR, "r"))) {
-		fputs("cannot open " FS_FILE_NR "\n", stderr);
-		return 1;
-	}
+	if(!(f=fopen(FS_FILE_NR, "r")))
+		return fail("cannot open " FS_FILE_NR);
 	if(3 != fscanf(f, "%d %d %d", &alloc, &freeh, &avail)) {
 		fclose(f);
-		fputs("cannot read from " FS_FILE_NR "\n", stderr);
-		return 1;
+		return fail("cannot read from " FS_FILE_NR);
 	}
 	fclose(f);
 	printf("used.value %d\nmax.value %d\n", alloc-freeh, avail);
