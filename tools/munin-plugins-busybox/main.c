@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
 				return swap(argc, argv);
 			break;
 		case 't':
-			if(!strcmp(progname+1, "hreads"))
+			if(!strcmp(progname, "threads"))
 				return threads(argc, argv);
 			break;
 		case 'u':
