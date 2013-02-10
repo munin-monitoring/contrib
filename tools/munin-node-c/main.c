@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <dirent.h>
 
 
@@ -102,6 +103,7 @@ int main(int argc, char *argv[]) {
 				strcmp(cmd, "fetch") == 0
 			) {
 			char cmdline[LINE_MAX];
+			pid_t pid;
 			if(arg == NULL) {
 				printf("# no plugin given\n");
 				continue;
@@ -110,13 +112,21 @@ int main(int argc, char *argv[]) {
 				printf("# invalid plugin character");
 				continue;
 			}
-			sprintf(cmdline, "%s/%s", plugin_dir, arg);
+			snprintf(cmdline, LINE_MAX, "%s/%s", plugin_dir, arg);
 			if (access(cmdline, X_OK) == -1) {
 				printf("# unknown plugin: %s\n", arg);
 				continue;
 			}
-			snprintf(cmdline, LINE_MAX, "exec %s/%s %s", plugin_dir, arg, cmd);
-			system(cmdline);
+			if(0 == (pid = vfork())) {
+				execl(cmdline, arg, cmd, NULL);
+				/* according to vfork(2) we must use _exit */
+				_exit(1);
+			} else if(pid < 0) {
+				printf("# fork failed\n");
+				continue;
+			} else {
+				waitpid(pid, NULL, 0);
+			}
 			printf(".\n");
 		} else if (strcmp(cmd, "cap") == 0) {
 			printf("cap ");
