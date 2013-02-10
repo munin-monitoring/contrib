@@ -90,7 +90,7 @@ int main(int argc, char *argv[]) {
 					continue;
 				}
 
-				sprintf(cmdline, "%s/%s", plugin_dir, plugin_filename);
+				snprintf(cmdline, LINE_MAX, "%s/%s", plugin_dir, plugin_filename);
 				if (access(cmdline, X_OK) == 0) {
 					printf("%s ", plugin_filename);
 				}
@@ -107,7 +107,7 @@ int main(int argc, char *argv[]) {
 				printf("# unknown plugin: %s\n", arg);
 				continue;
 			}
-			sprintf(cmdline, "exec %s/%s %s", plugin_dir, arg, cmd);
+			snprintf(cmdline, LINE_MAX, "exec %s/%s %s", plugin_dir, arg, cmd);
 			system(cmdline);
 			printf(".\n");
 		} else if (strcmp(cmd, "cap") == 0) {
