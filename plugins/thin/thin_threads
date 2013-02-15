@@ -41,10 +41,11 @@ module Munin
   class ThinThreads
     
     def run
-      pids = get_pids()
-      pids.sort.each do |pid|
-        res = (get_threads(pid).to_i)
-        puts "thin_#{pid}.value #{res}"
+      instances = get_pids()
+      instances.each do |instance|
+        pid, port = instance.split("|")
+        rss = (get_threads(pid).to_i)/1024
+        puts "thin_#{port}.value #{rss}"
       end
     end
     
@@ -61,13 +62,10 @@ module Munin
         return res
       end
     end
-    
-    
-    # Get pis using lsof (list open files) 
-    #   look for listening tcp applications 
-    #   that match the name thin
+        
+    # fetch all pids that match thin
     def get_pids
-      pids = `pgrep thin`.split
+      pids = `pgrep -f 'thin' -l | awk -F " " '{ if (substr( $4, 10, 4)>=1) print $1"|"substr( $4, 10, 4)}'`.split(/\r?\n/)
     end
 
     def autoconf
