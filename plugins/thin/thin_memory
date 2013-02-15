@@ -41,10 +41,11 @@ module Munin
     
     # run main method
     def run
-      pids = get_pids()
-      pids.sort.each do |pid|
+      instances = get_pids()
+      instances.each do |instance|
+        pid, port = instance.split("|")
         rss = (pid_rss(pid).to_i)/1024
-        puts "thin_#{pid}.value #{rss}"
+        puts "thin_#{port}.value #{rss}"
       end
     end
     
@@ -60,7 +61,7 @@ module Munin
     
     # fetch all pids that match thin
     def get_pids
-      pids = `pgrep thin`.split
+      pids = `pgrep -f 'thin' -l | awk -F " " '{ if (substr( $4, 10, 4)>=1) print $1"|"substr( $4, 10, 4)}'`.split(/\r?\n/)
     end
 
     def autoconf
