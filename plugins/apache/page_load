@@ -1,0 +1,59 @@
+#!/bin/sh
+
+#    Copyright (C) 2013 Alexandru Iacob
+#
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+######################################################################################################
+#       The plugin will generate a graph that displays the page load time
+#		We need to add our custom log format into Apache config.
+#		The plugin was tested on Ubuntu Server 12.04.02 LTS
+#
+#		apache2.conf
+#		LogFormat "%h %l %u %t \"%r\" %>s %O %b %D \"%{Referer}i\" \"%{User-Agent}i\"" custom
+#		
+#		Acording to : http://httpd.apache.org/docs/2.2/mod/mod_log_config.html
+#		%D 	The time taken to serve the request, in microseconds.
+#		In our case %D -> 9
+###################################################################################################### 
+#	GLOBALS
+LOGFILE="/var/log/apache2/access.log"
+BUFFER_SIZE=500
+
+######################################################################################################
+
+ 
+do_ () {
+    command="tail -n $BUFFER_SIZE $LOGFILE | awk '{sum=sum+\$9} END {print \"exec_time.value \"(sum/$BUFFER_SIZE)/1000000}'"
+    eval $command
+    exit 0
+}
+ 
+do_config () {
+    echo "graph_title Average page execution time"
+    echo "graph_vlabel Seconds"
+    echo "graph_category apache"
+    echo "graph_args --base 1000 -l 0"
+    echo "graph_info Average page execution time"
+ 
+    echo "exec_time.label Execution time"
+    echo "exec_time.type GAUGE"
+}
+ 
+case $1 in
+    config|'')
+	eval do_$1
+esac
+ 
+exit $?
