@@ -20,14 +20,16 @@
 #
 # Log info:
 # 2007/11/30 - Review on comments
+# 2012/12/19 - Updated to connect locally instead of localhost by default
+#              (PostgreSQL has different permissions for these).
 #
 
-dbserver='localhost'
+dbserver='' #'-h hostname'
 dbuser='postgres'
 
 if [ "$1" = "config" ]; then
-   maximum=$(psql -h ${dbserver} -U ${dbuser} -tc "SHOW max_connections;" | bc)
-   reserved=$(psql -h ${dbserver} -U ${dbuser} -tc "SHOW superuser_reserved_connections;" | bc)
+   maximum=$(psql ${dbserver} -U ${dbuser} -tc "SHOW max_connections;" | bc)
+   reserved=$(psql ${dbserver} -U ${dbuser} -tc "SHOW superuser_reserved_connections;" | bc)
    warning=$(((maximum-reserved)*70/100))
    critical=$(((maximum-reserved)*90/100))
    echo 'graph_args --base 1000 --lower-limit 0 --upper-limit '${maximum}
@@ -46,4 +48,4 @@ if [ "$1" = "config" ]; then
    exit 0
 fi
 
-echo 'backends.value '$(psql -h ${dbserver} -U ${dbuser} -tc "SELECT SUM(numbackends) FROM pg_stat_database;" | bc)
+echo 'backends.value '$(psql ${dbserver} -U ${dbuser} -tc "SELECT SUM(numbackends) FROM pg_stat_database;" | bc)
