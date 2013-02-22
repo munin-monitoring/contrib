@@ -1,0 +1,119 @@
+#!/usr/bin/perl
+#
+# Copyright 2012 Chris Wilson
+# Copyright 2006 Holger Levsen
+#
+# This plugin monitors ALL processes on a system. No exceptions. It can
+# produce very big graphs! But if you want to know which processes are
+# killing your system by page faulting, without knowing what to monitor
+# in advance, this can help; or in addition to one of the more specific
+# plugins to monitor just Apache or MySQL, for example.
+#
+# Each counter is a DERIVE (difference since the last counter reading)
+# of the number of major page faults, usually 4k each, read in by a
+# process. Memory mapped files probably contribute to this. The process
+# cannot continue until the page fault is served, so this is a
+# high-priority read that usually indicates memory starvation.
+# Processes with no page faults at all are ignored. Processes
+# that die may not appear on the graph, and anyway their last chunk of
+# CPU usage before they died is lost. You could modify this plugin to
+# read SAR/psacct records if you care about that.
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+
+use strict;
+use warnings;
+
+my $scriptname = $0;
+$scriptname =~ s|.*/||;
+my $fieldname = ($scriptname =~ /^total_by_process_(.*)_(.*)/) ? $1 : undef;
+my $fieldtype = ($scriptname =~ /^total_by_process_(.*)_(.*)/) ? $2 : undef;
+
+if (@ARGV and $ARGV[1] eq "suggest")
+{
+	system("ps L | cut -d' ' -f1");
+	exit(0);
+}
+
+if (!$fieldname)
+{
+	print STDERR "Must be used with a PS format specifier name; try '$0 suggest'";
+	exit(2);
+}
+
+unless ($fieldtype =~ /^(GAUGE|DERIVE)$/)
+{
+	print STDERR "Unknown field type $fieldtype: should be GAUGE or DERIVE";
+	exit(2);
+}
+
+my $cmd = "ps -eo $fieldname,comm h";
+open PS, "$cmd|" or die "Failed to run ps command: $cmd: $!";
+
+# my $header_line = <PS>;
+my %total_by_process;
+
+while (<PS>)
+{
+	my @fields = split;
+	my $value = $fields[0];
+	my $process = $fields[1];
+
+	# remove any / and everything after it from the process name,
+	# e.g. kworker/0:2 -> kworker
+	$process =~ s|/.*||;
+
+	# remove any . at the end of the name (why does this appear?)
+	# $process =~ s|\.$||;
+
+	# change any symbol that's not allowed in a munin variable name to _
+	$process =~ tr|a-zA-Z0-9|_|c;
+
+	$total_by_process{$process} += $value;
+}
+
+foreach my $process (keys %total_by_process)
+{
+	# remove all processes with 0 faults
+	if (not $total_by_process{$process})
+	{
+		delete $total_by_process{$process};
+	}
+}
+
+close(PS);
+
+if (@ARGV and $ARGV[1] == "config")
+{
+	print <<END;
+graph_title $fieldname by Process
+graph_category system
+graph_info Shows total of $fieldname (reported by ps) for each process name
+graph_vlabel $fieldname (from ps)
+END
+
+	# graph_args --base 1000
+	# graph_vlabel seconds
+
+	my $stack = 0;
+	sub draw() { return $stack++ ? "STACK" : "AREA" }
+	print map
+	{
+		"$_.label $_\n" .
+		"$_.min 0\n" .
+		"$_.type $fieldtype\n" .
+		"$_.draw " . draw() . "\n"
+	} sort keys %total_by_process;
+}
+else
+{
+	print map
+	{
+		"$_.value $total_by_process{$_}\n"
+	} sort keys %total_by_process;
+}
+
+exit(0);
