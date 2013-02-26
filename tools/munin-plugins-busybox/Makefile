@@ -12,7 +12,6 @@ CFLAGS+=-Wno-long-long
 %.o:%.c
 	${CC} ${CFLAGS} -c $< -o $@
 all:munin-plugins-busybox
-	strip -s munin-plugins-busybox
 	for l in ${LINKS}; do test -f $$l || ln -s munin-plugins-busybox $$l; done
 munin-plugins-busybox:${OBJS}
 	${CC} ${CFLAGS} $^ -o $@
