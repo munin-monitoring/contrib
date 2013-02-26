@@ -6,6 +6,9 @@ OBJS=main.o common.o cpu.o entropy.o forks.o fw_packets.o interrupts.o \
 LINKS=cpu entropy forks fw_packets interrupts if_err_eth0 load open_files \
       open_inodes processes swap threads uptime
 
+# C90 doesn't have 64bit types
+CFLAGS+=-Wno-long-long
+
 %.o:%.c
 	${CC} ${CFLAGS} -c $< -o $@
 all:munin-plugins-busybox

@@ -12,7 +12,7 @@
 /* TODO: port support for env.foo_warning and env.foo_critical from mainline plugin */
 
 static int print_stat_value(const char* field_name, const char* stat_value, int hz) {
-	return printf("%s.value %lu\n", field_name, strtoul(stat_value, NULL, 0) * 100 / hz);
+	return printf("%s.value %llu\n", field_name, strtoull(stat_value, NULL, 0) * 100 / hz);
 }
 
 int cpu(int argc, char **argv) {
