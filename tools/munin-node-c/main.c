@@ -12,10 +12,50 @@
 char VERSION[] = "1.0.0";
 
 int verbose = 0;
+int extension_stripping = 0;
 
 char* host = "";
 char* plugin_dir = "plugins";
 char* spoolfetch_dir = "";
+
+int find_plugin_with_basename(char *cmdline, char *plugin_dir, char *plugin_basename) {
+	DIR* dirp = opendir(plugin_dir);
+	struct dirent* dp;
+	int found = 0;
+
+	/* Empty cmdline */
+	cmdline[0] = '\0';
+
+	while ((dp = readdir(dirp)) != NULL) {
+		char* plugin_filename = dp->d_name;
+		int plugin_basename_len = strlen(plugin_basename);
+
+		if (plugin_filename[0] == '.') {
+			/* No dotted plugin */
+			continue;
+		}
+
+		if (strncmp(plugin_filename, plugin_basename, plugin_basename_len) != 0) {
+			/* Does not start with base */
+			continue;
+		}
+
+		if (plugin_filename[plugin_basename_len] != '\0' && plugin_filename[plugin_basename_len] != '.') {
+			/* Does not end the string or start an extension */
+			continue;
+		}
+
+		snprintf(cmdline, LINE_MAX, "%s/%s", plugin_dir, plugin_filename);
+		if (access(cmdline, X_OK) == 0) {
+			/* Found it */
+			found ++;
+			break;
+		}
+	}
+	closedir(dirp);
+
+	return found;
+}
 
 int main(int argc, char *argv[]) {
 
@@ -23,7 +63,7 @@ int main(int argc, char *argv[]) {
 	extern int opterr;
 	int optarg_len;
 
-	char format[] = "vd:h:s:";
+	char format[] = "evd:h:s:";
 
 	char line[LINE_MAX];
 
@@ -31,6 +71,9 @@ int main(int argc, char *argv[]) {
 
 	while ((optch = getopt(argc, argv, format)) != -1)
 	switch (optch) {
+		case 'e':
+			extension_stripping ++;
+			break;
 		case 'v':
 			verbose ++;
 			break;
@@ -93,6 +136,13 @@ int main(int argc, char *argv[]) {
 
 				snprintf(cmdline, LINE_MAX, "%s/%s", plugin_dir, plugin_filename);
 				if (access(cmdline, X_OK) == 0) {
+					if(extension_stripping) {
+						/* Strip after the last . */
+						char *last_dot_idx = strrchr(plugin_filename, '.');
+						if (last_dot_idx != NULL) {
+							*last_dot_idx = '\0';
+						}
+					}
 					printf("%s ", plugin_filename);
 				}
 			}
@@ -112,7 +162,10 @@ int main(int argc, char *argv[]) {
 				printf("# invalid plugin character");
 				continue;
 			}
-			snprintf(cmdline, LINE_MAX, "%s/%s", plugin_dir, arg);
+			if (! extension_stripping || find_plugin_with_basename(cmdline, plugin_dir, arg) == 0) {
+				/* extension_stripping failed, using the plain method */
+				snprintf(cmdline, LINE_MAX, "%s/%s", plugin_dir, arg);
+			}
 			if (access(cmdline, X_OK) == -1) {
 				printf("# unknown plugin: %s\n", arg);
 				continue;
