@@ -40,7 +40,7 @@ int cpu(int argc, char **argv) {
 			}
 			fclose(f);
 
-			if(ncpu < 1 || extinfo < 4)
+			if(ncpu < 1 || extinfo < 3)
 				return fail("cannot parse " PROC_STAT);
 
 			puts("graph_title CPU usage");
