@@ -11,6 +11,10 @@
 
 /* TODO: port support for env.foo_warning and env.foo_critical from mainline plugin */
 
+static int print_stat_value(const char* field_name, const char* stat_value, int hz) {
+	return printf("%s.value %lu\n", field_name, strtoul(stat_value, NULL, 0) * 100 / hz);
+}
+
 int cpu(int argc, char **argv) {
 	FILE *f;
 	char buff[256], *s;
@@ -142,31 +146,31 @@ int cpu(int argc, char **argv) {
 			fclose(f);
 			if(!(s = strtok(buff+4, " \t")))
 				break;
-			printf("user.value %lld\n", atoll(s) * 100 / hz);
+			print_stat_value("user", s, hz);
 			if(!(s = strtok(NULL, " \t")))
 				break;
-			printf("nice.value %lld\n", atoll(s) * 100 / hz);
+			print_stat_value("nice", s, hz);
 			if(!(s = strtok(NULL, " \t")))
 				break;
-			printf("system.value %lld\n", atoll(s) * 100 / hz);
+			print_stat_value("system", s, hz);
 			if(!(s = strtok(NULL, " \t")))
 				break;
-			printf("idle.value %lld\n", atoll(s) * 100 / hz);
+			print_stat_value("idle", s, hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("iowait.value %lld\n", atoll(s) * 100 / hz);
+			print_stat_value("iowait", s, hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("irq.value %lld\n", atoll(s) * 100 / hz);
+			print_stat_value("irq", s, hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("softirq.value %lld\n", atoll(s) * 100 / hz);
+			print_stat_value("softirq", s, hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("steal.value %lld\n", atoll(s) * 100 / hz);
+			print_stat_value("steal", s, hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("guest.value %lld\n", atoll(s) * 100 / hz);
+			print_stat_value("guest", s, hz);
 			return 0;
 		}
 	}
