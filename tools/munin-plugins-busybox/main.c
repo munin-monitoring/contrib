@@ -29,7 +29,10 @@ int busybox(int argc, char **argv) {
 
 int main(int argc, char **argv) {
 	char *progname;
+	char *ext;
 	progname = basename(argv[0]);
+	ext = strrchr(progname, '.');
+	if (ext != NULL) ext[0] = '\0';
 	switch(*progname) {
 		case 'c':
 			if(!strcmp(progname, "cpu"))
