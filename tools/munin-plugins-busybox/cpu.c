@@ -142,31 +142,31 @@ int cpu(int argc, char **argv) {
 			fclose(f);
 			if(!(s = strtok(buff+4, " \t")))
 				break;
-			printf("user.value %ld\n", atol(s) * 100 / hz);
+			printf("user.value %lld\n", atoll(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				break;
-			printf("nice.value %ld\n", atol(s) * 100 / hz);
+			printf("nice.value %lld\n", atoll(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				break;
-			printf("system.value %ld\n", atol(s) * 100 / hz);
+			printf("system.value %lld\n", atoll(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				break;
-			printf("idle.value %ld\n", atol(s) * 100 / hz);
+			printf("idle.value %lld\n", atoll(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("iowait.value %ld\n", atol(s) * 100 / hz);
+			printf("iowait.value %lld\n", atoll(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("irq.value %ld\n", atol(s) * 100 / hz);
+			printf("irq.value %lld\n", atoll(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("softirq.value %ld\n", atol(s) * 100 / hz);
+			printf("softirq.value %lld\n", atoll(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("steal.value %ld\n", atol(s) * 100 / hz);
+			printf("steal.value %lld\n", atoll(s) * 100 / hz);
 			if(!(s = strtok(NULL, " \t")))
 				return 0;
-			printf("guest.value %ld\n", atol(s) * 100 / hz);
+			printf("guest.value %lld\n", atoll(s) * 100 / hz);
 			return 0;
 		}
 	}
