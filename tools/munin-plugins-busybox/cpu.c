@@ -136,8 +136,8 @@ int cpu(int argc, char **argv) {
 	}
 	if(!(f=fopen(PROC_STAT, "r")))
 		return fail("cannot open " PROC_STAT);
+	hz = getenvint("HZ", 100);
 	while(fgets(buff, 256, f)) {
-		hz = getenvint("HZ", 100);
 		if(!strncmp(buff, "cpu ", 4)) {
 			fclose(f);
 			if(!(s = strtok(buff+4, " \t")))
