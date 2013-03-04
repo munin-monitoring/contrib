@@ -1,0 +1,96 @@
+#!/bin/bash
+#
+# Plugin to monitor PostgreSQL backends by database.
+#    (Draws a line for each database and a total with suitable warning and critical values)
+#
+# Author:
+#    Dave Fennel <dave@microtux.co.uk>
+#
+# Created:
+#    21st Feb 2013
+#
+# License:
+#    GPLv2
+#
+# Usage:
+#    Place in /etc/munin/plugins/ (or link it there using ln -s)
+#
+# General info:
+#    Requires permission for database access and read (no writes are processed).
+#    Recomended user is PostgreSQL database owner (default: postgres).
+#
+
+dbserver='' # '-h localhost'
+dbuser='postgres'
+
+# The psql command to use.
+cmd="psql ${dbserver} -U ${dbuser} -tc 'SELECT datname,numbackends FROM pg_stat_database;' | grep -v '^$'"
+
+
+if [ "$1" = "config" ]; then
+	maximum=$(psql ${dbserver} -U ${dbuser} -tc "SHOW max_connections;" | bc)
+	reserved=$(psql ${dbserver} -U ${dbuser} -tc "SHOW superuser_reserved_connections;" | bc)
+	warning=$(((maximum-reserved)*70/100))
+	critical=$(((maximum-reserved)*90/100))
+
+    echo 'graph_args --base 1000 --lower-limit 0' # --upper-limit '${maximum}
+    echo 'graph_category Postgresql'
+    echo 'graph_info Shows open backends for each database on the server'
+    echo 'graph_scale no'
+    echo 'graph_title PostgreSQL Active Backends By Database'
+    echo 'graph_vlabel Number of active backends'
+
+	pools=""
+
+	while read pool sep backends junk
+	do
+		test -z "${pool}" && continue
+
+		# Skip pgbouncer database itself.
+		if [ "$pool" = "template0" ]; then
+			continue
+		fi
+
+		if [ "$pool" = "template1" ]; then
+			continue
+		fi
+
+		echo ${pool}.label ${pool}
+		echo ${pool}.info ${pool} active backends
+		echo ${pool}.draw LINE2
+
+		pools="${pools} $pool"
+
+	done < <(eval ${cmd})
+
+	echo total.label total
+	echo total.info total active backends
+	echo total.draw AREA
+	echo total.colour AFCACA
+	echo total.sum ${pools}
+	echo total.warning ${warning}
+	echo total.critical ${critical}
+
+	# If dirty config capability is enabled then fall through
+	# to output the data with the config information.
+	if [ "$MUNIN_CAP_DIRTYCONFIG" = "" ]; then
+		exit 0
+	fi
+fi
+
+while read pool sep backends junk
+do
+	test -z "${pool}" && continue
+
+	# Skip template databases.
+	if [ "$pool" = "template0" ]; then
+		continue
+	fi
+
+	if [ "$pool" = "template1" ]; then
+		continue
+	fi
+
+	echo ${pool}.value ${backends}
+
+done < <(eval ${cmd})
