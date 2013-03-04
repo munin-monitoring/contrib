@@ -1,0 +1,124 @@
+#!/bin/bash
+#
+# munin plugin to monitor bans on Fail2ban jails
+#
+read -r -d '' POD <<EOPOD
+: << =cut
+
+=head1 NAME
+
+fail2ban_all_jails
+
+=head1 DESCRIPTION
+
+This plugin provides a graph that shows the number of IP addresses banned by all Fail2ban jails. Each
+jail having its own line.
+
+=head1 CONFIGURATION
+
+	[fail2ban_all_jails]
+	user root
+
+=head1 AUTHOR
+
+Original Author: Thomas Leveil
+
+Contributors: none 
+
+=head1 LICENSE
+
+Permission to use, copy, and modify this software with or without fee
+is hereby granted, provided that this entire notice is included in
+all source code copies of any software which is or includes a copy or
+modification of this software.
+
+THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR
+IMPLIED WARRANTY. IN PARTICULAR, NONE OF THE AUTHORS MAKES ANY
+REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE
+MERCHANTABILITY OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR
+PURPOSE.
+
+=head1 CONTRIBUTE
+
+contribute to this plugin at https://github.com/munin-monitoring/contrib
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=autoconf
+
+=head1 VERSION
+
+    1.2
+
+=head1 CHANGELOG
+
+=head2 1.0
+ 
+    first release
+
+=head2 1.1
+ 
+    better autoconf
+
+=head2 1.2
+ 
+    add POD documentation
+    
+=cut
+EOPOD
+
+
+case $1 in
+	autoconf)
+		if [ -z $(which fail2ban-client) ]; then
+			echo no
+			exit 1
+		fi
+		if [ $(whoami) != "root" ]; then
+			echo "no (fail2ban-client found but must run as root)"
+			exit 1
+		fi
+		if [ -x $(which fail2ban-client) ]; then
+			echo yes
+			exit 0
+		else
+			echo "no (fail2ban-client found but not executable)"
+			exit 1
+		fi
+		;;
+	config)
+		echo "graph_title Fail2ban"
+		echo 'graph_vlabel active bans'
+		echo 'graph_category Network'
+		echo 'graph_info number of jailled ip'
+		echo 'graph_info This graph shows the amount of bans caught by Fail2ban'
+		$(which fail2ban-client) status | awk -f <( cat - <<-'EOAWK'
+			/Jail list:/ { 
+				for (i=4; i<=NF; i++) {
+					sub(/,$/,"",$i);
+					jail=$i;
+					sub(/-/,"_",$i);
+					print "fail2ban_"$i".label "jail
+				}
+			}
+EOAWK
+)
+		exit 0
+		;;
+esac
+
+ $(which fail2ban-client) status | awk -f <( cat - <<-'EOAWK2'
+	/Jail list:/ {
+		for (i=4; i<=NF; i++) {
+			sub(/,$/,"",$i);
+			print $i
+		}
+	}
+EOAWK2
+) | \
+  while read JAIL; do 
+    echo -n "fail2ban_${JAIL//-/_}.value "
+    $(which fail2ban-client) status $JAIL | awk '/Currently banned:/ { print $NF }'
+  done
+  
