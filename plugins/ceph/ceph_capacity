@@ -1,0 +1,62 @@
+#!/bin/sh
+
+: << =cut
+
+=head1 NAME
+
+ceph_capacity - Shows ceph total storage capacity, used raw space and used data space
+
+=head1 CONFIGURATION
+
+[ceph_capacity]
+env.warning_level Used raw space percentage above warning alert should be issued
+env.critical_level Used raw space percentage above critical alert should be issued
+
+=head1 AUTHOR
+
+Mate Gabri <mate@gabri.hu>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGICK MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+if [ "$1" = "autoconf" ]; then
+	echo yes
+	exit 0
+fi
+
+WARNING_LEVEL=${warning_level:-"80"}
+CRITICAL_LEVEL=${critical_level:-"90"}
+
+if [ "$1" = "config" ]; then
+	
+	echo 'graph_title CEPH capacity'
+	echo 'graph_category ceph'
+	echo 'graph_vlabel GB'
+	echo 'graph_info CEPH cluster capacity'
+	echo 'graph_args --base 1000 -l 0'
+
+	CAPACITY=$(ceph -s | grep pgmap | cut -d ';' -f 2 | cut -d ',' -f 3 | cut -d '/' -f 2 | awk '{ print $1 }')
+	WARNING=$(echo "scale=2;$CAPACITY * ($WARNING_LEVEL/100)" | bc -l | cut -d '.' -f 1)
+	CRITICAL=$(echo "scale=2;$CAPACITY * ($CRITICAL_LEVEL/100)" | bc -l | cut -d '.' -f 1)
+	echo "capacity.label Capacity"
+	echo "used.label Raw used"
+	echo "used.draw AREA"
+	echo "used.warning $WARNING"
+	echo "used.critical $CRITICAL"
+	echo "data.label Data"
+	echo "data.draw AREA"
+
+	exit 0
+fi
+
+echo "capacity.value $(ceph -s | grep pgmap | cut -d ';' -f 2 | cut -d ',' -f 3 | cut -d '/' -f 2 | awk '{ print $1 }')"
+echo "used.value $(ceph -s | grep pgmap | cut -d ';' -f 2 | cut -d ',' -f 2 | awk '{ print $1 }')"
+echo "data.value $(ceph -s | grep pgmap | cut -d ';' -f 2 | cut -d ',' -f 1 | awk '{ print $1 }')"
