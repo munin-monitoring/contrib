@@ -1,0 +1,357 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# vim: set fileencoding=utf-8
+#
+# Munin plugin to monitor requests number, cache statuses, http status codes and average request times of
+# specified nginx upstreams.
+#
+# Copyright Igor Borodikhin
+#
+# License : GPLv3
+#
+# Configuration parameters:
+# env.graphs - which graphs to produce (optional, list of graphs separated by spaces, default - cache http time request)
+# env.log - log file path (mandatory, ex.: /var/log/nginx/upstream.log)
+# env.upstream - list of upstreams to monitor (mandatory, including port numbers separated by space, ex.: 10.0.0.1:80 10.0.0.2:8080)
+# env.statuses - list of http status codes to monitor (optional, default - all statuses, ex.: 200 403 404 410 500 502)
+# env.percentiles - which percentiles to draw on time graphs (optional, list of percentiles separated by spaces, default - 80)
+#
+# ## Installation
+# Copy file to directory /usr/share/munin/pligins/ and create symbolic link(s) for each log file you wish to monitor.
+#
+# Specify log_format at /etc/nginx/conf.d/upstream.conf:
+# log_format upstream "ua=[$upstream_addr] ut=[$upstream_response_time] us=[$upstream_status] cs=[$upstream_cache_status]"
+#
+# Use it in your site configuration (/etc/nginx/sites-enabled/anything.conf):
+# access_log /var/log/nginx/upstream.log upstream;
+#
+# And specify some options in munin-node.conf:
+#
+#     [nginx_upstream_multi_upstream]
+#     env.graphs cache http time request
+#     env.log /var/log/nginx/upstream.log
+#     env.upstream 10.0.0.1:80 10.0.0.2:8080 unix:/tmp/upstream3
+#     env.statuses 200 403 404 410 500 502
+#     env.percentiles 50 80
+#
+#%# family=contrib
+
+import os, sys, re, copy, math
+from time import time
+
+# How we've been called
+progName = sys.argv[0]
+progName = progName[progName.rfind("/")+1:]
+
+# Where to store plugin state
+if "MUNIN_PLUGSTATE" in os.environ:
+    stateDir = os.environ["MUNIN_PLUGSTATE"]
+else:
+    stateDir = None
+
+# Which site configuration we should use
+siteName = progName[len("nginx_upstream_multi_"):]
+
+# Log path
+if "log" in os.environ:
+    logPath = os.environ["log"]
+else:
+    logPath = "/var/log/nginx/access.log"
+
+# Http statuses list
+httpStatusString = ("100:Continue;101:Switching protocols;102:Processing;200:OK;201:Created;202:Accepted;"
+"203:Non-Authoritative Information;204:No content;205:Reset content;206:Partial content;207:Multi-status;"
+"226:IM used;300:Multiple choices;301:Moved permanently;302:Moved temporarily;303:See other;304:Not modified;"
+"305:Use proxy;307:Temporary redirect;400:Bad request;401:Unauthorized;402:Payment required;403:Forbidden;"
+"404:Not found;405:Method not allowed;406:Not acceptable;407:Proxy Authentication Required;408:Request timeout;"
+"409:Conflict;410:Gone;411:Length required;412:Precondition failed;413:Request entity too large;"
+"414:Request URI too large;415:Usupported media type;416:Request range not satisfiable;417:Expectation failed;"
+"422:Unprocessable entity;423:Locked;424:Failed dependency;425:Unordered collection;426:Upgrade required;"
+"449:Retry with;456:Unrecoverable error;500:Internal server error;501:Not implemented;502:Bad gateway;"
+"503:Service unavailable;504:Gateway timeout;505:HTTP version not supported;506:Variant also negotiates;"
+"507:Insufficient storage;508:Loop detected;509:Bandwidth limit exceeded;510:Not extended")
+
+if "statuses" in os.environ:
+    statuses = os.environ["statuses"].split()
+else:
+    statuses = []
+
+httpStatusList = {}
+for statusString in httpStatusString.split(";"):
+    [code, title] = statusString.split(":")
+    if len(statuses) > 0 and code in statuses or len(statuses) == 0:
+        httpStatusList[code] = {
+            "title" : title,
+            "requests" : 0
+        }
+
+cacheStatusList = { "MISS" : 0, "BYPASS" : 0, "EXPIRED" : 0, "UPDATING" : 0, "STALE" : 0, "HIT" : 0 }
+
+# Parse upstreams
+upstreams = {}
+if "upstream" in os.environ:
+    upstreamString = os.environ["upstream"]
+    upstreamList = upstreamString.split()
+    for upstream in upstreamList:
+        upstreams[upstream] = {
+            "requests" : 0,
+            "time"     : 0,
+            "times"    : [],
+            "cache"    : copy.deepcopy(cacheStatusList),
+            "http"     : copy.deepcopy(httpStatusList)
+        }
+else:
+    raise Exception("No upstreams specified")
+
+if "percentiles" in os.environ:
+    percentiles = os.environ["percentiles"].split()
+else:
+    percentiles = [80]
+
+if "graphs" in os.environ:
+    graphs_enabled = os.environ["graphs"].split()
+else:
+    graphs_enabled = ["cache", "http", "time", "request"]
+
+now = int(time())
+
+lastBytePath = "%s/nginx_upstream_multi_%s_lastByte.txt" % (stateDir, siteName)
+try:
+    lastRun = os.path.getmtime(lastBytePath)
+except OSError:
+    lastRun = now
+
+
+def sanitize(string):
+    return string.replace(".", "_").replace(":", "_").replace("/", "_").replace("-", "_")
+
+if len(sys.argv) == 2 and sys.argv[1] == "config":
+    # Parent graph declaration
+    print "multigraph nginx_upstream_multi_%s" % siteName.replace(".", "_")
+    print "graph_title Requests number"
+    print "graph_vlabel rps"
+    print "graph_category nginx"
+    for upstream in upstreams.keys():
+        print "us%s_requests.label %s" % (sanitize(upstream), upstream)
+
+    # Requests graph declaration
+    if "request" in graphs_enabled:
+        for upstream in upstreams.keys():
+            print ""
+            print "multigraph nginx_upstream_multi_%s.%s_requests" % (sanitize(siteName), sanitize(upstream))
+            print "graph_title Requests number - %s" % upstream
+            print "graph_vlabel rps"
+            print "graph_category nginx"
+            print "us%s_requests.label %s" % (sanitize(upstream), upstream)
+            print ""
+
+    # Times graph declaration
+    if "time" in graphs_enabled:
+        for upstream in upstreams.keys():
+            print ""
+            print "multigraph nginx_upstream_multi_%s.%s_times" % (sanitize(siteName), sanitize(upstream))
+            print "graph_title Request time - %s" % upstream
+            print "graph_vlabel sec."
+            print "graph_category nginx"
+            print "us%s_times.label average" % (sanitize(upstream))
+            for percentile in percentiles:
+                print "us%s_times_percentile_%s.label %s-percentile" % (sanitize(upstream), percentile, percentile)
+            print ""
+
+    # HTTP Status codes graph declaration
+    if "http" in graphs_enabled:
+        for upstream in upstreams.keys():
+            print ""
+            print "multigraph nginx_upstream_multi_%s.%s_statuses" % (sanitize(siteName), sanitize(upstream))
+            print "graph_title HTTP - %s" % upstream
+            print "graph_vlabel rps"
+            print "graph_category nginx"
+            keylist = httpStatusList.keys()
+            keylist.sort()
+            for status in keylist:
+                print "http%s_%s_status.label %s - %s" % (status, sanitize(upstream), status, httpStatusList[status]["title"])
+            print ""
+
+    # Cache status graph declaration
+    if "cache" in graphs_enabled:
+        for upstream in upstreams.keys():
+            print ""
+            print "multigraph nginx_upstream_multi_%s.%s_cache" % (sanitize(siteName), sanitize(upstream))
+            print "graph_title Cache - %s" % upstream
+            print "graph_vlabel rps"
+            print "graph_category nginx"
+            for status in cacheStatusList:
+                print "us%s_%s_cache.label %s" % (sanitize(status), sanitize(upstream), status)
+            print ""
+else:
+    timeElapsed = now - lastRun
+
+    lastByteHandle = None
+
+    try:
+        lastByteHandle = open(lastBytePath, "r")
+        lastByte = int(lastByteHandle.read())
+    except Exception:
+        lastByte = 0
+
+    if lastByteHandle != None:
+        lastByteHandle.close()
+
+    try:
+        logHandle = open(logPath, "r")
+    except Exception:
+        print "Log file %s not readable" % logPath
+        sys.exit(1)
+
+    try:
+        logSize = int(os.path.getsize(logPath))
+    except ValueError:
+        logSize = 0
+
+    if logSize < lastByte:
+        lastByte = 0
+
+    regExp = re.compile(r"ua=\[(.*?)\]\s+ut=\[(.*?)\]\s+us=\[(.*?)\]\s+cs=\[(.*?)\]")
+
+    logHandle.seek(lastByte)
+    for line in logHandle:
+        match = regExp.search(line)
+        if (match):
+            # Extract data
+            address = match.group(1)
+            time    = match.group(2)
+            status  = match.group(3)
+            cache   = match.group(4)
+
+            # Replace separators by space
+            address = address.replace(",", " ")
+            address = address.replace(" : ", " ")
+            address = re.sub("\s+", " ", address)
+
+            time    = time.replace(",", " ")
+            time    = time.replace(" : ", " ")
+            time    = re.sub("\s+", " ", time)
+
+            status  = status.replace(",", " ")
+            status  = status.replace(" : ", " ")
+            status  = re.sub("\s+", " ", status)
+
+            cache   = cache.replace(",", " ")
+            cache   = cache.replace(" : ", " ")
+            cache   = re.sub("\s+", " ", cache)
+
+            addresses = address.split()
+            times     = time.split()
+            statuses  = status.split()
+            caches    = cache.split()
+
+            index = 0
+            for uAddress in addresses:
+                if uAddress in upstreams.keys():
+                    try:
+                        uTime    = float(times[index])
+                    except ValueError:
+                        uTime    = 0
+
+                    if index < len(statuses):
+                        uStatus  = statuses[index]
+                    else:
+                        uStatus = "-"
+
+                    if index < len(caches):
+                        uCache   = caches[index]
+                    else:
+                        uCache = "-"
+
+                    if uAddress != "-":
+                        upstreams[uAddress]["requests"]                  += 1
+                    if uTime != "-":
+                        upstreams[uAddress]["time"]                      += uTime
+                        upstreams[uAddress]["times"].append(uTime)
+                    if uStatus != "-" and uStatus in upstreams[uAddress]["http"].keys():
+                        upstreams[uAddress]["http"][uStatus]["requests"] += 1
+                    if uCache != "-":
+                        upstreams[uAddress]["cache"][uCache]             += 1
+                index += 1
+
+    try:
+        lastByteHandle = open(lastBytePath, "w")
+        lastByteHandle.write(str(logHandle.tell()))
+        lastByteHandle.close()
+    except Exception:
+        sys.exit(1)
+
+    logHandle.close()
+
+    # Parent graph data
+    for upstream in upstreams.keys():
+        value = 0
+        if timeElapsed > 0:
+            value = upstreams[upstream]["requests"] / timeElapsed
+
+        print "us%s_requests.value %s" % (sanitize(upstream), value)
+
+    # Requests graph data
+    if "request" in graphs_enabled:
+        for upstream in upstreams.keys():
+            print ""
+            print "multigraph nginx_upstream_multi_%s.%s_requests" % (sanitize(siteName), sanitize(upstream))
+
+            value = 0
+            if timeElapsed > 0:
+                value = upstreams[upstream]["requests"] / timeElapsed
+
+            print "us%s_requests.value %s" % (sanitize(upstream), value)
+            print ""
+
+    # Times graph data
+    if "time" in graphs_enabled:
+        for upstream in upstreams.keys():
+            uTime = 0
+            if upstreams[upstream]["requests"] > 0:
+                uTime = upstreams[upstream]["time"] / upstreams[upstream]["requests"]
+                upstreams[upstream]["times"].sort()
+            print ""
+            print "multigraph nginx_upstream_multi_%s.%s_times" % (sanitize(siteName), sanitize(upstream))
+            print "us%s_times.value %s" % (sanitize(upstream), uTime)
+            for percentile in percentiles:
+                percentileValue = 0
+                if upstreams[upstream]["requests"] > 0:
+                    uTime = upstreams[upstream]["time"] / upstreams[upstream]["requests"]
+                    percentileKey = int(percentile) * len(upstreams[upstream]["times"]) / 100
+                    if len(upstreams[upstream]["times"])%2 > 0:
+                        low = int(math.floor(percentileKey))
+                        high = int(math.ceil(percentileKey))
+                        percentileValue = (upstreams[upstream]["times"][low] + upstreams[upstream]["times"][high]) / 2
+                    else:
+                        percentileValue = upstreams[upstream]["times"][int(percentileKey)]
+                print "us%s_times_percentile_%s.value %s" % (sanitize(upstream), percentile, percentileValue)
+            print ""
+
+    # HTTP Status codes graph data
+    if "http" in graphs_enabled:
+        for upstream in upstreams.keys():
+            print ""
+            print "multigraph nginx_upstream_multi_%s.%s_statuses" % (sanitize(siteName), sanitize(upstream))
+            keylist = httpStatusList.keys()
+            keylist.sort()
+            for status in keylist:
+                value = 0
+                if timeElapsed > 0:
+                    value = upstreams[upstream]["http"][status]["requests"] / timeElapsed
+
+                print "http%s_%s_status.value %s" % (status, sanitize(upstream), value)
+            print ""
+
+    # Cache status graph data
+    if "cache" in graphs_enabled:
+        for upstream in upstreams.keys():
+            print ""
+            print "multigraph nginx_upstream_multi_%s.%s_cache" % (sanitize(siteName), sanitize(upstream))
+            for status in cacheStatusList:
+                value = 0
+                if timeElapsed > 0:
+                    value = upstreams[upstream]["cache"][status] / timeElapsed
+
+                print "us%s_%s_cache.value %s" % (sanitize(status), sanitize(upstream), value)
+            print ""
