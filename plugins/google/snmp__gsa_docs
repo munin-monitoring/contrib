@@ -1,0 +1,174 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+
+=head1 NAME
+
+snmp__gsa_docs - SNMP wildcard plugin to monitor GSA document statistics
+
+=head1 APPLICABLE SYSTEMS
+
+A GSA running software version 5.0 or above. See [1] for counters
+exported via SNMP. Usage of SNMPv3 is recommended, with AuthPriv,
+and the SHA authentication scheme.
+
+[1]: https://developers.google.com/search-appliance/documentation/50/help_gsa/admin_snmp
+
+=head1 CONFIGURATION
+
+Create a "Munin" user on the GSA SNMP configuration, and then use
+something similar to the following:
+
+[snmpv3_gsa.host.name_*]
+  env.v3username munin
+  env.v3authprotocol sha
+  env.v3authpassword your-auth-passwd
+  env.v3privprotocol des
+  env.v3privpassword your-priv-passwd
+
+Please see 'perldoc Munin::Plugin::SNMP' for further configuration
+information.
+
+=head1 INTERPRETATION
+
+The graph shows statistics about the documents index and queries per minute.
+
+=head1 MIB INFORMATION
+
+This plugin requires the GOOGLE-MIB and GSA-MIB and will report
+
+GSA-MIB::docsServed.0 = INTEGER: ..
+GSA-MIB::docErrors.0 = INTEGER: ...
+GSA-MIB::docsFound.0 = INTEGER: ...
+GSA-MIB::docBytes.0 = INTEGER: ....
+GSA-MIB::qpm.0 = INTEGER: .........
+
+=head1 MAGIC MARKERS
+
+  #%# family=snmpauto
+  #%# capabilities=snmpconf
+
+=head1 VERSION
+
+  $Id$
+
+=head1 BUGS
+
+None known.
+
+=head1 AUTHOR
+
+Copyright (C) 2013 Marcello Barnaba <vjt@openssl.it> based on snmp__if_,
+Copyright (C) 2004-2009 Jimmy Olsen, Daginn Ilmari Mannsaaker.
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+use strict;
+use Munin::Plugin;
+use Munin::Plugin::SNMP;
+
+need_multigraph();
+
+# This is the snmpwalk:
+# .1.3.6.1.4.1.11129.1.1.1.0 = INTEGER: Running(1)   ##   GSA-MIB::crawlRunning.0 = INTEGER: Running(1)
+# .1.3.6.1.4.1.11129.1.1.2.1.0 = INTEGER: 855802     ##   GSA-MIB::docsServed.0 = INTEGER: 855802
+# .1.3.6.1.4.1.11129.1.1.2.2.0 = INTEGER: 0          ##   GSA-MIB::crawlingRate.0 = INTEGER: 0
+# .1.3.6.1.4.1.11129.1.1.2.3.0 = INTEGER: 501606     ##   GSA-MIB::docBytes.0 = INTEGER: 501606
+# .1.3.6.1.4.1.11129.1.1.2.4.0 = INTEGER: 1          ##   GSA-MIB::todayDocsCrawled.0 = INTEGER: 1
+# .1.3.6.1.4.1.11129.1.1.2.5.0 = INTEGER: 0          ##   GSA-MIB::docErrors.0 = INTEGER: 0
+# .1.3.6.1.4.1.11129.1.1.2.6.0 = INTEGER: 860683     ##   GSA-MIB::docsFound.0 = INTEGER: 860683
+# .1.3.6.1.4.1.11129.1.1.2.7.0 = INTEGER: Off(0)     ##   GSA-MIB::batchCrawlRunning.0 = INTEGER: Off(0)
+# .1.3.6.1.4.1.11129.1.1.2.8.0 = INTEGER: 0          ##   GSA-MIB::batchCrawlStartTime.0 = INTEGER: 0
+# .1.3.6.1.4.1.11129.1.1.2.9.0 = INTEGER: 0          ##   GSA-MIB::batchCrawlEndTime.0 = INTEGER: 0
+# .1.3.6.1.4.1.11129.1.2.1.0 = INTEGER: 0            ##   GSA-MIB::qpm.0 = INTEGER: 0
+# .1.3.6.1.4.1.11129.1.3.1.1.0 = INTEGER: green(0)   ##   GSA-MIB::diskHealth.0 = INTEGER: green(0)
+# .1.3.6.1.4.1.11129.1.3.1.2.0 = STRING:             ##   GSA-MIB::diskErrors.0 = STRING:
+# .1.3.6.1.4.1.11129.1.3.2.1.0 = INTEGER: green(0)   ##   GSA-MIB::temperatureHealth.0 = INTEGER: green(0)
+# .1.3.6.1.4.1.11129.1.3.2.2.0 = STRING:             ##   GSA-MIB::temperatureErrors.0 = STRING:
+# .1.3.6.1.4.1.11129.1.3.3.1.0 = INTEGER: green(0)   ##   GSA-MIB::machineHealth.0 = INTEGER: green(0)
+# .1.3.6.1.4.1.11129.1.3.3.2.0 = STRING:             ##   GSA-MIB::machineErrors.0 = STRING:
+
+my $entryDocsServed = "1.3.6.1.4.1.11129.1.1.2.1.0";
+my $entryDocBytes   = "1.3.6.1.4.1.11129.1.1.2.3.0";
+my $entryDocErrors  = "1.3.6.1.4.1.11129.1.1.2.5.0";
+my $entryDocsFound  = "1.3.6.1.4.1.11129.1.1.2.6.0";
+my $entryQPM        = "1.3.6.1.4.1.11129.1.2.1.0"  ; # Queries per Minute
+
+if (defined $ARGV[0] and $ARGV[0] eq "snmpconf") {
+    print "require $entryDocsServed\n";
+    print "require $entryDocErrors\n";
+    print "require $entryDocsFound\n";
+    print "require $entryDocBytes\n";
+    print "require $entryQPM\n";
+    exit 0;
+}
+
+# SNMP needed for both config and fetch.
+my $session = Munin::Plugin::SNMP->session();
+my $response;
+
+if ($ARGV[0] and $ARGV[0] eq "config") {
+    my ($host,undef,$version) = Munin::Plugin::SNMP->config_session();
+
+    print "host_name $host\n" unless $host eq 'localhost';
+
+    print "multigraph gsa_documents\n";
+    print "graph_title GSA documents statistics\n";
+    print "graph_order found served errors\n";
+    print "graph_args --base 1000\n";
+    print "graph_vlabel Documents\n";
+    print "graph_category search\n";
+    print "graph_info This graph shows document statistics for the GSA\n";
+    print "served.label served\n";
+    print "served.type GAUGE\n";
+    print "served.graph yes\n";
+    print "errors.label errors\n";
+    print "errors.type GAUGE\n";
+    print "errors.graph yes\n";
+    print "found.label found\n";
+    print "found.type GAUGE\n";
+    print "found.graph yes\n";
+    print "multigraph gsa_storage\n";
+    print "graph_title GSA storage statistics\n";
+    print "graph_order bytes\n";
+    print "graph_vlabel Megabytes Filtered\n";
+    print "graph_category search\n";
+    print "graph_info This graph shows the GSA index size\n";
+    print "bytes.label bytes\n";
+    print "bytes.type GAUGE\n";
+    print "bytes.graph yes\n";
+    print "multigraph gsa_qpm\n";
+    print "graph_title GSA Queries Per Minute\n";
+    print "graph_order qpm\n";
+    print "graph_vlabel Queries per minute\n";
+    print "graph_category search\n";
+    print "graph_info This graph shows how many Queries Per Minute the GSA receives\n";
+    print "qpm.label count\n";
+    print "qpm.type DERIVE\n";
+    print "qpm.graph yes\n";
+    exit 0;
+}
+
+print "multigraph gsa_documents\n";
+if (defined ($response = $session->get_single($entryDocsServed))) {
+    print "served.value ", $response, "\n";
+}
+if (defined ($response = $session->get_single($entryDocErrors))) {
+    print "errors.value ", $response, "\n";
+}
+if (defined ($response = $session->get_single($entryDocsFound))) {
+    print "found.value ", $response, "\n";
+}
+
+print "multigraph gsa_storage\n";
+if (defined ($response = $session->get_single($entryDocBytes))) {
+    print "bytes.value ", $response, "\n";
+}
+
+print "multigraph gsa_qpm\n";
+if (defined ($response = $session->get_single($entryQPM))) {
+    print "qpm.value ", $response, "\n";
+}
