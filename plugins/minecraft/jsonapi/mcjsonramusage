@@ -1,0 +1,55 @@
+#!/usr/bin/php
+<?php
+###########################################################
+##           - Bukkit RAM usage Munin plugin -           ##
+###########################################################
+## Script by:                                            ##
+##           Jonas Friedmann (@frdmn)                    ##
+##           http://blog.frd.mn                          ##
+###########################################################
+##                        JSONAPI                        ##
+###########################################################
+
+$hostname = 'your-hostname';
+$username = 'your-username';
+$password = 'your-password';
+$salt     = 'your-salt';
+$port     = 20059;
+
+###########################################################
+##                     DON'T EDIT THIS                   ##
+###########################################################
+if ((count($argv) > 1) && ($argv[1] == 'config'))
+{
+print("graph_title Bukkit / JSONAPI - RAM usage
+graph_category bukkit_jsonapi
+graph_vlabel RAM usage in GB
+graph_args --base 1024 -l 0
+total.label total
+total.type GAUGE
+used.label used
+used.type GAUGE
+");
+exit();
+}
+
+## Include JSONAPI.php SDK (get this file here: https://github.com/alecgorge/jsonapi/raw/master/sdk/php/JSONAPI.php)
+require('/var/cache/munin/JSONAPI.php');
+
+## Prepare API call
+$api = new JSONAPI($hostname, $port, $username, $password, $salt);
+$result = $api->callMultiple(array(
+  "system.getJavaMemoryUsage",
+  "system.getJavaMemoryTotal"
+  ), array(
+  array(),
+  array(),
+));
+
+## Check for success
+if ($result['result'] == 'success'){
+  ## Print values
+  print('used.value ' . round($result['success'][0]['success']/1000,2) . "\n");
+  print('total.value ' . round($result['success'][1]['success']/1000,2) . "\n");
+}
+?>
