@@ -23,8 +23,4 @@ Read more in my [blog post](http://).
 1. Make sure they are exectuable: `chmod 755 /usr/share/munin/plugins/mcjson*`
 1. Enable the plugins: `ln -s /usr/share/munin/plugins/mcjson* /etc/munin/plugins/`
 1. Restart your munin-node: `service munin-node restart`
-1. Run your cron:
-
-
-    su - munin --shell=/bin/sh
-    /usr/bin/munin-cron
+1. Run your cron: `su - munin --shell=/bin/sh -c /usr/bin/munin-cron`
