@@ -11,12 +11,12 @@ Read more in my [blog post](http://).
 
 ## Configuration
 
+1. Clone this repository: `git clone git@github.com:frdmn/munin-bukkit-plugins.git`
 1. Adjust the JSONAPI variables in each plugin
 1. Make sure the `PHP` binary in the Shebang line is executable
 
 ## Installation
 
-1. Clone this repository: `git clone git@github.com:frdmn/munin-bukkit-plugins.git`
 1. Perform your configuration (see above)
 1. Move the plugins into the Munin plugin directory: `mv mcjson* /usr/share/munin/plugins/`
 1. Change the ownership: `chown munin:munin /usr/share/munin/plugins/mcjson*`
