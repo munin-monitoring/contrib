@@ -25,5 +25,6 @@ Read more in my [blog post](http://).
 1. Restart your munin-node: `service munin-node restart`
 1. Run your cron:
 
+
     su - munin --shell=/bin/sh
     /usr/bin/munin-cron
