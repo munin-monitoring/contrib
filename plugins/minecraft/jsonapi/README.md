@@ -11,9 +11,9 @@ This repository contains some useful [Munin](http://munin-monitoring.org/) plugi
 * **mcsqls2players** - new players per day
 * **mcsqlubshame** - kicks/bans/mutes/etc. per day
 
-mcjson* requires [JSONAPI](https://github.com/alecgorge/jsonapi/).
-mcsqls2* requires [Statistician](http://dev.bukkit.org/server-mods/statisticianv2/).
-mcsqlub* requires [Ultrabans](http://dev.bukkit.org/server-mods/ultrabans/).
+mcjson* requires [JSONAPI](https://github.com/alecgorge/jsonapi/)
+mcsqls2* requires [Statistician](http://dev.bukkit.org/server-mods/statisticianv2/)
+mcsqlub* requires [Ultrabans](http://dev.bukkit.org/server-mods/ultrabans/)
 
 Read more in my [blog post](http://blog.frd.mn/posts/munin-bukkit-plugins/).
 
