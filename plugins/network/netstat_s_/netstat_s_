@@ -1,14 +1,15 @@
 #!/usr/bin/env ruby
 
-# netstat_bsd_s revision 2 (Mar 2012)
+# netstat_s revision 4 (Apr 2013)
 #
 # This plugin shows various statistics from 'netstat -s'
 #
 # Required privileges: none
 #
 # OS:
-# 	Supposed: BSD
-# 	Tested:   FreeBSD 8.2
+# 	Supposed: BSD, Linux
+# 	Tested:   FreeBSD: 8.2, 8.3
+# 	          Linux  : Debian 6 (kernel 2.6.32), Arch (kernel 3.8.3), CentOS 6
 #
 # Author: Artem Sheremet <dot.doom@gmail.com>
 #
@@ -17,8 +18,9 @@
 #%# capabilities=autoconf suggest
 
 # original filename
-PLUGIN_NAME = 'netstat_bsd_s_'
+PLUGIN_NAME = 'netstat_s_'
 
+$os = `uname -s`.strip.downcase.to_sym
 $debug_mode = ARGV.first == 'debug'
 
 class String
@@ -29,6 +31,12 @@ class String
 	unless method_defined? :start_with?
 		def start_with?(str)
 			self[0...str.size] == str
+		end
+	end
+
+	unless method_defined? :lines
+		def lines
+			self.split($/).to_enum
 		end
 	end
 end
@@ -46,8 +54,8 @@ class Graph
 		multigraphs = {}
 		@parse_expr.each { |expr, descr|
 			descr.each { |entry|
-				labels_array = (multigraphs[entry.first] ||= [])
-				labels_array.push entry.last
+				labels_array = (multigraphs[entry[0]] ||= [])
+				labels_array.push entry[1]
 			}
 		}
 
@@ -112,15 +120,42 @@ end
 
 def graphs_for(protocol)
 	case protocol
-	# order of the graps in each section is important for parsing.
+	# Order of the graps in each section is important for parsing.
 	# At the same time, it is not important for munin, so we are OK placing it in parsing order here.
 	when 'tcp'
-		[
+		$os == :linux ? [
 			Graph.new('sent', protocol, [
-				# for each match of the regexp, there is a matching entry in the array.
-				# First element of an entry is unit name, and the second is label.
-				# It could be reasonable to add third etc as warning and critical values.
-				
+				# Description of the elements of arrays below:
+				# 0: regexp to parse the line
+				# 1: Array<Array[2]> for each matching group in the regular expression.
+				#    The first element for a group is unit name, the second is the label.
+				#    It could be reasonable to add third etc as warning and critical values.
+
+				[ /(\d+) segments send out$/, [ [ :segments, 'total' ] ] ],
+				[ /(\d+) segments retransmited$/, [ [ :segments, 'retransmitted' ] ] ]
+			]),
+
+			Graph.new('received', protocol, [
+				[ /(\d+) segments received$/, [ [ :segments, 'total' ] ] ],
+				[ /(\d+) bad segments received.$/, [ [ :segments, 'bad' ] ] ]
+			]),
+
+			Graph.new('connections', protocol, [
+				[ /(\d+) active connections openings$/, [ [ :connections, 'active openings' ] ] ],
+				[ /(\d+) passive connection openings$/, [ [ :connections, 'passive openings' ] ] ],
+				[ /(\d+) failed connection attempts$/, [ [ :connections, 'failed attempts' ] ] ],
+				[ /(\d+) connection resets received$/, [ [ :connections, 'RST received' ] ] ],
+				[ /(\d+) connections established$/, [ [ :connections, 'established' ] ] ],
+				[ /(\d+) resets sent$/, [ [ :connections, 'RST sent' ] ] ]
+			]),
+
+			Graph.new('timeouts', protocol, [
+				[ /(\d+) timeouts after SACK recovery$/, [ [ :segments, 'after SACK recovery' ] ] ],
+				[ /(\d+) other TCP timeouts$/, [ [ :segments, 'other TCP' ] ] ],
+				[ /(\d+) timeouts in loss state$/, [ [ :segments, 'in a loss state' ] ] ]
+			])
+		] : [
+			Graph.new('sent', protocol, [
 				[ /(\d+) packets sent$/, [ [ :packets, 'total' ] ] ],
 				[ /(\d+) data packets \((\d+) bytes\)$/, [ [ :packets, 'data' ], [ :bytes, 'data' ] ] ],
 				[ /(\d+) data packets \((\d+) bytes\) retransmitted$/, [ [ :packets, 'retransmitted' ], [ :bytes, 'retransmitted' ] ] ],
@@ -148,14 +183,14 @@ def graphs_for(protocol)
 				[ /(\d+) window update packets$/, [ [ :packets, 'window update' ] ] ],
 				[ /(\d+) packets received after close$/, [ [ :packets, 'after close' ] ] ],
 				[ /(\d+) discarded for bad checksums$/, [ [ :packets, 'bad checksums' ] ] ],
-				[ /(\d+) discarded for bad header offset field$/, [ [ :packets, 'bad header offset flds' ] ] ],
+				[ /(\d+) discarded for bad header offset fields?$/, [ [ :packets, 'bad header offset flds' ] ] ],
 				[ /(\d+) discarded because packet too short$/, [ [ :packets, 'too short' ] ] ],
 				[ /(\d+) discarded due to memory problems$/, [ [ :packets, 'discarded: memory problems' ] ] ],
 				[ /(\d+) ignored RSTs in the windows$/, [ [ :packets, 'ignored RSTs in windows' ] ] ],
 				[ /(\d+) segments updated rtt \(of (\d+) attempts\)$/, [ [ :packets, 'RTT: updated' ], [ :packets, 'RTT: attempts to update' ] ] ]
 			]),
 
-			Graph.new('connections', protocol, [
+			Graph.new('connections', protocol, :bsd, [
 				[ /(\d+) connection requests$/, [ [ :connections, 'requests' ] ] ],
 				[ /(\d+) connection accepts$/, [ [ :connections, 'accepts' ] ] ],
 				[ /(\d+) bad connection attempts$/, [ [ :connections, 'bad attempts' ] ] ],
@@ -200,6 +235,8 @@ def graphs_for(protocol)
 				[ /(\d+) badack$/, [ [ :entries, 'bad ACK' ] ] ],
 				[ /(\d+) unreach$/, [ [ :entries, 'unreachable' ] ] ],
 				[ /(\d+) zone failures$/, [ [ :entries, 'zone failures' ] ] ],
+				[ /(\d+) hostcache entries added$/, [ [ :entries, 'hostcache added' ] ] ],
+				[ /(\d+) bucket overflow$/, [ [ :entries, 'hostcache overflow' ] ] ]
 			]),
 
 			Graph.new('SACK', protocol, [
@@ -220,7 +257,8 @@ def graphs_for(protocol)
 			])
 		]
 	when 'udp'
-		[
+		$os == :linux ? [
+		] : [
 			Graph.new('received', protocol, [
 				[ /(\d+) datagrams received$/, [ [ :packets, 'total' ] ] ],
 				[ /(\d+) with incomplete header$/, [ [ :packets, 'incomplete header' ] ] ],
@@ -240,7 +278,8 @@ def graphs_for(protocol)
 			])
 		]
 	when 'ip'
-		[
+		$os == :linux ? [
+		] : [
 			Graph.new('received', protocol, [
 				[ /(\d+) total packets received$/, [ [ :packets, 'total' ] ] ],
 				[ /(\d+) bad header checksums$/, [ [ :packets, 'bad header checksum' ] ] ],
@@ -276,7 +315,7 @@ def graphs_for(protocol)
 			])
 		]
 	when 'arp'
-		[
+		$os == :linux ? [] : [
 			Graph.new('sent', protocol, [
 				[ /(\d+) ARP requests sent$/, [ [ :packets, 'requests' ] ] ],
 				[ /(\d+) ARP replies sent$/, [ [ :packets, 'replies' ] ] ]
@@ -302,21 +341,21 @@ proto_name.slice! 0, PLUGIN_NAME.size if proto_name.start_with? PLUGIN_NAME
 
 proto_name = 'tcp' if proto_name.empty?
 
-def netstat_s_protocols
-	`netstat -s`.select { |line|
-		line =~ /^\w+:$/
-	}.map! { |proto| proto.strip[0..-2] }
-end
-
 def netstat_s(protocol)
-	`netstat -sp #{protocol}`.select { |line| not line.start_with? protocol }
+	if $os == :linux
+		%w(tcp udp).include?(protocol) ?
+			`netstat -s --#{protocol}` :
+			`netstat -s --raw`
+	else
+		`netstat -sp #{protocol}`
+	end.lines.reject { |line| line =~ /^\w+:/ }
 end
 
 case ARGV.first
 when 'autoconf'
-	puts `uname -s`.include?('FreeBSD') ? 'yes' : 'no'
+	puts [:linux, :freebsd].include?($os) ? 'yes' : 'no'
 when 'suggest'
-	puts netstat_s_protocols.map(&:escape).join $/
+	puts $os == :linux ? %w(tcp) : %w(tcp udp ip arp)
 when 'config'
 	graphs_for(proto_name).each { |graph|
 		puts graph.config.join $/
@@ -329,3 +368,6 @@ else
 
 	warn "not parsed:\n#{data.join}" unless data.empty? if $debug_mode
 end
+
+# awful performance when scrolling through those regexps above
+# vim: syntax=none
