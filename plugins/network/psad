@@ -1,0 +1,109 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+psad - Plugin to monitor the number of port scans detected by psad.
+
+=head1 CONFIGURATION
+
+The following environment variables are used by this plugin
+
+ psad            - Path to psad binary - defaults to psad in PATH
+ psad_log        - Path to the log where psad entries are logged. defaults to /var/log/messages
+ wc              - wc program to use
+ awk             - awk program to use
+
+=head1 APPLICABLE SYSTEMS
+
+Any system using psad for intrusion detection.
+psad is a port scan detection tool. Using this plugin will allow munin to
+graph its effectiveness for you so you can easily track network security
+compromise or other trends.
+
+=head2 CONFIGURATION EXAMPLES
+
+There should be no configuration needed for a standard install.
+
+For the sake of example, the following configuration could be used
+for psad installation with non-standard logfile location (/var/log/psad/psad.log):
+
+ [psad]
+  env.psad_log /var/log/psad/psad.log
+
+=head1 AUTHOR
+
+Copyright (C) 2013 Dave Driesen <dave.driesen@honeypot.pandemonium.be>
+
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; version 2 dated June, 1991.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+02110-1301 USA.
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto contrib
+ #%# capabilities=autoconf
+
+=cut
+
+psad_log_default=/var/log/messages
+
+[ $awk ] || awk="awk"
+[ $wc ] || wc="wc"
+[ $psad ] || psad="psad"
+[ $psad_log ] || psad_log="$psad_log_default"
+
+case $1 in
+   autoconf)
+        if [ -f ${psad} ] ; then
+            echo yes
+        else
+            echo no
+        fi
+        exit 0;;
+
+    config)
+        cat <<'EOM'
+graph_title Port scans detected
+graph_vlabel Events per hour
+graph_info This graph shows the number of port scans detected per hour
+graph_category network
+graph_period minute
+
+attacks_logged.label Scans detected per hour
+attacks_logged.draw LINE1
+attacks_logged.warning 10
+attacks_logged.critical 20
+attacks_logged.type COUNTER
+attacks_logged.cdef attacks_logged,12,*
+
+autoblocks_logged.label Auto-blocks per hour
+autoblocks_logged.draw LINE1
+autoblocks_logged.type COUNTER
+autoblocks_logged.cdef autoblocks_logged,12,*
+
+EOM
+        exit 0;;
+esac
+
+grep  "psad: scan detected" "$psad_log" | $wc -l | $awk '{
+print "attacks_logged.value " $1
+}'
+
+grep  "psad: added iptables auto-block against " "$psad_log" | $wc -l | $awk '{
+print "autoblocks_logged.value " $1
+}'
