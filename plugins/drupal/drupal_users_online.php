@@ -53,9 +53,13 @@ if (count($argv) === 2 && $argv[1] === 'config') {
   echo "online_anonymous.label online anonymous\n";
 
   echo "online_users.min 0\n";
-  echo "online_members.min 0\n";
-  echo "online_anonymous.min 0\n";
+  echo "online_users.type GAUGE\n";
 
+  echo "online_members.min 0\n";
+  echo "online_members.type GAUGE\n";
+
+  echo "online_anonymous.min 0\n";
+  echo "online_anonymous.type GAUGE\n";
   exit(0);
 }
 
@@ -91,10 +95,13 @@ function get_all_online_users(&$dbh = NULL, $active_interval = 900) {
   $stmt->bind_param("i", $active_interval);
   $stmt->execute();
 
-  $stmt->bind_result($active_interval);
-  $row = $stmt->fetch();
+  $count = 0;
+  $stmt->bind_result($count);
 
-  return (int) $row['count'];
+  if ($stmt->fetch() === TRUE)
+    return (int) $count;
+
+  return 0;
 
 }
 
@@ -107,16 +114,20 @@ function get_online_registered_users(&$dbh = NULL, $active_interval = 900) {
 
   $table_prefix = getenv('table_prefix');
 
-  $sql = "SELECT COUNT(DISTINCT(uid)) AS count FROM {$table_prefix}sessions WHERE uid != 0
+  $sql = "SELECT COUNT(DISTINCT(uid)) AS count FROM sessions WHERE uid != 0
     AND timestamp >= (UNIX_TIMESTAMP(now()) - ?)";
   $stmt = $dbh->prepare($sql);
+
   $stmt->bind_param("i", $active_interval);
   $stmt->execute();
 
-  $stmt->bind_result($active_interval);
-  $row = $stmt->fetch();
+  $count = 0;
+  $stmt->bind_result($count);
 
-  return (int) $row['count'];
+  if ($stmt->fetch() === TRUE)
+    return (int) $count;
+
+  return 0;
 
 }
 
@@ -144,12 +155,16 @@ function get_online_anonymous_users(&$dbh = NULL, $active_interval = 900) {
    */
 
   $stmt = $dbh->prepare($sql);
+
   $stmt->bind_param("i", $active_interval);
   $stmt->execute();
 
-  $stmt->bind_result($active_interval);
-  $row = $stmt->fetch();
+  $count = 0;
+  $stmt->bind_result($count);
 
-  return (int) $row['count'];
+  if ($stmt->fetch() === TRUE)
+    return (int) $count;
+
+  return 0;
 
 }
