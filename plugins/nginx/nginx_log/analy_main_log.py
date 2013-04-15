@@ -7,6 +7,10 @@ import datetime
 import re
 import json
 
+# config:
+# input log filepath
+LOG_FILE = '/oyster_nginx_log/xcf_main.access.log'
+
 # output filepath
 NGINX_MAIN_LOG_TOTAL = '/tmp/nginx_main_log_total'
 NGINX_MAIN_LOG_AVERAGE = '/tmp/nginx_main_log_average'
@@ -345,9 +349,7 @@ class LogAnalyser(object):
 
 
 def main():
-    logfile = '/oyster_nginx_log/xcf_main.access.log'
-    #logfile = '/home/tizac/test/xcf.log'
-    la = LogAnalyser(logfile, 300)
+    la = LogAnalyser(LOG_FILE, 300)
     la.analysis_records()
     data_average_json = json.dumps(la.data_average)
     data_total_json = json.dumps(la.data_total)
