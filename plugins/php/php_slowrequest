@@ -1,0 +1,117 @@
+#!/usr/bin/perl
+# -*- cperl -*-
+
+
+=head1 NAME
+
+php_slowrequest - Munin plugin 
+
+Show number of slow php request define by request_slowlog_timeout in php-fpm configuration.
+Inspirated by php5_fpm_process 
+
+=head1 APPLICABLE SYSTEMS
+
+Any php-fpm host
+You need php 5.4.9 or + 
+
+You will need the perl fastcgi::client on your host
+( yum install perl-FCGI-Client on Centos/RH ) 
+http://search.cpan.org/~tokuhirom/FCGI-Client-0.08/lib/FCGI/Client.pm
+
+=head1 CONFIGURATION
+
+You have to put this in your plugin.conf.d folder
+
+[php_fpm_process]
+   env.serveraddr 127.0.0.1
+   env.port 9000
+   env.path /status
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+  v1.0
+
+=head1 AUTHOR
+
+Minitux
+
+=head1 LICENSE
+
+GNU General Public License, version 3
+
+=cut
+
+use IO::Socket::INET;
+use FCGI::Client;
+
+my $ish = 1;
+my $header = "";
+my $body = "";
+my $IDLE = 0;
+my $ACTIVE = 0;
+my $TOTAL = 0;
+
+my $SERVERADDR = $ENV{'serveraddr'} || "127.0.0.1";
+my $PORT = $ENV{'port'} || "9000";
+my $PATH = $ENV{'path'} || "/fpm-status";
+
+my $sock = IO::Socket::INET->new(
+        PeerAddr => $SERVERADDR,
+        PeerPort => $PORT,
+);
+
+if (!$sock) {
+print "Server maybe down, unabled to connect to $SERVERADDR:$PORT";
+exit 2;
+}
+
+my $client = FCGI::Client::Connection->new( sock => $sock );
+my ( $stdout, $stderr, $appstatus ) = $client->request(
++{
+REQUEST_METHOD => 'GET',
+SCRIPT_FILENAME => '',
+QUERY_STRING => '',
+SCRIPT_NAME => $PATH,
+},
+''
+);
+
+if ( defined $ARGV[0] and $ARGV[0] eq "config" )
+{
+	print "graph_title PHP FPM slow queries";
+	print "graph_args --base 1000 -l 0";
+	print "graph_vlabel slow queries / ${graph_period}";
+	print "graph_category php";
+
+	print "request.label slow queries";
+	print "request.type DERIVE";
+	print "request.min 0";
+	print "request.max 500000";
+	exit 0
+}
+
+$stdout =~ s/\r//g;
+
+while($stdout =~ /([^\n]*)\n?/g) {
+	if(!$1) {
+		$ish = 0;
+		next;
+	}
+	if($ish == 1) {
+		$header .= $1."\n";
+	} else {
+		$body .= $1."\n";
+	}
+}
+
+if($body =~ m/slow requests: (.*?)\n/) {
+        $REQ = $1;
+	print "request.value ".$REQ."\n";
+} else { 
+	print "request.value\t0\n";
+}
