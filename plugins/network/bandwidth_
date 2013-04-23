@@ -23,6 +23,11 @@ public IP and if so it will suggest monitoring those interfaces.  If all
 IP addresses are private the setup will have to be done manually.  Suggest
 does not handle IPv6 addresses.
 
+Environment Variables:
+
+* monthlycap => monthly cap to draw warnings at in bytes
+* uploadonly => if set display (and count against warnings) only upload bytes
+
 =head1 USAGE
 
 Any device found in /proc/net/dev can be monitored.  Examples include ipsec*,
@@ -267,7 +272,8 @@ sub sum_old {
 sub munin_output {
     my $period    = $unix_ts - $oldest_ts;
     return unless $period;  #can't estimate anything from a single point, so don't.
-    my $total30   = $input_30days + $output_30days;
+    my $total30   = $output_30days;
+    $total30 += $input_30days unless $ENV{uploadonly};
     my $average30 = $total30 / $period;
     print "average.value  $average30\n";
     print "monthly.value " . $average30 * $count30 . "\n";
