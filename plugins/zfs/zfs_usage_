@@ -11,6 +11,19 @@ zfs_usage_ - Script to monitor zfs pool usage
 
 Create one symlink per zpool for exampe zfs_usage_system
 
+if you need to override the defaults below:
+
+ [zfs_usage_*]
+  env.zpoolexec - Path to zpool binary
+  env.zfsexec   - Path to zfs binary
+
+=head2 DEFAULT CONFIGURATION
+
+ [zfs_usage_*]
+  env.zpoolexec /sbin/zpool
+  env.zfsexec   /sbin/zfs
+
+
 =head1 BUGS
 
 =head1 AUTHOR
@@ -35,8 +48,8 @@ need_multigraph();
 
 my $filesystems;
 my $zpool;
-my $zpoolexec="/sbin/zpool";
-my $zfsexec="/sbin/zfs";
+my $zpoolexec = (defined($ENV{'zpoolexec'}) ? $ENV{'zpoolexec'} : '/sbin/zpool');
+my $zfsexec   = (defined($ENV{'zfsexec'}) ? $ENV{'zfsexec'} : '/sbin/zfs');
 
 my $properties = {
   available           =>  "Read-only property that identifies the amount of disk"
@@ -142,18 +155,13 @@ my @order = (
 );
 
 sub do_collect {
-    my $fslist=(`$zfsexec list -H -r -o name $zpool`);
-
     my @params = join(',',( keys %{$properties} ));
+    my $fsget="$zfsexec get -H -p -r -t filesystem,volume @params $zpool";
 
-    my $fsget="$zfsexec get -H -p @params";
-
-    foreach my $fsname (split(/\n/,$fslist)) {
-        foreach my $line (split(/\n/, `$fsget $fsname` )) {
-            my ($name, $key, $value, undef ) = (split(/\t/,$line));
-            ($name =~ s/\//_/g);
-            $filesystems->{$name}->{$key}=$value;
-        }
+    foreach my $line (split(/\n/, `$fsget` )) {
+        my ($name, $key, $value, undef ) = (split(/\t/,$line));
+        ($name =~ s/\//_/g);
+        $filesystems->{$name}->{$key}=$value;
     }
 }
 
