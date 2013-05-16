@@ -1,0 +1,56 @@
+
+#!/bin/bash
+# Copyright (c) 2013 Gareth Davies (shaolintiger@gmail.com www.shaolintiger.com)
+# License GPLv2
+
+mode=`echo $0 | cut -d _ -f 2`
+
+if [ "$1" = "suggest" ]; then
+        echo "memory"
+        echo "processes"
+        echo "average"
+        exit 0
+fi
+
+if [ "$mode" = "memory" ]; then
+        if [ "$1" = "config" ]; then
+                echo "graph_title Unicorn Memory"
+                echo "graph_vlabel RAM"
+                echo "graph_category Unicorn"
+                echo "graph_args --base 1024"
+                echo "ram.label RAM"
+                exit 0
+        else
+        echo -n "ram.value "
+        ps awwwux | grep 'unicorn worker' | grep -v grep | awk '{total_mem = $6 * 1024 + total_mem; total_proc++} END{printf("%d\n", total_mem / total_proc)}'
+        fi
+
+elif [ "$mode" = "processes" ]; then
+        if [ "$1" = "config" ]; then
+                echo "graph_title Unicorn Processes"
+                echo "graph_vlabel Processes"
+                echo "graph_category Unicorn"
+                echo "processes.label active processes"
+        else
+                echo -n "processes.value "
+                ps awwwux | grep 'unicorn worker' | grep -v grep | wc -l
+                exit 0
+        fi
+
+elif [ "$mode" = "average" ]; then
+        if [ "$1" = "average" ]; then
+        echo 'graph_title Unicorn Average Process Size'
+        echo 'graph_args --base 1024 -l 0 '
+        echo 'graph_vlabel Unicorn Average Process Size'
+        echo 'graph_category Unicorn'
+        echo 'php_average.label Unicorn Average Proccess Size'
+        echo 'php_average.draw LINE2'
+        echo 'php_average.info The average process size for Unicorn'
+        else
+                echo -n "average.value "
+                ps awwwux | grep 'unicorn worker' | grep -v grep | grep -v master | awk '{total_mem = $6 * 1024 + total_mem; total_proc++} END{printf("%d\n", total_mem / total_proc)}'
+                exit 0
+        fi
+
+fi
+exit 0
