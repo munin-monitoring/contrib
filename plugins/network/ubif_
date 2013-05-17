@@ -1,0 +1,106 @@
+#!/usr/bin/perl
+###############################################################################
+#
+#Munin plugin to monitor Ubiquiti AirOS device wireless link frequency.
+#
+#To use this plugin, copy it to the munin's plugin directory (eg. /usr/share/munin/plugins) 
+#under the name "ubif_". Don't change the filename.
+#
+#Then symlink it to munin's configured plugins directory (eg. /etc/munin/plugins) with names
+#according to the devices you wish to monitor, like ubnt_apo.ubnt or ubnt_cli.ubnt
+#
+#In your /etc/hosts file, add to 127.0.0.1 some names which would corespond to your devices, eg:
+#127.0.0.1              localhost       apo.ubnt        cli.ubnt
+#
+#Important: make sure to use the same names in your symlinks and other config places!
+#
+#In /etc/munin/plugin-conf.d/munin-node add the following, to be able to contact
+#those devices via telnet (obviously replacing these with your own data):
+#
+#[ubif_apo.ubnt]
+#env.Name AccessPoint
+#env.Host 192.168.2.2
+#env.TelnetPort 23
+#env.TelnetUser foobar
+#env.TelnetPass raboof
+#
+#[ubif_cli.ubnt]
+#env.Name Client
+#env.Host 192.168.2.3
+#env.TelnetPort 23
+#env.TelnetUser foobar
+#env.TelnetPass raboof
+#
+#In /etc/munin/munin.conf add them as new virtual nodes:
+#
+#[apo.ubnt]
+#    address 127.0.0.1
+#
+#[cli.ubnt]
+#    address 127.0.0.1
+#
+#If all went well, you should by now have two additional nodes listed on the Web Interface of munin.
+#
+#The plugin defaults to the 5GHz range, if you have a different frequency range on your device
+#change the --lower-limit 5100 --upper-limit 5800 values accordingly.
+#
+#Plugin base on aramsey's script, which is based on a MicroTik plugin, see for more info:
+#http://community.ubnt.com/t5/NanoStation-and-Loco-Devices/SNMP-data-for-NF-dBm/m-p/39070/highlight/true#M11372
+#
+#Tested & working with munin v.2.0.14
+###############################################################################
+use diagnostics;
+use Net::Telnet;
+use strict;
+use warnings;
+##############################################################################
+## Retrieve environmental variables
+my $Name = $ENV{'Name'};
+my $Host = $ENV{'Host'};
+my $TelnetPort = $ENV{'TelnetPort'};
+my $TelnetUser = $ENV{'TelnetUser'};
+my $TelnetPass = $ENV{'TelnetPass'};
+
+###############################################################################
+## Determine Hostname
+my $Hostname = undef;
+$0 =~ /ubif_(.+)*$/;
+unless ($Hostname = $1) {
+  exit 2;
+}
+###############################################################################
+## Initiate Telnet Session
+my $MT = Net::Telnet->new(Host    => $Host,
+                                 Port    => $TelnetPort,
+                                 Prompt  => '/ $/',
+                                 Timeout => 30);
+
+###############################################################################
+## Configuration
+if(exists $ARGV[0] and $ARGV[0] eq "config") {
+  print "host_name " . $Hostname . "\n";
+  print "graph_args -l 0 --units-exponent 0 --lower-limit 5100 --upper-limit 5800\n";
+  print "graph_title " . $Name . " WLAN Frequency\n";
+  print "graph_vlabel MHz\n";
+  print "graph_category Ubiquiti\n";
+  print "graph_info This graph shows the wireless interface frequency\n";
+  print "graph_scale no\n";
+  print "freq.label MHz\n";
+  exit;
+}
+
+###############################################################################
+## Execution
+if (!defined($MT->login($TelnetUser, $TelnetPass))) {
+  die "Croaking: $MT->error";
+} else {
+  my @Output = $MT->cmd("ubntbox mca-status\n");
+  my ($freq) = undef;
+  foreach my $Line (@Output) {
+    if ($Line =~ /freq/ && $Line =~ m/(.\d+)/) {
+      $freq = substr($Line, 5,5);
+    }
+  }
+  print "freq.value " . $freq . "\n";
+  exit;
+}
