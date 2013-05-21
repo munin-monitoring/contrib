@@ -1,0 +1,129 @@
+#!/usr/bin/perl
+###############################################################################
+#
+#Munin plugin to monitor Ubiquiti AirOS device wireless link quailty parameters.
+#
+#To use this plugin, copy it to the munin's plugin directory (eg. /usr/share/munin/plugins) 
+#under the name "ubiq_". Don't change the filename.
+#
+#Then symlink it to munin's configured plugins directory (eg. /etc/munin/plugins) with names
+#according to the devices you wish to monitor, like ubnt_apo.ubnt or ubnt_cli.ubnt
+#
+#In your /etc/hosts file, add to 127.0.0.1 some names which would corespond to your devices, eg:
+#127.0.0.1              localhost       apo.ubnt        cli.ubnt
+#
+#Important: make sure to use the same names in your symlinks and other config places!
+#
+#In /etc/munin/plugin-conf.d/munin-node add the following, to be able to contact
+#those devices via telnet (obviously replacing these with your own data):
+#
+#[ubiq_apo.ubnt]
+#env.Name AccessPoint
+#env.Host 192.168.2.2
+#env.TelnetPort 23
+#env.TelnetUser foobar
+#env.TelnetPass raboof
+#
+#[ubiq_cli.ubnt]
+#env.Name Client
+#env.Host 192.168.2.3
+#env.TelnetPort 23
+#env.TelnetUser foobar
+#env.TelnetPass raboof
+#
+#In /etc/munin/munin.conf add them as new virtual nodes:
+#
+#[apo.ubnt]
+#    address 127.0.0.1
+#
+#[cli.ubnt]
+#    address 127.0.0.1
+#
+#If all went well, you should by now have two additional nodes listed on the Web Interface of munin.
+#
+#Plugin base on aramsey's script, which is based on a MicroTik plugin, see for more info:
+#http://community.ubnt.com/t5/NanoStation-and-Loco-Devices/SNMP-data-for-NF-dBm/m-p/39070/highlight/true#M11372
+#
+#Tested & working with munin v.2.0.14
+###############################################################################
+use diagnostics;
+use Net::Telnet;
+use strict;
+use warnings;
+##############################################################################
+## Retrieve environmental variables
+my $Name = $ENV{'Name'};
+my $Host = $ENV{'Host'};
+my $TelnetPort = $ENV{'TelnetPort'};
+my $TelnetUser = $ENV{'TelnetUser'};
+my $TelnetPass = $ENV{'TelnetPass'};
+
+###############################################################################
+## Determine Hostname
+my $Hostname = undef;
+$0 =~ /ubiq_(.+)*$/;
+unless ($Hostname = $1) {
+  exit 2;
+}
+###############################################################################
+## Initiate Telnet Session
+my $MT = Net::Telnet->new(Host    => $Host,
+                                 Port    => $TelnetPort,
+                                 Prompt  => '/ $/',
+                                 Timeout => 30);
+
+###############################################################################
+## Configuration
+if(exists $ARGV[0] and $ARGV[0] eq "config") {
+  print "host_name " . $Hostname . "\n";
+  print "graph_args -l 0 --lower-limit -100 --upper-limit 100\n";
+  print "graph_title " . $Name . " WLAN Statistics\n";
+  print "graph_vlabel Comms Quality\n";
+  print "graph_category Ubiquiti\n";
+  print "graph_info This graph shows the wireless interface statistics\n";
+  print "graph_order txccq txsignal txrate rxrate acttimeout noisefloor\n";
+  print "graph_scale no\n";
+  print "txccq.label TX CCQ (%)\n";
+  print "txsignal.label TX Signal Strength (dBm)\n";
+  print "acttimeout.label ACT Timeout (us)\n";
+  print "noisefloor.label Noise Floor (dBm)\n";
+  print "txrate.label TX Rate (Mbps)\n";
+  print "rxrate.label RX Rate (Mbps)\n";
+  exit;
+}
+
+###############################################################################
+## Execution
+if (!defined($MT->login($TelnetUser, $TelnetPass))) {
+  die "Croaking: $MT->error";
+} else {
+  my @Output = $MT->cmd("ubntbox mca-status\n");
+  my ($rest, $tmp, $txccq, $txsignal, $stn, $otxccq, $acttimeout, $noisefloor, $txrate, $rxrate) = undef;
+  foreach my $Line (@Output) {
+    if (($Line =~ /ccq/ && $Line !~ /overall-tx-ccq/) && $Line =~ m/(\d+)/) {
+      $txccq = $1 / 10;
+    }
+    if ($Line =~ /signal/ && $Line =~ m/(.\d+)/) {
+      $txsignal = $1;
+    }
+    if ($Line =~ /noise/ && $Line =~ m/(.\d+)/) {
+      $noisefloor = $1;
+    }
+        if ($Line =~ /ackTimeout/ && $Line =~ m/(\d+)/) {
+      $acttimeout = $1;
+    }
+    if ($Line =~ /wlanTxRate/ && $Line =~ m/(\d+)/) {
+      $txrate = $1;
+    }
+    if ($Line =~ /wlanRxRate/ && $Line =~ m/(\d+)/) {
+      $rxrate = $1;
+    }
+  }
+  print "txccq.value " . $txccq . "\n";
+  print "txsignal.value " . $txsignal . "\n";
+  print "acttimeout.value " . $acttimeout . "\n";
+  print "noisefloor.value " . $noisefloor . "\n";
+  print "txrate.value " . $txrate . "\n";
+  print "rxrate.value " . $rxrate . "\n";
+  exit;
+}
