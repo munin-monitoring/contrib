@@ -1,0 +1,134 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+syslog_ng_stats - Plugin for syslog-ng.
+It uses the C<syslog-ng-ctl> utility to grab values.
+
+=head1 DESCRIPTION
+
+See C<man syslog-ng-ctl> for the C<stats> option.
+All options used are regexp.
+
+=over
+
+=item source_name
+
+=item source_id
+
+=item source_instance
+
+=item state
+
+=item type
+
+=back
+
+Example of input and destination via tcp for my application:
+
+    [syslog_ng_stats]
+    user root
+    env.source_name = source dst\.tcp
+    env.source_id = myname
+
+=head1 AUTHORS
+
+Dmitry E. Oboukhov <unera@debian.org>,
+Roman V. Nikolaev <rshadow@rambler.ru>
+
+=head1 COPYRIGHT
+
+Copyright (C) 2013 Dmitry E. Oboukhov <unera@debian.org>
+Copyright (C) 2013 Roman V. Nikolaev <rshadow@rambler.ru>
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.8.8 or,
+at your option, any later version of Perl 5 you may have available.
+
+=cut
+
+use strict;
+use warnings;
+use utf8;
+use open qw(:utf8 :std);
+use List::MoreUtils qw(any);
+
+# Filters
+my (@source_name, @source_id, @source_instance, @state, @type);
+@source_name     = split m{\s+}, $ENV{source_name} if $ENV{source_name};
+@source_id       = split m{\s+}, $ENV{source_id}   if $ENV{source_id};
+@source_instance = split m{\s+}, $ENV{source_instance}
+                                                    if $ENV{source_instance};
+@state           = split m{\s+}, $ENV{state}       if $ENV{state};
+@type            = split m{\s+}, $ENV{type}        if $ENV{type};
+
+# Get stats
+my $data = `syslog-ng-ctl stats`;
+die 'Can`t get stats from syslog-ng-ctl' unless $data;
+
+# Split to graphs
+my @str = split m{\n+}, $data;
+# Remove title
+shift @str;
+
+my @gpaths;
+for my $graph (@str) {
+    # Split to data
+    $graph = [ split m{;}, $graph ];
+    $graph = {
+        source_name     => $graph->[0],
+        source_id       => $graph->[1],
+        source_instance => $graph->[2],
+        state           => $graph->[3],
+        type            => $graph->[4],
+        number          => $graph->[5],
+    };
+
+    # Apply filters
+    next if @source_name        and
+            ! any {$graph->{source_name} =~ m{$_}i } @source_name;
+    next if @source_id          and
+            ! any {$graph->{source_id} =~ m{$_}i } @source_id;
+    next if @source_instance    and
+            ! any {$graph->{source_instance} =~ m{$_}i } @source_instance;
+    next if @state              and
+            ! any {$graph->{state} =~ m{$_}i } @state;
+    next if @type               and
+            ! any {$graph->{type} =~ m{$_}i } @type;
+
+    # Save graph
+    push @gpaths, $graph;
+}
+
+# Show config
+if( exists $ARGV[0] and $ARGV[0] eq "config" ) {
+    print "graph_title Syslog-ng statistics\n";
+    print "graph_vlabel count\n";
+    print "graph_args --base 1000 --lower-limit 0 --rigid\n";
+    print "graph_info This graph show syslog-ng-ctl stats\n";
+    print "graph_category syslog\n";
+    for my $graph (@gpaths) {
+        # ID
+        my $id = sprintf '%s_%s',
+            $graph->{source_id} || $graph->{source_instance},
+            $graph->{type};
+        s{#(\d+)}{[$1]}, s{[^\w\]\[]+}{_}g for $id;
+
+        printf "%s.label %s: %s, %s\n", $id,
+            $graph->{source_name},$graph->{source_id}, $graph->{type};
+        printf "%s.min 0\n", $id;
+    }
+}
+
+# Print values
+for my $graph (@gpaths) {
+    # ID
+    my $id = sprintf '%s_%s',
+        $graph->{source_id} || $graph->{source_instance},
+        $graph->{type};
+    s{#(\d+)}{[$1]}, s{[^\w\]\[]+}{_}g for $id;
+
+    printf "%s.value %s\n", $id, $graph->{number};
+}
+
+exit;
