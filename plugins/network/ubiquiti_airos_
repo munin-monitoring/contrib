@@ -24,11 +24,13 @@
 #   those devices via telnet (obviously replacing these with your own data):
 #
 #   [ubiquiti_airos_apo.wlan]
-#   env.Name AccessPoint
-#   env.Host 192.168.2.2
-#   env.TelnetPort 23
-#   env.TelnetUser foobar
-#   env.TelnetPass raboof
+#   env.Name AccessPoint  # Friendly name to show in graph infos
+#   env.Host 192.168.2.2	# IP address of the device running AirOS
+#   env.TelnetPort 23		# Port of the Telnet service configured in AirOS web interface
+#   env.TelnetUser foobar	# Username to log in
+#   env.TelnetPass raboof	# Password to log in
+#   env.PingAddr 192.168.2.3	# An IP address to ping, typically the other wireless device or a gateway
+#   env.PingName Client		# Friendly name of the pinged device, to display on the ping graph
 #
 #   [ubiquiti_airos_cli.wlan]
 #   env.Name Client
@@ -36,6 +38,8 @@
 #   env.TelnetPort 23
 #   env.TelnetUser foobar
 #   env.TelnetPass raboof
+#   env.PingAddr 192.168.2.2
+#   env.PingName AccessPoint
 #
 #4. In /etc/munin/munin.conf add them as new virtual nodes:
 #
@@ -53,36 +57,53 @@
 #Plugin based on aramsey's script, which is based on a MicroTik plugin, see for more info see this link:
 #http://community.ubnt.com/t5/NanoStation-and-Loco-Devices/SNMP-data-for-NF-dBm/m-p/39070/highlight/true#M11372
 #
-#Tested & working with munin v.2.0.14 and AirOS v5.5.4.
+#Tested & working with munin v.2.0.14 and AirOS v5.5.6.
 #Created in 2013 by robi
-#
-###############################################################################
+# v0.7 - added critical thresholds to some graphs, and some descriptions below some of them
+# v0.6 - added wlan errors by type graph - useful to detect interferences on the same frequency; added CPU usage graph
+# v0.5 - added ping graph - ping times from the AirOS device to a configured address; other fixes
+# v0.4 - corrected memory size unit calculation and display, fixed query bug, fancier graphs for memory and link speed
+# v0.3 - added undefined values handling in case of connection timeout, corrected linefeed character handling
+# v0.2 - combined all the separate pugins into one multigraph plugin, a couple of charts separated
+# v0.1 - initial version, separate plugin for each graph, packaged 11 different plugins
+##############################################################################
+## Magic Markers
+ #%# family=manual
+##############################################################################
 use diagnostics;
 use Net::Telnet;
 use strict;
 use warnings;
 ##############################################################################
-## Retrieve environmental variables
+## Receive environmentals
 my $Name = $ENV{'Name'};
 my $Host = $ENV{'Host'};
 my $TelnetPort = $ENV{'TelnetPort'};
 my $TelnetUser = $ENV{'TelnetUser'};
 my $TelnetPass = $ENV{'TelnetPass'};
+my $PingAddr = $ENV{'PingAddr'};
+my $PingName = $ENV{'PingName'};
+##############################################################################
+## Define variables
 my $graph_period = "second";
+my ($load, $uptime, $ping_time, $packet_loss, $amc, $amq, $conn, $mt, $mf, $mb, $errlrcvd, $errltrans, $errwrcvd, $errwtrans); 
+my ($trflup, $trfldown, $trfwup, $trfwdown, $freq, $txccq, $acttimeout, $txsignal, $noisefloor, $txrate, $rxrate, $errnwid);
+my ($errcrypt, $errfrag, $errretries, $errbmiss, $errother, $cpuuser, $cpusystem, $cpunice, $cpuidle, $cpuiowait, $cpuirq, $cpusoftirq);
+$load = $uptime = $ping_time = $packet_loss = $amc = $amq = $conn = $mt = $mf = $mb = $errlrcvd = $errltrans = $errwrcvd = $errwtrans = "U\n";
+$trflup = $trfldown = $trfwup = $trfwdown = $freq = $txccq= $acttimeout = $txsignal = $noisefloor = $txrate = $rxrate = $errnwid = "U\n";
+$errcrypt = $errfrag = $errretries = $errbmiss = $errother = $cpuuser = $cpusystem = $cpunice = $cpuidle = $cpuiowait = $cpuirq = $cpusoftirq = "U\n";
 ###############################################################################
-## Determine Hostname
+## Determine Hostname and other stuff
 my $Hostname = undef;
 $0 =~ /ubiquiti_airos_(.+)*$/;
 unless ($Hostname = $1) {
   exit 2;
 }
-###############################################################################
-## Initiate Telnet Session
-my $MT = Net::Telnet->new(Host    => $Host,
-                                 Port    => $TelnetPort,
-                                 Prompt  => '/ $/',
-                                 Timeout => 30);
-
+if ($PingAddr // "") {
+  if (!($PingName // "")) {
+    $PingName = $PingAddr;
+  }
+}
 ###############################################################################
 ## Configuration
 if(exists $ARGV[0] and $ARGV[0] eq "config") {
@@ -94,6 +115,7 @@ if(exists $ARGV[0] and $ARGV[0] eq "config") {
   print "graph_category system\n";
   print "graph_scale no\n";
   print "load.label load\n";
+  print "load.critical 10\n";
   print "graph_info The load average of " . $Name . " describes how many processes are in the run-queue (scheduled to run 'immediately').\n";
   print "load.info 5 minute load average\n";
   print "\n";
@@ -112,23 +134,26 @@ if(exists $ARGV[0] and $ARGV[0] eq "config") {
 
   print "multigraph airos_airmax\n";
   print "host_name " . $Hostname . "\n";
-  print "graph_args -l 0 --lower-limit 0 --upper-limit 100\n";
+  print "graph_args --base 1000 -l 0 --lower-limit 0 --upper-limit 100\n";
   print "graph_title AirMAX Quality and Capacity\n";
   print "graph_vlabel %\n";
   print "graph_category radio\n";
-  print "graph_info This graph shows the AirMAX Quality and AirMAX Capacity of " . $Name . ".\n";
+  print "graph_info This graph shows the AirMAX Quality and AirMAX Capacity of " . $Name . ". AirMAX Quality (AMQ) is based on the number of retries and the quality of the physical link. If this value is low, you may have interference and need to change frequencies. If AMQ is above 80% and you do not notice any other issues, then you do not need to make any changes. AirMAX Capacity (AMC) is based on airtime efficiency. The lower the AMC, the less efficient the AP is. If you only have one client, this may not matter, but when you have many clients (for example, more than 30), then AMC becomes very important, and you want it to be as high as possible.\n";
   print "graph_scale no\n";
   print "amc.label AirMAX Capacity\n";
+  print "amc.critical 30:\n";
   print "amq.label AirMAX Quality\n";
+  print "amq.critical 80:\n";
   print "\n";
 
   print "multigraph airos_wconn\n";
   print "host_name " . $Hostname . "\n";
   print "graph_title WLAN connections\n";
+  print "graph_args --base 1000 -l 0\n";
   print "graph_category network\n";
   print "graph_info This graph shows the number of wireless connections to the wlan interface of " . $Name . ".\n";
-  print "graph_scale no\n";
   print "conn.label Connections\n";
+  print "conn.critical 1:\n";
   print "\n";
 
   print "multigraph airos_errl\n";
@@ -140,11 +165,11 @@ if(exists $ARGV[0] and $ARGV[0] eq "config") {
   print "errlrcvd.label errors\n";
   print "errlrcvd.type COUNTER\n";
   print "errlrcvd.graph no\n";
-  print "errlrcvd.warning 1\n";
+  print "errlrcvd.critical 1\n";
   print "errltrans.label errors\n";
   print "errltrans.type COUNTER\n";
   print "errltrans.negative errlrcvd\n";
-  print "errltrans.warning 1\n";
+  print "errltrans.critical 1\n";
   print "host_name " . $Hostname . "\n";
   print "graph_title LAN errors\n";
   print "graph_category network\n";
@@ -159,11 +184,11 @@ if(exists $ARGV[0] and $ARGV[0] eq "config") {
   print "errwrcvd.label errors\n";
   print "errwrcvd.type COUNTER\n";
   print "errwrcvd.graph no\n";
-  print "errwrcvd.warning 1\n";
+  print "errwrcvd.critical 1\n";
   print "errwtrans.label errors\n";
   print "errwtrans.type COUNTER\n";
   print "errwtrans.negative errwrcvd\n";
-  print "errwtrans.warning 1\n";
+  print "errwtrans.critical 1\n";
   print "host_name " . $Hostname . "\n";
   print "graph_title WLAN errors\n";
   print "graph_category network\n";
@@ -213,40 +238,50 @@ if(exists $ARGV[0] and $ARGV[0] eq "config") {
 
   print "multigraph airos_freq\n";
   print "host_name " . $Hostname . "\n";
-  print "graph_args -l 0 --units-exponent 0 --lower-limit 5100 --upper-limit 5800\n";
+  print "graph_args --base 1000 --units-exponent 0 --lower-limit 5100 --upper-limit 5800\n";
   print "graph_title Frequency\n";
   print "graph_vlabel MHz\n";
   print "graph_category radio\n";
   print "graph_info This graph shows the operating frequency of the wireless interface of " . $Name . ".\n";
   print "graph_scale no\n";
   print "freq.label MHz\n";
+  print "freq.draw LINE2\n";
   print "\n";
 
   print "multigraph airos_mem\n";
   print "host_name " . $Hostname . "\n";
-  print "graph_args -l 0 \n";
+  print "graph_args --base 1000 -l 0 \n";
   print "graph_title Memory usage\n";
-  print "graph_vlabel kB\n";
+  print "graph_vlabel MB\n";
   print "graph_category system\n";
   print "graph_info This graph shows the device memory usage status of " . $Name . ".\n";
-  print "memTotal.label Total\n";
+  print "graph_order memTotal memFree memBuffers\n";
   print "memFree.label Free\n";
+  print "memFree.cdef memFree,1024,*\n";
+  print "memFree.draw AREA\n";
   print "memBuffers.label Buffers\n";
+  print "memBuffers.cdef memBuffers,1024,*\n";
+  print "memBuffers.draw AREA\n";
+  print "memTotal.label Total\n";
+  print "memTotal.cdef memTotal,1024,*\n";
+  print "memTotal.draw AREA\n";
   print "\n";
 
   print "multigraph airos_ccq\n";
   print "host_name " . $Hostname . "\n";
-  print "graph_args -l 0 --lower-limit 0 --upper-limit 100\n";
+  print "graph_args  --base 1000 -l 0 --upper-limit 101\n";
   print "graph_title Client Connection Quality\n";
   print "graph_vlabel %\n";
   print "graph_category radio\n";
-  print "graph_info This graph shows the Client Connection Quality value of " . $Name . ".\n";
+  print "graph_info This graph shows the Client Connection Quality value of " . $Name . ". The level is based on a percentage value for which 100% corresponds to a perfect link state.\n";
   print "graph_scale no\n";
   print "txccq.label Transmit CCQ\n";
+  print "txccq.critical 60:\n";
   print "\n";
 
   print "multigraph airos_ack\n";
   print "host_name " . $Hostname . "\n";
+  print "graph_args --base 1000\n";
   print "graph_title ACK timeout\n";
   print "graph_vlabel us\n";
   print "graph_category radio\n";
@@ -256,6 +291,7 @@ if(exists $ARGV[0] and $ARGV[0] eq "config") {
 
   print "multigraph airos_dbm\n";
   print "host_name " . $Hostname . "\n";
+  print "graph_args --base 1000\n";
   print "graph_title Signal levels\n";
   print "graph_vlabel dBm\n";
   print "graph_category radio\n";
@@ -265,46 +301,156 @@ if(exists $ARGV[0] and $ARGV[0] eq "config") {
   print "\n";
 
   print "multigraph airos_wrate\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_category radio\n";
+  print "graph_title Wireless link speed\n";
   print "graph_order rxrate txrate\n";
-  print "graph_args -l 0 --lower-limit -300 --upper-limit 300\n";
   print "graph_period " . $graph_period . "\n";
   print "graph_vlabel RX (-) / TX (+) Mbps\n";
   print "graph_info This graph shows the wireless link connection speed of " . $Name . ".\n";
   print "rxrate.label RX/TX Rate\n";
   print "rxrate.graph no\n";
-#  print "rxrate.min 0\n";
   print "txrate.label Mbps\n";
+  print "txrate.draw AREA\n";
   print "txrate.negative rxrate\n";
-#  print "txrate.min 0\n";
-  print "host_name " . $Hostname . "\n";
-  print "graph_category radio\n";
-  print "graph_title Wireless link speed\n";
   print "\n";
 
+  print "multigraph airos_errwty\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_title WLAN errors by type\n";
+  print "graph_args -l 0 --units-exponent 0\n";
+  print "graph_category network\n";
+  print "graph_info This graph shows the amount of errors on the received side of the WLAN network interface of " . $Name . ", differentiated by type.\n";
+  print "graph_scale no\n";
+  print "errnwid.label Nwid\n";
+  print "errnwid.info Received WLAN frames that do not belong to the own set BSSID (caused by interference on the same frequency).\n";
+  print "errnwid.critical 0:0\n";
+  print "errcrypt.label Crypt\n";
+  print "errcrypt.critical 0:0\n";
+  print "errfrag.label Frag\n";
+  print "errfrag.critical 0:0\n";
+  print "errretries.label Retries\n";
+  print "errretries.critical 0:0\n";
+  print "errbmiss.label Bmiss\n";
+  print "errbmiss.critical 0:0\n";
+  print "errother.label Other\n";
+  print "errother.critical 0:0\n";
+  print "\n";
+
+  print "multigraph airos_cpu\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_args -l 0 --lower-limit 0 --upper-limit 100\n";
+  print "graph_title CPU usage\n";
+  print "graph_vlabel %\n";
+  print "graph_category system\n";
+  print "graph_info This graph shows how CPU time is spent in " . $Name . ".\n";
+  print "graph_scale no\n";
+  print "graph_period second\n";
+  print "graph_order system user nice idle iowait irq softirq\n";
+  print "system.label cpu-system\n";
+  print "system.draw AREA\n";
+  print "system.min 0\n";
+  print "system.info CPU time spent by the kernel in system activities in " . $Name . ".\n";
+  print "user.label cpu-user\n";
+  print "user.draw STACK\n";
+  print "user.min 0\n";
+  print "user.info CPU time spent by normal programs and daemons in " . $Name . ".\n";
+  print "nice.label cpu-nice\n";
+  print "nice.draw STACK\n";
+  print "nice.min 0\n";
+  print "nice.info CPU time spent by nice(1)d programs in " . $Name . ".\n";
+  print "idle.label cpu-idle\n";
+  print "idle.draw STACK\n";
+  print "idle.min 0\n";
+  print "idle.info Idle CPU time in " . $Name . ".\n";
+  print "iowait.label cpu-iowait\n";
+  print "iowait.draw STACK\n";
+  print "iowait.min 0\n";
+  print "iowait.info CPU time spent waiting for I/O operations to finish when there is nothing else to do in " . $Name . ".\n";
+  print "irq.label cpu-irq\n";
+  print "irq.draw STACK\n";
+  print "irq.min 0\n";
+  print "irq.info CPU time spent handling interrupts in " . $Name . ".\n";
+  print "softirq.label cpu-softirq\n";
+  print "softirq.draw STACK\n";
+  print "softirq.min 0\n";
+  print "softirq.info CPU time spent handling batched interrupts in " . $Name . ".\n";
+  print "\n";
+
+  if ($PingAddr // "") {
+    print "multigraph airos_ping1\n";
+    print "host_name " . $Hostname . "\n";
+    print "graph_title Ping times to " . $PingName . "\n";
+    print "graph_args --base 1000 -l 0\n";
+    print "graph_vlabel roundtrip time (seconds)\n";
+    print "graph_category network\n";
+    print "graph_info This graph shows ping RTT statistics, measured on " . $Name . " (" . $Host . ").\n";
+    print "ping.label " . $PingName . "\n";
+    print "ping.info Ping RTT statistics for " . $PingName . " (" . $PingAddr . ").\n";
+    print "packetloss.label packet loss\n";
+    print "packetloss.graph no\n";
+    print "packetloss.critical 0\n";
+    print "\n";
+  }
   exit;
 }
 
 ###############################################################################
+## Initiate Telnet Session
+my $CM = Net::Telnet->new(Port  => $TelnetPort,
+                          Prompt=> '/ $/',
+                          Timeout=>10,
+                          Errmode=>'return');
+
+$CM->open($Host);
+###############################################################################
 ## Execution
-if (!defined($MT->login($TelnetUser, $TelnetPass))) {
-  die "Croaking: $MT->error";
+if (!defined($CM->login($TelnetUser, $TelnetPass))) {
+  # Nothing happens
 } else {
-  my @OutLoad = $MT->cmd("cat /proc/loadavg\n");
-  my ($load) = undef;
+  my @OutLoad = $CM->cmd("cat /proc/loadavg");
   foreach my $Line (@OutLoad) {
-      if ($Line !~ /XM.v/ && $Line =~ m/(\d+)/) {
-      		$load = substr($Line, 0,4);
-    	}
-  }
-  my @OutUpt = $MT->cmd("cat /proc/uptime\n");
-  my ($uptime) = undef;
-  foreach my $Line (@OutUpt) {
     if ($Line !~ /XM.v/ && $Line =~ m/(\d+)/) {
-      $uptime = $1 / 86400;
+      	$load = substr($Line, 0,4);
     }
   }
-  my @OutMca = $MT->cmd("ubntbox mca-status\n");
-  my ($amc, $amq, $conn, $mt, $mf, $mb, $errlrcvd, $errltrans, $errwrcvd, $errwtrans, $trflup, $trfldown, $trfwup, $trfwdown, $freq, $txccq, $acttimeout, $txsignal, $noisefloor, $txrate, $rxrate) = undef;
+
+#  my $topcmd = "top -b -n2 | grep '^CPU:' | tail -n1";
+  my $topcmd = "top -b -n2 -d1 | grep '^CPU:' | tail -n1";
+  my @OutCPU = $CM->cmd($topcmd);
+  chomp @OutCPU;
+  my $OutCPU = join(" ", @OutCPU);
+  my $recpu=".*?(\\d+).*?(\\d+).*?(\\d+).*?(\\d+).*?(\\d+).*?(\\d+).*?(\\d+)";
+  if ($OutCPU =~ m/$recpu/is) {
+    $cpuuser=$1;
+    $cpusystem=$2;
+    $cpunice=$3;
+    $cpuidle=$4;
+    $cpuiowait=$5;
+    $cpuirq=$6;
+    $cpusoftirq=$7;
+  }
+#  if ($cpuiowait > 100 && $cpusoftirq > 100) {
+#    $cpuiowait = 49;
+#    $cpusoftirq = 49;
+#  }
+#  if ($cpuiowait > 100) {
+#    $cpuiowait = 98;
+#  }
+#  if ($cpusoftirq > 100) {
+#    $cpusoftirq = 98;
+#  }
+
+  sleep 1;
+
+  my @OutUpt = $CM->cmd("cat /proc/uptime");
+  foreach my $Line (@OutUpt) {
+    if ($Line !~ /XM.v/ && $Line =~ m/(\d+)/) {
+	$uptime = $1 / 86400;
+    }
+  }
+
+  my @OutMca = $CM->cmd("ubntbox mca-status");
   foreach my $Line (@OutMca) {
     if ($Line =~ /wlanRxErrors/ && $Line =~ m/(.\d+)/) {
         $errwrcvd = substr($Line, 13);
@@ -320,9 +466,15 @@ if (!defined($MT->login($TelnetUser, $TelnetPass))) {
     }
     if ($Line =~ /wlanPollingCapacity/ && $Line =~ m/(.\d+)/) {
         $amc = substr($Line, 20);
+	if ($amc == 0) {
+	    $amc = "U";
+	}
     }
     if ($Line =~ /wlanPollingQuality/ && $Line =~ m/(.\d+)/) {
         $amq = substr($Line, 19);
+        if ($amq == 0) {
+            $amq = "U";
+        }
     }
     if ($Line =~ /wlanConnections/ && $Line =~ m/(.\d+)/) {
         $conn = substr($Line, 16);
@@ -343,16 +495,19 @@ if (!defined($MT->login($TelnetUser, $TelnetPass))) {
         $freq = substr($Line, 5);
     }
     if ($Line =~ /memTotal/ && $Line =~ m/(\d+)/) {
-      $mt = $1;
+        $mt = $1;
     }
     if ($Line =~ /memFree/ && $Line =~ m/(\d+)/) {
-      $mf = $1;
+        $mf = $1;
     }
     if ($Line =~ /memBuffers/ && $Line =~ m/(\d+)/) {
-      $mb = $1;
+        $mb = $1;
     }
     if (($Line =~ /ccq/ && $Line !~ /overall-tx-ccq/) && $Line =~ m/(\d+)/) {
-      $txccq = $1 / 10;
+        $txccq = $1 / 10;
+        if ($txccq == 0) {
+            $txccq = "U";
+        }
     }
     if ($Line =~ /signal/ && $Line =~ m/(.\d+)/) {
       $txsignal = $1;
@@ -369,73 +524,138 @@ if (!defined($MT->login($TelnetUser, $TelnetPass))) {
     if ($Line =~ /wlanRxRate/ && $Line =~ m/(\d+)/) {
       $rxrate = $1;
     }
+    if ($Line =~ /wlanRxErrNwid/ && $Line =~ m/(.\d+)/) {
+        $errnwid = substr($Line, 14);
+    }
+    if ($Line =~ /wlanRxErrCrypt/ && $Line =~ m/(.\d+)/) {
+        $errcrypt = substr($Line, 15);
+    }
+    if ($Line =~ /wlanRxErrFrag/ && $Line =~ m/(.\d+)/) {
+        $errfrag = substr($Line, 14);
+    }
+    if ($Line =~ /wlanRxErrRetries/ && $Line =~ m/(.\d+)/) {
+        $errretries = substr($Line, 17);
+    }
+    if ($Line =~ /wlanRxErrBmiss/ && $Line =~ m/(.\d+)/) {
+        $errbmiss = substr($Line, 15);
+    }
+    if ($Line =~ /wlanRxErrOther/ && $Line =~ m/(.\d+)/) {
+        $errother = substr($Line, 15);
+    }
+
 
   }
+  sleep 1;
+  if ($PingAddr // "") {
+    my $pingcmd = "ping -c 2 " . $PingAddr . " 2>/dev/null";
+    my @ping = $CM->cmd($pingcmd);
+    chomp @ping;
+    my $ping = join(" ", @ping);
+    $ping_time = ($1 / 1000) if ($ping =~ m@min/avg/max.*\s\d+(?:\.\d+)?/(\d+(?:\.\d+)?)/\d+(?:\.\d+)?@);
+    $packet_loss = $1 if ($ping =~ /(\d+)% packet loss/);
+  } else {
+    $PingName = "";
+    $PingAddr = "";
+  }
 
-  print "multigraph airos_wrate\n";
-  print "txrate.value " . $txrate . "\n";
-  print "rxrate.value " . $rxrate . "\n";
+}
+
+chomp($load, $uptime, $ping_time, $packet_loss, $amc, $amq, $conn, $mt, $mf, $mb, $errlrcvd, $errltrans, 
+	$errwrcvd, $errwtrans, $trflup, $trfldown, $trfwup, $trfwdown, $freq, $txccq, $acttimeout, $txsignal, 
+	$noisefloor, $txrate, $rxrate, $errnwid, $errcrypt, $errfrag, $errretries, $errbmiss, $errother,
+	$cpuuser, $cpusystem, $cpunice, $cpuidle, $cpuiowait, $cpuirq, $cpusoftirq);
+
+$CM->close;
+
+print "\n";
+
+print "multigraph airos_wrate\n";
+print "txrate.value " . $txrate . "\n";
+print "rxrate.value " . $rxrate . "\n";
+print "\n";
+
+print "multigraph airos_ccq\n";
+print "txccq.value " . $txccq . "\n";
+print "\n";
+
+print "multigraph airos_ack\n";
+print "acttimeout.value " . $acttimeout . "\n";
+print "\n";
+
+print "multigraph airos_dbm\n";
+print "txsignal.value " . $txsignal . "\n";
+print "noisefloor.value " . $noisefloor . "\n";
+print "\n";
+
+print "multigraph airos_mem\n";
+print "memTotal.value " . $mt . "\n";
+print "memFree.value " . $mf . "\n";
+print "memBuffers.value " . $mb . "\n";
+print "\n";
+
+print "multigraph airos_freq\n";
+print "freq.value " . $freq . "\n";
+print "\n";
+
+print "multigraph airos_trfw\n";
+print "trfwup.value " . $trfwup . "\n";
+print "trfwdown.value " . $trfwdown . "\n";
+print "\n";
+
+print "multigraph airos_trfl\n";
+print "trflup.value " . $trflup . "\n";
+print "trfldown.value " . $trfldown . "\n";
+print "\n";
+
+print "multigraph airos_errw\n";
+print "errwrcvd.value " . $errwrcvd . "\n";
+print "errwtrans.value " . $errwtrans . "\n";
+print "\n";
+
+print "multigraph airos_errl\n";
+print "errlrcvd.value " . $errlrcvd . "\n";
+print "errltrans.value " . $errltrans . "\n";
+print "\n";
+
+print "multigraph airos_airmax\n";
+print "amc.value " . $amc . "\n";
+print "amq.value " . $amq . "\n";
+print "\n";
+
+print "multigraph airos_wconn\n";
+print "conn.value " . $conn . "\n";
+print "\n";
+
+print "multigraph airos_load\n";
+print "load.value " . $load . "\n";
+print "\n";
+
+print "multigraph airos_uptime\n";
+print "uptime.value " . $uptime . "\n";
+print "\n";
+
+print "multigraph airos_errwty\n";
+print "errnwid.value $errnwid\n";
+print "errcrypt.value $errcrypt\n";
+print "errfrag.value $errfrag\n";
+print "errretries.value $errretries\n";
+print "errbmiss.value $errbmiss\n";
+print "errother.value $errother\n";
+print "\n";
+
+print "multigraph airos_cpu\n";
+print "user.value $cpuuser\n";
+print "system.value $cpusystem\n";
+print "nice.value $cpunice\n";
+print "idle.value $cpuidle\n";
+print "iowait.value $cpuiowait\n";
+print "irq.value $cpuirq\n";
+print "softirq.value $cpusoftirq\n";
+print "\n";
+
+if ($PingAddr // "") {
+  print "multigraph airos_ping1\n";
+  print "ping.value " . $ping_time . "\n";
+  print "packetloss.value " . $packet_loss . "\n";
   print "\n";
-
-  print "multigraph airos_ccq\n";
-  print "txccq.value " . $txccq . "\n";
-  print "\n";
-
-  print "multigraph airos_ack\n";
-  print "acttimeout.value " . $acttimeout . "\n";
-  print "\n";
-
-  print "multigraph airos_dbm\n";
-  print "txsignal.value " . $txsignal . "\n";
-  print "noisefloor.value " . $noisefloor . "\n";
-  print "\n";
-
-  print "multigraph airos_mem\n";
-  print "memTotal.value " . $mt . "\n";
-  print "memFree.value " . $mf . "\n";
-  print "memBuffers.value " . $mb . "\n";
-  print "\n";
-
-  print "multigraph airos_freq\n";
-  print "freq.value " . $freq;# . "\n";
-  print "\n";
-
-  print "multigraph airos_trfw\n";
-  print "trfwup.value " . $trfwup;# . "\n";
-  print "trfwdown.value " . $trfwdown;# . "\n";
-  print "\n";
-
-  print "multigraph airos_trfl\n";
-  print "trflup.value " . $trflup;# . "\n";
-  print "trfldown.value " . $trfldown;# . "\n";
-  print "\n";
-
-  print "multigraph airos_errw\n";
-  print "errwrcvd.value " . $errwrcvd;# . "\n";
-  print "errwtrans.value " . $errwtrans;# . "\n";
-  print "\n";
-
-  print "multigraph airos_errl\n";
-  print "errlrcvd.value " . $errlrcvd;# . "\n";
-  print "errltrans.value " . $errltrans;# . "\n";
-  print "\n";
-
-  print "multigraph airos_airmax\n";
-  print "amc.value " . $amc;# . "\n";
-  print "amq.value " . $amq;# . "\n";
-  print "\n";
-
-  print "multigraph airos_wconn\n";
-  print "conn.value " . $conn;# . "\n";
-  print "\n";
-
-  print "multigraph airos_load\n";
-  print "load.value " . $load . "\n";
-  print "\n";
-
-  print "multigraph airos_uptime\n";
-  print "uptime.value " . $uptime . "\n";
-  print "\n";
-
-  exit;
 }
