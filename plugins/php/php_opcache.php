@@ -23,6 +23,6 @@ else
 header('Content-Type: text/plain');
 foreach ($output as $key => $value)
 {
-        echo $key, ' ', $value, "\n";
+	echo $key, ' ', $value, "\n";
 }
 ?>
