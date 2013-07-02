@@ -3,26 +3,30 @@ use strict;
 #
 # byprojects_access
 #
-# Perl script to monitor access *byprojects* (e.g. vhost) from multiple files and/or regex.
+# Perl script to monitor access *byprojects* (e.g. vhost) from multiple files 
+# and/or regex.
 #
 # Danny Fullerton <northox@mantor.org> 
 # Mantor Organization <www.mantor.org>
-# This work is licensed under a Creative Commons Attribution 3.0 Unported License.
+# This work is licensed under a MIT license.
 #
 # You need logtail (https://www.fourmilab.ch/webtools/logtail/)
 #
-# Log can be gathered from multiple sources by simply specifying multiple log filename 
-# and/or a log filename and a regex.
-#   - 'prod' => [ {'path' => '/home/prod/log/access.log'} ],
-#     Prod graph will be using everything in /home/prod/log/access.log
-#   - 'test' => [ {'path' => '/var/log/access.log', 'regex' => '"[A-Z]+ /test/'},
-#                 {'path' => '/home/test/log/access.log'} ],
-#     Test graph will be using everything in /home/test/log/access.log and stuff that match 
-#     '"[A-Z] /test/' in /var/log/access.log such as '"GET /test/'
+# Log can be gathered from multiple sources by simply specifying multiple log 
+# filename or using wildcards (glob). File content can be selected using regex.
+#
+# - 'prod' => [ {'path' => '/home/prod/log/access.log'} ],
+#   Prod graph will be using everything in /home/prod/log/access.log
+#
+# - 'test' => [ {'path' => '/var/log/access.log', 'regex' => '"[A-Z]+ /test/'},
+#               {'path' => '/home/test/log/access*.log'} ],
+#   Test graph will be using everything file matching /home/test/log/access*.log
+#   and stuff that match the expression '"[A-Z] /test/' in /var/log/access.log
+#   such as '"GET /test/'
 
 my $server = 'Apache';
 
-my $statepath = '/usr/local/var/munin/plugin-state'; # where logtail will save the state
+my $statepath = '/usr/local/var/munin/plugin-state';
 my $logtail = '/usr/local/bin/logtail';
 
 my %logs = (
@@ -67,17 +71,21 @@ foreach my $project ( keys %logs )  {
   my $i = 0;
   my $x = 0;
   foreach my $log ( @{$logs{$project}} ) {
-    my $state = $statepath.'/'.$project.$x.'_access.state';
-    open(LT, "$logtail -f ".$log->{'path'}." -o $state |") or die "Can't open $logtail : $!";
-    while (<LT>) {
-      my $buf = $_;
-      if($buf eq '') { next }
-      if(!defined($log->{'regex'}) || $buf =~ m/$log->{'regex'}/) {
-        $i++;
+    my @paths = glob $log->{'path'};
+    foreach my $path (@paths) {
+      my $state = $statepath.'/'.$project.$x.'_access.state';
+      open(LT, "$logtail -f ".$log->{'path'}." -o $state |") or 
+        die "Can't open $logtail : $!";
+      while (<LT>) {
+        my $buf = $_;
+        if($buf eq '') { next }
+        if(!defined($log->{'regex'}) || $buf =~ m/$log->{'regex'}/) {
+          $i++;
+        }
       }
+      close(LT);
+      $x++;
     }
-    close(LT);
-    $x++;
   }
   print $project.".value $i\n";
 }
