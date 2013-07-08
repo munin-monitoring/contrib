@@ -1,0 +1,160 @@
+#!/bin/bash
+# -*- sh -*-
+#
+# Multigraph plugin to monitor harddrive temperature, condition, 
+# performance and estimated remaining lifetime through HDSentinel.
+#
+# To use, download the latest HDSentinel for Linux x86 or x64 from
+# http://www.hdsentinel.com/hard_disk_sentinel_linux.php
+# Unzip to /usr/local/bin/, make executable (chmod +x HDSentinel)
+# in /etc/munin/plugin-conf.d/munin-node add the following lines
+#
+#  [hdsentinel]
+#  user root
+#  group root
+#
+# Copy this plugin to /usr/share/munin/plugins, and symlink it to
+# /etc/munin/plugins, and then restart node.
+#
+#%# family=contrib
+
+HDSPATH=/usr/local/bin/HDSentinel
+
+if [ "$1" = "autoconf" ]; then
+        if [ -x "$HDSPATH" ]; then
+                echo yes
+                exit 0
+        else
+                echo no
+                exit 0
+        fi
+fi
+
+HDSOUT=`$HDSPATH`
+LIN=''
+SPC=' '
+NLN='\n'
+
+OLDIFS=$IFS
+IFS=$'\n'
+for line in $HDSOUT; do
+        if [[ "$line" == */dev* ]] ; then
+                LIN=$LIN$line
+        fi
+
+  if [[ "$line" == *Temperature* ]] || [[ "$line" == *Health* ]] || [[ "$line" == *Performance* ]] ; then
+		LIN=$LIN$SPC$line
+	fi
+
+        if [[ "$line" == *lifetime* ]] ; then
+                LIN=$LIN$SPC$line$NLN
+        fi
+
+done
+SLD=`echo -e $LIN`
+
+echo 'multigraph hdsentinel_temps'
+if [ "$1" = "config" ]; then
+	echo 'graph_title HDSentinel Drive Temperature'
+	echo 'graph_vlabel Degrees Celsius'
+	echo 'graph_args --base 1000 -l 0'
+	echo 'graph_category sensors'
+	echo 'graph_info Temperatures calculated by HDSentinel from SMART'
+fi
+for linf in $SLD; do
+	DEV=`echo $linf | awk '{printf $4}' | awk '{printf substr($0,6)}'`
+	echo -n $DEV
+	if [ "$1" = "config" ]; then
+		echo '_temp.label '$DEV
+                echo $DEV'_temp.warning 55'
+                echo $DEV'_temp.critical 70'
+	else
+		echo -n '_temp.value '
+		TEMP=`echo $linf | awk '{print $7}'`
+        	if [[ "$TEMP" == *Unknown* ]] || [[ "$line" == "" ]] ; then
+	                TEMP='U'
+        	fi
+		echo $TEMP
+	fi
+done
+echo
+
+echo 'multigraph hdsentinel_health'
+if [ "$1" = "config" ]; then
+        echo 'graph_title HDSentinel Drive Health'
+        echo 'graph_vlabel %'
+        echo 'graph_args --base 1000 -l 0 --lower-limit 0 --upper-limit 100'
+        echo 'graph_category disk'
+        echo 'graph_info Drive health in percent calculated by HDSentinel from SMART'
+fi
+for linf in $SLD; do
+        DEV=`echo $linf | awk '{printf $4}' | awk '{printf substr($0,6)}'`
+        echo -n $DEV
+        if [ "$1" = "config" ]; then
+                echo '_heal.label '$DEV
+		echo $DEV'_heal.warning 100:'
+                echo $DEV'_heal.critical 75:'
+        else
+	        echo -n '_heal.value '
+        	HEAL=`echo $linf | awk '{print $11}'`
+        	if [[ "$HEAL" == *Unknown* ]] || [[ "$HEAL" == "" ]] ; then
+                	HEAL='U'
+        	fi
+        	echo $HEAL
+	fi
+done
+echo
+
+echo 'multigraph hdsentinel_performance'
+if [ "$1" = "config" ]; then
+        echo 'graph_title HDSentinel Drive Performance'
+        echo 'graph_vlabel %'
+        echo 'graph_args --base 1000 -l 0 --lower-limit 0 --upper-limit 100'
+        echo 'graph_category disk'
+        echo 'graph_info Drive performance calculated by HDSentinel from SMART'
+fi
+for linf in $SLD; do
+        DEV=`echo $linf | awk '{printf $4}' | awk '{printf substr($0,6)}'`
+        echo -n $DEV
+        if [ "$1" = "config" ]; then
+                echo '_perf.label '$DEV
+                echo $DEV'_perf.warning 85:'
+                echo $DEV'_perf.critical 60:'
+        else
+        	echo -n '_perf.value '
+        	PERF=`echo $linf | awk '{print $15}'`
+        	if [[ "$PERF" == *Unknown* ]] || [[ "$PERF" == "" ]] ; then
+                	PERF='U'
+        	fi
+        	echo $PERF
+	fi
+done
+echo
+
+echo 'multigraph hdsentinel_lifetime'
+if [ "$1" = "config" ]; then
+        echo 'graph_title HDSentinel Estimated Drive Lifetime'
+        echo 'graph_vlabel days'
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_category disk'
+        echo 'graph_info Drive estimated remaining lifetime calculated by HDSentinel from SMART'
+fi
+for linf in $SLD; do
+        DEV=`echo $linf | awk '{printf $4}' | awk '{printf substr($0,6)}'`
+        echo -n $DEV
+        if [ "$1" = "config" ]; then
+                echo '_life.label '$DEV
+                echo $DEV'_life.warning 180:'
+		echo $DEV'_life.critical 90:'
+        else
+        	echo -n '_life.value '
+        	LIFE=`echo $linf | awk 'match($0,"lifetime: "){print substr($0,RSTART+10)}' | tr -dc '[0-9]'`
+        	if [[ "$LIFE" == *Unknown* ]] || [[ "$LIFE" == "" ]] ; then
+                	LIFE='U'
+        	fi
+        	echo $LIFE
+	fi
+done
+echo
+IFS=$OLDIFS
+unset IFS
