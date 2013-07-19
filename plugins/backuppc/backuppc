@@ -1,0 +1,150 @@
+#! /bin/sh
+# Copyright (C) 2013 - LGPL - Steve Schnepp <steve.schnepp@pwkf.org>
+#
+#    [backuppc]
+#    user backuppc
+#    env.pcdir /var/lib/BackupPC/pc
+#
+#%# family=backuppc
+#%# capabilities=autoconf
+
+PCDIR=${pcdir:-"/var/lib/BackupPC/pc"}
+HOSTS=$(cd ${PCDIR} 2>/dev/null && ls -1)
+
+if [ "$1" = "autoconf" ]; then
+	[ ! -z "${HOSTS}" ] && echo "yes" && exit 0
+	echo "no"
+	exit 1
+fi
+
+if [ "$1" = "config" ]; then
+	echo "multigraph backuppc_sizes"
+	echo "graph_title BackupPC - Last Backup Size"
+	echo "graph_args --base 1024 -l 0"
+	echo "graph_vlabel Bytes"
+	echo "graph_category Backuppc"
+
+	for h in ${HOSTS}
+	do
+		echo "${h}_full.label ${h} Full"
+		echo "${h}_incr.label ${h} Incr"
+	done
+
+	echo "multigraph backuppc_ages"
+	echo "graph_title BackupPC - Last Backup Age"
+	echo "graph_args -l 0"
+	echo "graph_vlabel days"
+	echo "graph_category Backuppc"
+
+	for h in ${HOSTS}
+	do
+		echo "${h}_full.label ${h} Full"
+		echo "${h}_incr.label ${h} Incr"
+	done
+
+	exit 0
+fi
+
+echo "multigraph backuppc_sizes"
+for h in $HOSTS
+do
+	SIZE=$(awk '/full/ { size = $6 } END { print size; }' ${PCDIR}/${h}/backups)
+	echo "${h}_full.value $SIZE"
+	SIZE=$(awk '/incr/ { size = $6 } END { print size; }' ${PCDIR}/${h}/backups)
+	echo "${h}_incr.value $SIZE"
+done
+
+echo "multigraph backuppc_ages"
+for h in $HOSTS
+do
+	SIZE=$(awk '/full/ { age = systime() - $3 } END { print age / 3600 / 24; }' ${PCDIR}/${h}/backups)
+	echo "${h}_full.value $SIZE"
+	SIZE=$(awk '/incr/ { age = systime() - $3 } END { print age / 3600 / 24; }' ${PCDIR}/${h}/backups)
+	echo "${h}_incr.value $SIZE"
+done
+
+<<'__END__'
+
+Extract for the BackupPC doc, http://backuppc.sourceforge.net/faq/BackupPC.html
+
+backups
+
+A tab-delimited ascii table listing information about each successful backup,
+one per row. The columns are:
+
+    num
+	The backup number, an integer that starts at 0 and increments for each
+	successive backup. The corresponding backup is stored in the directory num
+	(eg: if this field is 5, then the backup is stored in
+	__TOPDIR__/pc/$host/5).
+
+    type
+	Set to "full" or "incr" for full or incremental backup.
+
+    startTime
+	Start time of the backup in unix seconds.
+
+    endTime
+	Stop time of the backup in unix seconds.
+
+    nFiles
+	Number of files backed up (as reported by smbclient, tar, rsync or
+	ftp).
+
+    size
+	Total file size backed up (as reported by smbclient, tar, rsync or
+	ftp).
+
+    nFilesExist
+	Number of files that were already in the pool (as determined by
+	BackupPC_dump and BackupPC_link).
+
+    sizeExist
+	Total size of files that were already in the pool (as determined by
+	BackupPC_dump and BackupPC_link).
+
+    nFilesNew
+	Number of files that were not in the pool (as determined by
+	BackupPC_link).
+
+    sizeNew
+	Total size of files that were not in the pool (as determined by
+	BackupPC_link).
+
+    xferErrs
+	Number of errors or warnings from smbclient, tar, rsync or ftp.
+
+    xferBadFile
+	Number of errors from smbclient that were bad file errors (zero
+	otherwise).
+
+    xferBadShare
+	Number of errors from smbclient that were bad share errors (zero
+	otherwise).
+
+    tarErrs
+	Number of errors from BackupPC_tarExtract.
+
+    compress
+	The compression level used on this backup. Zero or empty means no
+	compression.
+
+    sizeExistComp
+	Total compressed size of files that were already in the pool (as
+	determined by BackupPC_dump and BackupPC_link).
+
+    sizeNewComp
+	Total compressed size of files that were not in the pool (as determined
+	by BackupPC_link).
+
+    noFill
+	Set if this backup has not been filled in with the most recent previous
+	filled or full backup. See $Conf{IncrFill}.
+
+    fillFromNum
+	If this backup was filled (ie: noFill is 0) then this is the number of
+	the backup that it was filled from
+
+    mangle
+	Set if this backup has mangled file names and attributes. Always true
+	for backups in v1.4.0 and above. False for all backups prior to v1.4.0.
