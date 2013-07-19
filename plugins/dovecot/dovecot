@@ -3,8 +3,8 @@
 #%# family=auto
 #%# capabilities=autoconf
 
+use Munin::Plugin;
 
-$statefile = "/var/lib/munin-node/plugin-state/root/plugin-dovecot.state";
 $pos   = undef;
 $connected = 0;
 $connectedimap = 0;
@@ -23,7 +23,6 @@ $aborted = 0;
 
 $logfile = $ENV{'LOGFILE'} || '/var/log/mail.log';
 $DOVEADM = "/usr/bin/doveadm";
-
 
 if ( $ARGV[0] and $ARGV[0] eq "autoconf" ) {
 
@@ -161,17 +160,7 @@ $connectionspop3 =~ s/\s+$//;
 $connected   = $connectedimap   + $connectedpop3;
 $connections = $connectionsimap + $connectionspop3;
 
-if (-f "$statefile") {
-  if (!open (IN, "$statefile")) {
-    print "Cannot open statefile $statefile for reading: $!\n";
-    exit 4;
-  }
-  my $in = <IN>;
-  if ($in =~ /^(\d+)$/) {
-     ($pos) = ($1);
-  }
-  close IN;
-}
+my ($pos) = restore_state();
 
 $startsize = (stat $logfile)[7];
 
@@ -189,16 +178,7 @@ if ($startsize < $pos) {
 parseDovecotfile ($logfile, $pos, $startsize);
 $pos = $startsize;
 
-if (-l $statefile) {
-  die("$statefile is a symbolic link, refusing to touch it.");
-}
-
-if (!open (OUT, ">$statefile")) {
-  print "Cannot open statefile $statefile for writing: $!\n";
-  exit 4;
-}
-print OUT "$pos\n";
-close OUT;
+save_state($pos);
 
 print "multigraph dovecot_connections\n";
 print "connections.value $connections\n";
