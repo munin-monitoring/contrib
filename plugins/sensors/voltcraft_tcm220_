@@ -1,0 +1,144 @@
+#!/usr/bin/perl -w
+##########################################################################################################
+#
+# Munin plugin to monitor values reported by a Voltcraft TCM 220 or 320 temperature swicth module 
+# connected to a serial port. A cable needs to be soldered to the module's dedicated data output pads: 
+# pad no. 9 (GND) to pin no. 5 of the serial port, pad no. 17 (DATA_OUT) to pin no. 2 of the serial port 
+# and pad no. 18 (CLOCK) to pin no. 3 of the serial port. For more details, check out the documentation 
+# that came with your Voltcraft TCM 220/320 temperature swicth module.
+#
+# In order to use this plugin, copy it to the munin's plugin directory (eg. /usr/share/munin/plugins)
+# under the name "voltcraft_tcm220_". Don't change this filename! Follow these steps:
+#
+# 1. Symlink it to munin's configured plugins directory (eg. /etc/munin/plugins) with names suggesting
+#    the locations of the  modules you wish to monitor, eg: "voltcraft_tcm220_serverroom1".
+#
+#    Important: make sure to use the same names in your symlinks and other config places!
+#
+# 2. In /etc/munin/plugin-conf.d/munin-node add the following, to be able to contact the modules via 
+#    serial ports (obviously replacing these with your own data):
+#
+#    [voltcraft_tcm220_serverroom1]
+#    user root  			# Need to run the plugin as root, in order to access the RS232 port
+#    group root
+#    env.Port /dev/ttyS0		# Serial port where the module is connected to
+#    env.Location Server Room 1		# Friendly name for the module location, printed on the graph
+#    env.CH1name Ceiling		# Friendly name for the CH1 sensor location
+#    env.CH1crit 35			# Critical temperature value which when reached, Munin should alert
+#    env.CH2name Floor			# Friendly name for the CH2 sensor location
+#    env.CH2crit 35			# Critical temperature value which when reached, Munin should alert
+#
+# 3. Restart the munin node by 'service munin-node restart'.
+#
+#    If all went well, after 5 minutes or so you should have tne new module's graphs listed on the Web 
+#    Interface of Munin.
+#
+# Note: the plugin waits maximum 11 seconds for the module to report the current temperature values to
+# the serial port. If no value is reported, or the serial cable is unplugged, it returns Undefined to 
+# Munin. According to the documentation, the module can be configured to report values every 2 seconds
+# instead the 10 seconds default - this can be used to speed up the data acquisition process, however
+# it can decrease battery life (with default values, two AAA alkaline batteries last cca 2 years).
+#
+# Tested & working with munin v.2.0.14 on Ubuntu LTS 12.04.2
+# Created in 2013 by robi
+#  v0.1 - initial version
+#########################################################################################################
+## Magic Markers
+ #%# family=manual
+#########################################################################################################
+use diagnostics;
+use strict;
+use Device::SerialPort;
+use warnings;
+
+#########################################################################################################
+## Receive environmentals
+my $Portty = $ENV{'Port'};
+my $Location = $ENV{'Location'};
+my $CH1name = $ENV{'CH1name'};
+my $CH1crit = $ENV{'CH1crit'};
+my $CH2name = $ENV{'CH2name'};
+my $CH2crit = $ENV{'CH2crit'};
+
+##########################################################################################################
+## Determine scriptname
+my $Modname = undef;
+$0 =~ /voltcraft_tcm220_(.+)*$/;
+unless ($Modname = $1) {
+print "Sorry, you did not symlink correctly the script! Please symlink as eg. voltcraft_tcm220_serverroom1\n";
+  exit 2;
+}
+
+##########################################################################################################
+## Configuration
+if(exists $ARGV[0] and $ARGV[0] eq "config") {
+  print "graph_args --base 1000\n";
+  print "graph_title " . $Location . " temperatures\n";
+  print "graph_vlabel degrees Celsius\n";
+  print "graph_category sensors\n";
+  print "graph_scale no\n";
+  print "graph_info Measured temperature values in " . $Location . " by a Voltcraft TCM 220 temperature switch module.\n";
+  print "ch1.label " . $CH1name . "\n";
+  print "ch1.critical ". $CH1crit . "\n";
+  print "ch1.info " . $CH1name . " temperature, connected to CH1.\n";
+  print "ch2.label " . $CH2name . "\n";
+  print "ch2.critical ". $CH2crit . "\n";
+  print "ch2.info " . $CH2name . " temperature, connected to CH2.\n";
+  print "\n";
+  exit;
+}
+
+##########################################################################################################
+## Initiate serial connection
+my $port = Device::SerialPort->new($Portty);
+$port->baudrate(9600);
+$port->parity("none");
+$port->handshake("none");
+$port->databits(8);
+$port->stopbits(1);
+$port->read_char_time(0);
+$port->read_const_time(20);
+
+##########################################################################################################
+## Execution
+my $response = "";
+my $resptime = (time() + 10);
+
+while (1) {
+	my $curtime = time();
+	my ($count, $data) = $port->read(255);
+	if ($count > 0) {
+		$response .= $data;
+		last if ($data // "");
+	}
+	last if ($curtime > $resptime);
+}
+
+my $ch1temp = "U";
+my $ch2temp = "U";
+
+if ($response // "") {
+	my $hex = unpack 'H*', $response; 
+	#print "$response\n";	#debug
+	#print "$hex\n";	#$hex should be something like "abc102999babc2017677" for +29.9 and +17.6
+
+	my $ch1z ="";
+	my $ch2z ="";
+
+	if (substr($hex, 4, 1) == "5") {
+		$ch1z ="-";
+	}
+	if (substr($hex, 14, 1) == "5") {
+		$ch2z ="-";
+	}
+
+	$ch1temp = $ch1z . substr($hex, 5, 2) . "." . substr($hex, 7, 1);
+	$ch2temp = $ch2z . substr($hex, 15, 2) . "." . substr($hex, 17, 1);
+}
+
+print "ch1.value $ch1temp\n";
+print "ch2.value $ch2temp\n";
+print "\n";
+
+##########################################################################################################
+## End
