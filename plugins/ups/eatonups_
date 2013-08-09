@@ -1,0 +1,280 @@
+#!/bin/sh
+
+###################################################################################################
+#
+# Multigraph munin plugin to monitor Eaton UPS-es through the web interface of the SNMP add-on card.
+# The plugin script simply parses the /PSummary.html page and extracts the values from there.
+#
+# To use this plugin, copy it to the munin's plugin directory (eg. /usr/share/munin/plugins)
+# under the name "eatonups_". Don't change this filename! Follow these steps:
+#
+# 1. Give names to your UPSes, in fqdn style. Like "ups.server1" or "ups.server2". Make sure
+#    you can resolve these names as DNS names from the munin machine. You can simply add them
+#    as entries in /etc/hosts.
+#
+# 2. Then symlink it to munin's configured plugins directory (eg. /etc/munin/plugins) with names
+#    according to the devices you wish to monitor, eg:
+#
+#    eatonups_ups.server1
+#    eatonups_ups.server2
+#
+# 3. In  /etc/munin/munin.conf just add these lines for them. Yes, 127.0.0.1 is correct
+#    because that points to the munin-node address not the UPS address.
+#
+#    [eatonups_ups.server1]
+#        address 127.0.0.1
+#
+#    [eatonups_ups.server2]
+#        address 127.0.0.1
+#
+# 4. Restart the munin node by 'service munin-node restart'.
+#
+#    If all went well, after 5 minutes or so you should have two additional nodes listed
+#    on the Web Interface of munin.
+#
+# Tested & working with Eaton USP model PW9130 1500VA-R, with installed ConnectUPS Web/SNMP Card
+# firmware revision V4.36 with munin v.2.0.14 and Ubuntu LTS 12.04
+# Created in 2013 by robi
+#  v0.1 - initial version
+##################################################################################################
+
+case $0 in
+    *eatonups_*)
+        hostname=${0##*/eatonups_}
+        ;;
+esac
+
+case $1 in
+   config)
+
+echo "multigraph volt_ac"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title AC Voltage Mains"
+echo "graph_vlabel Volts"
+echo "graph_category sensors"
+echo "graph_scale no"
+echo "graph_info Input and Output voltage of the UPS."
+echo "volt_in.label Input"
+echo "volt_in.critical 210:250"
+echo "volt_in.info Input mains voltage of the UPS."
+echo "volt_out.label Output"
+echo "volt_out.critical 210:250"
+echo "volt_out.info Output mains voltage of the UPS."
+echo
+echo "multigraph volt_batt"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title DC Voltage Battery"
+echo "graph_vlabel Volts"
+echo "graph_category sensors"
+echo "graph_scale no"
+echo "graph_info Voltage of the internal battery of the UPS."
+echo "volt_batt.label Battery"
+echo "volt_batt.critical 45:65"
+echo "volt_batt.info Battery voltage of the UPS."
+echo
+echo "multigraph curr_out"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title Output Current"
+echo "graph_vlabel Ampers"
+echo "graph_category sensors"
+echo "graph_scale no"
+echo "graph_info Output current of the UPS."
+echo "curr_out.label Current"
+echo "curr_out.critical 40"
+echo "curr_out.info Output current of the UPS."
+echo
+echo "multigraph power"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title Power"
+echo "graph_vlabel W or VA"
+echo "graph_category sensors"
+echo "graph_scale no"
+echo "graph_info Output Power of the UPS."
+echo "power_true.label True"
+echo "power_true.critical 800"
+echo "power_true.info True Power output of the UPS (Watts)."
+echo "power_appr.label Apparent"
+echo "power_appr.critical 1500"
+echo "power_appr.info Apparent Power output of the UPS (VA)."
+echo
+echo "multigraph runtime"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title Runtime"
+echo "graph_vlabel minutes"
+echo "graph_category sensors"
+echo "graph_scale no"
+echo "graph_info Remaining runtime of the UPS."
+echo "runtime.label Runtime"
+echo "runtime.critical 30:"
+echo "runtime.info Remaining runtime of the UPS (minutes)."
+echo
+echo "multigraph load"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title Load"
+echo "graph_vlabel %"
+echo "graph_category sensors"
+echo "graph_scale no"
+echo "graph_info Load of the UPS."
+echo "load.label Load"
+echo "load.critical 60"
+echo "load.info Load of the UPS (percent)."
+echo
+echo "multigraph freq_in"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title Frequency Input"
+echo "graph_vlabel Hz"
+echo "graph_category sensors"
+echo "graph_scale no"
+echo "graph_info Input frequency of the UPS."
+echo "freq_in.label In"
+echo "freq_in.critical 45:55"
+echo "freq_in.info Input frequency of the UPS."
+echo
+echo "multigraph freq_out"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title Frequency Output"
+echo "graph_vlabel Hz"
+echo "graph_category sensors"
+echo "graph_scale no"
+echo "graph_info Output frequency of the UPS."
+echo "freq_out.label Out"
+echo "freq_out.critical 45:55"
+echo "freq_out.info Output frequency of the UPS."
+echo
+echo "multigraph temp"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title Temperature"
+echo "graph_vlabel degrees Celsius"
+echo "graph_category sensors"
+echo "graph_scale no"
+echo "graph_info Internal Temperature of the UPS."
+echo "temp.label Load"
+echo "temp.critical 80"
+echo "temp.info Internal Temperature of the UPS (degrees Celsius)."
+echo
+
+        exit 0;;
+esac
+
+statusfile=/tmp/eatonups_munin_$hostname.html
+
+wget -O $statusfile http://$hostname/PSummary.html -o /dev/null --timeout 9
+
+if [ -f "$statusfile" ]
+then
+  volt_in=`sed -n -e '/Voltage In/{n;p;}' $statusfile | sed 's/<[^>]*>//g'`
+	volt_out=`sed -n -e '/Voltage Out/{n;p;}' $statusfile | sed 's/<[^>]*>//g'`
+	volt_batt=`sed -n -e '/Voltage</{n;p;}' $statusfile | sed 's/<[^>]*>//g'`
+	curr_out=`sed -n -e '/Current Out/{n;p;}' $statusfile | sed 's/<[^>]*>//g'`
+	power_true=`sed -n -e '/True Power/{n;p;}' $statusfile | sed 's/<[^>]*>//g'`
+	power_appr=`sed -n -e '/Apparent Power/{n;p;}' $statusfile | sed 's/<[^>]*>//g'`
+	runtime=`sed -n -e '/Runtime/{n;p;}' $statusfile | sed 's/<[^>]*>//g'`
+	freq_in=`sed -n -e '/Frequency/{n;p;}' $statusfile | sed 's/<[^>]*>//g' | sed -n '1p'`
+	freq_out=`sed -n -e '/Frequency/{n;p;}' $statusfile | sed 's/<[^>]*>//g' | sed -n '2p'`
+	load=`sed -n -e '/UPS Load/{n;p;}' $statusfile | sed 's/<[^>]*>//g'`
+	temp=`sed -n -e '/UPS Internal Temperature/{n;p;}' $statusfile | sed 's/<[^>]*>//g'`
+
+	rm -f $statusfile
+fi
+
+echo "multigraph volt_ac"
+echo -n "volt_in.value "
+if [ -n "$volt_in" ]; then
+        echo "$volt_in"
+else
+        echo "U"
+fi
+echo -n "volt_out.value "
+if [ -n "$volt_out" ]; then
+        echo "$volt_out"
+else
+        echo "U"
+fi
+echo
+
+echo "multigraph volt_batt"
+echo -n "volt_batt.value "
+if [ -n "$volt_batt" ]; then
+        echo "$volt_batt"
+else
+        echo "U"
+fi
+echo
+
+echo "multigraph curr_out"
+echo -n "curr_out.value "
+if [ -n "$curr_out" ]; then
+        echo "$curr_out"
+else
+        echo "U"
+fi
+echo
+
+echo "multigraph power"
+echo -n "power_true.value "
+if [ -n "$power_true" ]; then
+        echo "$power_true"
+else
+        echo "U"
+fi
+echo -n "power_appr.value "
+if [ -n "$power_appr" ]; then
+        echo "$power_appr"
+else
+        echo "U"
+fi
+echo
+
+echo "multigraph runtime"
+echo -n "runtime.value "
+if [ -n "$runtime" ]; then
+        echo "$runtime"
+else
+        echo "U"
+fi
+echo
+
+echo "multigraph load"
+echo -n "load.value "
+if [ -n "$load" ]; then
+        echo "$load"
+else
+        echo "U"
+fi
+echo
+
+echo "multigraph freq_in"
+echo -n "freq_in.value "
+if [ -n "$freq_in" ]; then
+        echo "$freq_in"
+else
+        echo "U"
+fi
+echo
+
+echo "multigraph freq_out"
+echo -n "freq_out.value "
+if [ -n "$freq_out" ]; then
+        echo "$freq_out"
+else
+        echo "U"
+fi
+echo
+
+echo "multigraph temp"
+echo -n "temp.value "
+if [ -n "$temp" ]; then
+        echo "$temp"
+else
+        echo "U"
+fi
+echo
