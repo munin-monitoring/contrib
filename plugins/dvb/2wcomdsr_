@@ -1,0 +1,240 @@
+#!/bin/sh
+
+###################################################################################################
+#
+# Multigraph munin plugin to monitor 2wcom DSR01/DSR02 Professional Audio Satellite-Receivers 
+# through their web interface status page.
+#
+# To use this plugin, copy it to the munin's plugin directory (eg. /usr/share/munin/plugins)
+# under the name "2wcomdsr_". Don't change this filename! Follow these steps:
+#
+# 1. Give names to your receivers, in fqdn style. Like "dvbs.radio1" or "dvbs.radio2". Make sure
+#    you can resolve these names as DNS names from the munin machine. You can simply add them
+#    as entries in /etc/hosts.
+#
+# 2. Then symlink it to munin's configured plugins directory (eg. /etc/munin/plugins) with names
+#    according to the devices you wish to monitor, eg:
+#
+#    2wcomdsr_dvbs.radio1
+#    2wcomdsr_dvbs.radio2
+#
+# 3. In  /etc/munin/munin.conf just add these lines for them. Yes, 127.0.0.1 is correct
+#    because that points to the munin-node address not the UPS address.
+#
+#    [2wcomdsr_dvbs.radio1]
+#	address 127.0.0.1
+#
+#    [2wcomdsr_dvbs.radio2]
+#	address 127.0.0.1
+#
+# 4. In /etc/munin/plugin-conf.d/munin-node add the web interface login, to be able to read
+#    the reveivers status pages (obviously replacing these with your own data):
+#
+#    [2wcomdsr_*]
+#    env.webuser admin
+#    env.webpass admin
+#
+#    The above is for all the receivers using the same username and password. If they are different
+#    you can add as many entries as you want, by removing the wildcard and giving the entire name.
+#
+# 5. Restart the munin node by 'service munin-node restart'.
+#
+#    If all went well, after 5 minutes or so you should have two additional nodes listed
+#    on the Web Interface of munin.
+#
+# Tested & working with several 2wcom DSR01 Basic receivers, with Munin v.2.0.14 on Ubuntu LTS 12.04
+# Created in 2013 by robi
+#  v0.2 - added Viterbi/LDPC and RS/BCH BER graphs
+#  v0.1 - initial version
+##################################################################################################
+
+case $0 in
+    *2wcomdsr_*)
+	hostname=${0##*/2wcomdsr_}
+	;;
+esac
+
+case $1 in
+   config)
+
+echo "multigraph cpn"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title Carrier/Noise Ratio"
+echo "graph_vlabel dB"
+echo "graph_category status"
+echo "graph_scale no"
+echo "graph_info Calculated carrier/noise ratio of the signal. To avoid data errors, the decoding of a received signal requires a minimum C/N ratio that depends on the FEC rate."
+echo "cpn.label C/N"
+echo "cpn.critical 10:"
+echo "cpn.info Calculated carrier/noise ratio of the signal."
+echo
+echo "multigraph cfo"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title Carrier Frequency Offset"
+echo "graph_vlabel MHz"
+echo "graph_category status"
+echo "graph_scale no"
+echo "graph_info Incoming signals from the LNB are subject to frequency tolerances, thus check the 'CFO Error' under menu item 'Status>Tuner'. This value represents the margin by which the entered frequency deviates from the actual frequency. In order to maximize reception quality the CFO error should be minimized."
+echo "cfo.label CFO"
+echo "cfo.critical 250"
+echo "cfo.info Carrier Frequency Offset."
+echo
+echo "multigraph inp"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title RF Signal Level"
+echo "graph_vlabel dBm"
+echo "graph_category status"
+echo "graph_scale no"
+echo "graph_info Input for the connection of the receiving LNB of the satellite antenna. Admissible RF signal input range is -82 to -10 dBm."
+echo "inp.label RF level"
+echo "inp.critical -65:"
+echo "inp.info Level of the RF signal at the 'RF-In' input."
+echo
+echo "multigraph tnr"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title Tuner system Status"
+echo "graph_vlabel 1=OK, 0=BAD"
+echo "graph_category status"
+echo "graph_scale no"
+echo "graph_info Tuner system status: 1 = 'OK' or 0 = 'BAD'. It is OK if all the following values are OK: AGC (Automatic Gain Control), CE (Carrier Frequency Offset Estimation), Symbol Timing, Carrier Locked, Viterbi error correction."
+echo "tnr.label Tuner status"
+echo "tnr.critical 1:"
+echo "tnr.info Tuner system status: 1 = 'OK' or 0 = 'BAD'."
+echo
+echo "multigraph led2"
+echo "host_name $hostname"
+echo "graph_args --base 1000"
+echo "graph_title Warning LED"
+echo "graph_vlabel 0=OFF; >0=ON"
+echo "graph_category status"
+echo "graph_scale no"
+echo "graph_info Every monitoring function has a checkbox 'warning LED on' to select if the 'Warning' LED on the web interface and the front panel of the device is activated on alarms or not."
+echo "ld2.label Warning"
+echo "ld2.critical 1"
+echo "ld2.info Warning LED: 0 = OFF, greater than 0 = ON."
+echo
+echo "multigraph ber_vt"
+echo "host_name $hostname"
+echo "graph_args --base 1000 --logarithmic"
+echo "graph_title BER Viterbi/LDPC"
+echo "graph_vlabel Bit Error Rate"
+echo "graph_category status"
+#echo "graph_scale no"
+echo "graph_info Detected bit error rate (BER) before the Viterbi error correction."
+echo "ber_vt.label Viterbi/LDPC BER"
+echo "ber_vt.critical 0.0002"
+echo "ber_vt.info BER before Viterbi error correction"
+echo
+echo "multigraph ber_rs"
+echo "host_name $hostname"
+echo "graph_args --base 1000 --logarithmic"
+echo "graph_title BER Reed Solomon/BCH"
+echo "graph_vlabel Bit Error Rate"
+echo "graph_category status"
+#echo "graph_scale no"
+echo "graph_info Detected bit error rate (BER) before the Reed Solomon error correction."
+echo "ber_rs.label RS/BCH BER"
+echo "ber_rs.critical 0.0002"
+echo "ber_rs.info BER before Reed Solomon error correction"
+echo 
+
+	exit 0;;
+esac
+
+statusfile=/tmp/2wcomdsr_munin_$hostname.html
+
+wget -O $statusfile --user=$webuser --password=$webpass http://$hostname/stattuner.xml -o /dev/null --timeout 9
+
+if [ -f "$statusfile" ]
+then
+	cpn=`grep 'content_1<' $statusfile | sed 's/<[^>]*>//g' | sed 's/content_1//g;s/dB//g;s/ //g'`
+	cfo=`grep 'content_2<' $statusfile | sed 's/<[^>]*>//g' | sed 's/content_2//g;s/MHz//g;s/ //g'`
+	inp=`grep 'content_3<' $statusfile | sed 's/<[^>]*>//g' | sed 's/content_3//g;s/dBm//g;s/ //g'`
+	tnr=`grep 'content_10<' $statusfile | sed 's/<[^>]*>//g' | sed 's/content_10//g;s/ //g'`
+	ld2=`grep 'led_2<' $statusfile | sed 's/<[^>]*>//g' | sed 's/led_2//g;s/ //g'`
+	bev=`grep 'content_12<' $statusfile | sed 's/<[^>]*>//g' | sed 's/content_12//g;s/ //g'`
+	bes=`grep 'content_13<' $statusfile | sed 's/<[^>]*>//g' | sed 's/content_13//g;s/ //g'`
+
+	rm -f $statusfile
+fi
+
+echo "multigraph cpn"
+echo -n "cpn.value "
+if [ -n "$cpn" ]; then
+	echo "$cpn"
+else
+	echo "U"
+fi
+echo
+
+
+echo "multigraph cfo"
+echo -n "cfo.value "
+if [ -n "$cfo" ]; then
+	echo "$cfo"
+else
+	echo "U"
+fi
+echo
+
+
+echo "multigraph inp"
+echo -n "inp.value "
+if [ -n "$inp" ]; then
+	echo "$inp"
+else
+	echo "U"
+fi
+echo
+
+
+echo "multigraph tnr"
+echo -n "tnr.value "
+if [ -n "$tnr" ]; then
+	case "$tnr" in
+		"OK" ) echo "1";;
+		"BAD" ) echo "0";;
+	esac
+else
+	echo "U"
+fi
+echo
+
+
+echo "multigraph led2"
+echo -n "ld2.value "
+if [ -n "$ld2" ]; then
+	echo "$ld2"
+else
+	echo "U"
+fi
+echo
+
+echo "multigraph ber_vt"
+echo -n "ber_vt.value "
+if [ -n "$bev" ]; then
+        case "$bev" in
+                "--" ) echo "U";;
+                * ) printf %.8f $bev && echo;;
+        esac
+else
+        echo "U"
+fi
+echo
+
+echo "multigraph ber_rs"
+echo -n "ber_rs.value "
+if [ -n "$bes" ]; then
+        case "$bes" in
+                "--" ) echo "U";;
+                * ) printf %.8f $bes && echo;;
+        esac
+else
+        echo "U"
+fi
+echo
+
