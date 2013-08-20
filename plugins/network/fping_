@@ -1,0 +1,41 @@
+#!/bin/sh
+#
+# Plugin to monitor a server/network availability.
+# Author: Thomas VIAL
+#
+# Requirements:
+# * fping
+#
+
+target=`basename $0 | sed 's/^fping_//g'`
+#target='dev.instalbu.ms'
+#target='127.0.0.1'
+
+if [ "$1" = "config" ]; then
+  echo "graph_title ${target} availability"
+  echo "graph_args --upper-limit 100"
+  echo "graph_vlabel Availability"
+  echo "graph_category network"
+  # Success
+  echo "fping_${target}_success.label Reachable"
+  echo "fping_${target}_success.type GAUGE"
+  echo "fping_${target}_success.color 00CC00CC"
+  # Failure
+  echo "fping_${target}_failure.label Unreachable"
+  echo "fping_${target}_failure.type AREA"
+  echo "fping_${target}_failure.color ff0000"
+  exit 0
+fi
+
+
+
+fping -q $target
+status=$?
+
+if [ $status -eq 0 ]; then
+    echo "fping_${target}_success.value 100"
+    echo "fping_${target}_failure.value 0"
+else
+    echo "fping_${target}_success.value 0"
+    echo "fping_${target}_failure.value 100" 
+fi
