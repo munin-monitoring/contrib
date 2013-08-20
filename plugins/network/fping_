@@ -1,41 +1,50 @@
 #!/bin/sh
 #
-# Plugin to monitor a server/network availability.
-# Author: Thomas VIAL
-#
-# Requirements:
+# Description  : Plugin to monitor a server/network availability.
+# Author       : Thomas VIAL
+# Usage        : ln -s /path/to/fping_ /etc/munin/fping_www.google.com
+# Explaination : Will graph connection to www.google.com  
+# Requirements :
 # * fping
 #
 
 target=`basename $0 | sed 's/^fping_//g'`
-#target='dev.instalbu.ms'
-#target='127.0.0.1'
+item=`echo $target | sed -e 's/\.//g'`
+
+#
+# Config
+#
 
 if [ "$1" = "config" ]; then
   echo "graph_title ${target} availability"
-  echo "graph_args --upper-limit 100"
+  echo "graph_args -l 0 -u 100"
   echo "graph_vlabel Availability"
   echo "graph_category network"
+  echo "graph_info Displays Network Availability"
   # Success
-  echo "fping_${target}_success.label Reachable"
-  echo "fping_${target}_success.type GAUGE"
-  echo "fping_${target}_success.color 00CC00CC"
+  echo "fping_${item}_success.label Reachable"
+  #echo "fping_${item}_success.type GAUGE"
+  echo "fping_${item}_success.colour 00CC00CC"
   # Failure
-  echo "fping_${target}_failure.label Unreachable"
-  echo "fping_${target}_failure.type AREA"
-  echo "fping_${target}_failure.color ff0000"
+  echo "fping_${item}_failure.label Unreachable"
+  echo "fping_${item}_failure.type AREA"
+  echo "fping_${item}_failure.colour ff0000"
   exit 0
 fi
 
-
+#
+# Let's go!
+#
 
 fping -q $target
 status=$?
 
 if [ $status -eq 0 ]; then
-    echo "fping_${target}_success.value 100"
-    echo "fping_${target}_failure.value 0"
+    # Success
+    echo "fping_${item}_success.value 100"
+    echo "fping_${item}_failure.value 0"
 else
-    echo "fping_${target}_success.value 0"
-    echo "fping_${target}_failure.value 100" 
+    # Failure
+    echo "fping_${item}_success.value 0"
+    echo "fping_${item}_failure.value 100" 
 fi
