@@ -1,0 +1,551 @@
+#!/usr/bin/perl
+###############################################################################
+#
+# Multigraph munin plugin to monitor Ubiquiti AirOS F (airFiber) devices various parameters.
+#
+# To use this plugin, copy it to the munin's plugin directory (eg. /usr/share/munin/plugins) 
+# under the name "ubiquiti_airfiber_". Don't change this filename! Follow these steps:
+#
+# 1. Give names to your devices, in fqdn style. Like "master.wlan" or  "slave.wlan". To make the
+#    system understand that, in your /etc/hosts file, add to localhost these names which corespond 
+#    to your devices:
+#    192.168.2.2	master.wlan
+#    192.168.2.3	slave.wlan
+#    You could of course add these to your network's local DNS server if you want to.
+#
+# 2. Then symlink it to munin's configured plugins directory (eg. /etc/munin/plugins) with names
+#    according to the devices you wish to monitor, eg:
+#    ubiquiti_airfiber_master.wlan
+#    ubiquiti_airfiber_slave.wlan
+#
+#    Important: make sure to use the same names in your symlinks and other config places!
+#
+# 3. In /etc/munin/plugin-conf.d/munin-node add the following, to be able to contact
+#    those devices via telnet (obviously replacing these with your own data):
+# 
+#    [ubiquiti_airos_master.wlan]
+#    env.TelnetPort 23		# Port of the Telnet service configured in AirOS F web interface
+#    env.TelnetUser foobar	# Username to log in
+#    env.TelnetPass raboof	# Password to log in
+#    env.PingAddr 192.168.2.3	# An IP address to ping, typically the other wireless device or a gateway
+#    env.PingName slave.wlan	# Friendly name of the pinged device, to display on the ping graph
+#
+#    [ubiquiti_airos_slave.wlan]
+#    env.TelnetPort 23
+#    env.TelnetUser foobar
+#    env.TelnetPass raboof
+#    env.PingAddr 192.168.2.2
+#    env.PingName master.wlan
+#
+# 4. In /etc/munin/munin.conf add them as new virtual nodes:
+#
+#    [master.wlan]
+#        address 127.0.0.1
+#
+#    [slave.wlan]
+#        address 127.0.0.1
+#
+# 5. Restart the munin node by 'service munin-node restart'.
+#
+#    If all went well, after 5 minutes or so you should have two additional nodes listed 
+#    on the Web Interface of munin.
+#
+# Plugin based on my similar one for AirMax devices:
+# http://community.ubnt.com/t5/airOS-Software-Configuration/Updated-airOS-plugin-for-Munin-monitoring/td-p/469169
+#
+# Tested & working with munin v.2.0.14 and AirOS F v1.1.2.
+# Created in 2013 by robi
+#  v0.2 - cleared up stuff related to naming and added ping graphs from munin-node
+#  v0.1 - initial version, based on ubiquiti_airos_ v0.7.
+##############################################################################
+## Magic Markers
+ #%# family=manual
+##############################################################################
+use diagnostics;
+use Net::Telnet;
+use strict;
+use warnings;
+##############################################################################
+## Receive environmentals
+my $TelnetPort = $ENV{'TelnetPort'};
+my $TelnetUser = $ENV{'TelnetUser'};
+my $TelnetPass = $ENV{'TelnetPass'};
+my $PingAddr = $ENV{'PingAddr'};
+my $PingName = $ENV{'PingName'};
+my $HostLo = qx("hostname");
+chomp ($HostLo);
+##############################################################################
+## Define variables
+my $graph_period = "second";
+my ($load, $uptime, $ping_time, $packet_loss, $cpuuser, $cpusystem, $cpunice, $cpuidle, $cpuiowait, $cpuirq, $cpusoftirq, $ping_timelo, $packet_losslo);
+my ($rxrate, $txrate, $rxpower0, $rxpower1, $powerout, $feet, $dist, $temp0, $temp1);
+my ($rssi0, $rssi1, $baseline, $fade, $txfreq, $rxfreq, $txmodrate, $speed);
+$load = $uptime = $ping_time = $packet_loss = $cpuuser = $cpusystem = $cpunice = $cpuidle = $cpuiowait = $cpuirq = $cpusoftirq = $ping_timelo = $packet_losslo = "U\n";
+$rxrate = $txrate = $rxpower0 = $rxpower1 = $powerout = $feet = $dist = $temp0 = $temp1 = "U\n";
+$rssi0 = $rssi1 = $baseline = $fade = $txfreq = $rxfreq = $txmodrate = $speed = "U\n";
+###############################################################################
+## Determine Hostname and other stuff
+my $Hostname = undef;
+$0 =~ /ubiquiti_airfiber_(.+)*$/;
+unless ($Hostname = $1) {
+  exit 2;
+}
+if ($PingAddr // "") {
+  if (!($PingName // "")) {
+    $PingName = $PingAddr;
+  }
+}
+###############################################################################
+## Configuration
+if(exists $ARGV[0] and $ARGV[0] eq "config") {
+  print "multigraph airos_wrate\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_category radio\n";
+  print "graph_title Wireless link capacity\n";
+  print "graph_order rxrate txrate\n";
+  print "graph_period " . $graph_period . "\n";
+  print "graph_vlabel RX (-) / TX (+) bps\n";
+  print "graph_info This graph shows the wireless link data transfer capacity as seen on " . $Hostname . ".\n";
+  print "rxrate.label RX/TX Capacity\n";
+  print "rxrate.graph no\n";
+  print "txrate.label bps\n";
+  print "txrate.draw AREA\n";
+  print "txrate.negative rxrate\n";
+  print "\n";
+
+  print "multigraph airos_load\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_args --base 1000 -l 0 \n";
+  print "graph_title Load average\n";
+  print "graph_vlabel load\n";
+  print "graph_category system\n";
+  print "graph_scale no\n";
+  print "load.label load\n";
+  print "load.critical 10\n";
+  print "graph_info The load average of " . $Hostname . " describes how many processes are in the run-queue (scheduled to run 'immediately').\n";
+  print "load.info 5 minute load average\n";
+  print "\n";
+
+  print "multigraph airos_uptime\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_args --base 1000 -l 0 \n";
+  print "graph_title Uptime\n";
+  print "graph_vlabel uptime in days\n";
+  print "graph_category system\n";
+  print "graph_scale no\n";
+  print "uptime.label uptime\n";
+  print "uptime.draw AREA\n";
+  print "graph_info This graph shows how many days have passed since the bootup of " . $Hostname . ".\n";
+  print "\n";
+
+  print "multigraph airos_dbm\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_args --base 1000\n";
+  print "graph_title Signal levels\n";
+  print "graph_vlabel dBm\n";
+  print "graph_category radio\n";
+  print "graph_info This graph shows the radio signal strengths of " . $Hostname . " in dBm.\n";
+  print "rxpower0.label Chain 0 Signal Strength dBm\n";
+  print "rxpower1.label Chain 1 Signal Strength dBm\n";
+  print "\n";
+
+  print "multigraph airos_powerout\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_title Output Power\n";
+  print "graph_vlabel dBm\n";
+  print "graph_args --base 1000 --lower-limit 0\n";
+  print "graph_category radio\n";
+  print "graph_info This graph shows the output power of " . $Hostname . " radio transmitter in dBm.\n";
+  print "powerout.label Output Power\n";
+  print "\n";
+
+  print "multigraph airos_freq\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_args --base 1000 --units-exponent 0 --lower-limit 24.0 --upper-limit 24.3 --rigid --alt-y-grid\n";
+  print "graph_title Frequency\n";
+  print "graph_vlabel GHz\n";
+  print "graph_category radio\n";
+  print "graph_info This graph shows the operating frequencies of " . $Hostname . ".\n";
+  print "graph_scale no\n";
+  print "txfreq.label TX Frequency\n";
+  print "rxfreq.label RX Frequency\n";
+  print "\n";
+
+  print "multigraph airos_dist\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_args --base 1000\n";
+  print "graph_title Distance\n";
+  print "graph_vlabel meters\n";	#converted to meters below in the code
+  print "graph_category radio\n";
+  print "graph_info This graph shows the calculated link distance seen from " . $Hostname . ".\n";
+  print "dist.label Distance\n";
+  print "\n";
+
+  print "multigraph airos_temp\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_args --base 1000\n";
+  print "graph_title Internal Temperature\n";
+  print "graph_vlabel Degrees Celsius\n";
+  print "graph_category system\n";
+  print "graph_info This graph shows the internal temperature of " . $Hostname . ".\n";
+  print "temp0.label Temp0\n";
+  print "temp1.label Temp1\n";
+  print "\n";
+
+  print "multigraph airos_rssi\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_args  --base 1000\n";
+  print "graph_title Signal levels (RSSI)\n";
+  print "graph_vlabel %\n";
+  print "graph_category radio\n";
+  print "graph_info This graph shows the received signal strength indication on " . $Hostname . " in percent.\n";
+  print "rssi0.label Chain 0 Signal Strength %\n";
+  print "rssi1.label Chain 1 Signal Strength %\n";
+  print "\n";
+
+  print "multigraph airos_baseline\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_args --base 1000\n";
+  print "graph_title Baseline\n";
+  print "graph_category radio\n";
+  print "graph_info Baseline on " . $Hostname . ".\n";
+  print "baseline.label Baseline\n";
+  print "\n";
+
+  print "multigraph airos_fade\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_args --base 1000\n";
+  print "graph_title Fade\n";
+  print "graph_category radio\n";
+  print "graph_info Fade on " . $Hostname . ".\n";
+  print "fade.label Fade\n";
+  print "\n";
+
+  print "multigraph airos_modrate\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_args --base 1000 --lower-limit -1 --upper-limit 7 --rigid --alt-y-grid\n";
+  print "graph_title Modulation Rate\n";
+  print "graph_vlabel x\n";
+  print "graph_category radio\n";
+  print "graph_info Current and Maximum possible Modulation Rate on " . $Hostname . ". Possible values: 6x (64QAM MIMO), 4x (16QAM MIMO), 2x (QPSK MIMO), 1x (QPSK SISO), 0x (1/4 QPSK SISO).\n";
+  print "speed.label (maximum)x\n";
+  print "txmodrate.label (current)x\n";
+  print "\n";
+
+  print "multigraph airos_cpu\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_args -l 0 --lower-limit 0 --upper-limit 100\n";
+  print "graph_title CPU usage\n";
+  print "graph_vlabel %\n";
+  print "graph_category system\n";
+  print "graph_info This graph shows how CPU time is spent in " . $Hostname . ".\n";
+  print "graph_scale no\n";
+  print "graph_period second\n";
+  print "graph_order system user nice idle iowait irq softirq\n";
+  print "system.label cpu-system\n";
+  print "system.draw AREA\n";
+  print "system.min 0\n";
+  print "system.info CPU time spent by the kernel in system activities in " . $Hostname . ".\n";
+  print "user.label cpu-user\n";
+  print "user.draw STACK\n";
+  print "user.min 0\n";
+  print "user.info CPU time spent by normal programs and daemons in " . $Hostname . ".\n";
+  print "nice.label cpu-nice\n";
+  print "nice.draw STACK\n";
+  print "nice.min 0\n";
+  print "nice.info CPU time spent by nice(1)d programs in " . $Hostname . ".\n";
+  print "idle.label cpu-idle\n";
+  print "idle.draw STACK\n";
+  print "idle.min 0\n";
+  print "idle.info Idle CPU time in " . $Hostname . ".\n";
+  print "iowait.label cpu-iowait\n";
+  print "iowait.draw STACK\n";
+  print "iowait.min 0\n";
+  print "iowait.info CPU time spent waiting for I/O operations to finish when there is nothing else to do in " . $Hostname . ".\n";
+  print "irq.label cpu-irq\n";
+  print "irq.draw STACK\n";
+  print "irq.min 0\n";
+  print "irq.info CPU time spent handling interrupts in " . $Hostname . ".\n";
+  print "softirq.label cpu-softirq\n";
+  print "softirq.draw STACK\n";
+  print "softirq.min 0\n";
+  print "softirq.info CPU time spent handling batched interrupts in " . $Hostname . ".\n";
+  print "\n";
+
+  if ($PingAddr // "") {
+    print "multigraph airos_ping1\n";
+    print "host_name " . $Hostname . "\n";
+    print "graph_title Ping times from " . $Hostname . " to " . $PingName . "\n";
+    print "graph_args --base 1000 -l 0\n";
+    print "graph_vlabel roundtrip time (seconds)\n";
+    print "graph_category network\n";
+    print "graph_info This graph shows ping RTT statistics, measured on " . $Hostname . " against " . $PingName . ". If you configure here the other end of the wireless link this graph will show you the pure latency of the wireless segment, without any etra latencies introduced by other network elements or segments.\n";
+    print "ping.label " . $PingName . "\n";
+    print "ping.info Ping RTT statistics for " . $PingName . ".\n";
+    print "packetloss.graph no\n";
+    print "packetloss.critical 0:0\n";
+    print "\n";
+  }
+
+  print "multigraph airos_pinglo_ping\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_title Ping times to " . $Hostname . "\n";
+  print "graph_args --base 1000 -l 0\n";
+  print "graph_vlabel roundtrip time (seconds)\n";
+  print "graph_category network\n";
+  print "graph_info This graph shows ping RTT statistics, measured on the munin-node " . $HostLo . " against " . $Hostname . ".\n";
+  print "ping.label " . $Hostname . "\n";
+  print "ping.info Ping RTT statistics for " . $Hostname . ".\n";
+  print "\n";
+
+  print "multigraph airos_pinglo_loss\n";
+  print "host_name " . $Hostname . "\n";
+  print "graph_title Ping packet loss to " . $Hostname . "\n";
+  print "graph_args --base 1000 -l 0\n";
+  print "graph_vlabel %\n";
+  print "graph_category network\n";
+  print "graph_info This graph shows ping packet loss, measured on the munin-node " . $HostLo . " against " . $Hostname . ". If this is anything above 0, there may be problems with the network connection, or the devices are unreachable.\n";
+  print "packetloss.label " . $Hostname . "\n";
+  print "packetloss.info Packet loss for " . $Hostname . ".\n";
+  print "packetloss.critical 0:0\n";
+  print "\n";
+
+
+
+  exit;
+}
+
+###############################################################################
+## Initiate Telnet Session
+my $CM = Net::Telnet->new(Port  => $TelnetPort,
+                          Prompt=> '/ $/',
+                          Timeout=>10,
+                          Errmode=>'return');
+
+$CM->open($Hostname);
+###############################################################################
+## Execution
+if (!defined($CM->login($TelnetUser, $TelnetPass))) {
+  # Nothing happens
+} else {
+  my @OutLoad = $CM->cmd("cat /proc/loadavg");
+  foreach my $Line (@OutLoad) {
+    if ($Line !~ /AF.v/ && $Line =~ m/(\d+)/) {
+      	$load = substr($Line, 0,4);
+    }
+  }
+
+  my $topcmd = "top -b -n2 -d1 | grep '^CPU:' | tail -n1";
+  my @OutCPU = $CM->cmd($topcmd);
+  chomp @OutCPU;
+  my $OutCPU = join(" ", @OutCPU);
+  my $recpu=".*?(\\d+).*?(\\d+).*?(\\d+).*?(\\d+).*?(\\d+).*?(\\d+).*?(\\d+)";
+  if ($OutCPU =~ m/$recpu/is) {
+    $cpuuser=$1;
+    $cpusystem=$2;
+    $cpunice=$3;
+    $cpuiowait=$5;
+    $cpuirq=$6;
+    $cpusoftirq=$7;
+    $cpuidle=100 - $cpuuser - $cpusystem - $cpunice - $cpuiowait - $cpuirq - $cpusoftirq; #=$4
+  }
+
+  sleep 1;
+
+  my @OutUpt = $CM->cmd("cat /proc/uptime");
+  foreach my $Line (@OutUpt) {
+    if ($Line !~ /AF.v/ && $Line =~ m/(\d+)/) {
+	$uptime = $1 / 86400;
+    }
+  }
+
+  my $fibcmd = q[af af, | awk '{FS = "," ; x=1; t=1; while (t <= NF){ t++; print $x "=" $t; x+=2; t++;}}'];
+  my @OutMca = $CM->cmd($fibcmd);
+  foreach my $Line (@OutMca) {
+    if ($Line =~ /rxcapacity/ && $Line =~ m/(.\d+)/) {
+        $rxrate = substr($Line, 11);
+        if ($rxrate == 0) {
+            $rxrate = "U";
+        }
+    }
+    if ($Line =~ /txcapacity/ && $Line =~ m/(.\d+)/) {
+        $txrate = substr($Line, 11);
+        if ($txrate == 0) {
+            $txrate = "U";
+        }
+    }
+    if ($Line =~ /rxpower0/ && $Line !~ /rrx/ && $Line =~ m/(.\d+)/) {
+        $rxpower0 = substr($Line, 9);
+    }
+    if ($Line =~ /rxpower1/ && $Line !~ /rrx/ && $Line =~ m/(.\d+)/) {
+        $rxpower1 = substr($Line, 9);
+    }
+    if ($Line =~ /powerout/ && $Line !~ /rpo/ && $Line =~ m/(.\d+)/) {
+        $powerout = substr($Line, 9);
+    }
+    if ($Line =~ /feet/ && $Line =~ m/(.\d+)/) {
+        $feet = substr($Line, 5);
+        if ($feet == 0) {
+            $feet = "U";
+        } else {
+	    $dist = $feet/3.28084; # conversion to meters
+	}
+    }
+    if ($Line =~ /temp0/ && $Line =~ m/(.\d+)/) {
+        $temp0 = substr($Line, 6);
+    }
+    if ($Line =~ /temp1/ && $Line =~ m/(.\d+)/) {
+        $temp1 = substr($Line, 6);
+    }
+    if ($Line =~ /rssi0/ && $Line =~ m/(.\d+)/) {
+        $rssi0 = substr($Line, 6);
+    }
+    if ($Line =~ /rssi1/ && $Line =~ m/(.\d+)/) {
+        $rssi1 = substr($Line, 6);
+    }
+    if ($Line =~ /baseline/ && $Line =~ m/(.\d+)/) {
+        $baseline = substr($Line, 9);
+    }
+    if ($Line =~ /fade/ && $Line =~ m/(.\d+)/) {
+        $fade = substr($Line, 5);
+    }
+    if ($Line =~ /txfrequency/ && $Line =~ m/(.\d+)/) {
+        $txfreq = substr($Line, 12);
+	$txfreq =~ s/GHz//;
+    }
+    if ($Line =~ /rxfrequency/ && $Line =~ m/(.\d+)/) {
+        $rxfreq = substr($Line, 12);
+	$rxfreq =~ s/GHz//;
+    }
+    if ($Line =~ /txmodrate/ && $Line !~ /rtx/ && $Line =~ m/(.\d+)/) {
+        $txmodrate = substr($Line, 10);
+	$txmodrate =~ s/x//;
+        if ($txmodrate == 0) {
+            $txmodrate = "U";
+        }
+    }
+    if ($Line =~ /speed/ && $Line =~ m/(.\d+)/) {
+        $speed = substr($Line, 6);
+	$speed =~ s/x//;
+        if ($speed == 0) {
+            $speed = "U";
+        }
+    }
+
+  }
+  sleep 1;
+
+  if ($PingAddr // "") {
+    my $pingcmd = "ping -c 2 " . $PingAddr . " 2>/dev/null";
+    my @ping = $CM->cmd($pingcmd);
+    chomp @ping;
+    my $ping = join(" ", @ping);
+    $ping_time = ($1 / 1000) if ($ping =~ m@min/avg/max.*\s\d+(?:\.\d+)?/(\d+(?:\.\d+)?)/\d+(?:\.\d+)?@);
+    $packet_loss = $1 if ($ping =~ /(\d+)% packet loss/);
+  } else {
+    $PingName = "";
+    $PingAddr = "";
+  }
+
+
+}
+
+
+$CM->close;
+
+
+my $pingcmdlo = "ping -c 2 " . $Hostname . " 2>/dev/null";
+my @pinglo = qx($pingcmdlo);
+chomp @pinglo;
+my $pinglo = join(" ", @pinglo);
+$ping_timelo = ($1 / 1000) if ($pinglo =~ m@min/avg/max.*\s\d+(?:\.\d+)?/(\d+(?:\.\d+)?)/\d+(?:\.\d+)?@);
+$packet_losslo = $1 if ($pinglo =~ /(\d+)% packet loss/);
+
+
+chomp($load, $uptime, $ping_time, $packet_loss, $cpuuser, $cpusystem, $cpunice, $cpuidle, $cpuiowait, $cpuirq, $cpusoftirq, $ping_timelo, $packet_losslo, 
+	$rxrate, $txrate, $rxpower0, $rxpower1, $powerout, $feet, $dist, $temp0, $temp1, 
+	$rssi0, $rssi1, $baseline, $fade, $txfreq, $rxfreq, $txmodrate, $speed);
+
+
+print "\n";
+
+print "multigraph airos_wrate\n";
+print "txrate.value " . $txrate . "\n";
+print "rxrate.value " . $rxrate . "\n";
+print "\n";
+
+print "multigraph airos_dbm\n";
+print "rxpower0.value " . $rxpower0 . "\n";
+print "rxpower1.value " . $rxpower1 . "\n";
+print "\n";
+
+print "multigraph airos_powerout\n";
+print "powerout.value " . $powerout . "\n";
+print "\n";
+
+print "multigraph airos_freq\n";
+print "txfreq.value " . $txfreq . "\n";
+print "rxfreq.value " . $rxfreq . "\n";
+print "\n";
+
+print "multigraph airos_dist\n";
+print "dist.value " . $dist . "\n";
+print "\n";
+
+print "multigraph airos_temp\n";
+print "temp0.value " . $temp0 . "\n";
+print "temp1.value " . $temp1 . "\n";
+print "\n";
+
+print "multigraph airos_rssi\n";
+print "rssi0.value " . $rssi0 . "\n";
+print "rssi1.value " . $rssi1 . "\n";
+print "\n";
+
+print "multigraph airos_baseline\n";
+print "baseline.value " . $baseline . "\n";
+print "\n";
+
+print "multigraph airos_fade\n";
+print "fade.value " . $fade . "\n";
+print "\n";
+
+print "multigraph airos_modrate\n";
+print "speed.value " . $speed . "\n";
+print "txmodrate.value " . $txmodrate . "\n";
+print "\n";
+
+print "multigraph airos_load\n";
+print "load.value " . $load . "\n";
+print "\n";
+
+print "multigraph airos_uptime\n";
+print "uptime.value " . $uptime . "\n";
+print "\n";
+
+print "multigraph airos_cpu\n";
+print "user.value $cpuuser\n";
+print "system.value $cpusystem\n";
+print "nice.value $cpunice\n";
+print "idle.value $cpuidle\n";
+print "iowait.value $cpuiowait\n";
+print "irq.value $cpuirq\n";
+print "softirq.value $cpusoftirq\n";
+print "\n";
+
+if ($PingAddr // "") {
+  print "multigraph airos_ping1\n";
+  print "ping.value " . $ping_time . "\n";
+  print "packetloss.value " . $packet_loss . "\n";
+  print "\n";
+}
+
+print "multigraph airos_pinglo_ping\n";
+print "ping.value " . $ping_timelo . "\n";
+print "\n";
+
+print "multigraph airos_pinglo_loss\n";
+print "packetloss.value " . $packet_losslo . "\n";
+print "\n";
+
+
