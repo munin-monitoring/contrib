@@ -2,12 +2,15 @@
 #########################
 # tinychat_users_
 #########################
-# Munin Plugin to monitor the number of users a tinychat room gets.
+# Munin Plugin to track monitor the number of users a tinychat room gets.
 # Author Phil Wray ( http://www.infjs.com )
+# 
+#
 #
 # Usage:
 # 	ln -s /usr/share/munin/plugins/tinychat_users_ /etc/munin/plugins/tinychat_users_your-room
 #
+
 # Get the Tinychat Room by parsing this scripts filename.
 room=${0##*tinychat_users_}
 
@@ -36,6 +39,8 @@ echo "graph_title Tinychat Users for $room"
     echo 'graph_category misc'
     echo 'total_count.label Room Users'
     echo 'total_count.draw AREA'
+    echo 'broadcaster_count.draw STACK'
+    echo 'broadcaster_count.label Broadcasting'	
     exit 0
 fi
 
@@ -44,6 +49,7 @@ fi
 ##
 # Get current Room Users.
 tinychat_users=$(curl -s http://api.tinychat.com/${room}.json | grep -Eo 'total_count":[0-9]+' | cut -d':' -f2)
-
+broadcasting_users=$(curl -s http://api.tinychat.com/${room}.json | grep -Eo 'broadcaster_count":[0-9]+' | cut -d':' -f2)
 # Output Room Users.
 echo "total_count.value $tinychat_users"
+echo "broadcaster_count.value $broadcasting_users"
