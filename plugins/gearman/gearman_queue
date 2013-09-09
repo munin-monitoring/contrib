@@ -1,0 +1,44 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+my $HOST = exists $ENV{'host'} ? $ENV{'host'} : "localhost";
+my $PORT = exists $ENV{'port'} ? $ENV{'port'} : "4730";
+my $ADMIN = exists $ENV{'admin'} ? $ENV{'admin'} : "gearadmin";
+
+my @result = `$ADMIN -h$HOST -p$PORT --status 2>&1`;
+
+my $gearman = {};
+my $keys = ["queue", "running", "total"];
+
+foreach my $line (@result) {
+	last if ($line =~ /\./);
+	my @array = split(/\s+/, $line);
+	chomp @array;
+	my $string_name = shift @array;
+	my %hash;
+	@hash{@$keys} = @array;
+
+	$gearman->{$string_name}=\%hash;
+};
+
+if (defined $ARGV[0] and $ARGV[0] eq 'config') {
+	print "graph_title Gearman queue\n";
+	print "graph_args --base 1000\n";
+	print "graph_vlabel jobs\n";
+	print "graph_category Gearman\n";
+	while ( my ($key, $value) = each(%$gearman) ) {
+		my $param = $key."_"."queue";
+		print "$param.type GAUGE\n";
+		print "$param.label $param\n";
+		print "$param.draw LINE\n";
+		print "$param.min 0\n";
+	}
+	exit 0;
+}
+
+while ( my ($key, $value) = each(%$gearman) ) {
+	my $param = $key."_"."queue";
+	print "$param.value ".$value->{"queue"}."\n";
+}
