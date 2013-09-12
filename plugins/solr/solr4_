@@ -336,6 +336,15 @@ class SolrMuninGraph:
     def _cacheConfig(self, cacheType, cacheName):
         return CACHE_GRAPH_TPL.format(core=self.params['core'], cacheType=cacheType, cacheName=cacheName)
 
+    def _format4Value(self, value):
+        if isinstance(value, basestring):
+            return "%s"
+        if isinstance(value, int):
+            return "%d"
+        if isinstance(value, float):
+            return "%.6f"
+        return "%s"
+
     def _cacheFetch(self, cacheType, fields = None):
         fields = fields or ['size', 'lookups', 'hits', 'inserts', 'evictions']
         hits_fields = ['lookups', 'hits', 'inserts']
@@ -345,7 +354,8 @@ class SolrMuninGraph:
         data = getattr(solrmbean, cacheType)()
         results.append('multigraph solr_{core}_{cacheType}_hit_rates'.format(core=self.params['core'], cacheType=cacheType))
         for label in hits_fields:
-            results.append("%s.value %.8f" % (label, data[label]))
+            vformat = self._format4Value(data[label])
+            results.append(("%s.value " + vformat) % (label, data[label]))
         results.append('multigraph solr_{core}_{cacheType}_size'.format(core=self.params['core'], cacheType=cacheType))
         for label in size_fields:
             results.append("%s.value %d" % (label, data[label]))
