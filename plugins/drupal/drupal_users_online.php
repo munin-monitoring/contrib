@@ -114,7 +114,7 @@ function get_online_registered_users(&$dbh = NULL, $active_interval = 900) {
 
   $table_prefix = getenv('table_prefix');
 
-  $sql = "SELECT COUNT(DISTINCT(uid)) AS count FROM sessions WHERE uid != 0
+  $sql = "SELECT COUNT(DISTINCT(uid)) AS count FROM {$table_prefix}sessions WHERE uid != 0
     AND timestamp >= (UNIX_TIMESTAMP(now()) - ?)";
   $stmt = $dbh->prepare($sql);
 
