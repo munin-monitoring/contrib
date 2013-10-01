@@ -10,10 +10,11 @@
 #
 # Configuration parameters:
 # env.status_url - url of lighty's server-status (optional, default is http://127.0.0.1/server-status)
-# env.username - username to provide if status_url requires basic authentication (optional, default - no authentication)
-# env.password - password to provide if status_url requires basic authentication (optional, default - no authentication)
+# env.username - username to provide if status_url requires authentication (optional, default - no authentication)
+# env.password - password to provide if status_url requires authentication (optional, default - no authentication)
+# env.auth_type - the authentication mechanism to use -- either 'basic' (default) or 'digest'.
 #
-# Note: If basic HTTP authentication is required you should specify both username and password.
+# Note: If HTTP authentication is required you should specify both username and password.
 #
 # ## Installation
 # Copy file to directory /usr/share/munin/plugins/
@@ -23,7 +24,7 @@
 #%# family=contrib
 #%# capabilities=autoconf suggest
 
-import os, sys, urllib2, base64
+import os, sys, urllib2
 
 program = sys.argv[0]
 graph_type = program[program.rfind("_")+1:]
@@ -79,19 +80,21 @@ elif len(sys.argv) == 2 and sys.argv[1] == "suggest":
     for item in graph_types.keys():
         print item
 else:
-    if "status-url" not in os.environ:
-        status_url = "http://127.0.0.1/server-status"
-    else:
-        status_url = os.environ["status_url"]
+    status_url = os.environ.get('status_url', 'http://127.0.0.1/server-status')
 
     request = urllib2.Request("%s?auto" % status_url)
     if "username" in os.environ and "password" in os.environ:
-        base64str = base64.encodestring("%s:%s" % (os.environ["username"], os.environ["password"])).replace("\r", "")
-        request.add_header("Authorization", "Basic %s" % base64str)
+        mgr = urllib2.HTTPPasswordMgrWithDefaultRealm()
+        mgr.add_password(None, status_url, os.environ["username"], os.environ["password"])
+        if os.environ.get("auth_type", "basic") == "digest":
+            auth = urllib2.HTTPDigestAuthHandler(mgr)
+        else:
+            auth = urllib2.HTTPBasicAuthHandler(mgr)
+        opener = urllib2.build_opener(auth)
+        urllib2.install_opener(opener)
     info = urllib2.urlopen(request).read()
     data = {}
-    lines = info.split("\n")
-    for line in lines:
+    for line in info.split("\n"):
         try:
            (title, value) = line.split(": ")
            data[title] = value
