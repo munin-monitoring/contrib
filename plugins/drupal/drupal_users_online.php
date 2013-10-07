@@ -9,11 +9,12 @@
  *
  * @example Example entry for configuration:
  * [drupal*]
- * env.db="drupal"
- * env.user="mysql_user"
- * env.pass="mysql_pass"
- * env.host="localhost"
- * env.port="3306"
+ * env.db drupal
+ * env.user mysql_user
+ * env.pass mysql_pass
+ * env.host localhost
+ * env.port 3306
+ * env.table_prefix drupal_
  *
  * @author Liran Tal <liran.tal@hp.com>
  * @version 1.0 2013
@@ -114,7 +115,7 @@ function get_online_registered_users(&$dbh = NULL, $active_interval = 900) {
 
   $table_prefix = getenv('table_prefix');
 
-  $sql = "SELECT COUNT(DISTINCT(uid)) AS count FROM sessions WHERE uid != 0
+  $sql = "SELECT COUNT(DISTINCT(uid)) AS count FROM {$table_prefix}sessions WHERE uid != 0
     AND timestamp >= (UNIX_TIMESTAMP(now()) - ?)";
   $stmt = $dbh->prepare($sql);
 
