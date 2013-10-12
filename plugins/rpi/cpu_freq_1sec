@@ -1,0 +1,53 @@
+#! /bin/sh
+# (c) 2013 - LGPL - Steve Schnepp <steve.schnepp@pwkf.org>
+
+pluginfull="$0"                 # full name of plugin
+plugin="${0##*/}"               # name of plugin
+pidfile="$MUNIN_PLUGSTATE/munin.$plugin.pid"
+cache="$MUNIN_PLUGSTATE/munin.$plugin.value"
+
+
+if [ ! -r "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq" ]
+then
+	echo "# Cannot read CPU Freq"
+	exit 1
+fi
+
+if [ "$1" = "acquire" ]
+then
+        (
+                while sleep 1
+                do
+                        echo $(
+                                date +%s
+                                cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+                        )
+                done | awk "{
+                                print \"scaling_cur_freq.value \" \$1 \":\" \$2;
+				system(\"\");
+                        }" >> $cache
+        ) &
+        echo $! > $pidfile
+        exit 0
+fi
+
+
+if [ "$1" = "config" ]
+then
+        cat <<EOF
+graph_title CPU Freq 1sec stats
+graph_category 1sec::cpu
+graph_data_size custom 1d, 10s for 1w, 1m for 1t, 5m for 1y
+graph_vlabel Hz
+update_rate 1
+scaling_cur_freq.label Current CPU Scaling Frequence
+scaling_cur_freq.type DERIVE
+EOF
+        exit 0
+fi
+
+# values
+cat ${cache}
+> ${cache}
+
+exit 0
