@@ -11,6 +11,8 @@
 PCDIR=${pcdir:-"/var/lib/BackupPC/pc"}
 HOSTS=$(cd ${PCDIR} 2>/dev/null && ls -1)
 
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
 if [ "$1" = "autoconf" ]; then
 	[ ! -z "${HOSTS}" ] && echo "yes" && exit 0
 	echo "no"
@@ -26,8 +28,8 @@ if [ "$1" = "config" ]; then
 
 	for h in ${HOSTS}
 	do
-		echo "${h}_full.label ${h} Full"
-		echo "${h}_incr.label ${h} Incr"
+		echo "$(clean_fieldname ${h})_full.label $(clean_fieldname ${h}) Full"
+		echo "$(clean_fieldname ${h})_incr.label $(clean_fieldname ${h}) Incr"
 	done
 
 	echo "multigraph backuppc_ages"
@@ -38,8 +40,8 @@ if [ "$1" = "config" ]; then
 
 	for h in ${HOSTS}
 	do
-		echo "${h}_full.label ${h} Full"
-		echo "${h}_incr.label ${h} Incr"
+		echo "$(clean_fieldname ${h})_full.label $(clean_fieldname ${h}) Full"
+		echo "$(clean_fieldname ${h})_incr.label $(clean_fieldname ${h}) Incr"
 	done
 
 	exit 0
@@ -49,18 +51,18 @@ echo "multigraph backuppc_sizes"
 for h in $HOSTS
 do
 	SIZE=$(awk '/full/ { size = $6 } END { print size; }' ${PCDIR}/${h}/backups)
-	echo "${h}_full.value $SIZE"
+	echo "$(clean_fieldname ${h})_full.value $SIZE"
 	SIZE=$(awk '/incr/ { size = $6 } END { print size; }' ${PCDIR}/${h}/backups)
-	echo "${h}_incr.value $SIZE"
+	echo "$(clean_fieldname ${h})_incr.value $SIZE"
 done
 
 echo "multigraph backuppc_ages"
 for h in $HOSTS
 do
 	SIZE=$(awk '/full/ { age = systime() - $3 } END { print age / 3600 / 24; }' ${PCDIR}/${h}/backups)
-	echo "${h}_full.value $SIZE"
+	echo "$(clean_fieldname ${h})_full.value $SIZE"
 	SIZE=$(awk '/incr/ { age = systime() - $3 } END { print age / 3600 / 24; }' ${PCDIR}/${h}/backups)
-	echo "${h}_incr.value $SIZE"
+	echo "$(clean_fieldname ${h})_incr.value $SIZE"
 done
 
 <<'__END__'
