@@ -20,40 +20,32 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 #
-# Munin plugin for monitoring a multicore solr 4.* installation via mbean.
-# It calls:
-# > http://localhost:8080/solr/admin/cores?action=STATUS&wt=json
-# and
-# > http://localhost:8080/solr/corename/admin/mbeans?stats=true&wt=json
-# for each core to retrieve cores and data. Verify those urls on your instance.
+# Solr 4.* munin graph plugin
+# Project repo: https://github.com/averni/munin-solr
 #
-# Configuration parameters:
+# Plugin configuration parameters:
+#
 # [solr_*]
-#    host_port <host:port>
-#    qpshandler_<handlerlabel> <handlerpath>
-#    availableram <ramsize in bytes>
+#    env.host_port <host:port>
+#    env.url <default /solr>
+#    env.qpshandler_<handlerlabel> <handlerpath>
 #
 # Example:
-#    host_port solrhost:8080 
-#    qpshandler_select /select
-#    availableram 3221225472
+# [solr_*]
+#    env.host_port solrhost:8080 
+#    env.url /solr
+#    env.qpshandler_select /select
 #
-# Defined checks:
-#    numdocs  
-#    qps  
-#    indexsize  
-#    requesttimes  
-#    documentcache  
-#    fieldvaluecache  
-#    filtercache  
-#    queryresultcache  
-#
-# Installation example:
+# Install plugins:
 #    ln -s /usr/share/munin/plugins/solr_.py /etc/munin/plugins/solr_numdocs_core_1
 #    ln -s /usr/share/munin/plugins/solr_.py /etc/munin/plugins/solr_requesttimes_select
+#    ln -s /usr/share/munin/plugins/solr_.py /etc/munin/plugins/solr_qps
 #    ln -s /usr/share/munin/plugins/solr_.py /etc/munin/plugins/solr_qps_core_1_select
+#    ln -s /usr/share/munin/plugins/solr_.py /etc/munin/plugins/solr_indexsize
+#    ln -s /usr/share/munin/plugins/solr_.py /etc/munin/plugins/solr_memory
 #
-# Source repo: https://github.com/averni/munin-solr
+#
+
 
 import sys
 import os
@@ -72,7 +64,7 @@ def parse_params():
         data = params['core'].rsplit('_', 1)
         handler = data.pop()
         params['params'] = {
-                'handler': os.environ.get('qpshandler_%s' % handler, '/select')
+                'handler': os.environ.get('qpshandler_%s' % handler, 'standard')
         }
         if not data:
             params['core'] = ''
@@ -90,7 +82,7 @@ class CheckException(Exception):
 
 class JSONReader:
     @classmethod
-    def readValue(cls, struct, path):
+    def readValue(cls, struct, path, convert = None):
         if not path[0] in struct:
             return -1
         obj = struct[path[0]]
@@ -98,15 +90,18 @@ class JSONReader:
             return -1
         for k in path[1:]:
             obj = obj[k]
+        if convert:
+            return convert(obj)
         return obj
 
 class SolrCoresAdmin:
-    def __init__(self, host):
+    def __init__(self, host, solrurl):
         self.host = host
+        self.solrurl = solrurl
         self.data = None
 
     def fetchcores(self):
-        uri = "/solr/admin/cores?action=STATUS&wt=json"
+        uri = os.path.join(self.solrurl, "admin/cores?action=STATUS&wt=json")
         conn = httplib.HTTPConnection(self.host)
         conn.request("GET", uri)
         res = conn.getresponse()
@@ -135,13 +130,14 @@ class SolrCoresAdmin:
             return ret
 
 class SolrCoreMBean:
-    def __init__(self, host, core):
+    def __init__(self, host, solrurl, core):
         self.host = host
         self.data = None
         self.core = core
+        self.solrurl = solrurl
 
     def _fetch(self):
-        uri = "/solr/%s/admin/mbeans?stats=true&wt=json" % self.core
+        uri = os.path.join(self.solrurl, "%s/admin/mbeans?stats=true&wt=json" % self.core)
         conn = httplib.HTTPConnection(self.host)
         conn.request("GET", uri)
         res = conn.getresponse()
@@ -159,37 +155,59 @@ class SolrCoreMBean:
                 data[key] = el
             else:
                 key = el
+        self._fetchSystem()
 
-    def _read(self, path):
+    def _fetchSystem(self):
+        uri = os.path.join(self.solrurl, "%s/admin/system?stats=true&wt=json" % self.core)
+        conn = httplib.HTTPConnection(self.host)
+        conn.request("GET", uri)
+        res = conn.getresponse()
+        data = res.read()
+        if res.status != 200:
+            raise CheckException("System fetch failed: %s\n%s" %( str(res.status), res.read()))
+        self.data['system'] = json.loads(data)
+
+
+    def _readInt(self, path):
+        return self._read(path, int)
+
+    def _readFloat(self, path):
+        return self._read(path, float)
+
+    def _read(self, path, convert = None):
         if self.data is None:
             self._fetch()
-        return JSONReader.readValue(self.data, path)
+        return JSONReader.readValue(self.data, path, convert)
 
     def _readCache(self, cache):
         result = {}
-        for key in ['lookups', 'hits', 'inserts', 'evictions', 'hitratio']:
+        for key, ftype in [('lookups', int), ('hits', int), ('inserts', int), ('evictions', int), ('hitratio', float)]:
             path = ['solr-mbeans', 'CACHE', cache, 'stats', 'cumulative_%s' % key]
-            result[key] = self._read(path)
-        result['size'] = self._read(['solr-mbeans', 'CACHE', cache, 'stats', 'size'])
+            result[key] = self._read(path, ftype)
+        result['size'] = self._readInt(['solr-mbeans', 'CACHE', cache, 'stats', 'size'])
         return result
 
     def getCore(self):
         return self.core
 
+    def requestcount(self, handler):
+        path = ['solr-mbeans', 'QUERYHANDLER', handler, 'stats', 'requests']
+        return self._readInt(path)
+
     def qps(self, handler):
         path = ['solr-mbeans', 'QUERYHANDLER', handler, 'stats', 'avgRequestsPerSecond']
-        return self._read(path)
+        return self._readFloat(path)
 
     def requesttimes(self, handler):
         times = {}
         path = ['solr-mbeans', 'QUERYHANDLER', handler, 'stats']
         for perc in ['avgTimePerRequest', '75thPcRequestTime', '99thPcRequestTime']:
-            times[perc] = self._read(path + [perc])
+            times[perc] = self._read(path + [perc], float)
         return times
 
     def numdocs(self):
         path = ['solr-mbeans', 'CORE', 'searcher', 'stats', 'numDocs']
-        return self._read(path)
+        return self._readInt(path)
 
     def documentcache(self):
         return self._readCache('documentCache')
@@ -202,6 +220,13 @@ class SolrCoreMBean:
 
     def queryresultcache(self):
         return self._readCache('queryResultCache')
+
+    def memory(self):
+        data = self._read(['system', 'jvm', 'memory', 'raw'])
+        del data['used%']
+        for k in data.keys():
+            data[k] = int(data[k])
+        return data
 
 #############################################################################
 # Graph Templates
@@ -240,14 +265,19 @@ evictions.draw LINE2
 
 """
 
-QPSMAIN_GRAPH_TPL = """graph_title Solr {core} {handler} Request per second"
-graph_args -l 0
+QPSMAIN_GRAPH_TPL = """graph_title Solr {core} {handler} Request per second
+graph_args --base 1000 -r --lower-limit 0
+graph_scale no
 graph_vlabel request / second
 graph_category solr
+graph_period second
+graph_order {gorder}
 {cores_qps_graphs}"""
 
 QPSCORE_GRAPH_TPL = """qps_{core}.label {core} Request per second
-qps_{core}.type LINESTACK1
+qps_{core}.draw {gtype}
+qps_{core}.type DERIVE
+qps_{core}.min 0
 qps_{core}.graph yes"""
 
 REQUESTTIMES_GRAPH_TPL = """multigraph {core}_requesttimes
@@ -256,15 +286,14 @@ graph_args -l 0
 graph_vlabel millis
 graph_category solr
 savgtimeperrequest_{core}.label {core} Avg time per request
-savgtimeperrequest_{core}.type gauge
+savgtimeperrequest_{core}.type GAUGE
 savgtimeperrequest_{core}.graph yes
 s75thpcrequesttime_{core}.label {core} 75th perc
-s75thpcrequesttime_{core}.type gauge
+s75thpcrequesttime_{core}.type GAUGE
 s75thpcrequesttime_{core}.graph yes
 s99thpcrequesttime_{core}.label {core} 99th perc
-s99thpcrequesttime_{core}.type gauge
+s99thpcrequesttime_{core}.type GAUGE
 s99thpcrequesttime_{core}.graph yes
-
 """
 
 NUMDOCS_GRAPH_TPL = """graph_title Solr Docs %s
@@ -272,42 +301,54 @@ graph_vlabel docs
 docs.label Docs
 graph_category solr"""
 
-INDEXSIZE_GRAPH_TPL = """graph_args --base 1024 -l 0 --upper-limit {availableram}
+INDEXSIZE_GRAPH_TPL = """graph_args --base 1024 -l 0 
 graph_vlabel Bytes
 graph_title Index Size
 graph_category solr
-graph_info Solr Index Memory Usage.
+graph_info Solr Index Size.
 graph_order {cores}
 {cores_config}
+xmx.label Xmx
+xmx.colour ff0000
 """
 
 INDEXSIZECORE_GRAPH_TPL = """{core}.label {core}
 {core}.draw STACK""" 
 
+MEMORYUSAGE_GRAPH_TPL = """graph_args --base 1024 -l 0 --upper-limit {availableram}
+graph_vlabel Bytes
+graph_title Solr memory usage
+graph_category solr
+graph_info Solr Memory Usage.
+used.label Used
+max.label Max
+max.colour ff0000
+"""
+
 #############################################################################
 # Graph managment
-CHECKS_DEFINED = [
-    'numdocs',
-    'qps',
-    'indexsize',
-    'requesttimes',
-    'documentcache',
-    'fieldvaluecache',
-    'filtercache',
-    'queryresultcache'
-]
 
 class SolrMuninGraph:
-    def __init__(self, hostport, solrmbean):
-        self.solrcoresadmin = SolrCoresAdmin(hostport)
+    def __init__(self, hostport, solrurl, params):
+        self.solrcoresadmin = SolrCoresAdmin(hostport, solrurl)
         self.hostport = hostport
+        self.solrurl = solrurl
         self.params = params
 
     def _getMBean(self, core):
-        return SolrCoreMBean(self.hostport, core)
+        return SolrCoreMBean(self.hostport, self.solrurl, core)
 
     def _cacheConfig(self, cacheType, cacheName):
         return CACHE_GRAPH_TPL.format(core=self.params['core'], cacheType=cacheType, cacheName=cacheName)
+
+    def _format4Value(self, value):
+        if isinstance(value, basestring):
+            return "%s"
+        if isinstance(value, int):
+            return "%d"
+        if isinstance(value, float):
+            return "%.6f"
+        return "%s"
 
     def _cacheFetch(self, cacheType, fields = None):
         fields = fields or ['size', 'lookups', 'hits', 'inserts', 'evictions']
@@ -318,16 +359,15 @@ class SolrMuninGraph:
         data = getattr(solrmbean, cacheType)()
         results.append('multigraph solr_{core}_{cacheType}_hit_rates'.format(core=self.params['core'], cacheType=cacheType))
         for label in hits_fields:
-            results.append("%s.value %s" % (label, data[label]))
+            vformat = self._format4Value(data[label])
+            results.append(("%s.value " + vformat) % (label, data[label]))
         results.append('multigraph solr_{core}_{cacheType}_size'.format(core=self.params['core'], cacheType=cacheType))
         for label in size_fields:
-            results.append("%s.value %s" % (label, data[label]))
+            results.append("%s.value %d" % (label, data[label]))
         return "\n".join(results)
 
     def config(self, mtype):
-        if not mtype:
-            raise CheckException("""Check missing. Available checks: \n\t%s""" % '\n\t'.join(CHECKS_DEFINED))
-        if not hasattr(self, '%sConfig' % mtype):
+        if not mtype or not hasattr(self, '%sConfig' % mtype):
             raise CheckException("Unknown check %s" % mtype)
         return getattr(self, '%sConfig' % mtype)()
 
@@ -345,12 +385,13 @@ class SolrMuninGraph:
 
     def qpsConfig(self):
         cores = self._getCores()
-        graph = [QPSCORE_GRAPH_TPL.format(core=c) for c in cores ]
+        graph = [QPSCORE_GRAPH_TPL.format(core=c, gtype='LINESTACK1') for pos,c in enumerate(cores) ]
         return QPSMAIN_GRAPH_TPL.format(
             cores_qps_graphs='\n'.join(graph), 
             handler=self.params['params']['handler'], 
             core=self.params['core'], 
-            cores_qps_cdefs='%s,%s' % (','.join(map(lambda x: 'qps_%s' % x, cores)),','.join(['+']*(len(cores)-1)))
+            cores_qps_cdefs='%s,%s' % (','.join(map(lambda x: 'qps_%s' % x, cores)),','.join(['+']*(len(cores)-1))), 
+            gorder=','.join(cores)
         )
 
     def qps(self):
@@ -358,7 +399,7 @@ class SolrMuninGraph:
         cores = self._getCores()
         for c in cores:
             mbean = self._getMBean(c)
-            results.append('qps_%s.value %s' % (c, mbean.qps(self.params['params']['handler'])))
+            results.append('qps_%s.value %d' % (c, mbean.requestcount(self.params['params']['handler'])))
         return '\n'.join(results)
 
     def requesttimesConfig(self):
@@ -373,7 +414,7 @@ class SolrMuninGraph:
             mbean = self._getMBean(c)
             results.append('multigraph {core}_requesttimes'.format(core=c))
             for k, time in mbean.requesttimes(self.params['params']['handler']).items():
-                results.append('s%s_%s.value %s' % (k.lower(), c, time))
+                results.append('s%s_%s.value %.5f' % (k.lower(), c, time))
         return '\n'.join(results)
 
     def numdocsConfig(self):
@@ -381,19 +422,35 @@ class SolrMuninGraph:
 
     def numdocs(self):
         mbean = self._getMBean(self.params['core'])
-        return 'docs.value %s' % mbean.numdocs(**self.params['params'])
+        return 'docs.value %d' % mbean.numdocs(**self.params['params'])
 
     def indexsizeConfig(self):
         cores = self._getCores()
-        availableram = os.environ.get('availableram', 16868532224)
         graph = [ INDEXSIZECORE_GRAPH_TPL.format(core=c) for c in cores]
-        return INDEXSIZE_GRAPH_TPL.format(cores=" ".join(cores), cores_config="\n".join(graph), availableram=availableram)
+        return INDEXSIZE_GRAPH_TPL.format(cores=" ".join(cores), cores_config="\n".join(graph))
 
     def indexsize(self):
         results = []
         for c, size in self.solrcoresadmin.indexsize(**self.params['params']).items():
-            results.append("%s.value %s" % (c, size))
+            results.append("%s.value %d" % (c, size))
+        cores = self._getCores()
+        mbean = self._getMBean(cores[0])
+        memory = mbean.memory()
+        results.append('xmx.value %d' % memory['max'])
         return "\n".join(results)
+
+    def memoryConfig(self):
+        cores = self._getCores()
+        mbean = self._getMBean(cores[0])
+        memory = mbean.memory()
+        return MEMORYUSAGE_GRAPH_TPL.format(availableram=memory['max'] * 1.05)
+
+    def memory(self):
+        results = []
+        cores = self._getCores()
+        mbean = self._getMBean(cores[0])
+        memory = mbean.memory()
+        return '\n'.join(['used.value %d' % memory['used'], 'max.value %d' % memory['max']])
 
     def documentcacheConfig(self):
         return self._cacheConfig('documentcache', 'Document Cache')
@@ -422,10 +479,10 @@ class SolrMuninGraph:
 if __name__ == '__main__':
     params = parse_params()
     SOLR_HOST_PORT = os.environ.get('host_port', 'localhost:8080').replace('http://', '')
-    mb = SolrMuninGraph(SOLR_HOST_PORT, params)
-    try:
-        if hasattr(mb, params['op']):
-            print getattr(mb,  params['op'])(params['type'])
-    except Exception, ex:
-        print "ERROR: %s" % ex
-        exit(1)
+    SOLR_URL  = os.environ.get('url', '/solr')
+    if SOLR_URL[0] != '/':
+        SOLR_URL = '/' + SOLR_URL 
+    mb = SolrMuninGraph(SOLR_HOST_PORT, SOLR_URL, params)
+    if hasattr(mb, params['op']):
+        print getattr(mb,  params['op'])(params['type'])
+
