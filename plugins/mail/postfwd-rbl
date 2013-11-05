@@ -1,0 +1,49 @@
+#!/bin/bash
+#
+# Made by David Obando, Berlin
+# Monitor blocked Mails during Postfwd RBL Scan
+#
+# set:
+#
+#[postfwd]
+#group adm
+#timeout 120
+#
+
+
+LOGFILE=${logfile:-/var/log/mail.log}   # Allow user to specify logfile through env.logfile
+#DATE=`date '+%b %e %H'`
+DATE=`date '+%b %e'`
+MAXLABEL=20
+
+if [ "$1" = "autoconf" ]; then
+        if [[ -r $LOGFILE ]]; then
+                echo yes
+        else
+                echo no
+        fi
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+        echo 'graph_title Postfwd'
+        echo 'graph_category Mail'
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_vlabel Postfwd statistics'
+        echo 'spamhaus.label Listed on Spamhaus.org'
+        echo 'spamcop.label Listed on Spamcop'
+        echo 'manitu.label Listed on manitu.net'
+        echo 'blocked.label Blocked'
+        exit 0
+fi
+
+
+echo -en "spamhaus.value "
+echo $(grep "listed on rbl:zen.spamhaus.org" $LOGFILE | grep "$DATE" | wc -l)
+echo -en "spamcop.value "
+echo $(grep "listed on rbl:bl.spamcop.net" $LOGFILE | grep "$DATE" | wc -l)
+echo -en "manitu.value "
+echo $(grep "listed on rbl:ix.dnsbl.manitu.net" $LOGFILE | grep "$DATE" | wc -l)
+echo -en "blocked.value "
+echo $(grep "hits=RULE-01, action=REJECT not allowed" $LOGFILE | grep "$DATE" | wc -l)
