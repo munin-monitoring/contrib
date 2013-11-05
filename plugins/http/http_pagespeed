@@ -1,0 +1,70 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+http_pagespeed - What is the Google PageSpeed score?
+
+=head1 CONFIGURATION
+
+The following environment variables are used
+
+ sites       - Sites to check
+ apikey      - the Google API Key - goto https://code.google.com/apis/console to get one
+
+Configuration example
+
+ [http_pagespeed]
+  env.sites http://example.com/ http://example2.de/
+  env.apikey faasfa4qaf24tgq3t4lkj093
+  timeout 30
+
+=head1 AUTHOR
+
+Copyright (C) 2013 Thomas Heidrich
+
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; version 2 dated June,
+1991.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+if [ "$1" = "config" ]; then
+    echo 'graph_args --base 1000 -l 0 -u 100'
+    echo 'graph_title Google PageSpeed'
+    echo 'graph_vlabel Score'
+    echo 'graph_category network'
+    echo 'graph_info This graph shows Google PageSpeed score statistics.'
+    echo 'graph_printf %3.0lf'
+    for site in $sites; do
+	siteid=`echo $site | sed 's/[^a-z]*//g'`
+	echo "$siteid.label $site"
+	echo "$siteid.info Google PageSpeed score statistics for $site."
+    done
+    exit 0
+fi
+
+for site in $sites; do
+    export siteid=`echo $site | sed 's/[^a-z]*//g'`
+    echo -n "$siteid.value "
+    curl -s "https://www.googleapis.com/pagespeedonline/v1/runPagespeed?url=$site&key=$apikey" | grep score | awk '{printf "%d", $2}'
+    echo
+done
