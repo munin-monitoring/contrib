@@ -95,10 +95,21 @@ def read_osd(filename):
 	s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
 	s.connect(filename)
 	s.send("{\"prefix\": \"perf dump\"}\0")
-	return json.loads(s.recv(10240)[4:])
+	result=s.recv(102400)
+	result=result[4:]
+	try:
+		return json.loads(result)
+	except:
+		print >> sys.stderr, "Result from %s: %s" % (filename,result)
+	return None
 
 def osd_list():
-	return dict([(osd.split(".")[1],read_osd(osd)) for osd in glob.glob("/var/run/ceph/ceph-osd.*.asok")])
+	result={}
+	for osd in glob.glob("/var/run/ceph/ceph-osd.*.asok"):
+		data=read_osd(osd)
+		if data:
+			result[osd.split(".")[1]]=data
+	return result
 
 def collapse_one(inputdict,newkeyformat="%s_%s"):
 	"""map inputdict["a"]["b"]=val to outdict["a_b"]=val"""
@@ -116,7 +127,7 @@ def sortlist(listtosort):
 
 # get and tidy osd_list, get derived keys.
 data=osd_list()
-osds=list(data.keys())
+osds=[key for key in data.keys() if data[key]!=None]
 osds.sort()
 for key in osds:
 	data[key]=collapse_one(data[key])
