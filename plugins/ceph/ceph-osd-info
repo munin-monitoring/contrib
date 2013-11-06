@@ -1,0 +1,172 @@
+#!/usr/bin/python
+
+"""
+: << =cut
+
+=head1 NAME
+
+ceph osd stats by BTG
+
+=head1 NOTES
+
+I have no idea what I'm doing here
+
+Usage:
+
+$0 config
+	show graphs that should be generated
+
+$0
+	show the data for the graphs
+
+Place this in /etc/munin/plugins/ and munin should find it.
+
+You may need to add "timeout 240" to /etc/munin/munin-node.conf and restart
+
+=head1 AUTHOR
+
+Jort Bloem
+
+=head1 EXCUSES
+
+This is one of the first programs I wrote in Python. I got carried away
+by Python's powerfull one-line commands. Just because you can, doesn't
+mean you should. 
+
+This program needs a rewrite, and if there were any problems with it,
+I probably would.
+
+=head1 LICENSE
+
+Copyright (C) 2013 Business Technology Group (btg.co.nz)
+
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3
+or any later version published by the Free Software Foundation;
+with no Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.
+A copy of the license is included in the section entitled "GNU
+Free Documentation License".
+
+If you wish to use this code on any other terms, please contact us
+with your needs, we'll do what we can. This may not include payment.
+We don't bite.
+
+=head1 MAGIC MARKERS
+
+ #%# capabilities=config
+
+=cut
+"""
+
+import socket,os,json,sys,re,glob,itertools
+
+# this overides config values for specific graphs:
+# "graphname.osd1":{"graph_title":"This is the graph for OSD 1!"}
+# "graphname.osd*":{"graph_title":"This is one of the 'dig deeper' graphs!"}
+# "graphname":{"graph_title":"This is my great graph!"}
+#
+# "graphname" overrides defaults, both for graphname and graphname.osd*
+# "graphname.osd*" overrides graphname and defaults (for the sub-graphs), but cannot have the OSD number in it.
+# "graphname.osd1" (or .osd2, or .osd3...) is the final setting for osd1 - may be needed if you want the number of the osd in it.
+# if "graphname.osd*" and "graphname.osd1" are not used, all the settings will be the same as the parent graph,
+#  except the title will have " - OSD 1" (or whichever osd it is) appended.
+#
+# Alternatively, "graph":None will hide a graph.
+
+settings_graph={
+#	"osd_opq":{"graph_title":"test"},
+}
+
+
+### BUG REPORT TODO README!
+# If subgraph is true, then graphs for osd* are created individually.
+# This causes the master (client) munin to take so long to update rrds that timeouts happen.
+# Solutions:
+# 1: set subgraph to false.
+# 2: increase the timeout, wherever that is
+# 3: return config, but no data, for individual graphs, so rrds aren't updated, then link individual rrds to their parent rrd.
+# 4: change munin so which rrd file is used can be overridden
+#
+# option 1: add "timeout 240" to /etc/munin/munin-node.conf and restart
+
+subgraphs=True
+
+def read_osd(filename):
+	s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+	s.connect(filename)
+	s.send("\0\0\0\1")
+	return json.loads(s.recv(10240)[4:])
+
+def osd_list():
+	return dict([(osd.split(".")[1],read_osd(osd)) for osd in glob.glob("/var/run/ceph/ceph-osd.*.asok")])
+
+def collapse_one(inputdict,newkeyformat="%s_%s"):
+	"""map inputdict["a"]["b"]=val to outdict["a_b"]=val"""
+	outdict={}
+	for outer in inputdict.items():
+		#print "outer => %s %s" % outer
+		for inner in outer[1].items():
+			outdict[newkeyformat % (outer[0],inner[0])]=inner[1]
+	return outdict
+
+def sortlist(listtosort):
+	listtosort=list(listtosort)
+	listtosort.sort()
+	return listtosort
+
+# get and tidy osd_list, get derived keys.
+data=osd_list()
+osds=list(data.keys())
+osds.sort()
+for key in osds:
+	data[key]=collapse_one(data[key])
+
+graphlist=[item[1].keys() for item in data.items()]+settings_graph.keys()
+graphlist=list(set(itertools.chain(*graphlist)))
+
+if (sys.argv.__len__()>1) and (sys.argv[1]=="config"):
+	for graph in graphlist:
+		if (graph not in settings_graph):
+			graphsettings={}
+		elif settings_graph[graph]==None:
+			continue
+		else:
+			graphsettings=settings_graph[graph]
+		gr_simple=graph.replace("-","_").replace(":","_")
+		gr_pretty=graph.replace("_"," ").title()
+		gr=graph.replace("-","_").replace(":","_")
+		graphdefaults={"graph_title":gr_pretty,"graph_vlabel":gr_pretty,"graph_category":"osd"}
+		graphsettings=dict(graphdefaults.items()+graphsettings.items())
+		print "multigraph %s" % (gr_simple)
+		print "\n".join(["%s %s" % setting for setting in graphsettings.items()])
+		for osd in sortlist(data.keys()):
+			print "osd%s_%s.label osd %s" % (osd,gr_simple,osd)
+		if subgraphs:
+			for osd in sortlist(data.keys()):
+				print "multigraph %s.osd%s" % (gr_simple,osd)
+				thisrecord=dict(graphsettings.items()+[("graph_title","%s - OSD %s" % (graphsettings["graph_title"],osd),)])
+				#print thisrecord
+				if ("%s.osd*" % (graph) in settings_graph):
+					thisrecord=dict(thisrecord.items()+settings_graph["%s.osd%s" % (graph,osd)].items())
+				if ("%s.osd%s" % (graph,osd) in settings_graph):
+					thisrecord=dict(thisrecord.items()+settings_graph["%s.osd%s" % (graph,osd)].items())
+				print "\n".join(["%s %s" % setting for setting in thisrecord.items()])
+				print "osd%s_%s.label osd %s" % (osd,gr_simple,osd)
+else:
+	for graph in graphlist:
+		gr=graph.replace("-","_").replace(":","_")
+		print "multigraph %s" % gr
+		for osd in osds:
+			if type(data[osd][graph])==dict:
+				if data[osd][graph]["avgcount"]==0:
+					data[osd][graph]="NaN"
+				else:
+					data[osd][graph]=float(data[osd][graph]["sum"])/float(data[osd][graph]["avgcount"])
+		for osd in osds:
+			value=data[osd][graph]
+			print "osd%s_%s.value %s" % (osd,gr,data[osd][graph])
+		if subgraphs:
+			for osd in osds:
+				print "multigraph %s.osd%s" % (gr,osd)
+				print "osd%s_%s.value %s" % (osd,gr,data[osd][graph])
+
