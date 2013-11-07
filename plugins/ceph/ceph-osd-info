@@ -92,15 +92,17 @@ settings_graph={
 subgraphs=True
 
 def read_osd(filename):
-	s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
-	s.connect(filename)
-	s.send("{\"prefix\": \"perf dump\"}\0")
-	result=s.recv(102400)
-	result=result[4:]
-	try:
-		return json.loads(result)
-	except:
-		print >> sys.stderr, "Result from %s: %s" % (filename,result)
+	for loop in range(10):
+		try:
+			s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+			s.connect(filename)
+			s.send("{\"prefix\": \"perf dump\"}\0")
+			result=s.recv(102400)
+			result=result[4:]
+			return json.loads(result)
+		except:
+			pass
+		
 	return None
 
 def osd_list():
