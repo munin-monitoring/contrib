@@ -1,0 +1,37 @@
+#! /bin/sh
+# (c) 2012 - Steve Schnepp - LGPL
+
+# XXX - coded hastily
+
+# Source the DB2 profile
+. /home/db2inst1/sqllib/db2profile
+
+echo "graph_title Number of connections"
+echo "graph_category DB2"
+echo "graph_args -l 0"
+
+db2 list application | tail +5 | awk ' /^[A-Z]/ { print $1 }' | sort | uniq -c > $HOME/run/$(basename $0).txt
+
+# Get users list
+touch $HOME/run/$(basename $0).users
+awk '{ print $2 }' $HOME/run/$(basename $0).txt | cat $HOME/run/$(basename $0).users - | sort -ru > $HOME/run/$(basename $0).users.tmp
+mv $HOME/run/$(basename $0).users.tmp $HOME/run/$(basename $0).users
+
+# Emit config
+if [ "$1" = "config" ]
+then
+        awk ' { print $1 ".label " $1 "\n" $1 ".draw AREASTACK" }' $HOME/run/$(basename $0).users
+fi
+
+# Emit values
+for i in $( cat $HOME/run/$(basename $0).users )
+do
+        TMPLINE=$(awk -v i=$i '($2 == i) { print }' $HOME/run/$(basename $0).txt)
+        if [ -z "$TMPLINE" ]
+        then
+                echo "$i.value 0"
+        else
+                echo "$TMPLINE" | awk ' { print $2 ".value " $1 }'
+
+        fi
+done

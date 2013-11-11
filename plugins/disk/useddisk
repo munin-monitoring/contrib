@@ -1,0 +1,35 @@
+#!/bin/bash
+#
+# Wildcard-plugin to monitor used disk.
+#
+#    ln -s /usr/share/munin/plugins/useddisk_ /etc/munin/plugins/useddisk_hda1
+#
+# ...will monitor /dev/hda1.
+#
+# $Log$
+# Revision 0.1	2013/08/23 avances123@gmail.com
+# init
+
+# parse wildcard config
+DISK=`basename $0 | sed 's/^useddisk_//g'`
+
+# output config
+if [ "$1" = "config" ]; then
+	echo "graph_title Used Disk on /dev/$DISK"
+        echo "graph_args --base 1024"
+        echo "graph_vlabel Used Disk in Bytes"
+        echo "graph_category disk"
+        echo "useddisk.label used Bytes"
+	echo "useddisk.draw LINE3"
+	echo "useddisk.cdef useddisk,1024,*"
+	echo "totaldisk.label total Bytes"
+        echo "totaldisk.draw AREA"
+        echo "totaldisk.cdef totaldisk,1024,*"
+	exit 0
+fi
+
+# get data
+OUTPUT=`df -P | grep "$DISK"`
+
+echo "useddisk.value `echo $OUTPUT | cut -d ' ' -f 3`"
+echo "totaldisk.value `echo $OUTPUT | cut -d ' ' -f 2`"

@@ -1,0 +1,284 @@
+#!/usr/local/bin/perl -w
+#%# family=auto
+#%# capabilities=autoconf
+#
+# Copyright (c) 2013 Philip Paeps
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer
+#    in this position and unchanged.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+# OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+# OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+# SUCH DAMAGE.
+#
+
+#
+# Plugin to monitor NSD performance.
+# Contributed by: Philip Paeps <philip@paeps.cx>.
+# Heavily inspired by the unbound_munin_ script by
+# W.C.A. Wijgaards and the nsd3 script by J.T.Sage.
+#
+# Usage: nsd_FUNCTION
+#
+# Available functions:
+#	by_type - incoming queries by type
+#	by_rcode - answers by rcode
+#	hits - base volume
+#
+# Example configuration:
+#
+#   [nsd_*]
+#   user bind
+#   env.logdir /var/log
+#   env.logfile nsd.log
+#
+#   [nsd_by_type]
+#   env.stats = A=A AAAA=AAAA MX=MX PTR=PTR TYPE252=AXFR SOA=SOA
+#
+# The stats line is an optional space-separated string of VALUE=Caption
+# pairs of query types to pick out of the NSTATS returned by NSD.  Replace
+# spaces in a caption value by _.
+#
+use strict;
+use Munin::Plugin;
+use POSIX;
+
+my $LOGDIR = $ENV{'logdir'} || '/var/log';
+my $LOGFILE = $ENV{'logfile'} || 'nsd.log';
+my $logfile = "$LOGDIR/$LOGFILE";
+my $pidfile = $ENV{'pidfile'} || '/var/run/nsd/nsd.pid';
+
+sub signal_nsd {
+	open(my $P, "< $pidfile") || die "Couldn't open pidfile: $!\n";
+	my $pid = <$P>;
+	close($P);
+
+	chomp $pid;
+	kill USR1 => $pid or die "Couldn't signal NSD: $!\n";
+
+	# Give the daemon a chance to write statistics.
+	sleep(0.5);
+}
+
+sub read_logfile($) {
+	my $stats = shift;
+	my $pos = undef;
+
+	($pos) = restore_state();
+	$pos = 0 unless defined($pos);
+	my ($L, $rotated) = tail_open($logfile, $pos);
+
+	my $last = 0;
+	while (<$L>) {
+		chomp $_;
+		if (/([NX]STATS) (\d+)/) {
+			$last = $2;
+			push @$stats, {
+				'type' => $1, 'when' => $2,
+				'values' => { $_ =~ m/(\S+)=(\d+)/g },
+			};
+		}
+	}
+	$pos = tail_close($L);
+	save_state($pos);
+
+	return $last;
+}
+
+sub get_values($) {
+	my $values = shift;
+
+	my @stats = ();
+	my $last = read_logfile(\@stats);
+
+	# If the values found in the logfile are older than three minutes,
+	# signal NSD to print fresh ones, and read them again.
+	my $now = time;
+	if ($now - $last > 3 * 60) {
+		signal_nsd();
+		read_logfile(\@stats);
+	}
+
+	# @stats is an array of the last lines found in the logfile.  Hopefully,
+	# the last two lines will be NSTATS and XSTATS.  If not, we need to keep
+	# looking.
+	foreach (keys %$values) {
+		foreach my $stat (reverse(@stats)) {
+			$values->{$_} = $stat->{'values'}{$_} if ($stat->{'values'}{$_});
+		}
+	}
+
+	return \@stats;
+}
+
+# Base volume
+sub hits($) {
+	my $function = shift;
+	my %captions = ();
+
+	%captions = (
+		'RR' => 'UDP queries dropped',
+		'SAns' => 'UDP queries answered',
+		'RTCP' => 'TCP connections',
+		'SErr' => 'Transmit errors',
+	);
+
+	# Print graph configuration.
+	if ($function and $function eq "config") {
+		print "graph_title NSD DNS traffic\n";
+		print "graph_args --base 1000 -l 0\n";
+		print "graph_vlabel queries / second\n";
+		print "graph_category dns\n";
+		foreach my $caption (keys %captions) {
+			my $label = $captions{$caption};
+			$label =~ s/_/ /;
+			print lc($caption) . ".label $label\n";
+			print lc($caption) . ".type DERIVE\n";
+			print lc($caption) . ".min 0\n";
+		}
+		print "graph_info Base volume\n";
+		exit 0;
+	}
+
+	my %values = map { $_ => 0 } keys %captions;
+	get_values(\%values);
+	foreach (keys %values) {
+		print lc($_) . ".value $values{$_}\n";
+	}
+
+	exit 0;
+}
+
+# DNS queries by type
+sub by_type($$) {
+	my ($function, $stats) = @_;
+
+	# Sensible default set of statistics.
+	if (! $stats) {
+		$stats = "A=A AAAA=AAAA MX=MX PTR=PTR TYPE252=AXFR SOA=SOA " .
+		    "TXT=TXT DNSKEY=DNSKEY NS=NS SPF=SPF";
+	}
+
+	my %captions = map { split /=/ } split / /, $stats;
+
+	# Print graph configuration.
+	if ($function and $function eq "config") {
+		print "graph_title NSD DNS queries by type\n";
+		print "graph_args --base 1000 -l 0\n";
+		print "graph_vlabel queries / second\n";
+		print "graph_category dns\n";
+		foreach my $caption (keys %captions) {
+			my $label = $captions{$caption};
+			$label =~ s/_/ /;
+			print lc($caption) . ".label $label\n";
+			print lc($caption) . ".type DERIVE\n";
+			print lc($caption) . ".min 0\n";
+		}
+		print "graph_info Queries by DNS RR type requested\n";
+		exit 0;
+	}
+
+	my %values = map { $_ => 0 } keys %captions;
+	get_values(\%values);
+	foreach (keys %values) {
+		print lc($_) . ".value $values{$_}\n";
+	}
+
+	exit 0;
+}
+
+# Answers by rcode
+sub by_rcode($) {
+	my ($function) = shift;
+	my %captions = ();
+
+	%captions = (
+		'SAns' => 'NOERROR',
+		'SFail' => 'SERVFAIL',
+		'SFErr' => 'FORMERR',
+		'SNXD' => 'NXDOMAIN',
+	);
+
+	# Print graph configuration.
+	if ($function and $function eq "config") {
+		print "graph_title NSD DNS answers by rcode\n";
+		print "graph_args --base 1000 -l 0\n";
+		print "graph_vlabel answers / second\n";
+		print "graph_category dns\n";
+		foreach my $caption (keys %captions) {
+			my $label = $captions{$caption};
+			$label =~ s/_/ /;
+			print lc($caption) . ".label $label\n";
+			print lc($caption) . ".type DERIVE\n";
+			print lc($caption) . ".min 0\n";
+		}
+		print "graph_info Answers by rcode returned\n";
+		exit 0;
+	}
+
+	my %values = map { $_ => 0 } keys %captions;
+	get_values(\%values);
+	foreach (keys %values) {
+		# SAns is the total number of answers sent, regardless of rcode.
+		# Subtracting SERVFAIL, FORMERR and NXDOMAIN leaves IMPL and
+		# REFUSED.  NSD will never send REFUSED, which leaves IMPL - so,
+		# probably correct enough!
+		if ($_ eq "SAns") {
+			$values{$_} -= $values{'SFErr'};
+			$values{$_} -= $values{'SFail'};
+			$values{$_} -= $values{'SNXD'};
+		}
+		print lc($_) . ".value $values{$_}\n";
+	}
+
+	exit 0;
+}
+
+# Make sure we can access the pidfile and the logfile
+# and that we can send a signal to NSD to print stats.
+# Note that autoconf should exit 0 even if it fails.
+sub autoconf {
+	open(my $L, "< $logfile") || print "no ($logfile: $!)\n";
+	open(my $P, "< $pidfile") || print "no ($pidfile: $!)\n";
+	exit 0 unless defined($L) and defined($P);
+
+	eval { signal_nsd() };
+	if ($@) {
+		chomp $@;
+		warn "no ($@)\n";
+		exit 0;
+	}
+
+	print "yes\n";
+	exit 0;
+}
+
+if ($ARGV[0] and $ARGV[0] eq "autoconf") {
+	autoconf();
+}
+
+if ($Munin::Plugin::me =~ /_by_type$/) {
+	by_type($ARGV[0], $ENV{'stats'});
+} elsif ($Munin::Plugin::me =~ /_by_rcode$/) {
+	by_rcode($ARGV[0]);
+} elsif ($Munin::Plugin::me =~ /_hits$/) {
+	hits($ARGV[0]);
+}
+
+exit 0;

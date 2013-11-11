@@ -38,9 +38,9 @@ module Munin
   class ThinPeakMemory
     
     def run
-      pids = get_pids()
-      port_list = Hash.new
-      pids.sort.each do |pid, port|
+      instances = get_pids()
+      instances.each do |instance|
+        pid, port = instance.split("|")
         hwm = (pid_hwm(pid).to_i)/1024
         puts "thin_#{port}.value #{hwm}"
       end
@@ -61,18 +61,9 @@ module Munin
       end
     end
     
-    # Get pis using lsof (list open files) 
-    #   look for listening tcp applications 
-    #   that match the name thin
+    # fetch all pids that match thin
     def get_pids
-      pids_ports = []
-      pids = `pgrep thin`.split
-      pids.each do |t|
-        port = `lsof -p #{t} | grep LISTEN`.split[8]
-        port = port.split(":")[1]
-        pids_ports << [t,port]
-      end
-      pids_ports
+      pids = `pgrep -f 'thin' -l | awk -F " " '{ if (substr( $4, 10, 4)>=1) print $1"|"substr( $4, 10, 4)}' | sort -t'|' -nk 2`.split(/\r?\n/)
     end
 
     def autoconf
@@ -92,7 +83,8 @@ when "config"
   puts "graph_args -l 0"
   puts "graph_scale yes"
   puts "graph_info Tracks the peak memory of thin processes, aka High Water Mark."
-  mpm.get_pids.sort.each do |pid,port|
+  mpm.get_pids.each do |instance|
+    pid, port = instance.split("|")    
     puts "thin_#{port}.label thin_#{port}"
     puts "thin_#{port}.info Peak Memory"
     puts "thin_#{port}.type GAUGE"

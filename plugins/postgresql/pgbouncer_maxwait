@@ -1,0 +1,68 @@
+#!/bin/bash
+#
+# Plugin to monitor PgBouncer max wait stat for all pools.
+#
+# Author:
+#    Dave Fennell <dave@microtux.co.uk>
+#
+# License:
+#    GPLv2
+#
+# Created:
+#    20th December 2012
+#
+# Usage:
+#    Place in /etc/munin/plugins/ (or link it there using ln -s)
+#
+
+dbserver='' # '-h localhost'
+dbuser='postgres'
+
+# Pgbouncer Port Number
+port=6432
+
+# The psql command to use.
+cmd="psql ${dbserver} -U ${dbuser} -p ${port} pgbouncer -tc 'SHOW POOLS;' | grep -v '^$'"
+
+if [ "$1" = "config" ]; then
+	echo 'graph_args --lower-limit 0'
+	echo 'graph_category pgbouncer'
+	echo 'graph_info PgBouncer Pool Maximum Wait'
+	echo 'graph_scale no'
+	echo 'graph_title PgBouncer Pool Maximum Wait'
+	echo 'graph_vlabel maximum wait (secs)'
+
+	eval ${cmd} | while read pool sep user junk
+	do
+	        # Skip pgbouncer database itself.
+	        if [ "$user" = "pgbouncer" ]; then
+	                continue
+	        fi
+
+		test -z "${pool}" && continue
+
+	        echo ${pool}.label ${pool}
+	        echo ${pool}.info ${pool} connection pool
+	        echo ${pool}.type GAUGE
+	done
+
+        # If dirty config capability is enabled then fall through
+        # to output the data with the config information.
+        if [ "$MUNIN_CAP_DIRTYCONFIG" = "" ]; then
+                exit 0
+        fi
+fi
+
+# Output looks like this:
+#  database         |   user    | cl_active | cl_waiting | sv_active | sv_idle | sv_used | sv_tested | sv_login | maxwait
+
+eval ${cmd} | while read pool sep user sep cl_active sep cl_waiting sep sv_active sep sv_idle sep sv_used sep sv_tested sep sv_login sep maxwait
+do
+	# Skip pgbouncer database itself.
+	if [ "$user" = "pgbouncer" ]; then
+		continue
+	fi
+
+	echo ${pool}.value ${maxwait}
+done
+

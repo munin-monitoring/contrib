@@ -1,0 +1,179 @@
+#! /usr/bin/perl -w
+
+use strict;
+use Munin::Plugin;
+
+=head1 NAME
+
+relayd - Plugin to show statistics about relayd load balancer.
+
+=head1 CONFIGURATION
+
+The following environment variables are used by this plugin:
+
+=over 4
+
+=item logfile
+
+The file where syslog logs relayd's action (Default:
+/var/log/relayd.log)
+
+You need an entry like this in your syslog.conf for this to work:
+
+!relayd
+*.*                                             /var/log/relayd.log
+
+The directive:
+
+log updates
+
+is also necessary in relayd.conf.
+
+=item configfile
+
+The relayd.conf configfile (Default: /usr/local/etc/relayd.conf)
+
+=back
+
+=head1 TODO
+
+ * determine if the table is completely down (may be *impossible* if a partial
+   downtime becomes complete between two runs)
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=autoconf
+
+=cut
+
+# wrapper around clean_fieldname() which is too dumb to parse IPs
+sub clean_host($) {
+	my $host = shift;
+        my $clean = clean_fieldname($host);
+        $clean  = clean_fieldname('host'.$host) unless ($clean ne '_');
+	return $clean;
+}
+
+my $logfile = '/var/log/relayd.log';
+my $configfile = "/usr/local/etc/relayd.conf";
+
+need_multigraph();
+
+(defined($ENV{'logfile'})) and $logfile = $ENV{'logfile'};
+(defined($ENV{'configfile'})) and $configfile = $ENV{'configfile'};
+
+my $cmd = (defined($ARGV[0])) ? $ARGV[0] : '';
+
+my @hosts = ();
+open(my $conf, "<", $configfile) or die "can't open $configfile: $!";
+my $content = join("", <$conf>);
+while ( $content =~ /table\s*<([^>]+)>\s*{([^}]+)}/g) {
+        my $hosts = $2;
+        print "table: $1, " if $Munin::Plugin::DEBUG;
+        $hosts =~ s/#.*$//mg; # comments
+        $hosts =~ s/^\s+//mg; # trim spaces before lines
+        print "hosts: $hosts\n" if $Munin::Plugin::DEBUG;
+        push @hosts , split /\s+/, $hosts;
+}
+
+if ($cmd eq 'config') {
+        print("multigraph relayd_avail\n");
+        print("graph_title Relayd host availability\n");
+        print("graph_args --upper-limit 100\n");
+        print("graph_vlabel % availability\n");
+        print("graph_category Load balancer\n");
+        print("graph_info Ratio of time when this host was up. This is provided by relayd itself (not averaged by this plugin)\n");
+        for my $host (@hosts) {
+                my $clean = clean_host($host);
+                print("$clean.label $host\n");
+        }
+        print("multigraph relayd_incidents\n");
+        print("graph_title Relayd host incidents\n");
+        print("graph_args --lower-limit 0\n");
+        print("graph_vlabel down incidents\n");
+        print("graph_category Load balancer\n");
+        print("graph_info Number of times this host went down\n");
+        for my $host (@hosts) {
+                my $clean = clean_host($host);
+                print("$clean.type ABSOLUTE\n");
+                print("$clean.label $host\n");
+        }
+        exit(0);
+}
+elsif ($cmd eq 'autoconf') {
+        sub fail($) {
+                my $msg=shift;
+                print "no ($msg)\n";
+                exit(1);
+        }
+        fail("$logfile unreadable)") unless -r $logfile;
+        fail("$configfile unreadable") unless -r $configfile;
+        open(my $status, "relayctl show summary|") or fail("cannot open relayctl pipe: $!");
+        () = <$status>; # necessary to avoid SIGPIPE to relayctl, which would make it fail
+        close($status) or fail("cannot run relayctl: $!");
+        print "yes\n";
+        exit(0);
+}
+
+# sample lines:
+# Mar  8 23:05:28 rtr0 relayd[81814]: host 209.44.112.101, check http code (2000ms), state up -> down, availability 97.83%
+# Mar  8 23:05:28 rtr0 relayd[81814]: host 209.44.112.96, check http code (2001ms), state up -> down, availability 98.12%
+# Mar  8 23:05:31 rtr0 relayd[81813]: table hag: 1 added, 2 deleted, 0 changed, 0 killed
+# Mar  8 23:05:31 rtr0 relayd[81814]: host 209.44.112.101, check http code (3ms), state down -> up, availability 97.83%
+# Mar  8 23:05:31 rtr0 relayd[81814]: host 209.44.112.96, check http code (3ms), state down -> up, availability 98.12%
+# Mar  8 23:05:36 rtr0 relayd[81813]: table hag: 2 added, 1 deleted, 0 changed, 0 killed
+# Mar  8 23:21:58 rtr0 relayd[81814]: host 209.44.112.96, check http code (2000ms), state up -> down, availability 98.12%
+# Mar  8 23:22:01 rtr0 relayd[81813]: table hag: 0 added, 1 deleted, 0 changed, 0 killed
+
+my (%avail, %down);
+
+my $pos = undef;
+($pos) = restore_state();
+$pos = 0 unless defined($pos);
+
+my ($log,$reset) = tail_open($logfile,$pos);
+#open(my $log, "$logtail -f $logfile -o $offsetfile |") or die("cannot open $logfile: $!");
+#open(my $log, "tail -100 $logfile |") or die("cannot open $logfile: $!");
+while (<$log>) {
+        if (/host ([^,]*), check[^,]*, state [^>]* -> ([^,]*), availability ([0-9]+.[0-9]+)%/) {
+                my $host = clean_host($1);
+
+                $down{$host} = 0 unless defined $down{$host};
+                $down{$host}++ if $2 eq 'down';
+                # yes, we overwrite previous value and take only the recent one. be sad.
+                $avail{$host} = $3;
+        }
+}
+$pos = tail_close($log) or warn "failed to close pipe: $!";
+save_state($pos);
+
+# get missing availability values from relayctl, if necessary
+for my $host (@hosts) {
+        my $ran = 0;
+        my $clean = clean_host($host);
+        if (!defined $avail{$clean} && !$ran) {
+                open(my $status, "relayctl show summary|") or die "can't open relayctl: $!";
+                while (<$status>) {
+                        if (/([\w\.]+)\s+(\d+\.\d+)%/) {
+				my $h = clean_host($1);
+                                print "found spare value: $2 for $h\n" if $Munin::Plugin::DEBUG;
+                                $avail{$h} = $2 unless defined($avail{$h});
+                        }
+                }
+                close $status or die "can't close pipe: $!";
+                $ran = 1;
+        }
+}
+
+print "multigraph relayd_avail\n";
+for my $host (@hosts) {
+        my $clean = clean_host($host);
+        print "$clean.value " . ($avail{$clean} || 'NaN'). "\n";
+}
+
+print "multigraph relayd_incidents\n";
+for my $host (@hosts) {
+        my $clean = clean_host($host);
+        print "$clean.value " . ($down{$clean} || 0). "\n";
+}

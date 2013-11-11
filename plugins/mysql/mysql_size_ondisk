@@ -1,0 +1,80 @@
+#!/bin/bash
+#
+INFO=\
+"mysql_size_ondisk - Munin plugin that reports the size of the files and
+ directories in /var/lib/mysql, biggest to smallest.
+ To correctly count InnoDB tables you should have innodb_file_per_table enabled
+ in MySQL (good practise anyway), otherwise all InnoDB tables will be counted into
+ ibdataX.
+ This plugin must be run as the user mysql, to do that append the following
+ to your /etc/munin/plugins/plugin-conf.d/munin-node:
+
+ [mysql_size_ondisk]
+  user mysql
+
+ This plugin gives you similar information as mysql_size_all. A difference
+ is that mysql_size_ondisk is much faster (0.4 seconds vs 14 seconds, on a server
+ with 170 databases, 26 GB total). Also note that mysql_size_all gives you the net
+ data size, mysql_size_ondisk gives you the gross storage space used, which may be
+ much more than your actual data."
+#
+# License: GPLv2 or later
+#
+# v1.0, 27.01.2012 Jakob Unterwurzacher <j.unterwurzacher@web-tech.at>
+
+#%# family=auto
+#%# capabilities=autoconf
+
+set -eu
+
+DIR=/var/lib/mysql
+
+function clean {
+	# First character must not be a number
+	a=${1/#[0-9]/_}
+	# Other characters must be alphanumeric
+	b=${a//[^a-zA-Z0-9]/_}
+	echo $b
+}
+
+if [ "${1:-}" = "autoconf" ]
+then
+	if du -sb $DIR &> /dev/null
+	then
+		echo "yes"
+		exit 0
+	else
+		echo "no"
+		exit 1
+	fi
+elif [ "${1:-}" = "config" ]
+then
+	echo "graph_title MySQL on-disk database size"
+	echo "graph_category mysql"
+	# graph_info cannot have newlines - replace by <br> which will be rendered to newlines in
+	# the web interface.
+	echo "graph_info ${INFO//$'\n'/<br>}"
+	echo "graph_args --base 1024 --lower-limit 0"
+	echo "graph_vlabel Bytes"
+	cd $DIR
+	du -sb * | sort -nr | while read s i
+	do
+		i=`clean $i`
+		echo "$i.label $i"
+		echo "$i.type GAUGE"
+		echo "$i.draw AREASTACK"
+	done
+	exit 0
+elif [ "${1:-}" = "" ]
+then
+	cd $DIR
+	du -sb * | sort -nr | while read s i
+	do
+		i=`clean $i`
+		echo "$i.value $s"
+	done
+	exit 0
+else
+	echo "Unknown argument"
+	exit 1
+fi

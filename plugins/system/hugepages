@@ -31,31 +31,34 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 # --
-#
+
+
+#%# family=auto
+#%# capabilities=autoconf
+
 BEGIN {
   if (ARGC > 1 && ARGV[1] == "config") {
-    print "graph_args --base 1024 -l 0"
-    print "graph_vlabel Bytes"
+    print "graph_args --base 1000 -l 0"
     print "graph_title HugePages usage"
     print "graph_category system"
     print "graph_info This graph shows the usage of the kernel Huge Pages."
-    print "graph_order Total Rsvd Free Surp Anon"
-    print "Total.label used"
+    print "graph_order Total Rsvd Free Surp"
+    print "Total.label total"
     print "Total.draw AREA"
-    print "Total.info In-use Huge Page Memory"
+    print "Total.info Size of pool of hugepages ('nr_hugepages')"
+    print "Rsvd.label reserved"
+    print "Rsvd.draw AREA"
+    print "Rsvd.info Huge Pages that have been reserved but are not used."
     print "Free.label free"
     print "Free.draw STACK"
-    print "Free.info Unused Huge Page Memory."
-    print "Rsvd.label reserved"
-    print "Rsvd.draw STACK"
-    print "Rsvd.info Huge Pages that have been reserved but are not used."
+    print "Free.info Unallocated Huge Page Memory."
     print "Surp.label surplus"
     print "Surp.draw STACK"
-    print "Surp.info Huge Pages that are in excess of the reserved amount, usually only greater than zero when the amount of Huge Pages is reduced while they are in use."
-    print "Anon.label anonymous"
-    print "Anon.draw STACK"
-    print "Anon.info Huge Pages that are in use by the transparent Huge Page allocator khugepaged."
+    print "Surp.info Number of hugepages > nr_hugepages, as decided by nr_overcommit_hugepages or when the amount of Huge Pages is reduced while they are in use."
     CONF=1
+  }
+  if (ARGC > 1 && ARGV[1] == "autoconf") {
+    CONF=2
   }
   ARGV[1] = "/proc/meminfo"
   ARGC = 2
@@ -66,15 +69,21 @@ BEGIN {
 
 CONF == 1 {
   if (/Hugepagesize/) {
-    print "Total.cdef Total,Free,-,1024,",$2,",*,*"
-    print "Free.cdef Free,1024,",$2,",*,*,Rsvd,-"
-    print "Rsvd.cdef Rsvd,1024,",$2,",*,*"
-    print "Surp.cdef Surp,1024,",$2,",*,*"
-    print "Anon.cdef Anon,1024,*"
+    print "graph_vlabel Pages (",$2,"KB/page)"
   }
 }
 
-(CONF != 1) {
+CONF == 2 {
+  if (/HugePages_Total/) {
+    if ($2 > 0) {
+      print "yes"
+    } else {
+      print "no"
+    }
+  }
+}
+
+(CONF != 1 && CONF != 2) {
   if (match($0,"(anon)?hugepages(_([^:]+))?[^i]",mats))
     print mats[1],mats[3],".value ",$2
 }

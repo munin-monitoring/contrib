@@ -1,19 +1,21 @@
 #!/bin/sh
 
+# This plugin shows Solaris zone memory usage.
+
 #%# family=auto
 #%# capabilities=autoconf
 
 PRSTAT=/usr/bin/prstat
-PRSTAT_OPTS="-Z 1 1"
+PRSTAT_OPTS="-Z -n 1,99 1 1"
 
 if [ "$1" = 'autoconf' ]; then
         if [ -f $PRSTAT ]; then
-		zones=`/usr/sbin/zoneadm list | wc -l`
-		if [ $zones -gt 1 ]; then
-			echo yes
-		else
-			echo yes
-		fi
+                zones=`/usr/sbin/zoneadm list | wc -l`
+                if [ $zones -gt 1 ]; then
+                        echo yes
+                else
+                        echo yes
+                fi
                 exit 0
         else
                 echo no
@@ -24,18 +26,18 @@ fi
 if [ "$1" = 'config' ]; then
         echo 'graph_title zone memory usage'
         echo 'graph_args --upper-limit 100'
-	echo 'graph_category system'
-	stack=AREA
+        echo 'graph_category system'
+        stack=AREA
         $PRSTAT $PRSTAT_OPTS | sed '1,/^ZONEID/d' | grep -v '^Total' | while read i; do
-		oIFS="$IFS"
-		IFS=' 
+                oIFS="$IFS"
+                IFS='
 '
-		set -$- $i
-		name=$1
-		label=$8
+                set -$- $i
+                name=$1
+                label=$8
                 printf "$name.label $label\n$name.draw $stack\n$name.warn 95\n"
-		IFS="$oIFS"
-		stack=STACK
+                IFS="$oIFS"
+                stack=STACK
         done
         exit 0
 fi
@@ -48,12 +50,12 @@ fi
 # Total: 207 processes, 709 lwps, load averages: 0.05, 0.06, 0.11$
 
 $PRSTAT $PRSTAT_OPTS | sed '1,/^ZONEID/d' | grep -v '^Total' | while read i; do
-	oIFS="$IFS"
-	IFS='% 
+        oIFS="$IFS"
+        IFS='%
 '
-	set -$- $i
-	name=$1
-	value=$5
-	printf "$name.value $value\n"
-	IFS="$oIFS"
+        set -$- $i
+        name=$1
+        value=$5
+        printf "$name.value $value\n"
+        IFS="$oIFS"
 done

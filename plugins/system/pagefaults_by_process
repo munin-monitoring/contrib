@@ -1,0 +1,105 @@
+#!/usr/bin/perl
+#
+# Copyright 2012 Chris Wilson
+# Copyright 2006 Holger Levsen
+#
+# This plugin monitors ALL processes on a system. No exceptions. It can
+# produce very big graphs! But if you want to know which processes are
+# killing your system by page faulting, without knowing what to monitor
+# in advance, this can help; or in addition to one of the more specific
+# plugins to monitor just Apache or MySQL, for example.
+#
+# Each counter is a DERIVE (difference since the last counter reading)
+# of the number of major page faults, usually 4k each, read in by a
+# process. Memory mapped files probably contribute to this. The process
+# cannot continue until the page fault is served, so this is a
+# high-priority read that usually indicates memory starvation.
+# Processes with no page faults at all are ignored. Processes
+# that die may not appear on the graph, and anyway their last chunk of
+# CPU usage before they died is lost. You could modify this plugin to
+# read SAR/psacct records if you care about that.
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+
+#scriptname=`basename $0`
+#vsname=`echo $scriptname | perl -ne '/^vserver_proc_VM_(.*)/ and print $1'`
+
+#if [ "$1" = "suggest" ]; then
+#	ls -1 /etc/vservers
+#	exit 0
+#elif [ -z "$vsname" ]; then
+#	echo "Must be used with a vserver name; try '$0 suggest'" >&2
+#	exit 2
+#fi
+
+use strict;
+use warnings;
+
+my $cmd = "ps -eo maj_flt,comm h";
+open PS, "$cmd|" or die "Failed to run ps command: $cmd: $!";
+
+# my $header_line = <PS>;
+my %total_by_process;
+
+while (<PS>)
+{
+	my @fields = split;
+	my $value = $fields[0];
+	my $process = $fields[1];
+
+	# remove any / and everything after it from the process name,
+	# e.g. kworker/0:2 -> kworker
+	$process =~ s|/.*||;
+
+	# remove any . at the end of the name (why does this appear?)
+	# $process =~ s|\.$||;
+
+	# change any symbol that's not allowed in a munin variable name to _
+	$process =~ tr|a-zA-Z0-9|_|c;
+
+	$total_by_process{$process} += $value;
+}
+
+foreach my $process (keys %total_by_process)
+{
+	# remove all processes with 0 faults
+	if (not $total_by_process{$process})
+	{
+		delete $total_by_process{$process};
+	}
+}
+
+close(PS);
+
+if (@ARGV and $ARGV[0] eq "config")
+{
+	print <<END;
+graph_title Page faults by Process
+graph_args --base 1000
+graph_vlabel major page faults
+graph_category system
+graph_info Shows number of major page faults caused by each process name
+END
+
+	my $stack = 0;
+	sub draw() { return $stack++ ? "STACK" : "AREA" }
+	print map
+	{
+		"$_.label $_\n" .
+		"$_.min 0\n" .
+		"$_.type DERIVE\n" .
+		"$_.draw " . draw() . "\n"
+	} sort keys %total_by_process;
+}
+else
+{
+	print map
+	{
+		"$_.value $total_by_process{$_}\n"
+	} sort keys %total_by_process;
+}
+
+exit(0);

@@ -1,0 +1,51 @@
+#!/usr/bin/python
+
+# This is monitoring plugin for riak Developer's website: http://wiki.basho.com/Riak.html
+# sample config in /etc/munin/plugin-conf.d/riak
+#
+# [riak_*]
+# env.RIAK_URL http://127.0.0.1:8091/stats
+#
+
+import urllib2
+import sys
+import os
+
+try:
+    import json
+except ImportError:
+    import simplejson as json
+
+def doData():
+    raw = urllib2.urlopen(  os.environ.get('RIAK_URL', "http://127.0.0.1:8097/stats") ).read()
+    stats = json.loads( raw )
+
+    print "get_fsm_time_95.value " + str( stats["node_get_fsm_time_95"] )
+    print "put_fsm_time_95.value " + str( stats["node_put_fsm_time_95"] )
+
+def doConfig():
+    print "graph_title 95th percentile of FSM time"
+    print "graph_args --base 1000"
+    print "graph_vlabel gets (-) puts (+) in ms"
+    print "graph_category Riak"
+    print "graph_info Response time, in milliseconds, met or beaten by 95% of riak_kv_get_fsm executions."
+
+    print "get_fsm_time_95.label vnode_gets"
+    print "get_fsm_time_95.graph no"
+    print "get_fsm_time_95.type GAUGE"
+    print "get_fsm_time_95.cdef get_fsm_time_95,1000,/"
+    print "get_fsm_time_95.min 0"
+    print "get_fsm_time_95.draw LINE1"
+
+    print "put_fsm_time_95.label vnode gets/puts"
+    print "put_fsm_time_95.type GAUGE"
+    print "put_fsm_time_95.min 0"
+    print "put_fsm_time_95.cdef put_fsm_time_95,1000,/"
+    print "put_fsm_time_95.negative get_fsm_time_95"
+    print "put_fsm_time_95.draw LINE1"
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "config":
+        doConfig()
+    else:
+        doData()

@@ -1,0 +1,164 @@
+#!/bin/bash
+#
+# Wildcard-plugin to monitor Grid Engine queue state.
+# To monitor a queue, link sge_queue_xml_<queue> to this file. E.g.
+#
+#   ln -s /usr/share/munin/plugins/sge_queue_xml_ /etc/munin/plugins/sge_queue_xml_all.q
+#
+# inspired by the sge_queue_ plugin comitted by steveschnepp
+#
+# Runs 'qstat -g c -xml' for the specified queue and gets the number of
+# used, reserved, unavailable, available and total queue slots.
+# Unavailable slots have queue states Disabled/Suspended/Error/Ambiguous config/Unknown
+#
+# Parameters understood:
+#
+#   config   (required)
+#   autoconf (optional - used by munin-config)
+#   suggest  (optional - used by munin-config)
+#
+# Configurable variables:
+#
+#   env.sge_settings - Path to SGE settings.sh script, defaults to /opt/sge/default/common/settings.sh
+#   env.title        - Graph title, overrides "SGE Queue state".
+#   env.options      - Additional command line options to qstat. 
+#   env.queues       - list of queues to summarize
+#
+# Revisions:
+#   v1.0 2013-10-14
+#
+# Magic markers
+#%# family=contrib
+#%# capabilities=autoconf suggest
+
+# env.sge_settings -- alternatively you can just modify the path below
+SGE_SETTINGS=${sge_settings:-/opt/sge/default/common/settings.sh}
+
+
+# queues to monitor 
+# priority 1: queue name in symlink
+QUEUE=${0##*_}
+# priority 2: queue names from environment
+QUEUE=${QUEUE:-$queues}
+# priority 3: summary of all GridEngine Queues
+QUEUE=${QUEUE:-"Summary"}
+
+# env.title
+GRAPHTITLE=${title:-"GridEngine Queue state (${QUEUE})"}
+
+# env.options
+OPTIONS="-g c -xml $options"
+
+if [ "$1" = "config" ]; then
+    echo "graph_title "$GRAPHTITLE""
+    echo "graph_order total used reserved unavailable available"
+    echo "graph_args --lower-limit 0 "
+    echo "graph_vlabel Queue slots"
+    echo "graph_scale no"
+    echo "graph_info Shows global Grid Engine queue state."
+    echo "graph_category SGE"
+    echo "graph_period minute"
+    echo "used.label Used"
+    echo "used.draw AREA"
+    echo "used.type GAUGE"
+    echo "used.info Currently used slots."
+    echo "unavailable.label Unavailable"
+    echo "unavailable.draw LINE1"
+    echo "unavailable.type GAUGE"
+    echo "unavailable.info Queue state Disabled/Suspended/Error/Ambiguous config/Unknown."
+    echo "reserved.label Reserved"
+    echo "reserved.draw LINE1"
+    echo "reserved.type GAUGE"
+    echo "reserved.info Reserved slots."
+    echo "available.label Available"
+    echo "available.draw LINE1"
+    echo "available.type GAUGE"
+    echo "available.info Available slots."
+    echo "total.label Total"
+    echo "total.draw AREA"
+    echo "total.type GAUGE"
+    echo "total.info Total slots."
+    exit 0
+fi
+
+# source settings script, needed for qstat
+if [ -f "$SGE_SETTINGS" ]; then
+    source "$SGE_SETTINGS"
+fi
+QSTAT=$( which qstat )
+XMLSTARLET=$( which xmlstarlet )
+
+if [ "$1" = "autoconf" ]; then
+    if [ -n "$QSTAT" -a -n "$XMLSTARLET" ]; then
+        echo "yes"
+        exit 0
+    else 
+        echo "no"
+        exit 1
+    fi
+fi
+
+# check requirements 
+[ -z "$QSTAT" ] && { echo "qstat not found" 1>&2 ; exit 1; } 
+[ -z "$XMLSTARLET" ] && { echo "xmlstarlet not found" 1>&2  ; exit 1; } 
+
+ALL_QUEUES=$( $QSTAT -g c -xml | $XMLSTARLET sel -T -t -m "//cluster_queue_summary/name" -v "node()" -o "," ) 
+[ "$QUEUE" == "Summary" ] && QUEUE="$ALL_QUEUES"
+
+if [ "$1" = "suggest" ]; then
+    /bin/echo -en "${ALL_QUEUES//,/\n}"
+    exit 0
+fi
+
+xmldemangle() {
+# _SGE_XML hash array to store values
+# _SGE_OUT xml output of qstat
+# _SGE_ENTITY entity to read values from (optional)
+
+	[ -z "$_SGE_OUT" ] && return 1
+
+	local ENTITY=${_SGE_ENTITY:-"cluster_queue_summary"}
+
+	local IFSBAK=$IFS;IFS=$
+	for node in $( echo "$_SGE_OUT" | $XMLSTARLET sel -T -t -m "//${ENTITY}/*" -o "_SGE_XML[" -v "name()" -o ']=' -v "node()"  -n )
+	do
+		eval $node
+	done
+	IFS=$IFSBAK
+}
+
+printvalues() {
+	local IFSBAK=$IFS; unset IFS
+	for i in ${!_SGE_QUEUE_KEYS[@]}
+	do 
+		echo "${_SGE_QUEUE_KEYS[$i]}.value ${_SGE_QUEUE_VALUES[$i]}"
+	done
+	IFS=$IFSBAK
+}
+
+declare -A _SGE_XML
+declare -A _SGE_QUEUE_VALUES
+declare -A _SGE_QUEUE_KEYS
+_SGE_QUEUE_KEYS=(
+[used]="used"
+[resv]="reserved"
+[manual_intervention]="unavailable"
+[available]="available"
+[total]="total"
+)
+
+for qu in $( /bin/echo -e "${QUEUE//,/\n}" )
+do
+	_SGE_OUT=$( "$QSTAT" $OPTIONS -q $qu )
+	xmldemangle || echo "Error on QUEUE: $qu" 1>&2
+
+	for i in ${!_SGE_QUEUE_KEYS[@]}
+	do 
+		_SGE_QUEUE_VALUES[$i]=${_SGE_QUEUE_VALUES[$i]:-0}
+		let "_SGE_QUEUE_VALUES[$i] += ${_SGE_XML[$i]:-0}"
+	done
+done
+
+printvalues
+
+exit 0

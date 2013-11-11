@@ -17,9 +17,28 @@ When used for the local host, the plugin should be linked as
 non-wildcard plugin, i.e., 'freeipmi', whereas when used to monitor a
 foreign host it should be, e.g., 'freeipmi_192.168.0.253'.
 
+=head1 DEPENDENCIES
+
+The plugin requires FreeIPMI 1.1.5 or later to fetch the information.
+Limits set on thresholds are available when using FreeIPMI 1.2.0 or
+later.
+
 =head1 AUTHOR
 
 Diego Elio Pettenò <flameeyes@flameeyes.eu>.
+
+With help and suggestions of:
+
+Bart ten Brinke <info@retrosync.com>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
 
 =head1 LICENSE
 
@@ -42,12 +61,15 @@ my $IPMISENSORS = $ENV{'ipmisensors'} || 'ipmi-sensors';
 $0 =~ /freeipmi(?:_(.+))$/;
 my $hostname = $1;
 
-$IPMISENSORS .= " --quiet-cache --comma-separated-output --no-header-output --ignore-not-available-sensors --sensor-types=Temperature,Fan,Current,Voltage --output-sensor-thresholds";
+my $help_output = `$IPMISENSORS --help`;
+
+$IPMISENSORS .= " --output-sensor-thresholds" if $help_output =~ /--output-sensor-thresholds/;
+$IPMISENSORS .= " --quiet-cache --comma-separated-output --no-header-output --ignore-not-available-sensors --sensor-types=Temperature,Fan,Current,Voltage";
 $IPMISENSORS .= " --hostname=$hostname" if defined($hostname);
 $IPMISENSORS .= " --username=$ENV{IPMI_USERNAME}" if defined($ENV{IPMI_USERNAME});
 $IPMISENSORS .= " --password=$ENV{IPMI_PASSWORD}" if defined($ENV{IPMI_PASSWORD});
 
-my $output=`$IPMISENSORS --output-sensor-thresholds 2>/dev/null`;
+my $output=`$IPMISENSORS 2>/dev/null`;
 my $retval=$?;
 
 if ( defined $ARGV[0] and $ARGV[0] eq 'autoconf' ) {
@@ -109,11 +131,11 @@ foreach my $line (@data) {
 		value => $dataline[3],
 		label => $dataline[1]
 	       );
-  $sensor{lwarn} = $dataline[7] ne "N/A" ? $dataline[7] : '';
-  $sensor{hwarn} = $dataline[8] ne "N/A" ? $dataline[8] : '';
+  $sensor{lwarn} = (defined($dataline[7]) and $dataline[7] ne "N/A") ? $dataline[7] : '';
+  $sensor{hwarn} = (defined($dataline[8]) and $dataline[8] ne "N/A") ? $dataline[8] : '';
 
-  $sensor{lcrit} = $dataline[6] ne "N/A" ? $dataline[6] : '';
-  $sensor{hcrit} = $dataline[9] ne "N/A" ? $dataline[9] : '';
+  $sensor{lcrit} = (defined($dataline[6]) and $dataline[6] ne "N/A") ? $dataline[6] : '';
+  $sensor{hcrit} = (defined($dataline[9]) and $dataline[9] ne "N/A") ? $dataline[9] : '';
 
   my $type;
   if ( $dataline[2] eq "Temperature" ) {
@@ -158,7 +180,7 @@ END
     }
   }
 
-  unless ( $ENV{MUNIN_CAP_DIRTYCONFIG} == 1 ) {
+  unless ( ($ENV{MUNIN_CAP_DIRTYCONFIG} || 0) == 1 ) {
     exit 0;
   }
 }

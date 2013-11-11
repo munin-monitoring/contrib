@@ -36,7 +36,12 @@ if [ "$1" = "config" ]; then
         exit 0
 fi
 
-vzlist -a -H -o hostname,$ATTRIBUTE | awk '{gsub(/\./,"_",$1)
+filter() { cat; }
+[ "$ATTRIBUTE" = 'laverage' ] && filter() { sed -e 's/[0-9\.]*\/\(.*\)\/.*$/\1/g'; }
+[ "$ATTRIBUTE" = 'status' ] && filter() { sed -e 's/running/10/g;s/stopped/0/g'; }
+#TODO: filter for uptime
+
+vzlist -a -H -o hostname,$ATTRIBUTE | filter | awk '{gsub(/\./,"_",$1)
          print("'$ATTRIBUTE'"$1".value "$2)}'
 
 exit 0
