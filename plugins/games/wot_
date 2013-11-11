@@ -1,0 +1,79 @@
+#!/usr/bin/php
+<?php
+/*
+* Title: World Of Tanks wildcard plugin for Munin
+* Author: Marsel Markhabulin (@Satariall)
+* Email: milar@marsell.ws
+*/
+
+include '/full/path/to/WotClass.php';	// it here https://github.com/Satariall/wot-api-description/blob/master/php/WotClass.php
+$wot = new Wot();
+$params = '6440135,14661324';	// fill there you account ids. You  may get them from site profile OR search by nickname with WotClass
+$cluster = 'RU';	// OR 'EU', 'NA', 'ASIA', 'KR' - region of you account(s)
+$request = substr(basename($_SERVER['SCRIPT_FILENAME']), 4);
+
+if(count($argv) == 2 && $arv[1] == 'authconf') {
+	exit('yes');
+}
+
+// graph config for munin
+if(count($argv) == 2 && $argv[1] == 'config') {
+	$graph_order='';
+	$graph_draw='';
+	$graph_type='';
+	switch ($request) {
+		case 'spotted': { print("graph_title WOT Spotted Count\n"); print("graph_vlabel Spotted\n"); break; }
+		case 'hits': { print("graph_title WOT Hits Count\n"); print("graph_vlabel Hits\n"); break; }
+		case 'battle_avg_xp': { print("graph_title WOT Battle Avg Exp Count\n"); print("graph_vlabel Battle Avg Exp\n"); break; }
+		case 'draws': { print("graph_title WOT Draws Count\n"); print("graph_vlabel Draws\n"); break; }
+		case 'wins': { print("graph_title WOT Wins Count\n"); print("graph_vlabel Wins\n"); break; }
+		case 'losses': { print("graph_title WOT Losses Count\n"); print("graph_vlabel Losses\n"); break; }
+		case 'capture_points': { print("graph_title WOT Capture Points Count\n"); print("graph_vlabel Capture Points\n"); break; }
+		case 'battles': { print("graph_title WOT Battles Count\n"); print("graph_vlabel Battles\n"); break; }
+		case 'damage_dealt': { print("graph_title WOT Damage Dealt Count\n"); print("graph_vlabel Damage Dealt\n"); break; }
+		case 'hits_percents': { print("graph_title WOT Hits Percents Count\n"); print("graph_vlabel Hits Percents\n"); break; }
+		case 'damage_received': { print("graph_title WOT Damage Received Count\n"); print("graph_vlabel Damage Received\n"); break; }
+		case 'shots': { print("graph_title WOT Shots Count\n"); print("graph_vlabel Shots\n"); break; }
+		case 'xp': { print("graph_title WOT XP Count\n"); print("graph_vlabel XP\n"); break; }
+		case 'frags': { print("graph_title WOT Frags Count\n"); print("graph_vlabel Frags\n"); break; }
+		case 'survived_battles': { print("graph_title WOT Survived Battles Count\n"); print("graph_vlabel Survived Battles\n"); break; }
+		case 'dropped_capture_points': { print("graph_title WOT Dropped Capture Points Count\n"); print("graph_vlabel Dropped Capture Points\n"); break; }
+	}
+	$obj = $wot->getUser('info', $params, $cluster);
+	foreach($obj as $p) {
+		$graph_order .= $p->nickname.' ';
+		$graph_draw .= $p->nickname.".label ".$p->nickname."\n";
+		$graph_draw .= $p->nickname.".draw LINE1\n";
+		$graph_type .= $p->nickname.".type GAUGE\n";
+	}
+	
+	print("graph_category WoT\n");
+	print("graph_scale no\n");
+	print("graph_order ".$graph_order."\n");
+	print($graph_draw);
+	print($graph_type);
+	exit();
+}
+
+// graph values
+$obj = $wot->getUser('info', $params, $cluster);
+switch ($request) {
+	case 'spotted': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->spotted."\n"); } break; }
+	case 'hits': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->hits."\n"); } break; }
+	case 'battle_avg_xp': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->battle_avg_xp."\n"); } break; }
+	case 'draws': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->draws."\n"); } break; }
+	case 'wins': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->wins."\n"); } break; }
+	case 'losses': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->losses."\n"); } break; }
+	case 'capture_points': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->capture_points."\n"); } break; }
+	case 'battles': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->battles."\n"); } break; }
+	case 'damage_dealt': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->damage_dealt."\n"); } break; }
+	case 'hits_percents': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->hits_percents."\n"); } break; }
+	case 'damage_received': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->damage_received."\n"); } break; }
+	case 'shots': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->shots."\n"); } break; }
+	case 'xp': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->xp."\n"); } break; }
+	case 'frags': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->frags."\n"); } break; }
+	case 'survived_battles': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->survived_battles."\n"); } break; }
+	case 'dropped_capture_points': { foreach($obj as $p) { print($p->nickname.".value ".$p->statistics->all->dropped_capture_points."\n"); } break; }
+}
+exit();
+?>
