@@ -1,0 +1,69 @@
+#!/bin/sh
+#
+# Plugin to monitor execution time of PHP with access.log from apache server.
+# Need to use apache module mod_log_config and have  set logformat like this:
+# LogFormat "%h %l %u %T/%D %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\"" time_combined
+#
+# Min, Max and Avg are calculated on number of page, default 10. On high traffic site, increase this value and you get a better
+# stat, on low traffic site keep small value, it's must be avg number of page every 5 minutes.
+#
+# Require read permitions for $LOG
+#  (set in /etc/munin/plugin-conf.d/munin-node on debian)
+# On busy servers you can change value type to COUNTER and set min to 0 to avoid minus peaks at logrotate
+#
+# $Log$
+# Revision 0.1  2012/04/05 12:00:00  Ulrich Lusseau
+# Initial revision
+#
+# Parameters:
+#
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+#
+# Magick markers (optional):
+#%# family=auto
+#%# capabilities=autoconf
+#
+# config example for /etc/munin/plugin-conf.d/munin-node
+#[apache_generate_time]
+#user root
+#env.logfile /home/newsite/logs/access.log
+#env.sitename mon-code
+#env.nbrpage 10
+#
+ 
+LOG=${logfile:-/var/log/apache2/access.log}
+NAME=${sitename:undefined}
+NBRPAGE=${nbrpage}
+ 
+ 
+if [ "$1" = "autoconf" ]; then
+        if [ -r "$LOG" ]; then
+                echo yes
+                exit 0
+        else
+                echo no
+                exit 1
+        fi
+fi
+ 
+if [ "$1" = "config" ]; then
+ 
+        echo 'graph_title Time to generate PHP page ' $NAME 'v2'
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_vlabel Time in microsecond'
+ 
+        echo "graph_category PHP"
+        echo "graph_info This graph shows load time in ms of $target"
+        echo "minloadtime.label Min time"
+        echo "minloadtime.info Min time"
+        echo "avgloadtime.label Avg time"
+        echo "avgloadtime.info Avg time"
+        echo "maxloadtime.label Max time"
+        echo "maxloadtime.info Max time"
+ 
+        exit 0
+fi
+ 
+ awk '($4 ~ /[0-9]+\/[0-9]+/ && $8 !~ /\.(jpg|JPG|jpeg|JPEG|gif|GIF|png|PNG|txt|TXT|css|CSS|js|JS|zip|ZIP|bmp|BMP)$/)' $LOG     | sed -e :a -e '$q;N;'$NBRPAGE',$D;ba' | awk '{print $4}' | awk -F\/ ' MIN=="" || $2 < MIN {MIN=$2}  MAX=="" || $2 > MAX {MAX=$2}  {SUM += $2} END {print  "minloadtime.value ",MIN/1000,"\navgloadtime.value ",SUM/(NR*1000),"\nmaxloadtime.value ",MAX/1000}'
+ 
