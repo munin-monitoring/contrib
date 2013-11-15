@@ -14,6 +14,7 @@
 # - connect to a running ejabberd node
 #
 # OS: *NIX
+# Requires lsof/fstat for open_files.
 #
 # Author: Artem Sheremet <dot.doom@gmail.com>
 #
@@ -120,7 +121,7 @@ code.info The total amount of memory currently allocated for Erlang code. This m
 ets.info The total amount of memory currently allocated for ets tables. This memory is part of the memory presented as system memory.
 INFO_FROM_DOC
 	else
-		pid=$(<$EJABBERD_PID_PATH)
+		local pid=$(<$EJABBERD_PID_PATH)
 		for memory_type in rss vsz; do
 			memory_value=$(ps -p $pid -o $memory_type=)
 			let memory_value=$memory_value*1024
@@ -140,39 +141,66 @@ function ejabberd_report_ports() {
 	local limit=$(ejabberd_exec 'os:getenv("ERL_MAX_PORTS").' | tr '"' ' ')
 	# string "false" indicates that this variable is not defined, thus a default of 1024
 	[ $limit = false ] && limit=1024
-	local os_limit=$(ejabberd_exec 'os:cmd("ulimit -n").' | tr '"\\n' ' ')
-	if [ $limit -gt $os_limit ]; then
-		local real_limit=$os_limit
-	else
-		local real_limit=$limit
-	fi
 	if [ "$1" = "config" ]; then
 		cat <<CONFIG
 graph_vlabel ports
-opened.draw LINE
-opened.label opened
-opened.info length(erlang:ports())
+open.draw LINE
+open.label open
+open.info length(erlang:ports())
 limit.draw LINE2
 limit.label limit
 limit.info ERL_MAX_PORTS environment variable inside ejabberd
-os_limit.draw LINE2
-os_limit.label os limit
-os_limit.info "ulimit -n" from inside of ejabberd
 CONFIG
-		warning='80%' critical='90%' print_adjusted_thresholds opened $real_limit
+		warning='80%' critical='90%' print_adjusted_thresholds open $limit
 		[ -n "$ERL_MAX_PORTS" ] && cat <<CONFIG_CONFIGURED
 configured.draw LINE
 configured.label configured
 configured.info Configuration file value ERL_MAX_PORTS
 CONFIG_CONFIGURED
 	else
-		local opened=$(ejabberd_exec 'length(erlang:ports()).')
+		local open=$(ejabberd_exec 'length(erlang:ports()).')
 		cat <<DATA
-opened.value $opened
+open.value $open
 limit.value $limit
-os_limit.value $os_limit
 DATA
 		[ -n "$ERL_MAX_PORTS" ] && echo "configured.value $ERL_MAX_PORTS"
+	fi
+}
+
+function open_files_counter_util() {
+	if hash lsof &>/dev/null; then
+		echo lsof
+		return 0
+	elif hash fstat &>/dev/null; then
+		echo fstat
+		return 0
+	fi
+	return 1
+}
+
+function open_files_number() {
+	echo $[$($(open_files_counter_util) -np $(<$EJABBERD_PID_PATH) | wc -l)-1]
+}
+
+function ejabberd_report_open_files() {
+	# this spawns a child process, but in most cases the open files limit is inherited
+	local limit=$(ejabberd_exec 'os:cmd("ulimit -n").' | tr '"\\n' ' ')
+	if [ "$1" = "config" ]; then
+		cat <<CONFIG
+graph_vlabel open files
+open.draw LINE
+open.label open
+open.info number of open files as reported by $(open_files_counter_util)
+limit.draw LINE2
+limit.label limit
+limit.info "ulimit -n" from inside of ejabberd
+CONFIG
+		warning='80%' critical='90%' print_adjusted_thresholds open $limit
+	else
+		cat <<DATA
+open.value $(open_files_number)
+limit.value $limit
+DATA
 	fi
 }
 
@@ -217,6 +245,7 @@ ports
 online_users
 registered_users
 SUGGESTIONS
+		open_files_counter_util &>/dev/null && echo open_files
 		exit 0
 		;;
 	config)
