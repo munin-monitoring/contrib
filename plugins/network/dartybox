@@ -1,0 +1,107 @@
+#! /bin/sh
+# Parse box information
+#
+# configuration :
+#
+# [dartybox]
+# env.IP 192.168.1.254
+
+# fail on error
+set -e
+
+IP=${IP:-"192.168.1.254"}
+
+if [ "$1" = "config" ]
+then
+	echo multigraph dbox_adsl_bw
+	echo graph_title DartyBox Adsl Bandwith
+	echo up.label UpStream
+	echo down.label DownStream
+	echo multigraph dbox_adsl_att
+	echo graph_title DartyBox Adsl Attenuation
+	echo up.label UpStream
+	echo down.value DownStream
+	echo multigraph dbox_adsl_snr
+	echo graph_title DartyBox Adsl SignalNoise Ratio
+	echo up.label SNRNear
+	echo down.label SNRFar
+	echo multigraph dbox_adsl_pkt
+	echo graph_title DartyBox Adsl Packets
+	echo up.label RSWORDSNear
+	echo down.label RSWORDSFar
+	echo up_c.label RSCORRERRORNear
+	echo down_c.label RSCORRERRORFar
+	echo up_u.label RSUNCORRERRORNear
+	echo down_u.label RSUNCORRERRORFar
+	echo multigraph dbox_adsl_uptime
+	echo graph_title DartyBox Adsl Uptime
+	echo uptime.label AdslUpTime
+
+	exit 0
+fi
+
+TMPFILE=$(mktemp)
+trap 'rm -f $TMPFILE' EXIT
+
+wget -qO "$TMPFILE" http://$IP/adslstats.html
+
+get() {
+	PATTERN=$1
+	gawk "match(\$0, /var $PATTERN\s+=\s+\"([0-9.]+)\"/, a) { print a[1] }" $TMPFILE
+}
+
+echo multigraph dbox_adsl_bw
+echo up.value $(get UpStream)
+echo down.value $(get DownStream)
+echo multigraph dbox_adsl_att
+echo up.value $(get AttNear)
+echo down.value $(get AttFar)
+echo multigraph dbox_adsl_snr
+echo up.value $(get SNRNear)
+echo down.value $(get SNRFar)
+echo multigraph dbox_adsl_pkt
+echo up.value $(get RSWORDSNear)
+echo down.value $(get RSWORDSFar)
+echo up_c.value $(get RSCORRERRORNear)
+echo down_c.value $(get RSCORRERRORFar)
+echo up_u.value $(get RSUNCORRERRORNear)
+echo down_u.value $(get RSUNCORRERRORFar)
+echo multigraph dbox_adsl_uptime
+echo uptime.value $(get AdslUpTime)
+
+exit 0
+
+:<<'EOF'
+var ADSLLineStatus = "Etabli";
+var ADSLMode    = "G992_1_A  (G.DMT)   ";
+var UpStream    = "704";
+var DownStream  = "7616";
+var AttNear     = "33.5";
+var AttFar      = "16.5";
+var SNRNear     = "11.0";
+var SNRFar      = "15.0";
+var HECCountNear= "4836";
+var HECCountFar= "6";
+var AdslVer1    = "0x81ef5379";
+var AdslVer2    = "0x6397bde2";
+var CmvVer1         = "0x6f249e71";
+var CmvVer2         = "0xa703362e";
+var ES15CntNear = "0";
+var ES15CntFar  = "0";
+var CRCErrorsNear = "641";
+var CRCErrorsFar = "7";
+var ES1CNTNear  = "8";
+var ES1CNTFar   = "0";
+
+var ESTOTCNTFar = "5";
+var ESTOTCNTNear = "452";
+var RSWORDSNear = "1802451823";
+var RSWORDSFar  = "2881437753";
+var RSCORRERRORNear  = "57293";
+var RSCORRERRORFar  = "301";
+var RSUNCORRERRORNear  = "641";
+var RSUNCORRERRORFar  = "7";
+var RSRatioNear  = "0";
+var RSRatioFar  = "0";
+var AdslUpTime = "20 jours 2 heures 2 mn";
+EOF
