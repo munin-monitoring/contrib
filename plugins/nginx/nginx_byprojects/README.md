@@ -29,7 +29,7 @@ Multiple logs can be used for the same project/vhost and a regular expression (r
                   ],
          'dev' => [
                     {'path' => '/var/log/httpd/ssl-dev-access.log'},
-                    {'path' => '/home/dev/log/access.log'}
+                    {'path' => '/home/dev/log/access*.log'} # glob is supported
                   ],
         'test' => [
                     {'path' => '/var/log/access.log', 'regex' => '"[A-Z]+ /test/'},
@@ -42,3 +42,6 @@ In the previous example the prod project graph will be using everything in /home
 Then link the file just as any other plugins.
 
       ln -s /usr/local/sbin/<plugin> /usr/local/etc/munin/plugins/<plugin>
+
+## License
+MIT
