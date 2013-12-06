@@ -31,17 +31,17 @@ then
 	echo multigraph dbox_adsl_snr
 	echo graph_title DartyBox Adsl SignalNoise Ratio
 	echo graph_category DartyBox
-	echo up.label SNRNear
-	echo down.label SNRFar
+	echo up.label UpStream
+	echo down.label DownStream
 	echo multigraph dbox_adsl_pkt
 	echo graph_title DartyBox Adsl Packets
 	echo graph_category DartyBox
-	echo up.label RSWORDSNear
-	echo down.label RSWORDSFar
-	echo up_c.label RSCORRERRORNear
-	echo down_c.label RSCORRERRORFar
-	echo up_u.label RSUNCORRERRORNear
-	echo down_u.label RSUNCORRERRORFar
+	echo up.label UpStream
+	echo down.label DownStream
+	echo up_c.label UpStream "(Correctable)"
+	echo down_c.label DownStream "(Correctable)"
+	echo up_u.label UpStream "(Uncorrectable)"
+	echo down_u.label DownStream "(Uncorrectable)"
 	echo up.type DERIVE
 	echo down.type DERIVE
 	echo up_c.type DERIVE
@@ -57,7 +57,8 @@ then
 	echo multigraph dbox_adsl_uptime
 	echo graph_title DartyBox Adsl Uptime
 	echo graph_category DartyBox
-	echo uptime.label AdslUpTime
+	echo graph_vlabel days
+	echo uptime.label Uptime
 
 	exit 0
 fi
@@ -67,9 +68,16 @@ trap 'rm -f $TMPFILE' EXIT
 
 wget -qO "$TMPFILE" http://$IP/adslstats.html
 
+[ "$MUNIN_DEBUG" = 1 ] && cat "$TMPFILE"
+
 get() {
 	PATTERN=$1
-	gawk "match(\$0, /var $PATTERN\s+=\s+\"([0-9.]+)\"/, a) { print a[1] }" $TMPFILE
+	gawk "match(\$0, /var $PATTERN\s+=\s+\"([^\"]+)\"/, a) { print a[1] }" $TMPFILE
+}
+
+getDays() {
+	# Convert "20 jours 2 heures 2 mn" in a number of days
+	echo "$@" | gawk "match(\$0, /([0-9.]+) jours ([0-9.]+) heures ([0-9.]+) mn/, a) { print a[1] + a[2]/24 + a[3]/1440 }"
 }
 
 echo multigraph dbox_adsl_bw
@@ -89,7 +97,7 @@ echo down_c.value $(get RSCORRERRORFar)
 echo up_u.value $(get RSUNCORRERRORNear)
 echo down_u.value $(get RSUNCORRERRORFar)
 echo multigraph dbox_adsl_uptime
-echo uptime.value $(get AdslUpTime)
+echo uptime.value $(getDays $(get AdslUpTime))
 
 exit 0
 
