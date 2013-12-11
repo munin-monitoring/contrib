@@ -1,45 +1,114 @@
-#!/bin/sh
-# Pasha "p01nt" Klets <pasha@klets.name>
+#!/bin/bash
+# Allan Parsons (allan.parsons@gmail.com)
+# This was a rewrite by Allan Parsons
+#
+# Original Author: Pasha "p01nt" Klets <pasha@klets.name>
+#
+
+##DEBUGDEBUG
+#MUNIN_LIBDIR=/usr/share/munin
+#. $MUNIN_LIBDIR/plugins/plugin.sh
+#socket="/var/run/haproxy.sock"
+
+
 
 name=`basename $0`
 title=`echo ${name} | awk -F_ '{print $NF}'`
+SVNAME='BACKEND'
+LIST=$backend
 
-hp_stat() {
-	echo "show stat" | socat unix-connect:/tmp/haproxy stdio
+
+
+function parse_url {
+	# Modify ifs variable
+	OIFS=$IFS;
+	IFS=",";
+	PXNAME="$1"
+	SVNAME="$2"
+	VALUE="$3"
+	if [ ! -z "$4" ]; then
+	   SERVERNAME="$4"
+	fi
+
+        if [ ! -z "$url" ]; then
+                LINE1=`curl -s "$url" | head -1 | sed 's/# //'`
+                LINE2=`curl -s "$url" | grep "$PXNAME" | grep -v "$PXNAME,$SVNAME" | tr ',' ' '`
+        fi
+
+        if [ ! -z "$socket" ]; then
+                LINE1=`echo "show stat" | socat unix-connect:"$socket" stdio | head -1 | sed 's/# //'`
+                LINE2=`echo "show stat" | socat unix-connect:"$socket" stdio | grep "$PXNAME" | grep -v "$PXNAME,$SVNAME" | tr ',' ' '`
+
+		#echo $CMD
+		#exit
+        fi
+
+
+	ARRAY1=($LINE1);
+	if [ ! -z $SERVERNAME ]; then
+		# Find values
+		for ((i=0; i<${#ARRAY1[@]}; ++i));
+		do
+	        	# Get data
+		        if [[ "${ARRAY1[$i]}" == "${VALUE}" ]]; then
+		                o=$i;
+	        	        o=`expr $o + 1`
+				RVAL=`echo ${LINE2} | grep ${SERVERNAME} | cut -d" " -f $o`
+		        fi
+		done
+	else
+		RVAL=`echo 'show stat' | socat unix-connect:"$socket" stdio | grep "$PXNAME" | grep -v "$PXNAME,$SVNAME" | tr ',' ' ' | awk '{print $2}'`
+	fi
+	# Reset ifs
+	IFS=$OIFS;
+
+	## return val
+	echo $RVAL
 }
 
-servers_section() {
-	hp_stat | grep '^'${title}',' |  egrep -v '^'${title}',(FRONTEND|BACKEND)'
-}
 
-servers() {
-	servers_section | awk -F, '{print $2}'
-}
 
-labels() {
-	servers_section | awk -F, '{print $2".label "$2"\n"$2".type GAUGE\n"$2".draw AREASTACK"}'
-}
-
-values() {
-	servers_section | awk -F, '{print $2".value "$5}'
-}
+##
+## Main
+##
 
 graph_title="${title} sessions by servers"
 graph_vlabel=${title}
 
-case $1 in
-   config)
-		cat <<EOF
-graph_category haproxy
-graph_title  ${graph_title}
-graph_vlabel ${graph_vlabel}
+if [ "$1" = "autoconf" ]; then
+	echo yes 
+	exit 0
+fi
 
-`labels`
-EOF
-		exit 0
-	;;
-esac
 
-values
+if [ "$1" = "config" ]; then
 
-exit 0
+	echo "graph_category haproxy"
+	echo "graph_title  ${graph_title}"
+	echo "graph_vlabel ${graph_vlabel}"
+	#echo "graph_printf %.0f"
+
+	for i in ${LIST}; do
+		SERVERLIST=$(parse_url ${i} ${SVNAME} svname)
+		for s in $SERVERLIST; do
+	        echo "hsessionsbyservers_$s_`echo $i_$s | md5sum | cut -d - -f1 | sed 's/ //g'`.label $s"
+        	echo "hsessionsbyservers_$s_`echo $i_$s | md5sum | cut -d - -f1 | sed 's/ //g'`.type DERIVE"
+			echo "hsessionsbyservers_$s_`echo $i_$s | md5sum | cut -d - -f1 | sed 's/ //g'`.info Active Sessions for $s"
+			echo "hsessionsbyservers_$s_`echo $i_$s | md5sum | cut -d - -f1 | sed 's/ //g'`.min 0"
+			#echo "hsessionsbyservers_$s_`echo $i_$s | md5sum | cut -d - -f1 | sed 's/ //g'`.draw AREASTACK"
+        done
+    done
+
+    exit 0
+fi
+
+
+for i in ${LIST}; do
+
+	SERVERLIST=$(parse_url ${i} ${SVNAME} svname)
+
+	for s in $SERVERLIST; do
+		val=$(parse_url ${i} ${SVNAME} scur ${s})
+        echo "hsessionsbyservers_$s_`echo $i_$s | md5sum| cut -d - -f1 | sed 's/ //g'`.value ${val}"
+    done
+done
