@@ -40,6 +40,7 @@
 #
 #   mysqlopts     - Options to pass to mysql
 #   mysqladmin    - Override location of mysqladmin
+#   numusers      - Override maximum number of users to display
 #   warning	  - Override default warning limit
 #   critical	  - Override default critical limit 
 #
@@ -54,6 +55,7 @@ my $TEST_COMMAND    = "$MYSQLADMIN $ENV{mysqlopts} processlist";
 my $MYSQL_VARIABLES = "$MYSQLADMIN $ENV{mysqlopts} extended-status variables";
 my $warning = $ENV{warning} || "80";
 my $critical = $ENV{critical} || "90";
+my $numusers = $ENV{numusers} || 10;
 
 # Pull in any arguments
 my $arg = shift();
@@ -67,6 +69,11 @@ if ($arg eq 'config') {
     else { print "no\n"; }
     exit;
 } else {
+    print_graph_data();
+    exit;
+}
+
+sub print_graph_data() {
 	# Define the values that are returned to munin
 	my ($current, $upper_limit) = (0,0,0);
 	
@@ -85,8 +92,14 @@ if ($arg eq 'config') {
             $counts{$user} = 0 unless defined($counts{$user});
             $counts{$user} += 1;
         }
-        while (($user, $count) = each %counts) {
-            print "$user.value $count\n";
+
+        sub valsort {
+            return $$threads{$a} <=> $$threads{$b};
+        }
+        my $i = 0;
+        foreach my $user (sort valsort keys(%counts)) {
+            last if $i++ >= $numusers;
+            print "$user.value $counts{$user}\n";
         }
 }
 
