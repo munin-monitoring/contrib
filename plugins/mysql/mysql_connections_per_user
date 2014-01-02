@@ -82,9 +82,6 @@ sub print_graph_data() {
 	$upper_limit = poll_variables($MYSQL_VARIABLES,"max_connections");
 
 	# Return the values to Munin
-	print "current.value $current\n";
-	print "limit.value $upper_limit\n";
-
         my $threads = get_thread_list();
         my %counts = ();
         my ($thread, $user, $count);
@@ -102,6 +99,8 @@ sub print_graph_data() {
             last if $i++ >= $numusers;
             print "$user.value $counts{$user}\n";
         }
+	print "current.value $current\n";
+	print "limit.value $upper_limit\n";
 }
 
 sub poll_variables {
@@ -130,14 +129,6 @@ graph_vlabel Connections
 graph_info The number of current connexions per user.
 graph_category mysql
 graph_total Total
-current.label In Use
-current.draw LINE1
-current.info The number of current threads connected
-current.warning $warning
-current.critical $critical
-limit.label Maximum
-limit.draw LINE1
-limit.info The current value of the "max_connections" variable
 EOM
 my $threads = get_thread_list();
 my %seen = ();
@@ -148,7 +139,6 @@ while (($thread, $user) = each %$threads) {
         next;
     }
     else {
-        $seen{$user} = 1;
         print <<EOM;
 $user.label Connexions for user $user
 $user.info Number of connexions used by user $user
@@ -161,10 +151,20 @@ EOM
         else {
             print "AREA\n";
         }
+        $seen{$user} = 1;
     }
             
 }
-
+print <<EOM;
+current.label In Use
+current.draw LINE1
+current.info The number of current threads connected
+current.warning $warning
+current.critical $critical
+limit.label Maximum
+limit.draw LINE1
+limit.info The current value of the "max_connections" variable
+EOM
 }
 
 sub get_thread_list {
