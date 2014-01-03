@@ -82,17 +82,11 @@ sub print_graph_data() {
 	$upper_limit = poll_variables($MYSQL_VARIABLES,"max_connections");
 
 	# Return the values to Munin
-        my $threads = get_thread_list();
-        my %counts = ();
-        my ($thread, $user, $count);
-
-        while (($thread, $user) = each %$threads) {
-            $counts{$user} = 0 unless defined($counts{$user});
-            $counts{$user}++;
-        }
+        my $counts = count_thread_users();
+        my %counts = %{$counts};
 
         sub valsort {
-            return $$threads{$a} <=> $$threads{$b};
+            return $counts{$a} <=> $counts{$b};
         }
         my $i = 0;
         foreach my $user (sort valsort keys(%counts)) {
@@ -130,31 +124,31 @@ graph_info The number of current connexions per user.
 graph_category mysql
 graph_total Total
 EOM
-my $threads = get_thread_list();
-my %seen = ();
-my ($thread, $user);
-while (($thread, $user) = each %$threads) {
-    # display user only once
-    if (defined($seen{$user})) {
-        next;
-    }
-    else {
-        print <<EOM;
+
+my $counts = count_thread_users();
+my %counts = %{$counts};
+my $stacked = 0;
+
+sub valsort {
+    return $counts{$a} <=> $counts{$b};
+}
+my $i = 0;
+foreach my $user (sort valsort keys(%counts)) {
+    last if $i++ >= $numusers;
+    print <<EOM;
 $user.label Connexions for user $user
 $user.info Number of connexions used by user $user
 EOM
-        print "$user.draw ";
-        # if we already printed an entry, make the next ones stacked
-        if (scalar %seen) {
-            print "STACK\n";
-        }
-        else {
-            print "AREA\n";
-        }
-        $seen{$user} = 1;
+print "$user.draw ";
+    # if we already printed an entry, make the next ones stacked
+    if ($i > 1) {
+        print "STACK\n";
     }
-            
+    else {
+        print "AREA\n";
+    }
 }
+
 print <<EOM;
 current.label In Use
 current.draw LINE1
@@ -167,19 +161,19 @@ limit.info The current value of the "max_connections" variable
 EOM
 }
 
-sub get_thread_list {
-    my %threads = ();
+sub count_thread_users {
+    my %counts = ();
     my $command = 'mysql -N -B -e "SHOW PROCESSLIST;"';
     open(SERVICE, "$command |")
         or die("Could not execute '$command': $!");
     while (<SERVICE>) {
         my ($threadid, $user) = split "\t";
         next unless ($threadid);
-        $threads{$threadid} = $user;
+        $counts{$user} = 0 unless defined($counts{$user});
+        $counts{$user}++;
     }
-    return \%threads;
+    return \%counts;
 }
-
 
 sub test_service {
     my $return = 1;
