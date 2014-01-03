@@ -1,0 +1,102 @@
+#!/usr/bin/python
+
+# Copyright (C) 2014 Johann Schmitz <johann@j-schmitz.net>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Library General Public License as published by
+# the Free Software Foundation; version 2 only
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Library General Public License for more details.
+#
+# You should have received a copy of the GNU Library General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
+
+"""
+=head1 NAME
+
+snmp__juniper - Health monitoring plugin for Juniper firewalls.
+
+=head1 CONFIGURATION
+
+Make sure your Juniper device is accessible via SNMP (e.g. via snmpwalk) and the munin-node
+has been configured correctly
+
+=head1 MAGIC MARKERS
+
+	#%# family=contrib
+	#%# capabilities=
+
+=head1 VERSION
+
+0.0.1
+
+=head1 BUGS
+
+Open a ticket at https://github.com/ercpe/contrib if you find one.
+
+=head1 AUTHOR
+
+Johann Schmitz <johann@j-schmitz.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+"""
+
+import re
+import sys
+import os
+
+host = None
+port = 161
+community = os.getenv('community', None)
+
+try:
+	match = re.search("^(?:|.*\/)snmp_([^_]+)_juniper$", sys.argv[0])
+	host = match.group(1)
+	request = match.group(2)
+	match = re.search("^([^:]+):(\d+)$", host)
+	if match is not None:
+		host = match.group(1)
+		port = match.group(2)
+except:
+	pass
+
+if not (host and port and community):
+	print "# Bad configuration. Cannot run with Host=%s, port=%s and community=%s" % (host, port, community)
+	sys.exit(1)
+
+def get_devices():
+	pass
+
+def print_config():
+	juntemp_tpl = """multigraph juniper_temperature%s
+graph_title $host/%s system temperature
+graph_vlabel °C
+graph_category system
+graph_info This graph shows the system temperature on $host
+
+temp.info System temperature in °C
+temp.label temp
+temp.type GAUGE
+temp.min 0
+"""
+
+def print_data():
+	pass
+
+if "config" in sys.argv[1:]:
+	print_config()
+elif "snmpconf" in sys.argv[1:]:
+	#print "require 1.3.6.1.4.1.18928.1.2.2.1.8.1.1"
+	sys.exit(0)
+else:
+	print_data()
+	sys.exit(0)
