@@ -1,0 +1,78 @@
+#!/bin/sh
+# -*- sh -*-
+# vim: ft=sh
+
+: << =cut
+
+=head1 NAME
+
+    du_pattern - plugin to monitor files size selected and grouped by a pattern
+
+=head1 CONFIGURATION
+
+    [du_pattern]
+    env.DIR /var/log/apache/
+    env.PATTERN www.example.com www.sample.com
+
+    In PATTERN, all items will be expanded like this : www.example.com*
+    In this example, you will monitor the size of :
+        /var/log/apache/www.example.com*
+        /var/log/apache/www.sample.com*
+
+    It's useful if you want to graph the size of your sites' log archives for example,
+    one graph per site.
+
+=head1 AUTHOR AND COPYRIGHT
+
+    Copyright 2013 Luc Didry <luc AT didry.org>
+
+=head1 LICENSE
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=cut
+
+NAME=${0##*/du_pattern_}
+
+if [ "$1" = "config" ]; then
+    echo "multigraph du_pattern_${NAME}"
+    echo "graph_title Files size in ${DIR}"
+    echo "graph_vlabel size of files"
+    echo "graph_category disk"
+    echo "graph_total Total"
+    echo "graph_info This graph shows the size of files grouped by a pattern."
+    FIRST=1
+    for i in ${PATTERN}
+    do
+        CLEAN=${i//\./_}
+        echo "$CLEAN.label $CLEAN"
+        if [[ $FIRST -eq 1 ]]
+    then
+        echo "$CLEAN.draw AREA"
+        FIRST=0
+        else
+        echo "$CLEAN.draw STACK"
+        fi
+    done
+    exit 0
+fi
+
+for i in ${PATTERN}
+do
+    CLEAN=${i//\./_}
+    FILES="${DIR}/${i}*"
+    echo -n "$CLEAN.value "
+    echo $(du -cbs ${FILES} | grep total | cut -f 1)
+done
+exit 0
