@@ -53,6 +53,9 @@ GPLv2
 import re
 import sys
 import os
+import logging
+
+from pysnmp.entity.rfc3413.oneliner import cmdgen
 
 host = None
 port = 161
@@ -73,30 +76,154 @@ if not (host and port and community):
 	print "# Bad configuration. Cannot run with Host=%s, port=%s and community=%s" % (host, port, community)
 	sys.exit(1)
 
-def get_devices():
-	pass
+jnxOperatingTable = '1.3.6.1.4.1.2636.3.1.13.1.5'
 
-def print_config():
-	juntemp_tpl = """multigraph juniper_temperature%s
-graph_title $host/%s system temperature
-graph_vlabel °C
+jnxOperatingTemp = '1.3.6.1.4.1.2636.3.1.13.1.7'
+jnxOperatingCPU = '1.3.6.1.4.1.2636.3.1.13.1.8'
+jnxOperatingBuffer = '1.3.6.1.4.1.2636.3.1.13.1.11'
+
+class JunOSSnmpClient(object):
+	def __init__(self, host, port, community):
+		self.transport = cmdgen.UdpTransportTarget((host, int(port)))
+		self.auth = cmdgen.CommunityData('test-agent', community)
+		self.gen = cmdgen.CommandGenerator()
+
+	def get_devices(self):
+		errorIndication, errorStatus, errorIndex, varBindTable = self.gen.bulkCmd(
+			self.auth,
+			self.transport,
+			0, 20,
+			jnxOperatingTable,
+			ignoreNonIncreasingOids=True)
+
+		if errorIndication:
+			logging.error("SNMP bulkCmd for devices failed: %s, %s, %s" % (errorIndication, errorStatus, errorIndex))
+			return {}
+
+		devices = {}
+		for row in varBindTable:
+			for name, value in row:
+				if not str(name).startswith(jnxOperatingTable):
+					continue
+
+				if str(value).endswith(' Routing Engine'):
+					devices[str(name)[len(jnxOperatingTable):]] = re.sub("[^\w]", '_', str(value).replace(' Routing Engine', ''))
+		return devices
+
+	def get_one(self, prefix_oid, suffix):
+		oid = prefix_oid + suffix
+		errorIndication, errorStatus, errorIndex, varBindTable = self.gen.getCmd(
+			self.auth,
+			self.transport,
+			oid)
+
+		if errorIndication:
+			logging.error("SNMP getCmd for %s failed: %s, %s, %s" % (oid, errorIndication, errorStatus, errorIndex))
+			return None
+
+		return int(varBindTable[0][1])
+
+		
+
+	def get_data(self):
+		devs = self.get_devices()
+
+		return {
+			'temp': dict([(name, self.get_one(jnxOperatingTemp, suffix)) for suffix, name in devs.iteritems()]),
+			'cpu': dict([(name, self.get_one(jnxOperatingCPU, suffix)) for suffix, name in devs.iteritems()]),
+			'buffer': dict([(name, self.get_one(jnxOperatingBuffer, suffix)) for suffix, name in devs.iteritems()]),
+		}
+
+	def print_config(self):
+		devices = self.get_devices()
+
+		tpl = """multigraph juniper_temperature
+graph_title $host system temperature
+graph_vlabel System temperature in C per ${graph_period}
 graph_category system
-graph_info This graph shows the system temperature on $host
+graph_info System temperature for ${host}
 
-temp.info System temperature in °C
-temp.label temp
-temp.type GAUGE
-temp.min 0
-"""
+%s"""
+
+		s = ""
+		for suffix, node in devices.iteritems():
+			ident = "%s_temp" % node
+			s += """{label}.info System temperature on {node}
+{label}.label {label}
+{label}.type GAUGE32
+{label}.min 0
+
+""".format(label=ident, node=node)
+
+		print tpl % s
+
+
+
+
+		tpl = """multigraph juniper_cpu
+graph_title $host CPU usage
+graph_vlabel CPU usage in %% per ${graph_period}
+graph_category system
+graph_info CPU usage for ${host}
+
+%s"""
+
+		s = ""
+		for suffix, node in devices.iteritems():
+			ident = "cpu_%s" % node
+			s += """{label}.info CPU usage on {node}
+{label}.label {label}
+{label}.type GAUGE32
+{label}.min 0
+{label}.max 100
+
+""".format(label=ident, node=node)
+
+		print tpl % s
+
+
+
+		tpl = """multigraph juniper_buffer		
+graph_title $host Buffer usage
+graph_vlabel Buffer usage in %% per ${graph_period}
+graph_category system
+graph_info Buffer usage for ${host}
+
+%s"""
+
+		s = ""
+		for suffix, node in devices.iteritems():
+			ident = "buffer_%s" % node
+			s += """{label}.info Buffer usage on {node}
+{label}.label {label}
+{label}.type GAUGE32
+{label}.min 0
+{label}.max 100
+
+""".format(label=ident, node=node)
+
+		print tpl % s
+
+
+
+	def execute(self):
+		data = self.get_data()
+#		import pprint
+#		pprint.pprint(data)
+
+		for pre, values in data.iteritems():
+			for node, value in values.iteritems():
+				print "%s_%s.value %s" % (pre, node, value)
+
 
 def print_data():
 	pass
 
+c = JunOSSnmpClient(host, port, community)
 if "config" in sys.argv[1:]:
-	print_config()
-elif "snmpconf" in sys.argv[1:]:
-	#print "require 1.3.6.1.4.1.18928.1.2.2.1.8.1.1"
-	sys.exit(0)
+	c.print_config()
+#elif "snmpconf" in sys.argv[1:]:
+#	#print "require 1.3.6.1.4.1.18928.1.2.2.1.8.1.1"
+#	sys.exit(0)
 else:
-	print_data()
-	sys.exit(0)
+	c.execute()
