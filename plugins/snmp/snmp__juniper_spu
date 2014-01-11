@@ -1,0 +1,228 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+# Copyright (C) 2014 Johann Schmitz <johann@j-schmitz.net>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Library General Public License as published by
+# the Free Software Foundation; version 2 only
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Library General Public License for more details.
+#
+# You should have received a copy of the GNU Library General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
+
+"""
+=head1 NAME
+
+snmp__juniper_spu - Network monitoring plugin for the SPU's in Juniper firewalls.
+
+=head1 CONFIGURATION
+
+Make sure your Juniper device is accessible via SNMP (e.g. via snmpwalk) and the munin-node
+has been configured correctly.
+
+=head1 MAGIC MARKERS
+
+	#%# family=snmpauto
+	#%# capabilities=snmpconf
+
+=head1 VERSION
+
+0.0.1
+
+=head1 BUGS
+
+Open a ticket at https://github.com/ercpe/contrib if you find one.
+
+=head1 AUTHOR
+
+Johann Schmitz <johann@j-schmitz.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+"""
+
+import re
+import sys
+import os
+import logging
+
+from pysnmp.entity.rfc3413.oneliner import cmdgen
+
+host = None
+port = os.getenv('port', 161)
+community = os.getenv('community', "public")
+
+debug = bool(os.getenv('MUNIN_DEBUG', os.getenv('DEBUG', 0)))
+
+if debug:
+	logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)-7s %(message)s')
+
+try:
+	match = re.search("^(?:|.*\/)snmp_([^_]+)_juniper_spu$", sys.argv[0])
+	host = match.group(1)
+	request = match.group(2)
+	match = re.search("^([^:]+):(\d+)$", host)
+	if match is not None:
+		host = match.group(1)
+		port = match.group(2)
+except:
+	pass
+
+jnxJsSPUMonitoringObjectsTable = '1.3.6.1.4.1.2636.3.39.1.12.1.1'
+#jnxJsSPUMonitoringIndex = jnxJsSPUMonitoringObjectsTable + '.1.1'
+#jnxJsSPUMonitoringFPCIndex = jnxJsSPUMonitoringObjectsTable + '.1.2'
+#jnxJsSPUMonitoringSPUIndex = jnxJsSPUMonitoringObjectsTable + '.1.3'
+#jnxJsSPUMonitoringCPUUsage = jnxJsSPUMonitoringObjectsTable + '.1.4'
+#jnxJsSPUMonitoringMemoryUsage = jnxJsSPUMonitoringObjectsTable + '.1.5'
+jnxJsSPUMonitoringCurrentFlowSession = jnxJsSPUMonitoringObjectsTable + '.1.6'
+jnxJsSPUMonitoringMaxFlowSession = jnxJsSPUMonitoringObjectsTable + '.1.7'
+jnxJsSPUMonitoringCurrentCPSession = jnxJsSPUMonitoringObjectsTable + '.1.8'
+jnxJsSPUMonitoringMaxCPSession = jnxJsSPUMonitoringObjectsTable + '.1.9'
+#jnxJsSPUMonitoringNodeIndex = jnxJsSPUMonitoringObjectsTable + '.1.10'
+jnxJsSPUMonitoringNodeDescr = jnxJsSPUMonitoringObjectsTable + '.1.11'
+jnxJsSPUMonitoringFlowSessIPv4 = jnxJsSPUMonitoringObjectsTable + '.1.12'
+jnxJsSPUMonitoringFlowSessIPv6 = jnxJsSPUMonitoringObjectsTable + '.1.13'
+jnxJsSPUMonitoringCPSessIPv4 = jnxJsSPUMonitoringObjectsTable + '.1.14'
+jnxJsSPUMonitoringCPSessIPv6 = jnxJsSPUMonitoringObjectsTable + '.1.15'
+
+class JunOSSnmpClient(object):
+
+	def __init__(self, host, port, community):
+		self.hostname = host
+		self.transport = cmdgen.UdpTransportTarget((host, int(port)))
+		self.auth = cmdgen.CommunityData('test-agent', community)
+		self.gen = cmdgen.CommandGenerator()
+
+	def get_data(self):
+		errorIndication, errorStatus, errorIndex, varBindTable = self.gen.bulkCmd(
+			self.auth,
+			self.transport,
+			0, 10,
+			jnxJsSPUMonitoringObjectsTable)
+#			ignoreNonIncreasingOids=True) # only available with pysnmp >= 4.2.4 (?) and broken anyway
+
+		if errorIndication:
+			logging.error("SNMP bulkCmd for devices failed: %s, %s, %s" % (errorIndication, errorStatus, errorIndex))
+			return {}
+
+		devices = {}
+		values = {}
+		for row in varBindTable:
+			for name, value in row:
+				if not str(name).startswith(jnxJsSPUMonitoringObjectsTable):
+					continue
+
+				oid = str(name)
+
+				nodeid = oid[oid.rindex('.'):]
+
+				idx = oid[len(jnxJsSPUMonitoringObjectsTable)+3:]
+				idx = idx[:idx.index('.')]
+
+				if oid.startswith(jnxJsSPUMonitoringNodeDescr):
+					devices[nodeid] = str(value)
+					continue
+
+				values[oid] = int(value)
+		return devices, values
+
+	def print_config(self):
+		devices, data = self.get_data()
+
+		data_def = [
+			('flow', self.hostname, 'Flow sessions', '--base 1000', '# of sessions', jnxJsSPUMonitoringMaxFlowSession),
+			('cp', self.hostname, 'Central point sessions', '--base 1000', '# of sessions', jnxJsSPUMonitoringMaxCPSession),
+		]
+
+		for datarow, hostname, title, args, vlabel, max_prefix in data_def:
+			print """multigraph juniper_{datarow}
+host_name {hostname}
+graph_title {title}
+graph_vlabel {vlabel}
+graph_args {args}
+graph_category network
+graph_info {title}""".format(datarow=datarow, hostname=hostname, title=title, args=args, vlabel=vlabel)
+
+			for suffix, node in devices.iteritems():
+				ident = "%s_%s" % (datarow, node)
+				print """{label}.info {title} on {node}
+{label}.label {node}
+{label}.type GAUGE
+{label}.min 0
+{label}.max {max}""".format(title=title, label=ident, node=node, max=data.get(max_prefix + suffix))
+
+			for suffix, node in devices.iteritems():
+				print """
+multigraph juniper_{datarow}.{node}
+host_name {hostname}
+graph_title {title}
+graph_vlabel {vlabel}
+graph_args {args}
+graph_category network
+graph_info {title}
+{datarow}V4.info Current IPv4 {datarow} sessions
+{datarow}V4.label IPv4
+{datarow}V4.draw AREASTACK
+{datarow}V4.type GAUGE
+{datarow}V6.info Current IPv6 {datarow} sessions
+{datarow}V6.label IPv6
+{datarow}V6.draw AREASTACK
+{datarow}V6.type GAUGE
+{datarow}Current.info Current total {datarow} sessions
+{datarow}Current.label Total
+{datarow}Current.draw LINE1
+{datarow}Current.type GAUGE
+{datarow}Current.colour 000000
+{datarow}Max.info Max. {datarow} sessions supported by the device(s)
+{datarow}Max.label Max
+{datarow}Max.draw LINE0
+{datarow}Max.type GAUGE
+""".format(datarow=datarow, hostname=hostname, title=title, args=args, vlabel=vlabel, node=node)
+
+	def execute(self):
+		devices, data = self.get_data()
+
+		print "multigraph juniper_flow"
+		for suffix, node in devices.iteritems():
+			print "flow_%s.value %s" % (node, data.get(jnxJsSPUMonitoringCurrentFlowSession + suffix, 0))
+
+			print "multigraph juniper_flow.%s" % node
+			print "flowV4.value %s" % data.get(jnxJsSPUMonitoringFlowSessIPv4 + suffix, 0)
+			print "flowV6.value %s" % data.get(jnxJsSPUMonitoringFlowSessIPv6 + suffix, 0)
+			print "flowCurrent.value %s" % data.get(jnxJsSPUMonitoringCurrentFlowSession + suffix, 0)
+			print "flowMax.value %s" % data.get(jnxJsSPUMonitoringMaxFlowSession + suffix, 0)
+
+		print "multigraph juniper_cp"
+		for suffix, node in devices.iteritems():
+			print "cp_%s.value %s" % (node, data.get(jnxJsSPUMonitoringCurrentCPSession + suffix, 0))
+
+			print "multigraph juniper_cp.%s" % node
+			print "cpV4.value %s" % data.get(jnxJsSPUMonitoringCPSessIPv4 + suffix, 0)
+			print "cpV6.value %s" % data.get(jnxJsSPUMonitoringCPSessIPv6 + suffix, 0)
+			print "cpCurrent.value %s" % data.get(jnxJsSPUMonitoringCurrentCPSession + suffix, 0)
+			print "cpMax.value %s" % data.get(jnxJsSPUMonitoringMaxCPSession + suffix, 0)
+
+c = JunOSSnmpClient(host, port, community)
+
+if "snmpconf" in sys.argv[1:]:
+	print "require %s" % (jnxJsSPUMonitoringObjectsTable, )
+	sys.exit(0)
+else:
+	if not (host and port and community):
+		print "# Bad configuration. Cannot run with Host=%s, port=%s and community=%s" % (host, port, community)
+		sys.exit(1)
+	
+	if "config" in sys.argv[1:]:
+		c.print_config()
+	else:
+		c.execute()
