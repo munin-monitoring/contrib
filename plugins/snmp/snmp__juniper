@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 # Copyright (C) 2014 Johann Schmitz <johann@j-schmitz.net>
 #
@@ -24,12 +25,12 @@ snmp__juniper - Health monitoring plugin for Juniper firewalls.
 =head1 CONFIGURATION
 
 Make sure your Juniper device is accessible via SNMP (e.g. via snmpwalk) and the munin-node
-has been configured correctly
+has been configured correctly.
 
 =head1 MAGIC MARKERS
 
-	#%# family=contrib
-	#%# capabilities=
+	#%# family=snmpauto
+	#%# capabilities=snmpconf
 
 =head1 VERSION
 
@@ -58,8 +59,13 @@ import logging
 from pysnmp.entity.rfc3413.oneliner import cmdgen
 
 host = None
-port = 161
+port = os.getenv('port', 161)
 community = os.getenv('community', None)
+
+debug = bool(os.getenv('MUNIN_DEBUG', os.getenv('DEBUG', 0)))
+
+if debug:
+	logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)-7s %(message)s')
 
 try:
 	match = re.search("^(?:|.*\/)snmp_([^_]+)_juniper$", sys.argv[0])
@@ -72,10 +78,6 @@ try:
 except:
 	pass
 
-if not (host and port and community):
-	print "# Bad configuration. Cannot run with Host=%s, port=%s and community=%s" % (host, port, community)
-	sys.exit(1)
-
 jnxOperatingTable = '1.3.6.1.4.1.2636.3.1.13.1.5'
 
 jnxOperatingTemp = '1.3.6.1.4.1.2636.3.1.13.1.7'
@@ -84,6 +86,7 @@ jnxOperatingBuffer = '1.3.6.1.4.1.2636.3.1.13.1.11'
 
 class JunOSSnmpClient(object):
 	def __init__(self, host, port, community):
+		self.hostname = host
 		self.transport = cmdgen.UdpTransportTarget((host, int(port)))
 		self.auth = cmdgen.CommunityData('test-agent', community)
 		self.gen = cmdgen.CommandGenerator()
@@ -94,7 +97,7 @@ class JunOSSnmpClient(object):
 			self.transport,
 			0, 20,
 			jnxOperatingTable)
-#			ignoreNonIncreasingOids=True)
+#			ignoreNonIncreasingOids=True) # only available with pysnmp >= 4.2.4 (?)
 
 		if errorIndication:
 			logging.error("SNMP bulkCmd for devices failed: %s, %s, %s" % (errorIndication, errorStatus, errorIndex))
@@ -106,6 +109,7 @@ class JunOSSnmpClient(object):
 				if not str(name).startswith(jnxOperatingTable):
 					continue
 
+				# TODO: Find a better way to get the routing engines in a cluster
 				if str(value).endswith(' Routing Engine'):
 					devices[str(name)[len(jnxOperatingTable):]] = re.sub("[^\w]", '_', str(value).replace(' Routing Engine', ''))
 		return devices
@@ -137,93 +141,47 @@ class JunOSSnmpClient(object):
 	def print_config(self):
 		devices = self.get_devices()
 
-		tpl = """multigraph juniper_temperature
-graph_title $host system temperature
-graph_vlabel System temperature in C per ${graph_period}
-graph_category system
-graph_info System temperature for ${host}
+		data_def = [
+			('temp', self.hostname, 'System temperature', '--base 1000', 'System temperature in C', 'system'),
+			('cpu', self.hostname, 'CPU usage', '--base 1000 -l 0 --upper-limit 100', 'CPU usage in %', 'system'),
+			('buffer', self.hostname, 'Buffer usage', '--base 1000 -l 0 --upper-limit 100', 'Buffer usage in %', 'system'),
+		]
 
-%s"""
+		for datarow, hostname, title, args, vlabel, category in data_def:
+			print """multigraph juniper_{datarow}
+host_name {hostname}
+graph_title {title}
+graph_vlabel {vlabel}
+graph_args {args}
+graph_category {category}
+graph_info {title}""".format(datarow=datarow, hostname=hostname, title=title, args=args, vlabel=vlabel, category=category)
 
-		s = ""
-		for suffix, node in devices.iteritems():
-			ident = "temp_%s" % node
-			s += """{label}.info System temperature on {node}
-{label}.label {label}
+			for suffix, node in devices.iteritems():
+				ident = "%s_%s" % (datarow, node)
+				print """{label}.info {title} on {node}
+{label}.label {node}
 {label}.type GAUGE
-{label}.min 0
-
-""".format(label=ident, node=node)
-
-		print tpl % s
-
-
-
-
-		tpl = """multigraph juniper_cpu
-graph_title $host CPU usage
-graph_vlabel CPU usage in %% per ${graph_period}
-graph_category system
-graph_info CPU usage for ${host}
-
-%s"""
-
-		s = ""
-		for suffix, node in devices.iteritems():
-			ident = "cpu_%s" % node
-			s += """{label}.info CPU usage on {node}
-{label}.label {label}
-{label}.type GAUGE
-{label}.min 0
-{label}.max 100
-
-""".format(label=ident, node=node)
-
-		print tpl % s
-
-
-
-		tpl = """multigraph juniper_buffer
-graph_title $host Buffer usage
-graph_vlabel Buffer usage in %% per ${graph_period}
-graph_category system
-graph_info Buffer usage for ${host}
-
-%s"""
-
-		s = ""
-		for suffix, node in devices.iteritems():
-			ident = "buffer_%s" % node
-			s += """{label}.info Buffer usage on {node}
-{label}.label {label}
-{label}.type GAUGE
-{label}.min 0
-{label}.max 100
-
-""".format(label=ident, node=node)
-
-		print tpl % s
-
-
+{label}.min 0""".format(title=title, label=ident, node=node)
 
 	def execute(self):
 		data = self.get_data()
-#		import pprint
-#		pprint.pprint(data)
 
 		for pre, values in data.iteritems():
+			print "multigraph juniper_%s" % pre
 			for node, value in values.iteritems():
 				print "%s_%s.value %s" % (pre, node, value)
 
-
-def print_data():
-	pass
-
 c = JunOSSnmpClient(host, port, community)
-if "config" in sys.argv[1:]:
-	c.print_config()
-#elif "snmpconf" in sys.argv[1:]:
-#	#print "require 1.3.6.1.4.1.18928.1.2.2.1.8.1.1"
-#	sys.exit(0)
+
+if "snmpconf" in sys.argv[1:]:
+	print "require 1.3.6.1.4.1.2636.3.1.13.1.5"
+	sys.exit(0)
 else:
-	c.execute()
+	if not (host and port and community):
+		print "# Bad configuration. Cannot run with Host=%s, port=%s and community=%s" % (host, port, community)
+		sys.exit(1)
+	
+	if "config" in sys.argv[1:]:
+		c.print_config()
+	else:
+		c.execute()
