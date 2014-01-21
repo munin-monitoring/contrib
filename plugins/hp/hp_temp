@@ -1,0 +1,111 @@
+#!/usr/bin/perl -w
+
+# Temperature read from hplog -t
+# in the plugin config the user need to be set to root:
+#
+# [hp_temp]
+# user root
+
+use strict;
+use Munin::Plugin;
+
+my $mode = ($ARGV[0] or "print");
+
+if ($mode eq 'autoconf')
+{
+	if (`/sbin/hplog -t` eq '')
+	{
+		print "no (no temperature devices to monitor)\n"
+	}
+	else
+	{
+		print "yes\n"
+	}
+	exit 0;
+}
+
+if ($mode eq 'config')
+{
+	# headers for the temperatur
+	print "graph_title HP Temperature sensors in Celcius\n";
+	print "graph_args --base 1000 -l 0\n";
+	print "graph_vlabel degrees Celsius\n";
+	print "graph_category sensors\n";
+}
+
+# threshold: ($name).critical
+# ($name).warning -5% of threshold
+
+open(HPT, "hplog -t 2>/dev/null |") || die("Cannot open hplog: $!\n");
+<HPT>; # header line, skipping
+while (<HPT>)
+{
+	# we need the following locations (fixed)
+	# ID: 1-2
+	# LOCATION: 18-32
+	# STATUS: 34-42
+	# CURRENT: 43-52
+	# THRESHOLD: (for init only) 53-62
+	chomp;
+	if (length($_) > 1)
+	{
+		my $status = substr($_, 33, 8); # Normal, Absent, etc
+		$status =~ s/\s+$//g;
+		# if status is not Abstent, we go ahead
+		if ($status ne 'Absent')
+		{
+			my $id = substr($_, 0, 2);
+			$id =~ s/\s+//g;
+			my $location = substr($_, 17, 14);
+			# strip any trailing spaces
+			$location =~ s/\s+$//g;
+			$location .= ' '.$id;
+			my $temp = substr($_, 42, 9);
+			# post work: current extract C number only
+			$temp =~ /\dF\/([\d ]{3})C$/;
+			$temp = $1;
+			if ($temp)
+			{
+				$temp =~ s/\s+//g;
+				# create a unique name from location
+				# remove all . / ( ) and replace space with _
+				my $name = lc($location);
+				$name =~ s/[\.\/\(\)]//g;
+				# strip all trailing spaces
+				$name =~ s/\s+$//g;
+				# convert spaces left to underscore
+				$name =~ s/\ /_/g;
+				# add the ID to be 100% unique
+				$name .= '_'.$id;
+				
+				if ($mode eq 'config')
+				{
+					# only needed here in config
+					my $threshold = substr($_, 52, 9);
+					# extract only C
+					$threshold =~ /\dF\/([\d ]{3})C$/;
+					$threshold = $1;
+					if ($threshold)
+					{
+						$threshold =~ s/\s+//g;
+					}
+					else
+					{
+						$threshold = 100;
+					}
+					# calc warning from threshold, 5% less
+					my $warning = sprintf("%.0f", $threshold * 95 / 100);
+					
+					print $name.".label ".$location."\n";
+					print $name.".warning ".$warning."\n";
+					print $name.".critical ".$threshold."\n";
+				}
+				else
+				{
+					print $name.".value ".$temp."\n";
+				}
+			}
+		}
+	}
+}
+close(HPT);
