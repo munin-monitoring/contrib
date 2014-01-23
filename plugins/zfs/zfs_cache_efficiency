@@ -6,10 +6,12 @@
 #%# capabilities=autoconf
 
 sysctl='/sbin/sysctl'
+ostype=`uname -s`
+procfile='/proc/spl/kstat/zfs/arcstats'
 
 case $1 in
     config)
-	cat <<EOF
+    cat <<EOF
 graph_title ZFS ARC efficiency
 graph_vlabel %
 graph_scale no
@@ -209,23 +211,37 @@ EOF
 # mru_ghost_hits_perc.cdef mru_ghost_hits,100,*,hits,/
 # mru_ghost_hits_perc.label Most recently used ghost hits
 # mru_ghost_hits_perc.graph no
-	exit 0
-	;;
+    exit 0
+    ;;
     autoconf)
-	if [ ! -x ${sysctl} ]; then
-	    echo "no (${sysctl} is not executable)"
-	    exit 1
-	fi
-	ostype=`uname -s`
-	if [ ${ostype} = "FreeBSD" ]; then
-	    echo "yes"
-	    exit 0
-	fi
-	echo "no (You're OS is not supported by this plugin)"
-	exit 1
-	;;
+    if [ ! -x ${sysctl} ]; then
+        echo "no (${sysctl} is not executable)"
+        exit 1
+    fi
+    if [ ${ostype} = "FreeBSD" ]; then
+        echo "yes"
+        exit 0
+    fi
+    if [ ${ostype} = "Linux" ]; then
+        if [ -f ${procfile} ]; then
+            echo "yes"
+            exit 0
+        fi
+        echo "no (The statsfile does not exist: ${procfile})"
+        exit 1
+    fi
+    echo "no (You're OS is not supported by this plugin)"
+    exit 1
+    ;;
     suggest)
-	exit 0
-	;;
+    exit 0
+    ;;
 esac
-$sysctl kstat.zfs.misc.arcstats | sed -e 's/^kstat.zfs.misc.arcstats.//' -e 's/:/.value/'
+case ${ostype} in
+    "FreeBSD")
+        $sysctl kstat.zfs.misc.arcstats | sed -e 's/^kstat.zfs.misc.arcstats.//' -e 's/:/.value/'
+    ;;
+    "Linux")
+        cat ${procfile} | tail -n +3 | sed -e 's/ \+/ /g' | cut -f 1,3 -d ' ' | sed -e 's/ /.value /'
+    ;;
+esac
