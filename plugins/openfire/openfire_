@@ -9,12 +9,13 @@ openfire_ a Plugin for displaying Openfire Stats
 
 This plugin displays the following charts:
 
-1) db 			Displaying DB Connections Stats.
-2) threads 		Displaying Stats about Openfire Stats.
-3) tasks 		Displaying Stats about Openfire Background Tasks.
-4) sessions 	Displaying the Number of current Jabber Sessions.
-5) nio 			Displaying some Network I/O Stats.
-6) timestamp 	Displaying the Log Timestamp (should be increasing - for Debugging)
+1) db 				Displaying DB Connections Stats.
+2) threads 			Displaying Stats about Openfire Stats.
+3) tasks 			Displaying Stats about Openfire Background Tasks.
+4) sessions 		Displaying the Number of current Jabber Sessions.
+5) nio 				Displaying some Network I/O Stats.
+6) queue	Displaying the Number of queued Events
+7) timestamp 		Displaying the Log Timestamp (should be increasing - for Debugging)
 
 You can set the modes with naming the softlink:
 
@@ -23,7 +24,8 @@ You can set the modes with naming the softlink:
 3) openfire_tasks
 4) openfire_sessions
 5) openfire_nio
-6) openfire_timestamp
+6) openfire_queue
+7) openfire_timestamp
 
 =head1 CONFIGURATION
 
@@ -110,12 +112,19 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 	if( $type eq "nio" ) {
 		print "graph_args --base 1000 -l 0\n";
 		print "graph_title Openfire I/O (NIO)\n";
-		print "graph_vlabel Number of Stanzas\n";
+		print "graph_vlabel Reads/Writes per \${graph_period} in (-) / out (+)\n";
 		print "graph_category Openfire\n";
 		print "graph_info The Graph shows Number of Stanzas\n";
-		print "nio_read.draw AREA\nnio_read.label Read\nnio_read.type GAUGE\n";
-		print "nio_written.draw STACK\nnio_written.label Written\nnio_written.type GAUGE\n";	
-		print "nio_queued_events.draw STACK\nnio_queued_events.label queued Events\nnio_queued_events.type GAUGE\n";	
+        print "nio_written.label nio\nnio_written.draw LINE1\nnio_written.max 10000\nnio_written.min 0\nnio_written.graph no\n";
+        print "nio_read.label nio\nnio_read.draw LINE1\nnio_read.max 10000\nnio_read.min 0\nnio_read.negative nio_written\n";
+	}
+    if( $type eq "queue" ) {   
+		print "graph_args --base 1000 -l 0\n";
+		print "graph_title Openfire Queue\n";
+		print "graph_vlabel Number of queued Stanzas\n";
+		print "graph_category Openfire\n";
+		print "graph_info The Graph shows Number of queued Stanzas\n";    	
+		print "nio_queued_events.draw AREA\nnio_queued_events.label queued Events\nnio_queued_events.type GAUGE\n";	
 		print "nio_queued_writes.draw STACK\nnio_queued_writes.label queued Writes\nnio_queued_writes.type GAUGE\n";					
 	}
 	if( $type eq "timestamp" ) {
@@ -152,7 +161,9 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 	}
 	if( $type eq "nio" ) {
 		print "nio_read.value $array[10]\n";
-		print "nio_written.value $array[11]\n";
+		print "nio_written.value $array[11]\n";				
+	}	
+	if( $type eq "queue" ) {
 		print "nio_queued_events.value $array[12]\n";
 		print "nio_queued_writes.value $array[13]";						
 	}	
