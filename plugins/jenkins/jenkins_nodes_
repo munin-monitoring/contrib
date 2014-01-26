@@ -1,0 +1,274 @@
+#!/usr/bin/env perl
+# -*- perl -*-
+
+# MAIN
+use warnings;
+use strict;
+use JSON;
+use File::Basename;
+use Data::Dumper;
+
+# VARS
+my $url = ($ENV{'url'} || 'localhost');
+my $port = ($ENV{'port'} || '4040');
+my $user = ($ENV{'user'} || '');
+my $apiToken = ($ENV{'apiToken'} || '');
+my $context = ($ENV{'context'} || '');
+my $wgetBin = "/usr/bin/env wget";
+
+# mem_sum, mem, swap, ws, tmp, executors, arch
+my $type = basename($0);
+$type =~ s/jenkins_nodes_//;
+
+my $auth = ( $user ne "" and $apiToken ne ""  ? " --auth-no-challenge --user=$user --password=$apiToken" : "" );
+my $cmd = "$wgetBin $auth -qO- $url:$port$context";
+my $monitor;
+
+if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
+    my $base_config = "graph_category Jenkins\n";
+
+    if( $type eq "mem_sum" ) {
+            print $base_config;
+            print "graph_args --base 1000 -l 0\n";
+            print "graph_title Jenkins Memory Summary\n";
+            print "graph_vlabel Memory Summary\n";
+            print "graph_info The Graph shows the Jenkins Memory Summary\n";
+            print "mem_sum_total.draw AREA\n";
+            print "mem_sum_total.label availible\n";
+            print "mem_sum_total.type GAUGE\n";
+            print "mem_sum_used.label used\n";
+            print "mem_sum_used.type GAUGE\n";
+    }
+
+    if( $type eq "mem" ) {
+        print $base_config;
+        print "graph_args --base 1000 -l 0\n";
+        print "graph_title available Memory per Node\n";
+        print "graph_vlabel available Memory per Node\n";
+        print "graph_info The Graph shows the available Physical Memory per Node\n";
+        my $lcount = 0;
+        my $node;
+        my $result = `$cmd/computer/api/json`;
+        my $parsed = decode_json($result);
+        foreach my $cur(@{$parsed->{'computer'}}) {
+            if( $cur->{'offline'} =~ /false$/ ) {
+                my $cat = $cur->{'displayName'};
+                $cat =~ s/\./\_/g;
+                    if( $lcount > 0 ){
+                            print $cat,"_mem.draw STACK\n";
+                    } else {
+                            print $cat,"_mem.draw AREA\n";
+                    }
+                    print $cat,"_mem.label $cur->{'displayName'}\n";
+                    print $cat,"_mem.type GAUGE\n";
+                $lcount++;
+            }
+        }
+    }
+
+    if( $type eq "ws" ) {
+        print $base_config;
+        print "graph_args --base 1000 -l 0\n";
+        print "graph_title available Workspace per Node\n";
+        print "graph_vlabel available Workspace\n";
+        print "graph_info The Graph shows the available Workspace per Node\n";
+        my $lcount = 0;
+        my $node;
+        my $result = `$cmd/computer/api/json`;
+        my $parsed = decode_json($result);
+        foreach my $cur(@{$parsed->{'computer'}}) {
+            if( $cur->{'offline'} =~ /false$/ ) {
+                my $cat = $cur->{'displayName'};
+                $cat =~ s/\./\_/g;
+                    if( $lcount > 0 ){
+                            print $cat,"_ws.draw STACK\n";
+                    } else {
+                            print $cat,"_ws.draw AREA\n";
+                    }
+                    print $cat,"_ws.label $cur->{'displayName'}\n";
+                    print $cat,"_ws.type GAUGE\n";
+                $lcount++;
+            }
+        }
+    }
+
+    if( $type eq "tmp" ) {
+        print $base_config;
+        print "graph_args --base 1000 -l 0\n";
+        print "graph_title available TMP Space per Node\n";
+        print "graph_vlabel available TMP Space\n";
+        print "graph_info The Graph shows the available TMP Space per Node\n";
+        my $lcount = 0;
+        my $node;
+        my $result = `$cmd/computer/api/json`;
+        my $parsed = decode_json($result);
+        foreach my $cur(@{$parsed->{'computer'}}) {
+            if( $cur->{'offline'} =~ /false$/ ) {
+                my $cat = $cur->{'displayName'};
+                $cat =~ s/\./\_/g;
+                    if( $lcount > 0 ){
+                            print $cat,"_tmp.draw STACK\n";
+                    } else {
+                            print $cat,"_tmp.draw AREA\n";
+                    }
+                    print $cat,"_tmp.label $cur->{'displayName'}\n";
+                    print $cat,"_tmp.type GAUGE\n";
+                $lcount++;
+            }
+        }
+    }
+
+    if( $type eq "arch" ) {
+        print $base_config;
+        print "graph_args --base 1000 -l 0\n";
+        print "graph_title available Node Architectures\n";
+        print "graph_vlabel available Node Architectures\n";
+        print "graph_info The Graph shows the available Node Architectures\n";
+        my $lcount = 0;
+        my $result = `$cmd/computer/api/json`;
+        my $parsed = decode_json($result);
+        my %archs = ();
+        my $cat;
+        foreach my $cur(@{$parsed->{'computer'}}) {
+            if( $cur->{'offline'} =~ /false$/ ) {
+                $cat = $cur->{'monitorData'}{'hudson.node_monitors.ArchitectureMonitor'};
+                if (exists $archs{$cat} ) {} else {
+                    $archs{$cat} = 0;
+                }
+            }
+        }
+        foreach my $cur (keys %archs) {
+            $cat = clean_name($cur);
+            if( $lcount > 0 ){
+                print $cat,".draw STACK\n";
+            } else {
+                print $cat,".draw AREA\n";
+            }
+            print $cat,".label $cur\n";
+            print $cat,".type GAUGE\n";
+            $lcount++;
+        }
+    }
+
+    if( $type eq "executors" ) {
+            print $base_config;
+            print "graph_args --base 1000 -l 0\n";
+            print "graph_title Jenkins Executors\n";
+            print "graph_vlabel Executors\n";
+            print "graph_info The Graph shows the Jenkins Executors\n";
+             print "executors_offline.label offline\n";
+            print "executors_offline.type GAUGE\n"; 
+            print "executors_offline.draw AREA\n";
+            print "executors_offline.colour 8A8A8A\n";           
+            print "executors_busy.label busy\n";
+            print "executors_busy.type GAUGE\n";    
+            print "executors_busy.draw STACK\n";
+            print "executors_idle.label idle\n";
+            print "executors_idle.type GAUGE\n";     
+            print "executors_idle.draw STACK\n";                           
+    }
+
+} else {
+    # CODE
+    my $result = `$cmd/computer/api/json`;
+    my $parsed = decode_json($result);
+
+    if( $type eq "mem_sum" ) {
+        my $avail_mem = 0;
+        my $total_mem = 0;
+        my $used_mem = 0;
+        foreach my $cur(@{$parsed->{'computer'}}) {
+            if( $cur->{'offline'} =~ /false$/ ) {
+                $monitor = $cur->{'monitorData'}{'hudson.node_monitors.SwapSpaceMonitor'};
+                $avail_mem += $monitor->{'availablePhysicalMemory'};
+                $total_mem += $monitor->{'totalPhysicalMemory'};
+            }
+        }
+        $used_mem = $total_mem - $avail_mem;
+        print "mem_sum_total.value $total_mem\n";
+        print "mem_sum_used.value $used_mem\n";
+    }
+
+    if( $type eq "mem" ) {
+        my $result = `$cmd/computer/api/json`;
+        my $parsed = decode_json($result);
+        foreach my $cur(@{$parsed->{'computer'}}) {
+            if( $cur->{'offline'} =~ /false$/ ) {
+                $monitor = $cur->{'monitorData'}{'hudson.node_monitors.SwapSpaceMonitor'};
+                my $cat = $cur->{'displayName'};
+                $cat =~ s/\./\_/g;
+                print $cat,"_mem.value ",$monitor->{'availablePhysicalMemory'},"\n";
+            }
+        }
+    }
+
+    if( $type eq "tmp" ) {
+        my $result = `$cmd/computer/api/json`;
+        my $parsed = decode_json($result);
+        foreach my $cur(@{$parsed->{'computer'}}) {
+            if( $cur->{'offline'} =~ /false$/ ) {
+                $monitor = $cur->{'monitorData'}{'hudson.node_monitors.TemporarySpaceMonitor'};
+                my $cat = $cur->{'displayName'};
+                $cat =~ s/\./\_/g;
+                print $cat,"_tmp.value ",$monitor->{'size'},"\n";
+            }
+        }
+    }
+
+    if( $type eq "ws" ) {
+        my $result = `$cmd/computer/api/json`;
+        my $parsed = decode_json($result);
+        foreach my $cur(@{$parsed->{'computer'}}) {
+            if( $cur->{'offline'} =~ /false$/ ) {
+                $monitor = $cur->{'monitorData'}{'hudson.node_monitors.DiskSpaceMonitor'};
+                my $cat = $cur->{'displayName'};
+                $cat =~ s/\./\_/g;
+                print $cat,"_ws.value ",$monitor->{'size'},"\n";
+            }
+        }
+    }
+
+    if( $type eq "arch" ) {
+        my $parsed = decode_json($result);
+        my %archs = ();
+        my $cat;
+        foreach my $cur(@{$parsed->{'computer'}}) {
+            if( $cur->{'offline'} =~ /false$/ ) {
+                $cat = $cur->{'monitorData'}{'hudson.node_monitors.ArchitectureMonitor'};
+                if (exists $archs{$cat} ) {
+                    $archs{$cat} += 1;
+                } else {
+                    $archs{$cat} = 1;
+                }
+            }
+        }
+        foreach my $cur (keys %archs) {
+            $cat = clean_name($cur);
+            print $cat,".value ", $archs{$cur}, "\n";
+        }
+    }
+
+    if( $type eq "executors" ) {
+    	my $busyExecutors = $parsed->{'busyExecutors'};    	
+    	my $totalExecutors = 0;		
+    	my $offlineExecutors = 0;
+        foreach my $cur(@{$parsed->{'computer'}}) {
+        	$totalExecutors += $cur->{'numExecutors'};
+	        if( $cur->{'offline'} =~ /true$/ ) {
+	        	$offlineExecutors += $cur->{'numExecutors'};
+	        }
+        }
+        print "executors_idle.value ", ($totalExecutors - $busyExecutors - $offlineExecutors), "\n";   		    	
+        print "executors_busy.value $busyExecutors\n";   		    	
+        print "executors_offline.value $offlineExecutors\n";   		    	
+    }
+}
+
+sub clean_name {
+    my $name = $_[0];
+    $name =~ s/\./\_/g;
+    $name =~ s/\(/\_/g;
+    $name =~ s/\)/\_/g;
+    $name =~ s/ //g;
+    return $name;
+}
