@@ -70,7 +70,7 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 		print "graph_scale no\n";		
 		print "graph_title CPU usage in % per VM\n";
 		print "graph_vlabel % of CPU usage\n";
-		print "graph_info The Graph shows the CPU usage in % per VM\n";		
+		print "graph_info The Graph shows the CPU usage in % per VM\n";	
 		foreach my $line(@lines) {
 			if( $line  =~ /(?<!grep)$/) {	
 				my @vm = ();
@@ -82,11 +82,18 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 						$count++;
 					}
 				}	
-				$vm[3] = clean_vmname($vm[3]);	
-				if( $vm[3] =~ /(?<!comm)$/)	{	
-					print "$vm[3]_pcpu.label $vm[3]\n";
-					print "$vm[3]_pcpu.type GAUGE\n";				
-				}
+				$vm[3] =~ s/\.vmx//;
+				my $cat = clean_vmname($vm[3]);			
+				if( $cat =~ /(?<!comm)$/)	{
+	                if( $lcount > 0 ){
+	                	print $cat,"_pcpu.draw STACK\n";
+	                } else {
+	                	print $cat,"_pcpu.draw AREA\n";
+	                }
+	                $lcount++;						
+					print $cat,"_pcpu.label $vm[3]\n";
+					print $cat,"_pcpu.type GAUGE\n";
+				}				
 			}
 		}
 	}
@@ -97,7 +104,7 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 		print "graph_scale no\n";
 		print "graph_title Memory usage in % per VM\n";
 		print "graph_vlabel % of Memory usage\n";
-		print "graph_info The Graph shows the Memory usage in % per VM\n";		
+		print "graph_info The Graph shows the Memory usage in % per VM\n";	
 		foreach my $line(@lines) {
 			if( $line  =~ /(?<!grep)$/ ) {	
 				my @vm = ();
@@ -109,10 +116,17 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 						$count++;
 					}
 				}	
-				$vm[3] = clean_vmname($vm[3]);	
-				if( $vm[3] =~ /(?<!comm)$/)	{
-					print "$vm[3]_pmem.label $vm[3]\n";
-					print "$vm[3]_pmem.type GAUGE\n";
+				$vm[3] =~ s/\.vmx//;
+                my $cat = clean_vmname($vm[3]);				
+				if( $cat =~ /(?<!comm)$/)	{
+	                if( $lcount > 0 ){
+	                	print $cat,"_pmem.draw STACK\n";
+	                } else {
+	                	print $cat,"_pmem.draw AREA\n";
+	                }
+	                $lcount++;					
+					print $cat,"_pmem.label $vm[3]\n";
+					print $cat,"_pmem.type GAUGE\n";
 				}	
 			}
 		}			
