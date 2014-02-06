@@ -33,8 +33,10 @@ use strict;
 use Net::Telnet;
  
 # CONFIG HERE!
-my $hostname =  $ENV{host} || "188.40.110.119";    # serveraddress
+my $hostname =  $ENV{host} || "localhost";    # serveraddress
 my $port =      $ENV{port} || 10011;      # querryport
+my $user =      $ENV{user} || "serveradmin";
+my $password =  $ENV{password} || "";
 my $filename =  "ts3v2_";
  
 # SCRIPT START!
@@ -43,6 +45,18 @@ my $name = ""; my $server = ""; my @num; my $id = 0; my $i = 0; my $myserver; my
 my $telnet = new Net::Telnet(Timeout=>1, Errmode=>"return", Prompt=>"/\r/");
 if (!$telnet->open(Host=>$hostname, Port=>$port)) {
         die "Server could not be reached, please check your config!";
+}
+
+$telnet->waitfor("/Welcome/");
+
+if ($password ne "") {
+  $telnet->cmd("login client_login_name=".$user." client_login_password=".$password);
+  my $response = $telnet->getline(Timeout=>1);
+  if ($response !~ "error id=0 msg=ok") {
+        $telnet->close;
+        print("Test: ".($response eq "error id=0 msg=ok"));
+        die "ServerQuery login failed: ".$response;
+  }
 }
  
 #get argument
@@ -62,7 +76,6 @@ if ($argument eq "overview" or $argument eq "transfer" or (defined $ARGV[0] and 
         } elsif($argument eq "transfer") {
                 $mode = "t";
         }
-        $telnet->waitfor("/Welcome/");
         $telnet->cmd("serverlist");
         my $line = $telnet->getline(Timeout=>1);
         my @servers = split(/\|/, $line);
@@ -95,7 +108,6 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
 } elsif (exists $ARGV[0] and $ARGV[0] eq "config") {
         if ($mode eq "s") {
                 #single server mode
-                $telnet->waitfor("/Welcome/");
                 $telnet->cmd("use sid=".$server);
                 $telnet->waitfor("/error id=0 msg=ok/");
                 $telnet->cmd("serverinfo");
@@ -131,7 +143,6 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
                 print "graph_info This graph shows the number of connected users on a Teamspeak3 server\n";
  
                 foreach (@num) {
-                        $telnet->waitfor("/Welcome/");
                         $telnet->cmd("use sid=".$_);
                         $telnet->waitfor("/error id=0 msg=ok/");
                         $telnet->cmd("serverinfo");
@@ -163,7 +174,6 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
         #go go magic, go!
         if ($mode eq "s") {
                 #single mode
-                $telnet->waitfor("/Welcome/");
                 $telnet->cmd("use sid=".$server);
                 $telnet->waitfor("/error id=0 msg=ok/");
                 $telnet->cmd("serverinfo");
@@ -192,7 +202,6 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
                         $telnet->waitfor("/error id=0 msg=ok/");
                 }
         } elsif ($mode eq "t") {
-                $telnet->waitfor("/Welcome/");
                 $telnet->cmd("hostinfo");
                 my @tsave;
                 my $line = $telnet->getline(Timeout=>1);
