@@ -1,0 +1,89 @@
+#!/usr/bin/perl -w
+#
+# xmlrpc based munin plugin for monitoring rtorrent's memory usage
+# prerequisites:
+#  - rtorrent 0.7.5 or newer compiled with --with-xmlrpc-c
+# check http://libtorrent.rakshasa.no/wiki/RTorrentXMLRPCGuide for further informations
+#
+# written by Gabor Hudiczius
+# web: http://projects.cyla.homeip.net/rtwi/wiki/rTorrentOMeter
+# email: ghudiczius@gmail.com
+#
+# 0.2.0 - 080619
+#  support for scgi_port and scgi_local
+#  configurable via munin env variables
+#  initial release
+#
+#
+# Parameters:
+#
+#       config          required
+#
+#
+# Configurable variables
+#
+#       src             "socket" when using scgi_socket, or anything else when using scgi_port
+#       socket          rTorrent's rpc socket (scgi_local)      - using scgi_local      - needed, when "src" is set to "socket"
+#       category        Change graph category
+#
+# Configuration example
+#
+#       [rtom_all]
+#       user username
+#       env.src socket
+#       env.socket /home/user/torrent/.socket/rpc.socket,/home/user/torrent/.socket/rpc.socket
+#       env.category Category
+#
+#%# family=auto
+
+
+if ( $ARGV[0] and $ARGV[0] eq "autoconf" ) {
+        exit 1;
+}
+
+if ( $ARGV[0] and $ARGV[0] eq "config" ) {
+        my $category = $ENV{"category"} || "";
+        print "graph_title rTorrent memory usage\n";
+        print "graph_args --base 1024 --lower-limit 0\n";
+        print "graph_vlabel Bytes\n";
+        print "graph_category rTorrent ".${category}."\n";
+        print "mem.label Memory usage\n";
+        print "mem.info Memory osage of rTorrent\n";
+        print "mem.type GAUGE\n";
+        print "mem.draw LINE2\n";
+        exit 0;
+}
+
+use IO::Socket;
+my @sockets = split /,/, $ENV{"socket"} || "";
+my $mem = 0;
+my $src         = $ENV{"src"} || "";
+
+my $pattern     = qr/<value><(int|i4|i8|ex\.i8)>(\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
+my $line        = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>get_memory_usage</methodName></methodCall>";
+my $llen        = length $line;
+my $header      = "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
+my $hlen        = length $header;
+$line           = "${hlen}:${header},${line}";
+
+for $socket (@sockets)
+{
+        if ( ( defined $src ) && ( $src eq "socket" ) ) {
+                socket( SOCK, PF_UNIX, SOCK_STREAM, 0 ) or die;
+                connect( SOCK, sockaddr_un( $socket ) ) or die $!;
+        }
+
+        print SOCK $line;
+        flush SOCK;
+
+        while ( $line = <SOCK> ) {
+                if ( $line =~ /$pattern/ ) {
+                        $mem = $mem + $2;
+                }
+        }
+        close (SOCK);
+}
+
+print "mem.value ${mem}\n";
+
+exit;
