@@ -17,9 +17,15 @@ You will need the perl fastcgi::client on your host
 
 You have to put this in your plugin.conf.d folder 
 
+# If your php process is listening on TCP 
 [php_fpm_process]
    env.serveraddr 127.0.0.1
    env.port 9000
+   env.path /status 
+
+# If your php process is listening on Unix Socket
+[php_fpm_process]
+   env.sock /var/run/php5-fpm.sock
    env.path /status 
 
 =head1 MAGIC MARKERS
@@ -41,8 +47,6 @@ GNU General Public License, version 3
 
 =cut
 
-
-use IO::Socket::INET;
 use FCGI::Client;
 
 my $ish = 1;
@@ -55,40 +59,55 @@ my $TOTAL = 0;
 my $SERVERADDR = $ENV{'serveraddr'} || "127.0.0.1";
 my $PORT = $ENV{'port'} || "9000";
 my $PATH = $ENV{'path'} || "/status";
+my $UNIX_SOCK = $ENV{'sock'};
 
-my $sock = IO::Socket::INET->new(
-        PeerAddr =>  $SERVERADDR,
-        PeerPort =>  $PORT,
-);
+my $sock;
 
-if (!$sock) { 
-	print "Server maybe down, unabled to connect to $SERVERADDR:$PORT";
-	exit 2;
+if ($UNIX_SOCK) {
+  use IO::Socket::UNIX;
+  $sock = IO::Socket::UNIX->new(
+    Peer =>  $UNIX_SOCK,
+  );
+  if (!$sock) { 
+    print "Server maybe down, unabled to connect to $UNIX_SOCK";
+    exit 2;
+  }
+} else {
+  use IO::Socket::INET;
+  $sock = IO::Socket::INET->new(
+    PeerAddr =>  $SERVERADDR,
+    PeerPort =>  $PORT,
+  );
+  if (!$sock) { 
+    print "Server maybe down, unabled to connect to $SERVERADDR:$PORT";
+    exit 2;
+  }
 }
 
-	my $client = FCGI::Client::Connection->new( sock => $sock );
-	my ( $stdout, $stderr, $appstatus )  = $client->request( 
-		+{
-	            REQUEST_METHOD => 'GET',
-		    SCRIPT_FILENAME => '',
-		    QUERY_STRING => '',
-		    SCRIPT_NAME    => $PATH,
-		},
-	        ''
-	);
+my $client = FCGI::Client::Connection->new( sock => $sock );
+
+my ( $stdout, $stderr, $appstatus )  = $client->request( 
+    +{
+        REQUEST_METHOD => 'GET',
+        SCRIPT_FILENAME => '',
+        QUERY_STRING => '',
+        SCRIPT_NAME    => $PATH,
+    },
+    ''
+  );
 
 $stdout =~ s/\r//g;
 
 while($stdout =~ /([^\n]*)\n?/g) {
-	if(!$1) {
-		$ish = 0;
-		next;
-	}
-	if($ish == 1) {
-		$header .= $1."\n";
-	} else {
-		$body .= $1."\n";
-	}
+  if(!$1) {
+    $ish = 0;
+    next;
+  }
+  if($ish == 1) {
+    $header .= $1."\n";
+  } else {
+    $body .= $1."\n";
+  }
 }
 
 if ( defined $ARGV[0] and $ARGV[0] eq "config" )
@@ -117,17 +136,19 @@ if ( defined $ARGV[0] and $ARGV[0] eq "config" )
   print "total.draw LINE2\n";
   print "total.info The number of idle + active processes\n";
   exit 0
-}	
+} 
+
+print $body;
 
 if($body =~ m/idle processes: (.*?)\n/) {
         $IDLE = $1;
-	print "idle.value ".$IDLE."\n";
+  print "idle.value ".$IDLE."\n";
 }
 if($body =~ m/active processes: (.*?)\n/) {
         $ACTIVE = $1;
-	print "active.value ".$ACTIVE."\n";
+  print "active.value ".$ACTIVE."\n";
 }
 if($body =~ m/total processes: (.*?)\n/) {
         $TOTAL = $1;
-	print "total.value ".$TOTAL."\n";
+  print "total.value ".$TOTAL."\n";
 }
