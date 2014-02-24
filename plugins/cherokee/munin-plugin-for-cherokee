@@ -24,17 +24,24 @@
 # ln -s /usr/share/munin/plugins/cherokee__type_ cherokee_localhost_type_rate
 
 
-import urllib
+import urllib2
+import base64
 import os
 import sys
 import re
+import json
 
-about_location = "/about/info/py"
+#py returns invalid json
+about_location = "/about/info/js"
+
+#Leave empty if not required
+http_user = "admin"
+http_pass = "pass"
 
 host = os.getenv('host');
 type = 'data';
 
-host="localhost"
+host = "localhost"
 
 match = re.match('^(?:|.*\/)cherokee_([^_]+)_type_(.+)$', sys.argv[0])
 if match:
@@ -66,14 +73,26 @@ def output_values(response):
 
 
 def get_data():
-	raw_data = urllib.urlopen( "http://%s%s" % (host,about_location)).read()
-#	print "DEBUG: " + raw_data
-	return eval(raw_data)
+	global host
+	global about_location
+	global http_user
+	global http_pass
+	url = "http://%s%s" % ( host , about_location )
+	request = urllib2.Request(url)
+	base64string = base64.standard_b64encode('%s:%s' % (http_user, http_pass))
+	if len(http_user) > 0 and len(http_pass) > 0:
+		#print "DEBUG: AUTH: " + base64string
+		request.add_header("Authorization", "Basic %s" % base64string)   
+	#print "DEBUG: GET: " + url
+	raw_data = urllib2.urlopen(request).read()
+	#print "DEBUG: " + raw_data
+	return json.loads(raw_data)
 
 def munin_values(res):
 	output_values(res)
 
 def munin_config(response):
+	global type
 	print "graph_category cherokee"
 	if type == "rate":
 		print "graph_title Cherokee Data Transfer Rate"
