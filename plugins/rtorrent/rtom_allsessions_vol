@@ -28,11 +28,16 @@
 #
 # Configuration example
 #
-#	[rtom_vol]
-#	user username
-#	env.src socket
-#	env.socket /home/user/torrent/.socket/rpc.socket,/home/user/torrent/.socket/rpc2.socket
-#	env.category Sometext
+#       [rtom_allsessions_*]
+#       user username
+#       env.src socket
+#       env.socket /home/user/torrent/.socket/rpc.socket,/home/user/torrent/.socket/rpc.socket
+#       env.category Category
+#
+#       [rtom_allsessions_*]
+#       user username
+#       env.port 5000,5001,5002,5003
+#       env.category Category
 #
 #%# family=auto
 
@@ -71,40 +76,50 @@ if ( $ARGV[0] and $ARGV[0] eq "config" ) {
 
 use IO::Socket;
 
-my @sockets = split /,/, $ENV{"socket"} || "";
 my $src         = $ENV{"src"} || "";
+my @sockets     = split /,/, $ENV{"socket"} || "";
+my $ip          = $ENV{"ip"} || "127.0.0.1";
+my @ports       = split /,/, $ENV{"port"} || "";
 
 my $pattern	= qr/<value><string>([A-Z0-9]+)<\/string><\/value>/;
 
-my $line;
-my $llenmy;
-my $header;
-my $hlen;
-
-my $num;
 foreach ( @views ) {
-	$num = 0;
-	for $socket (@sockets){
-		if ( ( defined $src ) && ( $src eq "socket" ) ) {
-			socket( SOCK, PF_UNIX, SOCK_STREAM, 0 );
-			connect( SOCK, sockaddr_un( $socket ) );
-		}
+	my $num = 0;
+	my $line = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>d.multicall</methodName><params><param><value><string>${_}</string></value></param><param><value><string>d.get_hash=</string></value></param></params></methodCall>";
+	my $llen = length $line;
+	my $header = "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
+	my $hlen = length $header;
 
-		$line	= "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>d.multicall</methodName><params><param><value><string>${_}</string></value></param><param><value><string>d.get_hash=</string></value></param></params></methodCall>";
-		$llen	= length $line;
-		$header	= "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
-		$hlen	= length $header;
-		$line	= "${hlen}:${header},${line}";
-
-		print SOCK $line;
-		flush SOCK;
-
-		while ( $line = <SOCK> ) {
-			if ( $line =~ /$pattern/ ) {
-				$num++;
-			}
-		}
-		close (SOCK);
+	if ( ( defined $src ) && ( $src eq "socket" ) ) {
+	        for $socket (@sockets)
+	        {
+	                socket( SOCK, PF_UNIX, SOCK_STREAM, 0 ) or die;
+	                connect( SOCK, sockaddr_un( $socket ) ) or die $!;
+	                my $line = "${hlen}:${header},${line}";
+	                print SOCK $line;
+	                flush SOCK;
+	                while ( $line = <SOCK> ) {
+						if ( $line =~ /$pattern/ ) {
+							$num++;
+						}
+					}
+					close (SOCK);
+	        }        
+	} else {
+	        for $port (@ports)
+	        { 
+	                socket( SOCK, PF_INET, SOCK_STREAM, getprotobyname( "tcp" ) );
+	                connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
+	                my $line = "${hlen}:${header},${line}";
+	                print SOCK $line;
+	                flush SOCK;
+	                while ( $line = <SOCK> ) {
+						if ( $line =~ /$pattern/ ) {
+							$num++;
+						}
+					}
+					close (SOCK);
+	        }
 	}
 	print "${_}.value ${num}\n";
 }

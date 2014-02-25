@@ -40,12 +40,16 @@
 #
 # Configuration example
 #
-#       [rtom_spdd]
+#       [rtom_allsessions_*]
 #       user username
 #       env.src socket
-#       env.socket /home/user/torrent/.socket/rpc.socket,/home/user2/torrent/.socket/rpc2.socket
-#       env.category Sometext
+#       env.socket /home/user/torrent/.socket/rpc.socket,/home/user/torrent/.socket/rpc.socket
+#       env.category Category
 #
+#       [rtom_allsessions_*]
+#       user username
+#       env.port 5000,5001,5002,5003
+#       env.category Category
 #
 #%# family=auto
 
@@ -82,43 +86,72 @@ if ( $ARGV[0] and $ARGV[0] eq "config" ) {
 }
 
 use IO::Socket;
-my @sockets = split /,/, $ENV{"socket"} || "";
 my $src         = $ENV{"src"} || "";
+my @sockets     = split /,/, $ENV{"socket"} || "";
+my $ip          = $ENV{"ip"} || "127.0.0.1";
+my @ports       = split /,/, $ENV{"port"} || "";
+
+my $pattern     = qr/<value><(int|i4|i8|ex\.i8)>([-]{0,1}\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
+my $line        = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>system.multicall</methodName><params><param><value><array><data><value><struct><member><name>methodName</name><value><string>get_up_total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_down_total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_upload_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_download_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value></data></array></value></param></params></methodCall>";
+my $llen        = length $line;
+my $header      = "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
+my $hlen        = length $header;
 
 my $up = -1;
 my $down = -1;
 
-for $socket (@sockets)
-{
-        my $pattern     = qr/<value><(int|i4|i8|ex\.i8)>([-]{0,1}\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
-        my $line        = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>system.multicall</methodName><params><param><value><array><data><value><struct><member><name>methodName</name><value><string>get_up_total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_down_total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_upload_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_download_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value></data></array></value></param></params></methodCall>";
-        my $llen        = length $line;
-        my $header      = "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
-        my $hlen        = length $header;
-        $line           = "${hlen}:${header},${line}";
-        if ( ( defined $src ) && ( $src eq "socket" ) ) {
-                socket( SOCK, PF_UNIX, SOCK_STREAM, 0 );
-                connect( SOCK, sockaddr_un( $socket ) );
-        }
-
-        print SOCK $line;
-        flush SOCK;
-        my $up_tmp = -1;
-        my $down_tmp = -1;
-        while (( $up_tmp == -1 ) && ( $line = <SOCK> ) ) {
-                if ( $line =~ /$pattern/ ) {
-                        $up_tmp = $2;
+if ( ( defined $src ) && ( $src eq "socket" ) ) {
+        for $socket (@sockets)
+        {
+                socket( SOCK, PF_UNIX, SOCK_STREAM, 0 ) or die;
+                connect( SOCK, sockaddr_un( $socket ) ) or die $!;
+                my $line = "${hlen}:${header},${line}";
+                print SOCK $line;
+                flush SOCK;
+                my $up_tmp = -1;
+                my $down_tmp = -1;
+                while (( $up_tmp == -1 ) && ( $line = <SOCK> ) ) {
+                        if ( $line =~ /$pattern/ ) {
+                                $up_tmp = $2;
+                        }
                 }
-        }
-        while (( $down_tmp == -1 ) && ( $line = <SOCK> ) ) {
-                if ( $line =~ /$pattern/ ) {
-                        $down_tmp = $2;
+                while (( $down_tmp == -1 ) && ( $line = <SOCK> ) ) {
+                        if ( $line =~ /$pattern/ ) {
+                                $down_tmp = $2;
+                        }
                 }
+                close (SOCK);
+                $up = $up + $up_tmp;
+                $down = $down + $down_tmp;
+        }        
+} else {
+        for $port (@ports)
+        { 
+                socket( SOCK, PF_INET, SOCK_STREAM, getprotobyname( "tcp" ) );
+                connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
+                my $line = "${hlen}:${header},${line}";
+                print SOCK $line;
+                flush SOCK;
+                my $up_tmp = -1;
+                my $down_tmp = -1;
+                while (( $up_tmp == -1 ) && ( $line = <SOCK> ) ) {
+                        if ( $line =~ /$pattern/ ) {
+                                $up_tmp = $2;
+                        }
+                }
+                while (( $down_tmp == -1 ) && ( $line = <SOCK> ) ) {
+                        if ( $line =~ /$pattern/ ) {
+                                $down_tmp = $2;
+                        }
+                }
+                close (SOCK);
+                $up = $up + $up_tmp;
+                $down = $down + $down_tmp;
         }
-        close (SOCK);
-        $up = $up + $up_tmp;
-        $down = $down + $down_tmp;
 }
+
+
+
 print "up.value ${up}\ndown.value ${down}\n";
 
 exit;
