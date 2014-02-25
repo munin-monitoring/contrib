@@ -28,11 +28,16 @@
 #
 # Configuration example
 #
-#	[rtom_peers]
-#	user username
-#	env.src socket
-#	env.socket /home/usernametorrent/.socket/rpc.socket,/home/usernametorrent/.socket/rpc2.socket
-#	env.category Category
+#       [rtom_allsessions_*]
+#       user username
+#       env.src socket
+#       env.socket /home/user/torrent/.socket/rpc.socket,/home/user/torrent/.socket/rpc.socket
+#       env.category Category
+#
+#       [rtom_allsessions_*]
+#       user username
+#       env.port 5000,5001,5002,5003
+#       env.category Category
 #
 #%# family=auto
 
@@ -67,9 +72,10 @@ if ( $ARGV[0] and $ARGV[0] eq "config" ) {
 
 use IO::Socket;
 
-my @sockets = split /,/, $ENV{"socket"} || "";
-my $mem = 0;
 my $src         = $ENV{"src"} || "";
+my @sockets     = split /,/, $ENV{"socket"} || "";
+my $ip          = $ENV{"ip"} || "127.0.0.1";
+my @ports       = split /,/, $ENV{"port"} || "";
 
 my $pattern	= qr/<value><(int|i4|i8|ex\.i8)>(\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
 my $tpattern	= qr/[0-9A-F]{20}/;
@@ -78,7 +84,6 @@ my $line	= "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>d.
 my $llen	= length $line;
 my $header	= "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
 my $hlen	= length $header;
-$line		= "${hlen}:${header},${line}";
 
 my $tor = 0;
 my $tot = 0;
@@ -89,34 +94,60 @@ my $ppline = "";
 my $out = 0;
 my $pla = 0;
 
-for $socket (@sockets)
-{
-	if ( ( defined $src ) && ( $src eq "socket" ) ) {
-		socket( SOCK, PF_UNIX, SOCK_STREAM, 0 );
-		connect( SOCK, sockaddr_un( $socket ) );
-	}
 
-	print SOCK $line;
-	flush SOCK;
-
-	while ( $line = <SOCK> ) {
-		if ( $line =~ /$tpattern/ ) {
-			$tor += 1;
-		} elsif ( $line =~ /$pattern/ ) {
-			$tot += 1;
-			$enc += $2;
-			$line = <SOCK>;
-			$line =~ /$pattern/;
-			$inc += $2;
-		}
-		$ppline = $pline;
-		$pline = $line;
-	}
-	close (SOCK);
-
-	$out = $out + $tot - $inc;
-	$pla = $pla + $tot - $enc;
+if ( ( defined $src ) && ( $src eq "socket" ) ) {
+        for $socket (@sockets)
+        {
+                socket( SOCK, PF_UNIX, SOCK_STREAM, 0 ) or die;
+                connect( SOCK, sockaddr_un( $socket ) ) or die $!;
+                my $line = "${hlen}:${header},${line}";
+                print SOCK $line;
+                flush SOCK;
+                while ( $line = <SOCK> ) {
+					if ( $line =~ /$tpattern/ ) {
+						$tor += 1;
+					} elsif ( $line =~ /$pattern/ ) {
+						$tot += 1;
+						$enc += $2;
+						$line = <SOCK>;
+						$line =~ /$pattern/;
+						$inc += $2;
+					}
+					$ppline = $pline;
+					$pline = $line;
+				}
+				close (SOCK);
+				$out = $out + $tot - $inc;
+				$pla = $pla + $tot - $enc;
+        }        
+} else {
+        for $port (@ports)
+        { 
+                socket( SOCK, PF_INET, SOCK_STREAM, getprotobyname( "tcp" ) );
+                connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
+                my $line = "${hlen}:${header},${line}";
+                print SOCK $line;
+                flush SOCK;
+                while ( $line = <SOCK> ) {
+					if ( $line =~ /$tpattern/ ) {
+						$tor += 1;
+					} elsif ( $line =~ /$pattern/ ) {
+						$tot += 1;
+						$enc += $2;
+						$line = <SOCK>;
+						$line =~ /$pattern/;
+						$inc += $2;
+					}
+					$ppline = $pline;
+					$pline = $line;
+				}
+				close (SOCK);
+				$out = $out + $tot - $inc;
+				$pla = $pla + $tot - $enc;
+        }
 }
+
+
 print "torrents.value ${tor}\ntotal.value ${tot}\nencrypted.value ${enc}\nplain.value ${pla}\nincoming.value ${inc}\noutgoing.value ${out}\n";
 
 exit;
