@@ -60,19 +60,13 @@ if [ "$1" = "config" ]; then
 		echo "${_USER}.label $USER"
 		echo "${_USER}.info CPU used by user $USER"
 		echo "${_USER}.type GAUGE"
-		if [ $FIRSTUSER -eq 1 ]; then
-			echo "${_USER}.draw AREA"
-			FIRSTUSER=0
-		else
-			echo "${_USER}.draw STACK"
-		fi
 	done
 	exit
 fi
 
-ps -e -o "%C%U" | \
+top -b -n 1 | tail -n +8 | \
 	awk -v USERS="$USERS" '
-		{ if ($2 != "USER") CPU_USER[$2]+=$1 }
+		{ if ($2 != "USER") CPU_USER[$2]+=$9 }
 		END {
 			others_sum = 0
 			for (user in CPU_USER) {
