@@ -1,0 +1,89 @@
+#!/usr/bin/php
+<?php
+/**
+ * Bukkit/MySQL Munin plugin
+ * ---------------------------------
+ * Neutral mob kills per day
+ *
+ * Shows the daily kills of neutral mobs
+ * via Statistician (http://s.frd.mn/14qKXTM)
+ *
+ * Read more about my plugins on my blog:
+ * http://s.frd.mn/XJsryR
+ *
+ * Author: Jonas Friedmann (http://frd.mn)
+ *
+ */
+
+/**
+ * MySQL configuration
+ */
+
+$hostname = 'localhost';
+$username = 'sql';
+$password = 'pass';
+$database = 'sql';
+$port     = 3306;
+
+/**
+ * !!! DO NOT EDIT THIS PART BELOW !!!
+ */
+
+if ((count($argv) > 1) && ($argv[1] == 'config'))
+{
+print("graph_title Bukkit / Statistician - neutral mob kills per day
+graph_category bukkit_sql_kills
+graph_vlabel neutral mob kills per day
+graph_args --base 1000 -l 0
+enderman.type GAUGE
+enderman.label killed endermen
+wolf.type GAUGE
+wolf.label killed wolf
+zombiepigman.type GAUGE
+zombiepigman.label killed zombie pigmen
+snowman.type GAUGE
+snowman.label killed snowmen
+");
+exit();
+}
+
+// Construct 'minumum' timstamp
+$current = mktime();
+$today = mktime(0, 0, 0, date("n", $current), date("j", $current), date("Y", $current));
+
+// Initiate connection
+$connection = mysqli_connect($hostname, $username, $password, $database, $port);
+
+// Check connection
+if (mysqli_connect_errno()) {
+    printf("Connect failed: %s\n", mysqli_connect_error());
+    exit();
+}
+
+// Select queries for enderman and return the amount of rows
+if ($result = mysqli_query($connection, "SELECT id FROM killchart WHERE time > $today AND killed_creature_type = 'Enderman'")) {
+    // Print values
+    print('enderman.value ' . mysqli_num_rows($result) . "\n");
+}
+
+// Select queries for wolf kills and return the amount of rows
+if ($result = mysqli_query($connection, "SELECT id FROM killchart WHERE time > $today AND killed_creature_type = 'Wolf'")) {
+    // Print values
+    print('wolf.value ' . mysqli_num_rows($result) . "\n");
+}
+
+// Select queries for zombie pigman kills and return the amount of rows
+if ($result = mysqli_query($connection, "SELECT id FROM killchart WHERE time > $today AND killed_creature_type = 'Zombie Pigman'")) {
+    // Print values
+    print('zombiepigman.value ' . mysqli_num_rows($result) . "\n");
+}
+
+// Select queries for zombie snowman kills and return the amount of rows
+if ($result = mysqli_query($connection, "SELECT id FROM killchart WHERE time > $today AND killed_creature_type = 'Snowman'")) {
+    // Print values
+    print('snowman.value ' . mysqli_num_rows($result) . "\n");
+}
+
+// Close connection
+mysqli_close($connection);
+?>
