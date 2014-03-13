@@ -15,7 +15,7 @@ mcjson* requires [JSONAPI](https://github.com/alecgorge/jsonapi/)
 mcsqls2* requires [Statistician](http://dev.bukkit.org/server-mods/statisticianv2/)
 mcsqlub* requires [Ultrabans](http://dev.bukkit.org/server-mods/ultrabans/)
 
-Read more in my [blog post](http://blog.frd.mn/posts/munin-bukkit-plugins/).
+Read more in my [blog post](http://blog.frd.mn/munin-bukkit-plugins/).
 
 ## Requirements
 
@@ -41,3 +41,15 @@ Read more in my [blog post](http://blog.frd.mn/posts/munin-bukkit-plugins/).
 1. Enable the plugins: `ln -s /usr/share/munin/plugins/mc* /etc/munin/plugins/`
 1. Restart your munin-node: `service munin-node restart`
 1. Run your cron: `su - munin --shell=/bin/sh -c /usr/bin/munin-cron`
+
+## Alerts and limits?
+
+To setup alerts and limits add the following lines in your specific node in the `munin.conf` file:
+
+   [kotor.yeahwh.at]
+      address 5.9.115.5
+      [...]
+      mctps_main.warning 19.9:      # Warning alert on < 19.9
+      mctps_main.critical 19:		# Critical alert on < 19.0
+      mcplayer_main.warning 20		# Warning alert when there are 20 players online
+      mcplayer_main.critical 30		# Critical alert when there are more than 30 players online
