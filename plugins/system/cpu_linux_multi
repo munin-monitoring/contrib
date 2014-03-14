@@ -37,8 +37,6 @@
 # multigraph, supersampling, extended cpu informations
 #
 # require: mpstat (to actually collect the data)
-# require linux /proc
-#   (sorry, quick/dirty retrieve the number of cpu from /proc/cpuinfo)
 #
 #
 # ENV (default):
@@ -148,7 +146,7 @@ sub graph_section() { "system:cpu" };
 sub graph_name() { "cpu_extended_multi_1s" };
 sub graph_title() { "CPU usage" };
 sub graph_title_all() { "Overall CPU usage" };
-sub graph_title_n($) { "CPU#" . shift . " usage" };
+sub graph_title_n($) { "CPU#" . (shift) . " usage" };
 sub acquire_name() { "<$plugin> collecting information" }
 
 ########################################################################
@@ -186,10 +184,16 @@ if (defined $ENV{MUNIN_MPSTAT}) {
 
 my $cpu_count_cache = undef;
 sub cpu_count() {
-	# XXX: is there any way to do that cleanly ?
 	if (not defined $cpu_count_cache) {
-		$cpu_count_cache = `grep -c ^processor /proc/cpuinfo`;
-		chomp $cpu_count_cache;
+               open MPSTAT, "$mpstat -P ALL |" or die "open mpstat|: $!\n";
+               $cpu_count_cache = 0;
+               while (<MPSTAT>) {
+                       chomp;
+                       my @field = split();
+                       next unless ($field[1] && ($field[1] =~ /^([0-9]+)$/));
+                       $cpu_count_cache ++;
+               }
+               close(MPSTAT);
 	}
 	return $cpu_count_cache;
 }
