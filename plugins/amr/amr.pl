@@ -47,6 +47,7 @@ my $logfile = $LOGDIR .'/'. $LOGFILE;
 my %stations;
 # number of signals sent per station
 my %signals;
+my $count;
 
 sub autoconf
 {
@@ -72,17 +73,16 @@ sub config
     print "graph_total  Total\n";
     print "graph_category AMR\n";
 
-    my $first = 1;
+    $count = 0;
     foreach my $station (sort keys %stations) {
 	my $name = clean_fieldname('station power ' . $station);
-	printf "%s.label station %d\n", $name, $station;
+	printf "%s.label station %d\n", $name, $count;
 	printf "%s.type COUNTER\n", $name;
-        if ($first) {
-            printf "%s.draw AREA\n", $name;
-            $first = 0;
+        if ($count++) {
+            printf "%s.draw STACK\n", $name;
         }
         else {
-            printf "%s.draw STACK\n", $name;
+            printf "%s.draw AREA\n", $name;
         }
 	printf "%s.min 0\n", $name;
     }
@@ -94,10 +94,10 @@ sub config
     print "graph_scale  no\n";
     print "graph_category AMR\n";
 
-    my $first = 0;
+    $count = 0;
     foreach my $station (sort keys %stations) {
 	my $name = clean_fieldname('station meter ' . $station);
-	printf "%s.label station %d\n", $name, $station;
+	printf "%s.label station %d\n", $name, $count++;
 	printf "%s.type GAUGE\n", $name;
 	printf "%s.min 0\n", $name;
     }
@@ -115,9 +115,10 @@ sub config
     print "graph_vlabel signals / \${graph_period}\n";
     print "graph_period minute\n";
     print "graph_category AMR\n";
+    $count = 0;
     foreach my $station (sort keys %stations) {
 	my $name = clean_fieldname('station signals ' . $station);
-	printf "%s.label station %d\n", $name, $station;
+	printf "%s.label station %d\n", $name, $count++;
 	printf "%s.type ABSOLUTE\n", $name;
     }
 
