@@ -19,7 +19,7 @@
 #    serial ports (obviously replacing these with your own data):
 #
 #    [voltcraft_tcm220_serverroom1]
-#    user root  			# Need to run the plugin as root, in order to access the RS232 port
+#    user root				# Need to run the plugin as root, in order to access the RS232 port
 #    group root
 #    env.Port /dev/ttyS0		# Serial port where the module is connected to
 #    env.Location Server Room 1		# Friendly name for the module location, printed on the graph
@@ -39,8 +39,9 @@
 # instead the 10 seconds default - this can be used to speed up the data acquisition process, however
 # it can decrease battery life (with default values, two AAA alkaline batteries last cca 2 years).
 #
-# Tested & working with munin v.2.0.14 on Ubuntu LTS 12.04.2
-# Created in 2013 by robi
+# Tested & working with munin v.2.0.19-2 on Ubuntu LTS 12.04.4
+# Created in 2014 by robi
+#  v0.2 - added checksum validation
 #  v0.1 - initial version
 #########################################################################################################
 ## Magic Markers
@@ -119,21 +120,29 @@ my $ch2temp = "U";
 
 if ($response // "") {
 	my $hex = unpack 'H*', $response; 
-	#print "$response\n";	#debug
-	#print "$hex\n";	#$hex should be something like "abc102999babc2017677" for +29.9 and +17.6
+#	print "$hex\n";	#$hex should be something like "abc102999babc2017677" for +29.9 and +17.6
 
-	my $ch1z ="";
-	my $ch2z ="";
+	my $ch1sum = substr($hex, 4, 1) + substr($hex, 5, 1) + substr($hex, 6, 1) + substr($hex, 7, 1);
+	my $ch1sul = substr(sprintf("%02d", $ch1sum), 1, 1);
 
-	if (substr($hex, 4, 1) == "5") {
-		$ch1z ="-";
+        my $ch2sum = substr($hex, 14, 1) + substr($hex, 15, 1) + substr($hex, 16, 1) + substr($hex, 17, 1);
+        my $ch2sul = substr(sprintf("%02d", $ch2sum), 1, 1);
+
+	if (substr($hex, 9, 1) == $ch1sul) {
+		my $ch1z = "";
+		if (substr($hex, 4, 1) == "5") {
+			$ch1z ="-";
+		}
+		$ch1temp = $ch1z . substr($hex, 5, 2) . "." . substr($hex, 7, 1);
 	}
-	if (substr($hex, 14, 1) == "5") {
-		$ch2z ="-";
-	}
 
-	$ch1temp = $ch1z . substr($hex, 5, 2) . "." . substr($hex, 7, 1);
-	$ch2temp = $ch2z . substr($hex, 15, 2) . "." . substr($hex, 17, 1);
+	if (substr($hex, 19, 1) == $ch2sul) {
+		my $ch2z = "";
+		if (substr($hex, 14, 1) == "5") {
+			$ch2z ="-";
+		}
+		$ch2temp = $ch2z . substr($hex, 15, 2) . "." . substr($hex, 17, 1);
+	}
 }
 
 print "ch1.value $ch1temp\n";
