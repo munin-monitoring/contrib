@@ -9,11 +9,12 @@
  *
  * @example Example entry for configuration:
  * [drupal*]
- * env.db="drupal"
- * env.user="mysql_user"
- * env.pass="mysql_pass"
- * env.host="localhost"
- * env.port="3306"
+ * env.db drupal
+ * env.user mysql_user
+ * env.pass mysql_pass
+ * env.host localhost
+ * env.port 3306
+ * env.table_prefix drupal_
  *
  * @author Liran Tal <liran.tal@hp.com>
  * @version 1.0 2013

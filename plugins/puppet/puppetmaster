@@ -1,4 +1,27 @@
-#! /bin/env ruby
+#!/usr/bin/ruby
+
+# this plugin reports various performance statistics from a puppetmaster
+# server and client
+#
+# linked as puppet_mem, it will display memory usage of the puppet
+# client and puppet master on the local server.
+#
+# linked as puppet_clients, it will report the average compile time, the
+# number of clients that checked in in the last 5 minutes and 24h and
+# the number of known clients.
+#
+# it requires read access to the puppet logfile.
+#
+# CONFIGURATION
+#
+# [puppet*]
+# env.puppet_logfile /var/log/message
+# env.puppet_logformat "^%b %d"
+#
+# the logfile is where the puppetmaster is expected to log its
+# compilation statistics. the format is the format of the date syslog
+# writes to the file, which may vary according to locale and
+# configuration.
 
 # returns the mem usage of a given process
 def plist(psname)
@@ -19,8 +42,9 @@ def phaselog
 	logfile = ENV['puppet_logfile'] || '/var/log/messages'
 	count,avg,day_count_unique,day_count = 0 ,0 ,0, 0
 	t = Time.now
-	today = t.strftime("^%Y-%m-%dT")
-	hour = t.strftime("^%Y-%m-%dT%H:")
+	dateformat = ENV['puppet_logformat'] || "^%b %d"
+	today = t.strftime(dateformat)
+	hour = t.strftime(dateformat + " %H:")
 	m = t.min.to_i
 	last5m = ""
 	6.times do |i|
@@ -78,7 +102,7 @@ case ARGV[0]
 			puts "graph_title puppet clients usage"
 			puts "graph_vlabel clients"
 			puts "known_clients.label Known Clients"
-			puts "avg_compile.label Average configuration compile"
+			puts "avg_compile.label Average configuration compile, in seconds"
 			puts "last5m_count.label Clients in the last 5 minutes"
 			puts "last24h_unique_count.label unique clients in the last 24 hours"
 		end

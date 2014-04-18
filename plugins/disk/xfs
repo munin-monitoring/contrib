@@ -1,0 +1,126 @@
+#!/usr/bin/perl
+#
+# Plugin for collecting xfs statistics.
+#
+# Note:
+#   Stats are read from /proc/fs/xfs/stat.
+#
+# Parameters:
+#   config
+#   autoconf
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use warnings;
+
+if ($ARGV[0] and $ARGV[0] eq "autoconf")
+{
+  if (-r "/proc/fs/xfs/stat")
+  {
+    print "yes\n";
+    exit 0;
+  }
+    else
+  {
+    print "/proc/fs/xfs/stat not found\n";
+    exit 1;
+  }
+}
+
+my %runtime_stats = (
+  "extent_alloc" => ["xs_allocx","xs_allocb","xs_freex","xs_freeb"],
+  "abt" => ["xs_abt_lookup","xs_abt_compare","xs_abt_insrec","xs_abt_delrec"],
+  "blk_map" => ["xs_blk_mapr","xs_blk_mapw","xs_blk_unmap","xs_add_exlist","xs_del_exlist","xs_look_exlist","xs_cmp_exlist"],
+  "bmbt" => ["xs_bmbt_lookup","xs_bmbt_compare","xs_bmbt_insrec","xs_bmbt_delrec"],
+  "dir" => ["xs_dir_lookup","xs_dir_create","xs_dir_remove","xs_dir_getdents"],
+  "trans" => ["xs_trans_sync","xs_trans_async","xs_trans_empty"],
+  "ig" => ["xs_ig_attempts","xs_ig_found","xs_ig_frecycle","xs_ig_missed","xs_ig_dup","xs_ig_reclaims","xs_ig_attrchg"],
+  "log" => ["xs_log_writes","xs_log_blocks","xs_log_noiclogs","xs_log_force","xs_log_force_sleep"],
+  "push_ail" => ["xs_try_logspace","xs_sleep_logspace","xs_push_ail","xs_push_ail_success","xs_push_ail_pushbuf","xs_push_ail_pinned","xs_push_ail_locked","xs_push_ail_flushing","xs_push_ail_restarts","xs_push_ail_flush"],
+  "xstrat" => ["xs_xstrat_quick","xs_xstrat_split"],
+  "rw" => ["xs_write_calls","xs_read_calls"],
+  "attr" => ["xs_attr_get","xs_attr_set","xs_attr_remove","xs_attr_list"],
+  "icluster" => ["xs_iflush_count","xs_icluster_flushcnt","xs_icluster_flushinode"],
+  "vnodes" => ["vn_active","vn_alloc","vn_get","vn_hold","vn_rele","vn_reclaim","vn_remove","vn_free"],
+  "buf" => ["xb_get","xb_create","xb_get_locked","xb_get_locked_waited","xb_busy_locked","xb_miss_locked","xb_page_retries","xb_page_found","xb_get_read"],
+  "ibt2" => ["xs_ibt_2_lookup","xs_ibt_2_compare","xs_ibt_2_insrec","xs_ibt_2_delrec","xs_ibt_2_newroot","xs_ibt_2_killroot","xs_ibt_2_increment","xs_ibt_2_decrement","xs_ibt_2_lshift","xs_ibt_2_rshift","xs_ibt_2_split","xs_ibt_2_join","xs_ibt_2_alloc","xs_ibt_2_free","xs_ibt_2_moves"],
+  "bmbt2" => ["xs_bmbt_2_lookup","xs_bmbt_2_compare","xs_bmbt_2_insrec","xs_bmbt_2_delrec","xs_bmbt_2_newroot","xs_bmbt_2_killroot","xs_bmbt_2_increment","xs_bmbt_2_decrement","xs_bmbt_2_lshift","xs_bmbt_2_rshift","xs_bmbt_2_split","xs_bmbt_2_join","xs_bmbt_2_alloc","xs_bmbt_2_free","xs_bmbt_2_moves"],
+  "abtc2" => ["xs_abtc_2_lookup","xs_abtc_2_compare","xs_abtc_2_insrec","xs_abtc_2_delrec","xs_abtc_2_newroot","xs_abtc_2_killroot","xs_abtc_2_increment","xs_abtc_2_decrement","xs_abtc_2_lshift","xs_abtc_2_rshift","xs_abtc_2_split","xs_abtc_2_join","xs_abtc_2_alloc","xs_abtc_2_free","xs_abtc_2_moves"],
+  "abtb2" => ["xs_abtb_2_lookup","xs_abtb_2_compare","xs_abtb_2_insrec","xs_abtb_2_delrec","xs_abtb_2_newroot","xs_abtb_2_killroot","xs_abtb_2_increment","xs_abtb_2_decrement","xs_abtb_2_lshift","xs_abtb_2_rshift","xs_abtb_2_split","xs_abtb_2_join","xs_abtb_2_alloc","xs_abtb_2_free","xs_abtb_2_moves"],
+  "qm" => ["xs_qm_dquot","xs_qm_dquot_unused"],
+  "xpc" => ["xs_xstrat_bytes","xs_write_bytes","xs_read_bytes"],
+  "debug" => ["debug"]
+);
+
+my %config = (
+  "read" => {
+    title => 'XFS read statistics',
+    vtitle => 'calls',
+    params => ["xs_read_calls","xs_dir_lookup","xs_attr_get","xs_attr_list","xs_dir_getdents"],
+    draw => ["AREA","AREA","STACK","STACK","STACK"]
+  },
+  "write" => {
+    title => 'XFS write statistics',
+    vtitle => 'calls',
+    params => ["xs_write_calls","xs_dir_create","xs_attr_set","xs_attr_remove","xs_dir_remove"],
+    draw => ["AREA","AREA","STACK","STACK","STACK"]
+  },
+  "other" => {
+    title => 'XFS transaction&log statistics',
+    vtitle => 'calls',
+    params => ["xs_trans_async","xs_log_writes","xs_log_noiclogs","xs_xstrat_quick","xs_xstrat_split","xs_trans_sync","xs_trans_empty"],
+    draw => ["AREA","AREA","STACK","AREA","STACK","LINE","LINE"]
+  },
+);
+
+open (IN, '<', '/proc/fs/xfs/stat');
+
+my $collected_stats;
+
+while (<IN>) {
+  my @array = split /\s+/, $_;
+  chomp @array;
+  my $string_name = shift @array;
+  my %hash;
+  my $keys = $runtime_stats{$string_name};
+
+  @hash{@$keys} = @array;
+  $collected_stats->{$string_name}=\%hash;
+};
+
+close(IN);
+
+foreach my $func ( keys %config ) {
+  print "multigraph xfs_$func\n"; 
+
+  if (defined $ARGV[0] and $ARGV[0] eq 'config') {
+    print "graph_title $config{$func}->{title}\n";
+    print "graph_args --base 1000\n";
+    print "graph_vlabel $config{$func}->{vtitle}\n";
+    print "graph_category XFS\n";
+    my $iter = 0;
+    foreach my $param (@{$config{$func}->{params}}) {
+      print "$param.type DERIVE\n";
+      print "$param.label $param\n";
+      print "$param.draw $config{$func}->{draw}[$iter]\n";
+      print "$param.min 0\n";
+      $iter += 1;
+    };
+  } else {
+    foreach my $param (@{$config{$func}->{params}}) {
+      print "$param.value ". get_key($param) ."\n";
+    };
+  };
+}
+
+sub get_key {
+  my $key = shift;
+  foreach my $group (keys %{$collected_stats}) {
+    if (exists $collected_stats->{$group}->{$key}) {
+    return $collected_stats->{$group}->{$key};
+    };
+  };
+};
+

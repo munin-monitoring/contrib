@@ -1,15 +1,15 @@
 #!/usr/bin/env ruby
 
-# netstat_s revision 4 (Apr 2013)
+# netstat_s revision 6 (Nov 2013)
 #
 # This plugin shows various statistics from 'netstat -s'
 #
 # Required privileges: none
 #
 # OS:
-# 	Supposed: BSD, Linux
-# 	Tested:   FreeBSD: 8.2, 8.3
-# 	          Linux  : Debian 6 (kernel 2.6.32), Arch (kernel 3.8.3), CentOS 6
+# 	Supposed: BSD, Linux (only a few items, see netstat_multi for more)
+# 	Tested:   FreeBSD: 8.2, 8.3, 9.1
+# 	          Linux  : Debian 6 (kernel 2.6.32), Arch (kernel 3.11.6), CentOS 6
 #
 # Author: Artem Sheremet <dot.doom@gmail.com>
 #
@@ -53,34 +53,65 @@ class Graph
 		# Hash key is unit, and the value is array of labels
 		multigraphs = {}
 		@parse_expr.each { |expr, descr|
+			next unless descr # no label - skip this entry
 			descr.each { |entry|
 				labels_array = (multigraphs[entry[0]] ||= [])
-				labels_array.push entry[1]
+				labels_array.push [entry[1], entry[2]]
 			}
 		}
 
-		multigraphs.each_pair { |unit, labels|
+		multigraphs.each_pair { |unit, labels_and_negatives|
 			# now just add options to the config
 
-			config_options += [
+			config_options.concat [
 				"multigraph #{name(unit)}",
 				"graph_title Netstat: #{@protocol}: #{@name}#{" (#{unit})" if multigraphs.size > 1}",
 				"graph_category netstat",
-				"graph_vlabel per second",
-				"graph_order #{labels.map(&:escape).join(' ')}"
+				"graph_order #{labels_and_negatives.map { |label, _negative| label.escape }.join(' ')}"
 			]
 
 			config_options.push "graph_args --base 1024" if unit == :bytes
+			has_negatives = false
 
-			labels.each { |label|
+			labels_and_negatives.each { |label, negative|
 				label_esc = label.escape
-				config_options += [
-					"#{label_esc}.type DERIVE",
-					"#{label_esc}.min 0",
-					"#{label_esc}.draw LINE",
-					"#{label_esc}.label #{label}"
-				]
+				has_negatives = true unless negative == nil
+
+				if negative == true
+					# the value has no opposite and is negative
+					config_options.concat [
+						"#{label_esc}.graph no",
+						"#{label_esc}_neg.type DERIVE",
+						"#{label_esc}_neg.min 0",
+						"#{label_esc}_neg.draw LINE",
+						"#{label_esc}_neg.label #{label}",
+						"#{label_esc}_neg.negative #{label_esc}"
+					]
+				else
+					config_options.concat [
+						"#{label_esc}.type DERIVE",
+						"#{label_esc}.min 0",
+						"#{label_esc}.draw LINE",
+						"#{label_esc}.label #{label}"
+					]
+				end
+
+				if negative == false
+					# the value has no opposite and is positive
+					config_options.concat [
+						"#{label_esc}_neg.graph off",
+						"#{label_esc}.negative #{label_esc}_neg"
+					]
+				elsif negative
+					negative_esc = negative.escape
+					config_options.concat [
+						"#{label_esc}.negative #{negative_esc}",
+						"#{negative_esc}.graph no"
+					]
+				end
 			}
+
+			config_options.push "graph_vlabel per second#{" in (-) / out (+)" if has_negatives}"
 		}
 
 		config_options
@@ -93,6 +124,7 @@ class Graph
 		# Hash key is unit, and the value is a hash of 'escaped label' => 'value'
 		multigraphs = {}
 		@parse_expr.each { |expr, descr|
+			next unless descr # no label - skip this entry
 			index = data.index { |line| line =~ expr }
 			if index
 				data.delete_at index
@@ -127,9 +159,11 @@ def graphs_for(protocol)
 			Graph.new('sent', protocol, [
 				# Description of the elements of arrays below:
 				# 0: regexp to parse the line
-				# 1: Array<Array[2]> for each matching group in the regular expression.
-				#    The first element for a group is unit name, the second is the label.
-				#    It could be reasonable to add third etc as warning and critical values.
+				# 1: Array<Array[3]> for each matching group in the regular expression.
+				#    0: unit name
+				#    1: label
+				#    2 (optional): negative label
+				#    It could be reasonable to add more elements as warning and critical values.
 
 				[ /(\d+) segments send out$/, [ [ :segments, 'total' ] ] ],
 				[ /(\d+) segments retransmited$/, [ [ :segments, 'retransmitted' ] ] ]
@@ -290,46 +324,44 @@ def graphs_for(protocol)
 				[ /(\d+) with data length < header length$/, [ [ :packets, 'data length < header length' ] ] ],
 				[ /(\d+) with bad options$/, [ [ :packets, 'bad options' ] ] ],
 				[ /(\d+) with incorrect version number$/, [ [ :packets, 'incorrect version' ] ] ],
-				[ /(\d+) fragments received$/, [ [ :packets, 'fragments' ] ] ],
-				[ /(\d+) fragments dropped \(dup or out of space\)$/, [ [ :packets, 'frags dropped: dup/out of spc' ] ] ],
-				[ /(\d+) fragments dropped after timeout$/, [ [ :packets, 'frags dropped: timeout' ] ] ],
-				[ /(\d+) packets reassembled ok$/, [ [ :packets, 'reassembled ok' ] ] ],
-				[ /(\d+) packets for this host$/, [ [ :packets, 'for this host' ] ] ],
-				[ /(\d+) packets for unknown\/unsupported protocol$/, [ [ :packets, 'for unknown/unsup protocol' ] ] ],
-				[ /(\d+) packets forwarded \((\d+) packets fast forwarded\)$/, [ [ :packets, 'forwarded' ], [ :packets, 'fast forwarded' ] ] ],
-				[ /(\d+) packets not forwardable$/, [ [ :packets, 'not forwardable' ] ] ],
-				[ /(\d+) packets received for unknown multicast group$/, [ [ :packets, 'unknown multicast grp' ] ] ]
+				[ /(\d+) fragments? received$/, [ [ :packets, 'fragments' ] ] ],
+				[ /(\d+) fragments? dropped \(dup or out of space\)$/, [ [ :packets, 'frags dropped: dup/out of spc' ] ] ],
+				[ /(\d+) fragments? dropped after timeout$/, [ [ :packets, 'frags dropped: timeout' ] ] ],
+				[ /(\d+) packets? reassembled ok$/, [ [ :packets, 'reassembled ok' ] ] ],
+				[ /(\d+) packets? for this host$/, [ [ :packets, 'for this host' ] ] ],
+				[ /(\d+) packets? for unknown\/unsupported protocol$/, [ [ :packets, 'for unknown/unsup protocol' ] ] ],
+				[ /(\d+) packets? forwarded \((\d+) packets fast forwarded\)$/, [ [ :packets, 'forwarded' ], [ :packets, 'fast forwarded' ] ] ],
+				[ /(\d+) packets? not forwardable$/, [ [ :packets, 'not forwardable' ] ] ],
+				[ /(\d+) packets? received for unknown multicast group$/, [ [ :packets, 'unknown multicast grp' ] ] ]
 			]),
 
 			Graph.new('sent', protocol, [
-				[ /(\d+) packets sent from this host$/, [ [ :packets, 'total' ] ] ],
-				[ /(\d+) redirects sent$/, [ [ :packets, 'redirect' ] ] ],
-				[ /(\d+) packets sent with fabricated ip header$/, [ [ :packets, 'fabricated IP head' ] ] ],
-				[ /(\d+) output packets dropped due to no bufs, etc\.$/, [ [ :packets, 'dropped: no bufs, etc' ] ] ],
-				[ /(\d+) output packets discarded due to no route$/, [ [ :packets, 'discarded: no route' ] ] ],
-				[ /(\d+) output datagrams fragmented$/, [ [ :packets, 'fragmented' ] ] ],
-				[ /(\d+) fragments created$/, [ [ :packets, 'fragments created' ] ] ],
-				[ /(\d+) datagrams that can't be fragmented$/, [ [ :packets, "can't be fragmented" ] ] ],
-				[ /(\d+) tunneling packets that can't find gif$/, [ [ :packets, 'tunneling, gif not found' ] ] ],
-				[ /(\d+) datagrams with bad address in header$/, [ [ :packets, 'bad address in header' ] ] ]
+				[ /(\d+) packets? sent from this host$/, [ [ :packets, 'total' ] ] ],
+				[ /(\d+) redirects? sent$/, [ [ :packets, 'redirect' ] ] ],
+				[ /(\d+) packets? sent with fabricated ip header$/, [ [ :packets, 'fabricated IP head' ] ] ],
+				[ /(\d+) output packets? dropped due to no bufs, etc\.$/, [ [ :packets, 'dropped: no bufs, etc' ] ] ],
+				[ /(\d+) output packets? discarded due to no route$/, [ [ :packets, 'discarded: no route' ] ] ],
+				[ /(\d+) output datagrams? fragmented$/, [ [ :packets, 'fragmented' ] ] ],
+				[ /(\d+) fragments? created$/, [ [ :packets, 'fragments created' ] ] ],
+				[ /(\d+) datagrams? that can't be fragmented$/, [ [ :packets, "can't be fragmented" ] ] ],
+				[ /(\d+) tunneling packets? that can't find gif$/, [ [ :packets, 'tunneling, gif not found' ] ] ],
+				[ /(\d+) datagrams? with bad address in header$/, [ [ :packets, 'bad address in header' ] ] ]
 			])
 		]
 	when 'arp'
 		$os == :linux ? [] : [
-			Graph.new('sent', protocol, [
-				[ /(\d+) ARP requests sent$/, [ [ :packets, 'requests' ] ] ],
-				[ /(\d+) ARP replies sent$/, [ [ :packets, 'replies' ] ] ]
-			]),
-
-			Graph.new('received', protocol, [
-				[ /(\d+) ARP packets received$/, [ [ :packets, 'total' ] ] ],
-				[ /(\d+) ARP requests received$/, [ [ :packets, 'requests' ] ] ],
-				[ /(\d+) ARP replies received$/, [ [ :packets, 'replies' ] ] ],
-				[ /(\d+) total packets dropped due to no ARP entry$/, [ [ :packets, 'dropped: no entry' ] ] ]
+			Graph.new('packets', protocol, [
+				# This is just a total, so ignore the value but keep regexp to avoid 'not parsed' warning.
+				[ /(\d+) ARP packets? received$/ ],
+				[ /(\d+) ARP requests? received$/, [ [ :packets, 'requests received' ] ] ],
+				[ /(\d+) ARP repl(?:y|ies) received$/, [ [ :packets, 'replies received' ] ] ],
+				[ /(\d+) ARP requests? sent$/, [ [ :packets, 'requests', 'requests received' ] ] ],
+				[ /(\d+) ARP repl(?:y|ies) sent$/, [ [ :packets, 'replies', 'replies received' ] ] ],
+				[ /(\d+) total packets? dropped due to no ARP entry$/, [ [ :packets, 'no entry' ] ] ]
 			]),
 
 			Graph.new('entries', protocol, [
-				[ /(\d+) ARP entrys timed out$/, [ [ :entries, 'timed out' ] ] ],
+				[ /(\d+) ARP entrys? timed out$/, [ [ :entries, 'timed out' ] ] ],
 				[ /(\d+) Duplicate IPs seen$/, [ [ :entries, 'duplicate IPs seen' ] ] ]
 			])
 		]

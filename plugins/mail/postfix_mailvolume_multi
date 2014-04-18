@@ -1,0 +1,220 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+
+=head1 NAME
+
+postfix_mailvolume - Plugin to monitor the volume of mails delivered
+  by multiple postfix and stores per postfix delivered data.
+
+=head1 APPLICABLE SYSTEMS
+
+Any postfix.
+
+=head1 CONFIGURATION
+
+The following shows the default configuration.
+
+  [postfix*]
+    env.logdir /var/log
+    env.logfile syslog
+
+=head2 Needed additional configuration
+
+To correctly get all the postfix log data, the postfix system_log prefix names need to be defined with the env.postfix config setting.
+If this is not set, the script tries to find all the postfix config folders in /etc/postfix* and get the syslog names from there
+
+	env.postfix postfix10 postfix11 postfix12
+
+=head1 INTERPRETATION
+
+The plugin shows the number of bytes of mail that has passed through
+the postfix installation per postfix mailer running.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 BUGS
+
+None known
+
+=head1 VERSION
+
+ $Id: postfix_mailvolume.in 2314 2009-08-03 11:28:34Z ssm $
+
+=head1 AUTHOR
+
+Copyright (C) 2011.
+
+Clemens Schwaighofer (gullevek@gullevek.org)
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+use strict;
+use Munin::Plugin;
+
+my $pos = undef;
+my $syslog_name = '';
+my @postfix_syslog_name = ();
+my %volume = ();
+my @restore_state = ();
+my $i = 1;
+my $LOGDIR  = $ENV{'logdir'}  || '/var/log';
+my $LOGFILE = $ENV{'logfile'} || 'syslog';
+my $POSTFIX = $ENV{'postfix'} || '';
+# get the postfix syslog_name from the POSTFIX env var, if not set, find them in the /etc/postfix* type
+if (!$POSTFIX)
+{
+	foreach my $dir (grep -d, glob "/etc/postfix*")
+	{
+		# remove the leading etc
+		$dir =~ s/\/etc\///g;
+		# add data to the postfix string
+		$POSTFIX .= ' ' if ($POSTFIX);
+		$POSTFIX .= $dir;
+	}
+}
+if ($POSTFIX)
+{
+	foreach my $config (split(/ /, $POSTFIX))
+	{
+		# find the syslog name
+		$syslog_name = `postconf -c /etc/$config | grep "syslog_name"`;
+		# remove any pending whitespace or line breaks
+		chomp($syslog_name);
+		$syslog_name =~ s/syslog_name = //g;
+		# add this to the postfix syslog name array
+		push(@postfix_syslog_name, $syslog_name);
+		# also init set the syslog name 0
+		$volume{$syslog_name} = 0;
+	}
+}
+else
+{
+	print "Cannot get any postfix syslog_name data\n";
+	exit 1;
+}
+
+sub parseLogfile
+{
+	my ($fname, $start) = @_;
+
+	my ($LOGFILE, $rotated) = tail_open($fname, $start);
+
+	my $line;
+
+	while ($line =<$LOGFILE>)
+	{
+		chomp ($line);
+		# get the postfix syslog name and the size
+		if ($line =~ /\ (\w+)\/qmgr.*from=.*size=([0-9]+)/)
+		{
+			$volume{$1} += $2;
+		}
+	}
+	return tail_close($LOGFILE);
+}
+
+if ($ARGV[0] and $ARGV[0] eq "autoconf")
+{
+	my $logfile;
+	`which postconf >/dev/null 2>/dev/null`;
+	if (!$?)
+	{
+		$logfile = "$LOGDIR/$LOGFILE";
+
+		if (-f $logfile)
+		{
+			if (-r "$logfile")
+			{
+				print "yes\n";
+				exit 0;
+			}
+			else
+			{
+				print "no (logfile '$logfile' not readable)\n";
+			}
+		}
+		else
+		{
+			print "no (logfile '$logfile' not found)\n";
+		}
+	}
+	else 
+	{
+		print "no (postfix not found)\n";
+	}
+	exit 0;
+}
+
+if ($ARGV[0] and $ARGV[0] eq "config")
+{
+	print "graph_title Postfix bytes throughput per postfix\n";
+	print "graph_args --base 1000 -l 0\n";
+	print "graph_vlabel bytes / \${graph_period}\n";
+	print "graph_scale yes\n";
+	print "graph_category postfix\n";
+	print "graph_total Throughput sum\n";
+	# loop through the postfix names and create per config an entry
+	foreach $syslog_name (@postfix_syslog_name)
+	{
+		print $syslog_name."_volume.label ".$syslog_name." throughput\n";
+		print $syslog_name."_volume.type DERIVE\n";
+		print $syslog_name."_volume.min 0\n";
+	}
+	exit 0;
+}
+
+
+my $logfile = "$LOGDIR/$LOGFILE";
+
+if (! -f $logfile) {
+    print "delivered.value U\n";
+    exit 1;
+}
+
+@restore_state = restore_state();
+# first is pos, rest is postfix entries
+$pos = $restore_state[0];
+# per postfix values are store: postfix config,value
+for ($i = 1; $i < @restore_state; $i ++)
+{
+	my ($key, $value) = split(/,/, $restore_state[$i]);
+	$volume{$key} = $value;
+}
+
+if (!$pos)
+{
+	# No state file present.  Avoid startup spike: Do not read log
+	# file up to now, but remember how large it is now, and next
+	# time read from there.
+	
+	$pos = (stat $logfile)[7]; # File size
+	foreach $syslog_name (@postfix_syslog_name)
+	{
+		$volume{$syslog_name} = 0;
+	}
+}
+else
+{
+    $pos = parseLogfile($logfile, $pos);
+}
+
+@restore_state = ($pos);
+foreach $syslog_name (sort keys %volume)
+{
+	print $syslog_name."_volume.value ".$volume{$syslog_name}."\n";
+	push(@restore_state, $syslog_name.','.$volume{$syslog_name});
+}
+
+# save the current state
+save_state(@restore_state);
+
+# vim:syntax=perl
+
+__END__

@@ -1,0 +1,140 @@
+#!/usr/bin/php
+<?php
+/**
+ * Bukkit/MySQL Munin plugin
+ * ---------------------------------
+ * Kicks/bans/jails/etc. per day
+ *
+ * Shows the amount and kind of shame that
+ * happens on your server via Ultrabans
+ * (http://s.frd.mn/14qLR2B)
+ *
+ * Read more about my plugins on my blog:
+ * http://s.frd.mn/XJsryR
+ *
+ * Author: Jonas Friedmann (http://frd.mn)
+ *
+ */
+
+/**
+ * MySQL configuration
+ */
+
+$hostname = 'localhost';
+$username = 'sql';
+$password = 'pass';
+$database = 'sql';
+$port     = 3306;
+
+/**
+ * !!! DO NOT EDIT THIS PART BELOW !!!
+ */
+
+if ((count($argv) > 1) && ($argv[1] == 'config'))
+{
+print("graph_title Bukkit / Ultrabans - shame per day
+graph_category bukkit_sql
+graph_vlabel amount of shame per day
+graph_args --base 1000 -l 0
+unban.type GAUGE
+unban.label unbans
+kick.type GAUGE
+kick.label kicks
+warning.type GAUGE
+warning.label warnings
+ban.type GAUGE
+ban.label bans
+ipban.type GAUGE
+ipban.label ipbans
+fine.type GAUGE
+fine.label fines
+jail.type GAUGE
+jail.label jails
+permban.type GAUGE
+permban.label permbans
+mute.type GAUGE
+mute.label mutes
+");
+exit();
+}
+
+// Construct 'minumum' timstamp
+$current = mktime();
+$today = mktime(0, 0, 0, date("n", $current), date("j", $current), date("Y", $current));
+
+// Initiate connection
+$connection = mysqli_connect($hostname, $username, $password, $database, $port);
+
+// Check connection
+if (mysqli_connect_errno()) {
+    printf("Connect failed: %s\n", mysqli_connect_error());
+    exit();
+}
+
+// Select queries for unbans return the amount of rows
+if ($result = mysqli_query($connection, "SELECT name FROM banlist WHERE type = 5 AND time > $today")) {
+    // Print values
+    print('unban.value ' . mysqli_num_rows($result) . "\n");
+}
+
+// Select queries for kicks return the amount of rows
+if ($result = mysqli_query($connection, "SELECT name FROM banlist WHERE type = 3 AND time > $today")) {
+    // Print values
+    print('kick.value ' . mysqli_num_rows($result) . "\n");
+}
+
+// Select queries for warnings return the amount of rows
+if ($result = mysqli_query($connection, "SELECT name FROM banlist WHERE type = 2 AND time > $today")) {
+    // Print values
+    print('warning.value ' . mysqli_num_rows($result) . "\n");
+}
+
+// Select queries for bans return the amount of rows
+if ($result = mysqli_query($connection, "SELECT name FROM banlist WHERE type = 0 AND time > $today")) {
+    // Print values
+    print('ban.value ' . mysqli_num_rows($result) . "\n");
+}
+
+// Select queries for ipbans return the amount of rows
+if ($result = mysqli_query($connection, "SELECT name FROM banlist WHERE type = 1 AND time > $today")) {
+    // Print values
+    print('ipban.value ' . mysqli_num_rows($result) . "\n");
+}
+
+// Select queries for fines return the amount of rows
+if ($result = mysqli_query($connection, "SELECT name FROM banlist WHERE type = 4 AND time > $today")) {
+    // Print values
+    print('fine.value ' . mysqli_num_rows($result) . "\n");
+}
+
+// Select queries for jails return the amount of rows
+if ($result = mysqli_query($connection, "SELECT name FROM banlist WHERE type = 6 AND time > $today")) {
+    // Print values
+    print('jail.value ' . mysqli_num_rows($result) . "\n");
+}
+
+// Select queries for permbans return the amount of rows
+if ($result = mysqli_query($connection, "SELECT name FROM banlist WHERE type = 9 AND time > $today")) {
+    // Print values
+    print('permban.value ' . mysqli_num_rows($result) . "\n");
+}
+
+// Select queries for mutes - part 1 return the amount of rows
+if ($result = mysqli_query($connection, "SELECT name FROM banlist WHERE type = 7 AND time > $today")) {
+    // Store result
+    $tmp1 = mysqli_num_rows($result);
+}
+
+// Select queries for mutes - part 2 return the amount of rows
+if ($result = mysqli_query($connection, "SELECT name FROM banlist WHERE type = 8 AND time > $today")) {
+    // Store result
+    $tmp2 = mysqli_num_rows($result);
+}
+
+$mutes = $tmp1 + $tmp2;
+
+print('mute.value ' . $mutes . "\n");
+
+// Close connection
+mysqli_close($connection);
+?>

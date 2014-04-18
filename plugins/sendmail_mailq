@@ -1,0 +1,182 @@
+#! @@PERL@@ -w
+# -*- perl -*-
+
+=head1 NAME
+
+  sendmail_mailq
+
+=head1 APPLICABLE SYSTEMS
+
+  Systems running sendmail as MTA
+
+=head1 CONFIGURATION
+
+  [sendmail_mailq]
+    # shall run as root in order to get access to sendmail queues
+    user              root
+
+    # warning and critical thresholds
+    env.warning       200
+    env.critical      300
+
+    # include total and/or detail of MTA queues
+    # rem : mtatotal is changed to "yes" if both are "no"
+    #       in case of just one queue only one is shown
+    env.mtatotal      yes
+    env.mtadetail     yes
+
+    # include total and/or detail of MSP queues
+    # rem : mtatotal is changed to "yes" if both are "no"
+    #       in case of just one queue only one is shown
+    env.msptotal      yes
+    env.mspdetail     yes
+
+=head1 BUGS/GOTCHAS
+
+
+    If you find one, drop a message to the author
+
+    * The autoconfiguration returns yes if it finds both sendmail
+      mailq and sendmail.cf configuration files. This may be wrong
+      if the system has both postfix and sendmail installed but the
+      enabled MTA is postfix.
+
+=head1 AUTHOR
+
+    Jose-Marcio Martins da Cruz - mailto:Jose-Marcio.Martins@mines-paristech.fr
+    Ecole Nationale Superieure des Mines de Paris
+
+=head1 VERSION 
+
+   1.0 - Jan, 04, 2014
+
+=head1 LICENSE
+
+   GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=autoconf
+
+=cut
+
+use strict;
+use warnings;
+
+my $MAILQ = "mailq";
+my $SMCF  = "/etc/mail/sendmail.cf";
+
+my %EnvConf = (
+  'warning'  => defined $ENV{'warning'}  ? $ENV{'warning'}  : '200',
+  'critical' => defined $ENV{'critical'} ? $ENV{'critical'} : '300'
+);
+foreach my $k (qw(mtatotal mtadetail msptotal mspdetail)) {
+  if (exists $ENV{$k}) {
+    $EnvConf{$k} = $ENV{$k} =~ /^(yes|true|oui|vrai|1)$/i;
+  } else {
+    $EnvConf{$k} = 1;
+  }
+}
+
+if ($#ARGV >= 0 && $ARGV[0] eq "autoconf") {
+  unless (-f $SMCF) {
+    print "no\n";
+    exit 0;
+  }
+  unless (system("$MAILQ > /dev/null 2>&1") == 0) {
+    print "no\n";
+    exit 0;
+  }
+  print "yes\n";
+  exit 0;
+}
+
+if ($#ARGV >= 0 && $ARGV[0] eq "config") {
+  my %MTAQueue = ();
+  my %MSPQueue = ();
+
+  GetQueue(\%MTAQueue, "",    $EnvConf{mtadetail}, $EnvConf{mtatotal});
+  GetQueue(\%MSPQueue, "-Ac", $EnvConf{mspdetail}, $EnvConf{msptotal});
+
+  print <<EOT;
+graph_title    sendmail queue size
+graph_category sendmail
+graph_vlabel   messages
+graph_scale    no
+EOT
+  my @ord = qw();
+  push @ord, sort grep {$_ = "mta_" . $_;} keys %MTAQueue;
+  push @ord, sort grep {$_ = "msp_" . $_;} keys %MSPQueue;
+  printf "graph_order %s\n", join " ", @ord;
+  foreach my $k (sort keys %MTAQueue) {
+    printf "mta_%s.label MTA %s\n", $k, $MTAQueue{$k}{name};
+    printf "mta_%s.warning %d\n",   $k, $EnvConf{warning};
+    printf "mta_%s.critical %d\n",  $k, $EnvConf{critical};
+  }
+  foreach my $k (sort keys %MSPQueue) {
+    printf "msp_%s.label MSP %s\n", $k, $MSPQueue{$k}{name};
+    printf "msp_%s.warning %d\n",   $k, $EnvConf{warning};
+    printf "msp_%s.critical %d\n",  $k, $EnvConf{critical};
+  }
+  exit 0;
+}
+
+if ($#ARGV < 0) {
+  my %MTAQueue = ();
+  my %MSPQueue = ();
+
+  GetQueue(\%MTAQueue, "", $EnvConf{mtadetail}, $EnvConf{mtatotal});
+  foreach my $k (sort keys %MTAQueue) {
+    printf "mta_%s.value %d\n", $k, $MTAQueue{$k}{value};
+  }
+  GetQueue(\%MSPQueue, "-Ac", $EnvConf{mspdetail}, $EnvConf{msptotal});
+  foreach my $k (sort keys %MSPQueue) {
+    printf "msp_%s.value %d\n", $k, $MSPQueue{$k}{value};
+  }
+  exit 0;
+}
+
+exit 1;
+
+sub GetQueue {
+  my ($h, $opt, $detail, $total, undef) = @_;
+  my @QUEUE   = `$MAILQ $opt 2>/dev/null`;
+  my $totsz   = 0;
+  my $ndetail = 0;
+  foreach my $qline (@QUEUE) {
+    if ($qline =~ /^\s*(\S+)\s+\((\d+)\s+request.*\)/) {
+      $ndetail++;
+      if ($detail || !$total) {
+        my ($field, $name) = QueueName($1);
+        $h->{$field}{name}  = $name;
+        $h->{$field}{value} = $2;
+        $totsz += $2;
+      }
+      next;
+    }
+    if ($qline =~ /^\s*(\S+)\s+is\s+empty/) {
+      $ndetail++;
+      if ($detail || !$total) {
+        my ($field, $name) = QueueName($1);
+        $h->{$field}{name}  = $name;
+        $h->{$field}{value} = 0;
+      }
+      next;
+    }
+  }
+  if ($total && $ndetail > 1) {
+    $h->{zztotal}{name}  = "=== Total ===";
+    $h->{zztotal}{value} = $totsz;
+  }
+}
+
+sub QueueName {
+  my ($q, undef) = @_;
+  my ($field, $name) = (undef, undef);
+  $name = `basename $q`;
+  chomp $name;
+  $field = $name;
+  $field =~ s/[^A-Za-z0-9_]/_/g;
+  return ($field, $name);
+}

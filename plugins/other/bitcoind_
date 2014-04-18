@@ -104,17 +104,15 @@ def main():
             raise ValueError("Could not connect to Bitcoin server.")
 
     if request_var in ('transactions', 'block_age'):
-        block_info = get_json_url('http://blockchain.info/block-height/%d?format=json' %
-                                  info['blocks'])
-        last_block = block_info['blocks'][0]
-        info['block_age'] = int(time.time()) - last_block['time']
-        info['confirmed'] = len(last_block['tx'])
+        (info, error) = bitcoin.getblockhash(info['blocks'])
+        (info, error) = bitcoin.getblock(info)
+        info['block_age'] = int(time.time()) - info['time']
+        info['confirmed'] = len(info['tx'])
 
     if request_var in ('fees', 'transactions'):
-        (memory_pool, error) = bitcoin.getmemorypool()
+        (memory_pool, error) = bitcoin.getrawmempool()
         if memory_pool:
-            info['fees'] = float(memory_pool['coinbasevalue']) / 1e8 - 50.0
-            info['waiting'] = len(memory_pool['transactions'])
+            info['waiting'] = len(memory_pool)
 
     if command == 'autoconf':
         print 'yes'

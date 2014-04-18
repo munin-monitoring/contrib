@@ -1,0 +1,189 @@
+#!/usr/bin/perl
+#
+# Copyright (C) 2008 Rackspace US, Inc. <http://www.rackspace.com>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, see http://www.gnu.org/licenses/gpl.txt
+#
+#
+# This plugin is based off of the Connection Usage 
+# section of the MySQL Connection Health Page
+# 
+# http://dev.mysql.com/doc/administrator/en/mysql-administrator-health-connection-health.html
+#
+# To enable, link mysql_connections to this file. E.g.
+#
+#    ln -s /usr/share/node/node/plugins/mysql_connections /etc/munin/plugins/mysql_connections
+#
+# Revision 1.0  2007/08/03
+# Created by Justin Shepherd <galstrom21@gmail.com>
+#
+# Revision 2.0 2013/01/02
+# Per user support by anarcat@koumbit.org
+#
+# Parameters:
+#
+#   config
+#   autoconf
+#
+# Configuration variables
+#
+#   mysqlopts     - Options to pass to mysql
+#   mysqladmin    - Override location of mysqladmin
+#   numusers      - Override maximum number of users to display
+#   warning	  - Override default warning limit
+#   critical	  - Override default critical limit 
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+
+# Define the mysqladmin paths, and commands
+my $MYSQLADMIN = $ENV{mysqladmin} || "mysqladmin";
+my $TEST_COMMAND    = "$MYSQLADMIN $ENV{mysqlopts} processlist";
+my $MYSQL_VARIABLES = "$MYSQLADMIN $ENV{mysqlopts} extended-status variables";
+my $warning = $ENV{warning} || "80";
+my $critical = $ENV{critical} || "90";
+my $numusers = $ENV{numusers} || 10;
+
+# Pull in any arguments
+my $arg = shift();
+
+# Check to see how the script was called 
+if ($arg eq 'config') {
+    print_graph_information();
+} elsif ($arg eq 'autoconf') {
+    if (test_service()) { print "yes\n"; }
+    else { print "no\n"; }
+} else {
+    print_graph_data();
+}
+exit;
+
+sub print_graph_data() {
+	# Define the values that are returned to munin
+
+	# Return the values to Munin
+        my $counts = count_thread_users();
+        my %counts = %{$counts};
+
+        sub valsort {
+            return $counts{$a} <=> $counts{$b};
+        }
+        my $i = 0;
+        my $total = 0;
+        foreach my $user (sort valsort keys(%counts)) {
+            last if $i++ >= $numusers;
+            $total += $counts{$user};
+            print "$user.value $counts{$user}\n";
+        }
+        my $other = poll_variables($MYSQL_VARIABLES,"Threads_connected") - $total;
+	print "other.value $other\n";
+}
+
+sub poll_variables {
+	my $command = shift;
+	my $expression = shift;
+	my $ret = 0;
+	open(SERVICE, "$command |")
+  		or die("Coult not execute '$command': $!");
+	while (<SERVICE>) {
+            my ($field, $value) = (m/(\w+).*?(\d+(?:\.\d+)?)/);
+	    next unless ($field);
+	    if ($field eq $expression ) {
+		$ret = "$value";
+	    }
+	}
+	close(SERVICE);
+	return $ret;
+}
+
+
+sub print_graph_information {
+print <<EOM;
+graph_title MySQL Connections per user
+graph_args --base 1000 --lower-limit 0
+graph_vlabel Connections
+graph_info The number of current connexions per user.
+graph_category mysql
+graph_total Total
+EOM
+
+my $counts = count_thread_users();
+my %counts = %{$counts};
+my $stacked = 0;
+
+sub valsort {
+    return $counts{$a} <=> $counts{$b};
+}
+my $i = 0;
+foreach my $user (sort valsort keys(%counts)) {
+    last if $i++ >= $numusers;
+    print <<EOM;
+$user.label $user
+$user.info Number of connexions used by user $user
+EOM
+print "$user.draw ";
+    # if we already printed an entry, make the next ones stacked
+    if ($i > 1) {
+        print "STACK\n";
+    }
+    else {
+        print "AREA\n";
+    }
+}
+
+print <<EOM;
+other.label Others
+other.draw STACK
+other.info Other connected threads not in the top $numusers
+EOM
+}
+
+sub count_thread_users {
+    my %counts = ();
+    my $command = 'mysql -N -B -e "SHOW PROCESSLIST;"';
+    open(SERVICE, "$command |")
+        or die("Could not execute '$command': $!");
+    while (<SERVICE>) {
+        my ($threadid, $user) = split "\t";
+        next unless ($threadid);
+        $counts{$user} = 0 unless defined($counts{$user});
+        $counts{$user}++;
+    }
+    return \%counts;
+}
+
+sub test_service {
+    my $return = 1;
+    system ("$MYSQLADMIN --version >/dev/null 2>/dev/null");
+    if ($? == 0)
+    {
+		system ("$TEST_COMMAND >/dev/null 2>/dev/null");
+		if ($? == 0)
+		{
+		    print "yes\n";
+		    $return = 0;
+		}
+		else
+		{
+	   		print "no (could not connect to mysql)\n";
+		}
+    }
+    else
+    {
+		print "no (mysqladmin not found)\n";
+    }
+    exit $return;
+}

@@ -17,6 +17,7 @@
 # table: Mysql table name (no default, raises exception)
 # field: field name, used in GROUP BY statement (default - empty, no group by)
 # where: optional where condition (without "where", default - empty)
+# only: optional; "max" or "min" to indicate that only the largest or smallest value should be graphed
 #
 # This plugin shows graphs of Mysql COUNT(*) results.
 #
@@ -96,6 +97,20 @@ else:
     groupBy = ""
     field = ""
 
+if "only" in os.environ and os.environ["only"] != None:
+    if not field:
+        raise Exception("You should provide 'env.field' in configuration file")
+    only = os.environ["only"]
+    if only == "max":
+        dir = "DESC"
+    elif only == "min":
+        dir = "ASC"
+    else:
+        raise Exception("env.only should be 'max' or 'min'; found %s") % (only, )
+    order_by = "ORDER BY COUNT(*) %s LIMIT 1" % (dir, )
+else:
+    order_by = ""
+
 # Mysql where condition
 if "where" in os.environ and os.environ["where"] != None:
     where = "WHERE %s" % os.environ["where"]
@@ -105,10 +120,10 @@ else:
 # Mysql connection handler
 conn = None
 
-# Query to get field values
+# Query to get field values (used only when graphing several values)
 valuesQuery = "SELECT DISTINCT %s 1 FROM %s %s" % (field, table, where)
 # Query to get graph data
-aggregateQuery = "SELECT %sCOUNT(*) FROM %s %s %s" % (field, table, where, groupBy)
+aggregateQuery = "SELECT %sCOUNT(*) FROM %s %s %s %s" % (field, table, where, groupBy, order_by)
 
 # Connect to mysql
 try:
@@ -118,8 +133,10 @@ except MySQLdb.Error, e:
     print "Error %d: %s" % (e.args[0], e.args[1])
     sys.exit(1)
 
+single_value = field == "" or order_by != ""
+
 # init values tuple
-if field != "":
+if not single_value:
     values = {}
     cursor.execute(valuesQuery)
     results = cursor.fetchall()
@@ -140,13 +157,16 @@ elif len(sys.argv) == 2 and sys.argv[1] == "config":
     else:
         vlabel = "count(*)"
 
-    if field == "":
+    if single_value:
         print "graph mysql_aggregate_%s" % table
         print "graph_title %s" % label
         print "graph_vlabel %s" % vlabel
         print "graph_category mysql"
         print ""
-        print "values_count.label count"
+        if "only" in os.environ:
+            print "values_count.label %s" % (os.environ["only"], )
+        else:
+            print "values_count.label count"
     else:
         print "multigraph mysql_aggregate_%s" % table
         print "graph_title %s" % label
@@ -171,11 +191,15 @@ else:
     try:
         cursor.execute(aggregateQuery)
 
-        if field == "":
+        if single_value:
             result = cursor.fetchone()
             count = 0
-            if result[0]:
-                count = count + result[0]
+            if field:
+                ind = 1
+            else:
+                ind = 0
+            if result[ind]:
+                count = count + result[ind]
             print "values_count.value %s" % count
         else:
             results = cursor.fetchall()
