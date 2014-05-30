@@ -1,0 +1,123 @@
+#!/bin/bash
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+lxc_proc - Plugin to monitor LXC Processes count
+
+=head1 CONFIGURATION
+
+env.cgrouppath - Set the path where 'tasks' sysfs files are stored, default: empty
+
+  [lxc_proc]
+    user root
+    env.cgrouppath /sys/fs/cgroup/cpuacct/lxc/
+
+=head1 INTERPRETATION
+
+This plugin needs root privilege.
+
+=head1 AUTHOR
+
+vajtsz  vajtsz@gmail.com
+
+=head1 LICENSE
+
+Unknown license
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+## find proper sysfs and count it
+# Debian 6.0: /sys/fs/cgroup/<container>/tasks
+# Ubuntu 12.04 with fstab: /sys/fs/cgroup/lxc/<container>/tasks
+# Ubuntu 12.04 with cgroup-lite: /sys/fs/cgroup/cpuacct/lxc/<container>/tasks
+# Ubuntu 12.04 with cgroup-bin: /sys/fs/cgroup/cpuacct/sysdefault/lxc/<container>/tasks
+count_processes () {
+    [ -z "$1" ] && return 0
+    
+    if [ -n "$cgrouppath" ]; then
+        SYSFS=$cgrouppath/$1/tasks
+        if [ -e $SYSFS ]; then
+            return `wc -l < $SYSFS`
+        fi
+    fi
+    
+    for SYSFS in \
+        /sys/fs/cgroup/$1/tasks \
+        /sys/fs/cgroup/lxc/$1/tasks \
+        /sys/fs/cgroup/cpuacct/lxc/$1/tasks \
+        /sys/fs/cgroup/cpuacct/sysdefault/lxc/$1/tasks \
+    ; do
+        if [ -e $SYSFS ]; then
+            return `wc -l < $SYSFS`
+        fi
+    done
+    
+    return 0
+}
+
+
+guest_names=`lxc-ls | sort -u`
+for guest in $guest_names; do
+ if lxc-info -n $guest 2>&1 | grep -qs RUNNING ; then
+  active="$active $guest"
+ fi
+done
+guest_names="$active"
+                
+
+
+f_comm='lxc-cgroup  '
+
+if [ "$1" = "autoconf" ]; then
+	if [ -r /proc/stat ]; then
+		echo yes
+		exit 0
+	else
+		echo "no (no /proc/stat)"
+		exit 0
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+
+ echo 'graph_title Processes '
+ echo 'graph_args -l 0 --base 1000'
+ echo 'graph_vlabel Number of processes'
+ echo 'graph_category lxc'
+
+ 
+ for guest_name in $guest_names;
+ do 
+  guest="$(clean_fieldname $guest_name)"
+  echo 'lxc_proc_'$guest'.label '$guest_name': processes'
+  echo 'lxc_proc_'$guest'.type GAUGE'
+  echo 'lxc_proc_'$guest'.min 0'
+ done
+ exit 0
+fi
+
+ for guest_name in $guest_names;
+ do 
+  guest="$(clean_fieldname $guest_name)"
+  
+  count_processes $guest_name
+  tmp_g=$?
+  if [ $tmp_g -eq 0 ]; then
+    tmp_g=`$f_comm -n $guest_name tasks | wc -l`
+  fi
+  echo 'lxc_proc_'$guest'.value '$tmp_g
+  
+
+ done
+
+

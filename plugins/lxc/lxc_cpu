@@ -1,0 +1,94 @@
+#!/bin/bash
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+lxc_cpu - Plugin to monitor LXC CPU usage
+
+=head1 CONFIGURATION
+
+  [lxc_*]
+    user root
+
+=head1 INTERPRETATION
+
+This plugin needs root privilege.
+
+=head1 AUTHOR
+
+vajtsz  vajtsz@gmail.com
+mitty   mitty@mitty.jp
+
+=head1 LICENSE
+
+Unknown license
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+guest_names=`lxc-ls | sort -u`
+for guest in $guest_names; do
+ if lxc-info -n $guest 2>&1 | grep -qs RUNNING ; then
+  active="$active $guest"
+ fi
+done
+guest_names="$active"
+                
+
+
+f_comm='lxc-cgroup  '
+
+if [ "$1" = "autoconf" ]; then
+	if [ -r /proc/stat ]; then
+		echo yes
+		exit 0
+	else
+		echo "no (no /proc/stat)"
+		exit 0
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+
+ echo 'graph_title CPU Usage '
+ echo 'graph_args -l 0 --base 1000'
+ echo 'graph_vlabel USER_HZ'
+ echo 'graph_category lxc'
+
+ 
+ for guest_name in $guest_names;
+ do 
+  guest="$(clean_fieldname $guest_name)"
+  echo 'cpu_user_'$guest'.label '$guest_name': User'
+  echo 'cpu_user_'$guest'.type DERIVE'
+  echo 'cpu_user_'$guest'.min 0'
+  echo 'cpu_system_'$guest'.label '$guest_name': System'
+  echo 'cpu_system_'$guest'.type DERIVE'
+  echo 'cpu_system_'$guest'.min 0'
+ done
+ exit 0
+fi
+
+ for guest_name in $guest_names;
+ do 
+  guest="$(clean_fieldname $guest_name)"
+  
+  tmp_g=`$f_comm -n $guest_name cpuacct.stat | grep user`
+  tmp_v=`echo $tmp_g | awk '{print($2)}'`
+  echo 'cpu_user_'$guest'.value '$tmp_v
+  
+  tmp_g=`$f_comm -n $guest_name cpuacct.stat | grep system`
+  tmp_v=`echo $tmp_g | awk '{print($2)}'`
+  echo 'cpu_system_'$guest'.value '$tmp_v
+
+ done
+
+
