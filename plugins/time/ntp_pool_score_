@@ -1,0 +1,85 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+ntp_pool_score_ - Wildcard plugin to monitor the score assigned to a server 
+from pool.ntp.org . This is achieved by fetching the cvs data from
+http://www.pool.ntp.org/scores/IP_ADDRESS/log?limit=1 using wget.
+
+=head1 CONFIGURATION
+
+This is a wildcard plugin. The wildcard suffix link will be the server to be
+monitored.
+
+This plugin uses the following configuration variables:
+
+ [ntp_pool_score_*]
+  env.warning - score below which a warning will be triggered
+  env.critical - score below which the value becomes critical
+
+=head2 DEFAULT CONFIGURATION
+
+The default configuration is to set warning to 15 and critical to 10.
+
+=head2 EXAMPLE WILDCARD USAGE
+
+C<ln -s /usr/share/munin/plugins/ntp_pool_score_ /etc/munin/plugins/ntp_pool_score_SERVER_IP
+
+...will monitor the score of the server with ip address SERVER_IP
+
+=head1 AUTHOR
+
+Tocho Tochev
+tocho AT tochev DOT net
+
+=head1 LICENSE
+
+ GNU General Public License, version 2
+ http://www.gnu.org/licenses/gpl-2.0.html 
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+target=`basename $0 | sed 's/^ntp_pool_score_//g'`
+
+if [ "$target"x = "x" ]; then
+    echo "Please call using ntp_pool_score_IP" >&2
+    exit 1
+fi
+
+# Check if config was requested
+if [ "$1" = "config" ]; then
+
+	# Configure graph
+    echo "graph_title NTP Pool Score for $target"
+    echo 'graph_args -l -25 -u 25'
+    echo 'graph_vlabel Score'
+    echo 'graph_category time'
+    echo "graph_info NTP Pool Score for $target"
+    echo "score.warning ${warning:-15}":
+    echo "score.critical ${critical:-10}":
+	echo "score.info Score for $target"
+	echo "score.label score"
+
+	exit 0
+fi
+
+
+# Get the score
+# the score can be a bit outdated but do not worry about that
+SCORE=$(wget "http://www.pool.ntp.org/scores/$target/log?limit=1" \
+                --timeout=30 -O - 2>/dev/null \
+                | tail -n 1 | awk -F ',' '{print $5}')
+
+if echo "$SCORE" | grep -q '^-\?[0-9.]\+$'; then
+    echo "score.value $SCORE"
+else
+    echo "score.value U"
+fi
+
