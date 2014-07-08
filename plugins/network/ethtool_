@@ -1,0 +1,72 @@
+#!/bin/sh
+# -*- sh -*-
+#
+# Plugin to monitor unusual activity/errors from ethernet driver/hardware.
+#
+# Parameters:
+#
+#   config   (required)
+#   autoconf (optional - only used by munin-config)
+#
+# Environment variables (optional):
+#
+#   IGNORED_FIELDS: comma-separated list of fields (or field endings) to ignore
+#   WARN: regex defining fields which trigger 'warning' on non-zero values
+#   CRITICAL: regex defining fields which trigger 'critical' on non-zero values
+#
+# Author: Ted Dumitrescu (ted@mixpanel.com, webdev@cmme.org)
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#%# family=auto
+#%# capabilities=autoconf
+
+
+INTERFACE=${0##*ethtool_}
+ETHTOOL="ethtool -S $INTERFACE"
+
+if [ -z $IGNORED_FIELDS ]; then
+  IGNORED_FIELDS='packets,bytes,broadcast,multicast,long_byte_count,offload_good,tcp_seg_good,smbus'
+fi
+if [ -z $WARN ]; then
+  WARN='tx_.*restart.*'
+fi
+if [ -z $CRITICAL ]; then
+  CRITICAL='(rx_no_buffer_count|rx_missed_errors|rx_queue_.+_drops)'
+fi
+
+TO_REMOVE=`echo $IGNORED_FIELDS | sed 's/,/\\\|/g'`
+STRIP_OUTPUT="1d; s/^[ \t]*//; /\($TO_REMOVE\):/d"
+
+if [ "$1" = "autoconf" ]; then
+  $ETHTOOL 2>/dev/null >/dev/null
+  if [ $? -ne 0 ]; then
+    echo no
+    exit 1
+  else
+    echo yes
+    exit 0
+  fi
+fi
+
+if [ "$1" = "config" ]; then
+  echo "graph_title Ethtool $INTERFACE"
+  echo 'graph_args -l 0 --base 1000'
+  echo 'graph_category network'
+  echo 'graph_period second'
+  echo 'graph_info Unusual network hardware activity from ethtool'
+
+  $ETHTOOL | sed "$STRIP_OUTPUT" | awk -F: -v WARN=$WARN -v CRITICAL=$CRITICAL '
+    {
+      printf("%s.label %s\n%s.type DERIVE\n%s.min 0\n", $1, $1, $1, $1);
+      if ($1 ~ "^"WARN) {
+        printf("%s.warning 0:0\n", $1);
+      } else if ($1 ~ "^"CRITICAL) {
+        printf("%s.critical 0:0\n", $1);
+      }
+    }'
+
+  exit 0
+fi
+
+$ETHTOOL | sed "$STRIP_OUTPUT; s/:/.value/"
