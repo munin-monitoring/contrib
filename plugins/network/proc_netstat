@@ -1,0 +1,53 @@
+#!/bin/sh
+# -*- sh -*-
+#
+# Plugin to monitor network connection activity using a subset of data from /proc/net/netstat
+#
+# Parameters:
+#
+#   config   (required)
+#   autoconf (optional - only used by munin-config)
+#
+# Environment variables (optional):
+#
+#   IGNORED_FIELDS: comma-separated list of regexs for fields to ignore
+#
+# Author: Ted Dumitrescu (ted@mixpanel.com, webdev@cmme.org)
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#%# family=auto
+#%# capabilities=autoconf
+
+
+NETSTATS="/proc/net/netstat"
+
+if [ -z $IGNORED_FIELDS ]; then
+  IGNORED_FIELDS='TW\.,TCPPrequeued,TCPDirectCopy,TCPHPHits,TCPPureAcks,TCPHPAcks,TCPRcvCoalesce'
+fi
+
+TO_REMOVE=`echo $IGNORED_FIELDS | sed 's/,/\\\|/g'`
+STRIP_OUTPUT="/\($TO_REMOVE\)/d"
+
+if [ "$1" = "autoconf" ]; then
+  if [ -r $NETSTATS ]; then
+    echo yes
+    exit 0
+  else
+    echo no
+    exit 1
+  fi
+fi
+
+if [ "$1" = "config" ]; then
+  echo 'graph_title Netstat'
+  echo 'graph_args -l 0 --base 1000'
+  echo 'graph_category network'
+  echo 'graph_period second'
+  echo 'graph_info TcpExt stats'
+
+  awk 'NR < 2 { for (i=2; i<=NF; i++) { printf("%s.label %s\n%s.type DERIVE\n%s.min 0\n", $i, $i, $i, $i); } }' $NETSTATS | sed "$STRIP_OUTPUT"
+  exit 0
+fi
+
+awk 'NR < 2 { for (i=2; i<=NF; i++) { fn[i]=$i; }; getline; for (i=2; i<=NF; i++) { printf("%s.value %s\n", fn[i], $i); } }' $NETSTATS | sed "$STRIP_OUTPUT"
