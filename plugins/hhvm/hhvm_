@@ -68,9 +68,11 @@ sub getJson( $ );
 my $script = $0;
 my $host = '127.0.0.1';
 my $port = 8081;
+my $name = undef;
 
 if ( $script =~ /\bhhvm_([a-z0-9\-\.]+)(?:_(\d+))?$/ ) {
     $host = $1;
+    $name = $host;
     if ( $2 ) {
         $port = int( $2 );
     }
@@ -78,19 +80,22 @@ if ( $script =~ /\bhhvm_([a-z0-9\-\.]+)(?:_(\d+))?$/ ) {
 
 $host = defined $ENV{'host'} ? $ENV{'host'} : $host;
 $port = defined $ENV{'port'} ? $ENV{'port'} : $port;
+$name = defined $name ? $name : $host.':'.$port;
+my $graphName = $name;
+$graphName =~ s/[^\w]+/_/g;
 
 if ( exists $ARGV[0] && 'config' eq $ARGV[0] ) {
     print <<EOF;
-multigraph hhvm_threads
-graph_title HHVM Threads ${host}:${port}
+multigraph hhvm_${graphName}_threads
+graph_title HHVM Threads ${name}
 graph_args --base 1000
 graph_category hhvm
 threads.label Threads
 load.label Active Workers
 queued.label Queued Jobs
 
-multigraph hhvm_sizes
-graph_title HHVM Sizes ${host}:${port}
+multigraph hhvm_${graphName}_sizes
+graph_title HHVM Sizes ${name}
 graph_args --base 1024
 graph_category hhvm
 hhbc-roarena-capac.label HHBC Arena Capacity
@@ -115,13 +120,12 @@ EOF
     my $health = getJson( sprintf( '%s/check-health', $url ) );
     my $status = getJson( sprintf( '%s/status.json', $url ) );
 
-    print "multigraph hhvm_threads\n";
+    printf( "multigraph hhvm_%s_threads\n", $graphName );
     printf( "threads.value %d\n", int( @{ $status->{'status'}->{'threads'} } ) ); 
     printf( "load.value %d\n", $health->{'load'} );
     printf( "queued.value %d\n", $health->{'queued'} );
     print "\n";
-
-    print "multigraph hhvm_sizes\n";
+    printf( "multigraph hhvm_%s_sizes\n", $graphName );
     printf( "hhbc-roarena-capac.value %d\n", $health->{'hhbc-roarena-capac'} );
     printf( "tc-hotsize.value %d\n", $health->{'tc-hotsize'} );
     printf( "tc-size.value %d\n", $health->{'tc-size'} );
