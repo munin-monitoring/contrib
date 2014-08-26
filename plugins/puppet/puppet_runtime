@@ -1,0 +1,45 @@
+#!/usr/bin/ruby
+
+# This plugin reports the duration of the most recent puppet agent run.
+# It requires read access to the puppet logfile (defaults to /var/log/messages).
+#
+# CONFIGURATION
+#
+# [puppet*]
+# env.puppet_logfile /var/log/message
+# env.puppet_logformat "^%b %d"
+#
+# The logfile is where the puppet agent is expected to log its run time statistics.
+# The format is the format of the date syslog writes to the file, which may vary
+# according to locale and configuration.
+
+# reports how long the puppet agent took to apply the catalog
+def get_runtime
+  logfile = ENV['puppet_logfile'] || '/var/log/messages'
+  t = Time.now
+  dateformat = ENV['puppet_logformat'] || "^%b %d"
+  today = t.strftime(dateformat)
+  File.open(logfile).grep(/#{today}/).grep(/Finished catalog run in/).reverse_each do |line|
+    if line =~ /in (.*) seconds/
+      puts "runtime.value #{$1}"
+      exit 0
+    end
+  end
+end
+
+case ARGV[0]
+	when 'config'
+  		puts "graph_category puppet"
+                puts "graph_args --base 1000 -l 0"
+                puts "graph_scale no"
+  		puts "graph_title puppet catalog run time"
+  		puts "graph_vlabel Seconds"
+  		puts "runtime.label Catalog application time"
+		exit 0
+	when 'autoconf'
+		puts "yes"
+		exit 0
+	else
+  		get_runtime
+end
+
