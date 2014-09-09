@@ -1,0 +1,297 @@
+#!/usr/bin/env python
+
+"""
+linux_if - munin plugin monitoring Linux network interfaces
+
+This is not a wildcard plugin. Monitored interfaces are controlled
+by 'include', 'exclude' in config. By default, only statically
+configured interfaces (and their sub-interfaces) are monitored.
+
+Features:
+* bonding - group bonding slave interfaces with master
+* vlans - group vlan sub-interfaces with main (dot1q trunk) interface
+
+plugin configuration:
+
+[linux_if]
+  # run plugin as root (required if you have VLAN sub-interfaces)
+  user = root
+
+  # comma separated list of intreface patterns to exclude from monitoring
+  # default: lo
+  # example:
+  env.exclude = lo,vnet*
+
+  # comma separated list of intreface patterns to include in monitoring
+  # default: (empty)
+  # example:
+  env.include = br_*
+
+  # should staticly configured interfaces be included (they have ifcfg-* file)
+  # default: true
+  env.include_configured_if = true
+
+Include/exclude logic in detail. Interface name is matched..
+1) if matched by any exclude pattern, then exclude. Otherwise next step.
+2) if matched by any include pattern, then include, Otherwise next step.
+3) if 'include_configured_if' is true and 'ifcfg-*' file exists then include
+4) default is not to include interface in monitoring
+5) automatically include sub-interface, if the parent interface is monitored
+
+Tested on: RHEL 6.x and clones (with Python 2.6)
+
+TODO:
+* implment 'data loaning' between graphs, removes duplicit measures
+* add support for bridging
+* configurable graph max based on intreface speed
+
+MUNIN MAGIC MARKER
+#%# family=manual
+"""
+
+__author__ = 'Brano Zarnovican'
+__email__ = 'zarnovican@gmail.com'
+__license__ = 'BSD'
+__version__ = '0.9'
+
+import fnmatch, os, sys
+#from pprint import pprint
+
+#
+# handle 'autoconf' option
+#
+if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+    if os.path.exists('/proc/net/dev'):
+        print('yes')
+        sys.exit(0)
+    else:
+        print('no')
+        sys.exit(1)
+
+#
+# plugin configuration
+#
+exclude_patterns = os.environ.get('exclude', 'lo').split(',')
+include_patterns = os.environ.get('include', '').split(',')
+include_configured_if = os.environ.get('include_configured_if', 'true').lower()
+
+def interface_is_enabled(ifname):
+    """logic to include or exclude this interface in plugin based on configuration"""
+
+    if any(fnmatch.fnmatch(ifname, pattern) for pattern in exclude_patterns):
+        return False
+
+    if any(fnmatch.fnmatch(ifname, pattern) for pattern in include_patterns):
+        return True
+
+    if include_configured_if == 'true' and \
+        os.path.exists('/etc/sysconfig/network-scripts/ifcfg-'+ifname):
+        return True
+
+    return False
+
+#
+# read counts for all interfaces (for both 'update' or 'config')
+#
+interface = {}  # interface[name][measure] = value
+try:
+    fieldnames = ('rxbytes', 'rxpackets', 'rxerrs', 'rxdrop', 'rxfifo', 'rxframe', 'rxcompressed', 'rxmulticast') +\
+        ('txbytes', 'txpackets', 'txerrs', 'txdrop', 'txfifo', 'txcolls', 'txcarrier', 'txcompressed')
+    with open('/proc/net/dev') as f:
+        f.readline()    # skip 2-line header
+        f.readline()
+        for line in f:
+            l = line.replace('|', ' ').replace(':', ' ').split()
+            ifname = l[0].strip(':')
+
+            assert len(l) == 17, 'Unexpected number of fields (%d)' % len(l)
+            interface[ifname] = dict(zip(fieldnames, l[1:]))
+            interface[ifname]['name'] = ifname
+            interface[ifname]['sname'] = ifname.replace('.', '_')   # sanitized interface name
+except IOError as e:
+    print(e)
+    sys.exit(-1)
+
+#
+# associate slave interfaces to their bond masters
+#
+bond = {}       # bond[bondname][slavename][measure] = value
+try:
+    with open('/sys/class/net/bonding_masters') as f:
+        bond_list = f.read().split()
+
+    for bondname in bond_list:
+        if bondname not in interface: continue
+        if not interface_is_enabled(bondname): continue
+
+        bond[bondname] = { 'subifs': [], }
+        bond[bondname]['parent'] = interface[bondname]
+
+        with open('/sys/class/net/'+bondname+'/bonding/slaves') as f:
+            slave_list = f.read().split()
+
+        for slave in slave_list:
+            if slave not in interface: continue
+            bond[bondname]['subifs'].append(slave)
+            bond[bondname][slave] = interface[slave]
+            del interface[slave]
+
+except IOError:
+    pass        # bonding not configured
+
+#
+# associate VLAN sub-interfaces to their trunks
+#
+trunk = {}      # trunk[trunkname][subifname][measure] = value
+try:
+    with open('/proc/net/vlan/config') as f:
+        f.readline()
+        f.readline()
+        for line in f:
+            (subif, vlanid, trunkif) = line.replace('|', ' ').split()
+            if trunkif not in interface: continue
+            if subif not in interface: continue
+            if not interface_is_enabled(trunkif): continue
+
+            if trunkif not in trunk:
+                trunk[trunkif] = { 'subifs': [], }
+                trunk[trunkif]['parent'] = interface[trunkif]
+
+            trunk[trunkif]['subifs'].append(subif)
+            trunk[trunkif][subif] = interface[subif]
+            del interface[subif]
+except IOError:
+    pass        # vlans not configured (or not running as root)
+
+#
+# all remaining interfaces are considered 'plain'
+#
+plain = {}      # plain[ifname][measure] = value
+for (ifname, counts) in interface.items():
+    if ifname in bond or ifname in trunk: continue
+    if not interface_is_enabled(ifname): continue
+    plain[ifname] = counts
+
+#
+# now, do the actual stdout output..
+#
+
+in_config = (len(sys.argv) > 1 and sys.argv[1] == 'config')
+
+def graph_interface_traffic(data):
+    if in_config:
+        print("""graph_title {name} traffic
+graph_order down up
+graph_args --base 1000 --lower-limit 0
+graph_vlabel bits in (-) / out (+) per ${{graph_period}}
+graph_category network
+down.label received
+down.type DERIVE
+down.graph no
+down.cdef down,8,*
+down.min 0
+up.label bps
+up.type DERIVE
+up.negative down
+up.cdef up,8,*
+up.min 0""".format(**data))
+    else:
+        print("""down.value {rxbytes}
+up.value {txbytes}""".format(**data))
+    print('')
+
+def graph_interface_errors(data):
+    if in_config:
+        print("""graph_title {name} errors
+graph_args --base 1000 --lower-limit 0
+graph_vlabel counts RX (-) / TX (+) per ${{graph_period}}
+graph_category network
+rxerrs.label errors
+rxerrs.type COUNTER
+rxerrs.graph no
+txerrs.label errors
+txerrs.type COUNTER
+txerrs.negative rxerrs
+rxdrop.label drops
+rxdrop.type COUNTER
+rxdrop.graph no
+txdrop.label drops
+txdrop.type COUNTER
+txdrop.negative rxdrop
+txcolls.label collisions
+txcolls.type COUNTER""".format(**data))
+    else:
+        print("""rxerrs.value {rxerrs}
+txerrs.value {txerrs}
+rxdrop.value {rxdrop}
+txdrop.value {txdrop}
+txcolls.value {txcolls}""".format(**data))
+    print('')
+
+def graph_traffic_with_subifs(ddata, title):
+
+    if in_config:
+        print('graph_title ' + title)
+        print("""graph_args --base 1000 --lower-limit 0
+graph_vlabel bits in (-) / out (+) per ${graph_period}
+graph_category network""")
+
+    for ifname in ddata['subifs'] + ['parent',]:
+        data = d[ifname]
+
+        if ifname == 'parent':
+            label = 'total'
+            drawtype = 'LINE1'
+        else:
+            label = data['name']
+            drawtype = 'AREASTACK'
+
+        if in_config:
+            print("""{sname}_down.label {label}
+{sname}_down.type DERIVE
+{sname}_down.graph no
+{sname}_down.cdef {sname}_down,8,*
+{sname}_down.min 0
+{sname}_up.label {label}
+{sname}_up.type DERIVE
+{sname}_up.negative {sname}_down
+{sname}_up.cdef {sname}_up,8,*
+{sname}_up.draw {drawtype}
+{sname}_up.min 0""".format(label=label, drawtype=drawtype, **data))
+            if ifname == 'parent':
+                print('{sname}_up.colour 000000'.format(**data))
+        else:
+            print("""{sname}_down.value {rxbytes}
+{sname}_up.value {txbytes}""".format(**data))
+    print('')
+
+for d in plain.values():
+    print('multigraph interface_{sname}_traffic'.format(**d))
+    graph_interface_traffic(d)
+    print('multigraph interface_{sname}_errors'.format(**d))
+    graph_interface_errors(d)
+
+for d in bond.values():
+    parent = d['parent']
+    print('multigraph bond_{sname}_traffic'.format(**parent))
+    graph_traffic_with_subifs(d, title='{0} traffic (stacked)'.format(parent['name']))
+    print('multigraph bond_{sname}_errors'.format(**parent))
+    graph_interface_errors(parent)
+
+    for ifname in d['subifs']:
+        if_data = d[ifname]
+        print('multigraph bond_{0}_traffic.{1}'.format(parent['sname'], if_data['sname']))
+        graph_interface_traffic(if_data)
+        print('multigraph bond_{0}_errors.{1}'.format(parent['sname'], if_data['sname']))
+        graph_interface_errors(if_data)
+
+for d in trunk.values():
+    parent = d['parent']
+    print('multigraph trunk_{sname}_traffic'.format(**parent))
+    graph_traffic_with_subifs(d, title='{0} trunk (stacked)'.format(parent['name']))
+
+    for ifname in d['subifs']:
+        if_data = d[ifname]
+        print('multigraph trunk_{0}_traffic.{1}'.format(parent['sname'], if_data['sname']))
+        graph_interface_traffic(if_data)
+
