@@ -44,6 +44,7 @@ if (count($argv) === 2 && $argv[1] === 'config') {
     echo "graph_info Displays the sum of online users in your Moodle site\n";
     echo "users_online.label online users\n";
     echo "users_online.min 0\n";
+    echo "users_online.draw AREA\n";
     exit(0);
 }
 
