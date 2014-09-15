@@ -41,13 +41,17 @@ if (count($argv) === 2 && $argv[1] === 'config') {
     echo "graph_vlabel Total Users Count / ${graph_period}\n";
     echo "graph_category Moodle\n";
     echo "graph_scale no\n";
-    echo "graph_info Displays the sum of users, as well as active count, in your Moodle site\n";
+    echo "graph_info Displays the sum of users, as well as active, suspended and deleted accounts, in your Moodle site\n";
 
     echo "users_total.label total users\n";
     echo "users_active.label active users\n";
+    echo "users_suspended.label suspended users\n";
+    echo "users_deleted.label deleted users\n";
 
     echo "users_total.min 0\n";
     echo "users_active.min 0\n";
+    echo "users_suspended.min 0\n";
+    echo "users_deleted.min 0\n";
 
     exit(0);
 }
@@ -74,4 +78,18 @@ $nbusers = 0;
 if (($stmt = $dbh->query("SELECT COUNT(id) FROM {$table_prefix}user WHERE deleted=0 AND suspended=0")) != false) {
     $nbusers = $stmt->fetchColumn();
     echo "users_active.value $nbusers\n";
+}
+
+//Active users (not deleted or suspended)
+$nbusers = 0;
+if (($stmt = $dbh->query("SELECT COUNT(id) FROM {$table_prefix}user WHERE suspended=1 and deleted=0")) != false) {
+    $nbusers = $stmt->fetchColumn();
+    echo "users_suspended.value $nbusers\n";
+}
+
+//Active users (not deleted or suspended)
+$nbusers = 0;
+if (($stmt = $dbh->query("SELECT COUNT(id) FROM {$table_prefix}user WHERE deleted=1")) != false) {
+    $nbusers = $stmt->fetchColumn();
+    echo "users_deleted.value $nbusers\n";
 }
