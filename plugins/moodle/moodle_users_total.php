@@ -43,17 +43,14 @@ if (count($argv) === 2 && $argv[1] === 'config') {
     echo "graph_category Moodle\n";
     echo "graph_scale no\n";
     echo "graph_info Displays the sum of users, as well as active, suspended and deleted accounts, in your Moodle site\n";
+    echo "graph_total total\n";
 
-    echo "users_total.label total users\n";
-    echo "users_active.label active users\n";
-    echo "users_suspended.label suspended users\n";
-    echo "users_deleted.label deleted users\n";
-
-    echo "users_total.min 0\n";
+    echo "users_active.label active\n";
+    echo "users_suspended.label suspended\n";
+    echo "users_deleted.label deleted\n";
     echo "users_active.min 0\n";
     echo "users_suspended.min 0\n";
     echo "users_deleted.min 0\n";
-
     exit(0);
 }
 
@@ -64,15 +61,6 @@ try {
     echo "Connection failed\n";
     exit(1);
 }
-
-
-
-//All users
-$nbusers = 0;
-if (($stmt = $dbh->query("SELECT COUNT(id) FROM {$table_prefix}user")) != false) {
-    $nbusers = $stmt->fetchColumn();
-}
-echo "users_total.value $nbusers\n";
 
 //Active users (not deleted or suspended)
 $nbusers = 0;

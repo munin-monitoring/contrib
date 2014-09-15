@@ -56,20 +56,16 @@ if (count($argv) === 2 && $argv[1] === 'config') {
     echo "graph_category Moodle\n";
     echo "graph_scale no\n";
     echo "graph_info Displays the sum of module, as well as module instance number by type, in your Moodle site\n";
+    echo "graph_total.label total\n";
 
     foreach($data as $entry) {
         echo "modules_".$entry->modulename.".label ".$entry->modulename."\n";
         echo "modules_".$entry->modulename.".min 0\n";
         echo "modules_".$entry->modulename.".draw AREA\n";
     }
-    echo "modules_total.label total users\n";
-    echo "modules_total.min 0\n";
     exit(0);
 }
-$total = 0;
 foreach($data as $entry) {
     echo "modules_".$entry->modulename.".label ".$entry->modulename."\n";
     echo "modules_".$entry->modulename.".value ".$entry->moduleinstance."\n";
-    $total += $entry->moduleinstance;
 }
-echo "modules_total.value $total\n";
