@@ -32,8 +32,6 @@ $table_prefix = getenv('table_prefix');
 $port = getenv('port');
 if (!$port)
     $port = 3306;
-//$graph_period = getenv('graph_period');
-$graph_period = time() - 5*60;
 
 
 try {
