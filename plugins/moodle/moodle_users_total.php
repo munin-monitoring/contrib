@@ -48,9 +48,9 @@ if (count($argv) === 2 && $argv[1] === 'config') {
     echo "users_active.min 0\n";
     echo "users_active.draw AREA\n";
     echo "users_suspended.min 0\n";
-    echo "users_suspended.draw AREA\n";
+    echo "users_suspended.draw STACK\n";
     echo "users_deleted.min 0\n";
-    echo "users_deleted.draw AREA\n";
+    echo "users_deleted.draw STACK\n";
     exit(0);
 }
 
