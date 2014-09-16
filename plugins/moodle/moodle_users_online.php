@@ -58,7 +58,7 @@ try {
 
 //Online users
 $nbusers = 0;
-if (($stmt = $dbh->query("SELECT count(id) AS users FROM {$table_prefix}user WHERE lastaccess > $graph_period")) != false) {
+if (($stmt = $dbh->query("SELECT count(id) FROM {$table_prefix}user WHERE lastaccess > $graph_period")) != false) {
     $nbusers = $stmt->fetchColumn();
 }
 echo "users_online.value $nbusers\n";
