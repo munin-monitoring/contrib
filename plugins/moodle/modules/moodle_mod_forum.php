@@ -45,9 +45,9 @@ if (count($argv) === 2 && $argv[1] === 'config') {
     echo "forum_posts.label posts\n";
     echo "forum_posts.min 0\n";
     echo "forum_posts.draw AREA\n";
-    echo "forum_discussion.draw STACK\n";
-    echo "forum_discussion.min 0\n";
-    echo "forum_discussion.label discussions\n";
+    echo "forum_discussions.draw STACK\n";
+    echo "forum_discussions.min 0\n";
+    echo "forum_discussions.label discussions\n";
     exit(0);
 }
 
