@@ -60,7 +60,7 @@ try {
 }
 
 $nb = 0;
-if (($stmt = $dbh->query("SELECT count(id) FROM {$table_prefix}forum_posts WHERE timemodified > $graph_period")) != false) {
+if (($stmt = $dbh->query("SELECT count(id) FROM {$table_prefix}forum_posts WHERE modified > $graph_period")) != false) {
     $nb = $stmt->fetchColumn();
 }
 echo "forum_posts.value $nb\n";
