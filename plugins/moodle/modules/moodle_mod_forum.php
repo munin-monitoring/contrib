@@ -45,9 +45,6 @@ if (count($argv) === 2 && $argv[1] === 'config') {
     echo "forum_posts.label posts\n";
     echo "forum_posts.min 0\n";
     echo "forum_posts.draw AREA\n";
-    echo "forum_discussions.draw STACK\n";
-    echo "forum_discussions.min 0\n";
-    echo "forum_discussions.label discussions\n";
     exit(0);
 }
 
@@ -64,9 +61,3 @@ if (($stmt = $dbh->query("SELECT count(id) FROM {$table_prefix}forum_posts WHERE
     $nb = $stmt->fetchColumn();
 }
 echo "forum_posts.value $nb\n";
-
-$nb = 0;
-if (($stmt = $dbh->query("SELECT count(id) FROM {$table_prefix}forum_discussions WHERE timemodified > $graph_period")) != false) {
-    $nb = $stmt->fetchColumn();
-}
-echo "forum_discussions.value $nb\n";
