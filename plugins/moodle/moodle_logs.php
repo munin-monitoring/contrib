@@ -43,6 +43,7 @@ if (count($argv) === 2 && $argv[1] === 'config') {
     echo "graph_info Displays the number of new logs written\n";
     echo "logs.label logs\n";
     echo "logs.min 0\n";
+    echo "logs.draw AREA";
     exit(0);
 }
 
