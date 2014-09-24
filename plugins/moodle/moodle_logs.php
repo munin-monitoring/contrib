@@ -1,8 +1,8 @@
 #!/usr/bin/php
 <?php
 /**
- * Moodle module forum
- * Munin plugin to count new posts on forums
+ * Moodle Logs
+ * Munin plugin to count logs entries
  *
  * It's required to define a container entry for this plugin in your
  * /etc/munin/plugin-conf.d/munin-node (or a separate and dedicated file).
@@ -34,17 +34,16 @@ if (!$port)
 //$graph_period = getenv('graph_period');
 $graph_period = time() - 5*60;
 
-
 if (count($argv) === 2 && $argv[1] === 'config') {
-    echo "graph_title Moodle Forum Posts\n";
+    echo "graph_title Moodle Logs\n";
     echo "graph_args --base 1000 --lower-limit 0\n";
-    echo "graph_vlabel number\n";
+    echo "graph_vlabel logs\n";
     echo "graph_category Moodle\n";
     echo "graph_scale no\n";
-    echo "graph_info Displays the sum of new forums posts / discussions in your Moodle site\n";
-    echo "forum_posts.label posts\n";
-    echo "forum_posts.min 0\n";
-    echo "forum_posts.draw AREA\n";
+    echo "graph_info Displays the number of new logs written\n";
+    echo "logs.label logs\n";
+    echo "logs.min 0\n";
+    echo "logs.draw AREA";
     exit(0);
 }
 
@@ -56,8 +55,9 @@ try {
     exit(1);
 }
 
+//Online users
 $nb = 0;
-if (($stmt = $dbh->query("SELECT count(id) FROM {$table_prefix}forum_posts WHERE modified > $graph_period")) != false) {
-    $nb = $stmt->fetchColumn();
+if (($stmt = $dbh->query("SELECT count(id) FROM {$table_prefix}log WHERE time > $graph_period")) != false) {
+    $nbusers = $stmt->fetchColumn();
 }
-echo "forum_posts.value $nb\n";
+echo "logs.value $nb\n";
