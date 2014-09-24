@@ -8,6 +8,7 @@
 #       autoconf (optional)
 #
 #  Made by Sven Hartge (sven AT svenhartge DOT de)
+#  change to iproute by Martin89 (martin AT martin89 DOT de)
 #
 #
 
@@ -15,41 +16,52 @@
 #%# family=contrib
 #%# capabilities=autoconf suggest
 
-INTERFACE=$(basename $0 | sed 's/^arp_//g' | tr '_' '.')
+case "$1" in
+	autoconf)
+		# Search for ip
+		which ip >/dev/null 2>&1
+		if [ $? -ne 0 ]; then
+			echo "no (can't find ip binary)"
+			exit 1
+		fi
+		# ...or success
+		echo 'yes'
+		exit 0
+	;;
+	suggest)
+		if [ ! -r /proc/net/dev ]; then
+			exit 1
+		fi
+		awk '$1~ /^(eth|wlan|ath|ra)[0-9]+(\.[0-9]+)?/ { gsub(":", ""); gsub("\.", "_"); print $1 }' /proc/net/dev
+		exit 0
+	;;
+	config)
+		INTERFACE="$(basename $0 | sed 's/^arp_//g' | tr '_' '.')"
+		if [ -z "$INTERFACE" ]; then
+			exit 1
+		fi
+		echo "graph_title ARP/NDP entries for $INTERFACE"
+		cat <<'EOM'
+graph_args --base 1000 -l 0
+graph_vlabel Entries
+graph_category network
+graph_scale no
+graph_info This graph shows the number of ARP and NDP entries for a interface.
+entries4.label ARP entries
+entries4.info Number of ARP entries
+entries6global.label NDP global entries
+entries6global.info Number of NDP entries for global IPv6 address
+entries6local.label NDP local entries
+entries6local.info Number of NDP entries for link-local IPv6 address (fe80::/64)
+EOM
+		exit 0
+	;;
+esac
 
-if [ "$1" = "autoconf" ]; then
-    # Search for arp
-    which arp >/dev/null 2>/dev/null || (echo "no (can't find arp binary)" && exit 1)
-
-    # ...or success
-    echo yes
-    exit 0
+INTERFACE="$(basename $0 | sed 's/^arp_//g' | tr '_' '.')"
+if [ -z "$INTERFACE" ]; then
+	exit 1
 fi
-
-if [ "$1" = "suggest" ]; then
-    if [ -r /proc/net/dev ]; then
-        awk '$1~ /^(eth|wlan|ath|ra)[0-9]+(\.[0-9]+)?/ { gsub(":", ""); gsub("\.", "_"); print $1 }' /proc/net/dev
-        exit 0
-    else
-        exit 1
-    fi
-fi
-
-
-
-if [ "$1" = "config" ]; then
-    echo "graph_title ARP entries for $INTERFACE"
-    echo 'graph_args --base 1000 -l 0'
-    echo 'graph_vlabel Entries'
-    echo 'graph_category network'
-    echo 'graph_scale no'
-    echo "graph_info This graph shows the number of ARP entries registered by the system for interface ${INTERFACE}."
-    echo 'entries.label ARP entries'
-    echo 'entries.draw LINE2'
-    echo 'entries.type GAUGE'
-    echo 'entries.info Number of ARP entries'
-    exit 0
-fi
-
-arp -an -i "$INTERFACE" | awk 'BEGIN { regex="<incomplete>";} { if (!match($4,regex)) { a[$4] }} END{for(i in a){n++};print "entries.value " n}'
-
+ip neigh show dev "$INTERFACE" | awk 'BEGIN { a=0; b=0; c=0 }
+/(REACHABLE|DELAY|STALE)/ { if ($1~ /^fe80:/){c++} else{if ($1~ /^[0-9]+\./) {a++} else{b++} } }
+END { print "entries4.value", a "\nentries6global.value", b, "\nentries6local.value", c }'
