@@ -1,0 +1,97 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+
+=head1 NAME
+
+cfengine.promises - Plugin to monitor promises repaired
+
+To try it :
+  munin-run cf_promises --debug
+
+=head1 NOTES
+
+
+=head1 AUTHOR
+
+Created by Didier 
+v 1.0 24 dec 2012
+v 1.1 11 sep 2014 (cfe 3.6)
+
+
+=head1 LICENSE
+
+# Copyleft, no copyright, use at your own risks
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
+# If you improve this script please send your version to my email address
+# with the copyright notice upgrade with your name.
+
+
+=head1 MAGIC MARKERS
+
+ #%# family=cfengine
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+if [ "$1" = "autoconf" ]; then
+	echo yes 
+	exit 0
+fi
+
+LOG="/var/cfengine/promise_summary.log"
+
+STR=$(tail -n1 ${LOG} | perl -ne 'print "$1 $2 $3" if /Promises observed to be kept ([\d\.]+)%.*Promises repaired ([\d\.]+)%.*Promises not repaired ([\d\.]+)%/')
+
+PObKept=$(echo $STR | awk '{print $1}')
+PRepaired=$(echo $STR | awk '{print $2}')
+PNRepaired=$(echo $STR | awk '{print $3}')
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title cfengine promises module'
+	echo 'graph_vlabel percentage of promises kept / repaired / not repaired'
+	echo 'graph_category cfengine'
+	echo 'graph_args --base 1000 -l 0'
+
+	echo 'cfengine_Promises_kept.draw LINE2'
+	echo 'cfengine_Promises_repaired.draw LINE2'
+	echo 'cfengine_Promises_not_repaired.draw LINE2'
+
+	echo 'cfengine_Promises_kept.colour 0000FF'
+	echo 'cfengine_Promises_repaired.colour 00FF00'
+	echo 'cfengine_Promises_not_repaired.colour FF0000'
+
+	echo 'cfengine_Promises_kept.label Promises kept'
+	echo 'cfengine_Promises_repaired.label Promises repaired'
+	echo 'cfengine_Promises_not_repaired.label Promises not repaired'
+
+	for field in cfengine_Promises_kept cfengine_Promises_repaired cfengine_Promises_not_repaired; do
+			print_warning "$field"
+			print_critical "$field"
+	done
+
+	exit 0
+fi
+echo "cfengine_Promises_kept.value $PObKept"
+echo "cfengine_Promises_repaired.value $PRepaired"
+echo "cfengine_Promises_not_repaired.value $PNRepaired"
+
+# vim:syntax=bash
