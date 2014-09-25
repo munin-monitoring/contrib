@@ -1,0 +1,47 @@
+#!/usr/bin/perl
+#
+#  Author: Igor T. <tsiganenok@gmail.com>
+#
+
+use strict;
+use warnings;
+
+use LWP::UserAgent;
+use JSON;
+
+my $username    = $ENV{user};
+my $password    = $ENV{pass}; 
+my $host        = exists $ENV{host} ? $ENV{host} : '127.0.0.1';
+my $port        = exists $ENV{port} ? $ENV{port} : '12900';
+my $metric      = $ENV{metric};
+my $label       = $ENV{label};
+
+my %results = %{retrieve_metric()};
+
+if($ARGV[0]){
+  if($ARGV[0] eq 'config') {
+    my $metr = (split('_', __FILE__))[-1];
+    print "graph_args --base 1024\n";
+    print "graph_title $metr \n";
+    print "graph_category Graylog2\n";
+    print "graph_vlabel $label\n";
+
+    foreach my $name (keys %results) {
+      print "$name.label $name\n"."$name.type GAUGE\n";
+    }
+  }
+}
+
+if(!$ARGV[0] || $ARGV[0] eq 'autoconf') {
+    foreach my $name (keys %results) {
+        print "$name.value " . $results{$name} . "\n";
+    }
+}
+
+sub retrieve_metric {
+  my $browser = LWP::UserAgent->new;
+  my $req     =  HTTP::Request->new( GET => "http://$host:$port/$metric");
+     $req->authorization_basic( "$username", "$password" );
+  my $page = $browser->request( $req );
+  return decode_json($page->content);
+}
