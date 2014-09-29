@@ -13,8 +13,11 @@
 #%# family=auto
 #%# capabilities=autoconf
 
+host=${squidhost:-localhost}
+port=${squidport:-3128}
+
 if [ "$1" = "autoconf" ]; then
-	SQUID_STATS=`printf "GET cache_object://localhost/info HTTP/1.0\n\n" | netcat localhost 3128`
+	SQUID_STATS=`printf "GET cache_object://$host/info HTTP/1.0\n\n" | netcat $host $port`
 	if [ -n "${SQUID_STATS}" ]; then
 		echo yes 
 		exit 0
@@ -42,7 +45,7 @@ if [ "$1" = "config" ]; then
 	exit 0
 fi 
 
-SQUID_TIME=$(printf "GET cache_object://localhost/info HTTP/1.0\n\n" | nc localhost 3128)
+SQUID_TIME=$(printf "GET cache_object://$host/info HTTP/1.0\n\n" | nc $host $port)
 
 SQUID_TIME_HTTP=$(echo "$SQUID_TIME" | grep "HTTP Requests (All)" | cut -d':' -f2 | sed -e "s/^\ *//" | cut -d' ' -f1)
 SQUID_TIME_CACHE_MISSES=$(echo "$SQUID_TIME" | grep "Cache Misses" | cut -d':' -f2 | sed -e "s/^\ *//" | cut -d' ' -f1)
@@ -59,3 +62,4 @@ echo "mean_nhits.value $SQUID_TIME_NEAR_HITS"
 echo "mean_nmr.value $SQUID_TIME_NM_REPLIES"
 echo "mean_dnsl.value $SQUID_TIME_DNS_LOOKUPS"
 echo "mean_icpq.value $SQUID_TIME_ICP_QUERIES"
+
