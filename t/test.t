@@ -56,7 +56,7 @@ sub process_file {
         ok( check_file_with( [ 'ksh', '-n', $file ] ),
             $filename . " ksh syntax check" );
     }
-    elsif ( $interpreter =~ m{/bin/bash} ) {
+    elsif ( $interpreter =~ m{bash} ) {
         ok( check_file_with( [ 'bash', '-n', $file ] ),
             $filename . " bash syntax check" );
     }
