@@ -47,69 +47,117 @@ sub process_file {
     if ( $interpreter =~ m{/bin/sh} ) {
         subtest $filename => sub {
             plan tests => 2;
-            ok( check_file_with( [ 'sh', '-n', $file ] ), "sh syntax check" );
-            ok( check_file_with( [ 'checkbashisms', $file ] ),
-                "checkbashisms" );
+            run_check(
+                {   command     => [ 'sh', '-n', $file ],
+                    description => 'sh syntax check'
+                }
+            );
+            run_check(
+                {   command     => [ 'checkbashisms', $file ],
+                    description => 'checkbashisms'
+                }
+            );
         };
     }
     elsif ( $interpreter =~ m{/bin/ksh} ) {
-        ok( check_file_with( [ 'ksh', '-n', $file ] ),
-            $filename . " ksh syntax check" );
-    }
-    elsif ( $interpreter =~ m{bash} ) {
-        ok( check_file_with( [ 'bash', '-n', $file ] ),
-            $filename . " bash syntax check" );
-    }
-    elsif ( $interpreter =~ m{perl} ) {
-        ok( check_file_with( [ 'perl', '-cw', $file ] ),
-            $filename . " perl syntax check" );
-    }
-    elsif ( $interpreter =~ m{python} ) {
-        ok( check_file_with(
-                [   'pylint',        '--rcfile=/dev/null',
-                    '--errors-only', '--report=no',
-                    $file
-                ]
-            ),
-            $filename . " python syntax check"
+        run_check(
+            {   command     => [ 'ksh', '-n', $file ],
+                description => 'ksh syntax check',
+                filename    => $filename
+            }
         );
     }
+    elsif ( $interpreter =~ m{bash} ) {
+        run_check(
+            {   command     => [ 'bash', '-n', $file ],
+                description => 'bash syntax check',
+                filename    => $filename
+            }
+        );
+    }
+    elsif ( $interpreter =~ m{perl} ) {
+        run_check(
+            {   command     => [ 'perl', '-cw', $file ],
+                description => 'perl syntax check',
+                filename    => $filename
+            }
+        );
+    }
+    elsif ( $interpreter =~ m{python} ) {
+    SKIP: {
+            skip 'need better syntax check for python', 1;
+            run_check(
+                {   command => [
+                        'pylint',        '--rcfile=/dev/null',
+                        '--errors-only', '--report=no',
+                        $file
+                    ],
+                    description => 'python syntax check',
+                    filename    => $filename
+                }
+            );
+        }
+    }
     elsif ( $interpreter =~ m{php} ) {
-        ok( check_file_with( [ 'php', '-l', $file ] ),
-            $filename . " php syntax check" );
+        run_check(
+            {   command     => [ 'php', '-l', $file ],
+                description => 'php syntax check',
+                filename    => $filename
+            }
+        );
     }
     elsif ( $interpreter =~ m{j?ruby} ) {
-        ok( check_file_with( [ 'ruby', '-cw', $file ] ),
-            $filename . " ruby syntax check" );
+        run_check(
+            {   command     => [ 'ruby', '-cw', $file ],
+                description => 'ruby syntax check',
+                filename    => $filename
+            }
+        );
     }
     elsif ( $interpreter =~ m{gawk} ) {
-        ok( check_file_with(
-                [   'gawk', '--source', 'BEGIN { exit(0) } END { exit(0) }',
+        run_check(
+            {   command => [
+                    'gawk', '--source', 'BEGIN { exit(0) } END { exit(0) }',
                     '--file', $file
-                ]
-            ),
-            $filename . " gawk syntax check"
+                ],
+                description => 'gawk syntax check',
+                filename    => $filename
+            }
         );
     }
     elsif ( $interpreter =~ m{expect} ) {
-        pass(
-            "No idea how to check expect scripts, pretending everything is ok"
-        );
+    SKIP: {
+            skip 'no idea how to check expect scripts', 1;
+            pass("No pretending everything is ok");
+        }
     }
     else {
         fail( $filename . " unknown interpreter " . $interpreter );
     }
 }
 
-sub check_file_with {
-    my ($check_command) = @_;
+sub run_check {
+    my ($args)        = @_;
+    my $check_command = $args->{command};
+    my $description   = $args->{description};
+    my $filename      = $args->{filename};
+
+    my $message;
+
+    if ($filename) {
+        $message = sprintf( '%s: %s', $filename, $description );
+    }
+    else {
+        $message = $description;
+    }
+
     my ( $stdout, $stderr, $exit ) = capture {
         system( @{$check_command} );
     };
-    if ( $exit == 0 ) {
-        return 1;
-    }
-    else {
+
+    ok( ( $exit == 0 ), $message );
+
+    if ($exit) {
         diag(
             sprintf(
                 "\nCommand: %s\n\nSTDOUT:\n\n%s\n\nSTDERR:\n\n%s\n\n",
@@ -117,7 +165,6 @@ sub check_file_with {
                 $stdout, $stderr
             )
         );
-        return;
     }
 }
 
