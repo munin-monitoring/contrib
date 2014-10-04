@@ -14,13 +14,14 @@ use vars qw/*name *dir *prune/;
 my $num_plugins = 0;
 
 sub wanted {
-    my ( $dev, $ino, $mode, $nlink, $uid, $gid, $interpreter );
+    my ( $dev, $ino, $mode, $nlink, $uid, $gid, $interpreter, $arguments );
 
     ( ( $dev, $ino, $mode, $nlink, $uid, $gid ) = lstat($_) )
         && -f _
-        && ( $interpreter = hashbang("$_") )
+        && ( ( $interpreter, $arguments ) = hashbang("$_") )
+        && ($interpreter)
         && ++$num_plugins
-        && process_file( $_, $name, $interpreter );
+        && process_file( $_, $name, $interpreter, $arguments );
 }
 
 File::Find::find( { wanted => \&wanted }, 'plugins' );
@@ -31,17 +32,20 @@ sub hashbang {
     my $firstline = <$file>;
     close $file;
 
-    $firstline =~ m{ ^\#!                 # hashbang
-                     \s*                  # optional space
-                     (?:/usr/bin/env\s+)? # optional /usr/bin/env
-                     (?<interpreter>\S+)  # interpreter
-               }xm;
+    $firstline =~ m{ ^\#!                    # hashbang
+                     \s*                     # optional space
+                     (?:/usr/bin/env\s+)?    # optional /usr/bin/env
+                     (?<interpreter>\S+)     # interpreter
+                     (?:\s+
+                         (?<arguments>[^\n]*)   # optional interpreter arguments
+                     )?
+               }xms;
 
-    return $+{interpreter};
+    return ($+{interpreter}, $+{arguments});
 }
 
 sub process_file {
-    my ( $file, $filename, $interpreter ) = @_;
+    my ( $file, $filename, $interpreter, $arguments ) = @_;
     use v5.10.1;
 
     if ( $interpreter =~ m{/bin/sh} ) {
@@ -76,8 +80,15 @@ sub process_file {
         );
     }
     elsif ( $interpreter =~ m{perl} ) {
+        my $command;
+        if ($arguments =~ m{-.*T}mx) {
+            $command = [ 'perl', '-cwT', $file ];
+        }
+        else {
+            $command = [ 'perl', '-cw', $file ];
+        }
         run_check(
-            {   command     => [ 'perl', '-cw', $file ],
+            {   command     => $command,
                 description => 'perl syntax check',
                 filename    => $filename
             }
