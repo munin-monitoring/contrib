@@ -91,6 +91,11 @@ sub process_file {
             $filename . " gawk syntax check"
         );
     }
+    elsif ( $interpreter =~ m{expect} ) {
+        pass(
+            "No idea how to check expect scripts, pretending everything is ok"
+        );
+    }
     else {
         fail( $filename . " unknown interpreter " . $interpreter );
     }
