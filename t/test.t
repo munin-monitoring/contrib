@@ -81,7 +81,7 @@ sub process_file {
     }
     elsif ( $interpreter =~ m{gawk} ) {
         ok( check_file_with(
-                [   'gawk', '--source', "'BEGIN { exit(0) } END { exit(0) }'",
+                [   'gawk', '--source', 'BEGIN { exit(0) } END { exit(0) }',
                     '--file', $file
                 ]
             ),
