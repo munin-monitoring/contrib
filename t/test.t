@@ -52,6 +52,10 @@ sub process_file {
                 "checkbashisms" );
         };
     }
+    elsif ( $interpreter =~ m{/bin/ksh} ) {
+        ok( check_file_with( [ 'ksh', '-n', $file ] ),
+            $filename . " ksh syntax check" );
+    }
     elsif ( $interpreter =~ m{/bin/bash} ) {
         ok( check_file_with( [ 'bash', '-n', $file ] ),
             $filename . " bash syntax check" );
@@ -62,7 +66,7 @@ sub process_file {
     }
     elsif ( $interpreter =~ m{python} ) {
         ok( check_file_with(
-                [ 'pylint', '--errors-only', '--report=no', $file ]
+                [ 'pylint', '--rcfile=/dev/null', '--errors-only', '--report=no', $file ]
             ),
             $filename . " python syntax check"
         );
@@ -98,8 +102,7 @@ sub check_file_with {
         return 1;
     }
     else {
-        diag($stdout);
-        diag($stderr);
+        diag(sprintf("\nCommand: %s\n\nSTDOUT:\n\n%s\n\nSTDERR:\n\n%s\n\n", join(" ", @{$check_command}), $stdout, $stderr));
         return;
     }
 }
