@@ -66,7 +66,10 @@ sub process_file {
     }
     elsif ( $interpreter =~ m{python} ) {
         ok( check_file_with(
-                [ 'pylint', '--rcfile=/dev/null', '--errors-only', '--report=no', $file ]
+                [   'pylint',        '--rcfile=/dev/null',
+                    '--errors-only', '--report=no',
+                    $file
+                ]
             ),
             $filename . " python syntax check"
         );
@@ -81,7 +84,7 @@ sub process_file {
     }
     elsif ( $interpreter =~ m{gawk} ) {
         ok( check_file_with(
-                [   'gawk', '--source', "'BEGIN { exit(0) } END { exit(0) }'",
+                [   'gawk', '--source', 'BEGIN { exit(0) } END { exit(0) }',
                     '--file', $file
                 ]
             ),
@@ -102,7 +105,13 @@ sub check_file_with {
         return 1;
     }
     else {
-        diag(sprintf("\nCommand: %s\n\nSTDOUT:\n\n%s\n\nSTDERR:\n\n%s\n\n", join(" ", @{$check_command}), $stdout, $stderr));
+        diag(
+            sprintf(
+                "\nCommand: %s\n\nSTDOUT:\n\n%s\n\nSTDERR:\n\n%s\n\n",
+                join( " ", @{$check_command} ),
+                $stdout, $stderr
+            )
+        );
         return;
     }
 }
