@@ -95,19 +95,12 @@ sub process_file {
         );
     }
     elsif ( $interpreter =~ m{python} ) {
-    SKIP: {
-            skip 'need better syntax check for python', 1;
-            run_check(
-                {   command => [
-                        'pylint',        '--rcfile=/dev/null',
-                        '--errors-only', '--report=no',
-                        $file
-                    ],
-                    description => 'python syntax check',
-                    filename    => $filename
-                }
-            );
-        }
+        run_check(
+            {   command     => [ 'python', '-m', 'py_compile', $file ],
+                description => 'python compile',
+                filename    => $filename
+            }
+        );
     }
     elsif ( $interpreter =~ m{php} ) {
         run_check(
