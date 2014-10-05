@@ -1,0 +1,79 @@
+#!/bin/bash
+#
+: <<=cut
+
+=head1 NAME
+
+hs_write - Plugin to monitor HandlerSocket write port usage.
+
+=head1 APPLICABLE SYSTEMS
+
+All Linux systems
+
+=head1 CONFIGURATION
+
+The following is default configuration
+
+  [hs_read_connections]
+	env.mysql_host      localhost
+	env.mysql_port	    3306
+	env.mysql_user      root
+	env.mysql_password  pass
+
+=head1 AUTHOR
+
+Konstantin Kuklin <konstantin.kuklin@gmail.com>
+
+=head1 LICENSE
+
+MIT
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+if [ "$1" = "autoconf" ]; then
+    echo no
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+    echo 'graph_title HS Write port connections'
+    echo "graph_args --base 1000 -l 0"
+    echo 'graph_category mysql'
+    echo 'total.label Total'
+    echo 'total.draw AREA'
+    echo 'total.min 0'
+    echo 'active.label Active'
+    echo 'active.draw LINE2'
+    echo 'active.min 0'
+    exit 0
+fi
+
+# query
+command='mysql';
+
+if [[ ! -z $mysql_host ]]; then
+    command="$command -h $mysql_host"
+fi
+
+if [[ ! -z $mysql_user ]]; then
+    command="$command -u $mysql_user"
+else
+    command="$command -u root"
+fi
+
+if [[ ! -z $mysql_password ]]; then
+    command="$command -p$mysql_password"
+fi
+
+if [[ ! -z $mysql_port ]]; then
+    command="$command -P $mysql_port"
+fi
+
+totalConnections=$(echo 'show processlist;' | $command | awk ' /'mode=wr'/ {x += $11}; END {print x}')
+totalActiveConnections=$(echo 'show processlist;' | $command | awk ' /'mode=wr'/ {x += $13}; END {print x}')
+
+echo "total.value $totalConnections";
+echo "active.value $totalActiveConnections";
