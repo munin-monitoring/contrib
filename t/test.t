@@ -41,7 +41,7 @@ sub hashbang {
                      )?
                }xms;
 
-    return ($+{interpreter}, $+{arguments});
+    return ( $+{interpreter}, $+{arguments} );
 }
 
 sub process_file {
@@ -81,7 +81,7 @@ sub process_file {
     }
     elsif ( $interpreter =~ m{perl} ) {
         my $command;
-        if ($arguments =~ m{-.*T}mx) {
+        if ( $arguments =~ m{-.*T}mx ) {
             $command = [ 'perl', '-cwT', $file ];
         }
         else {
