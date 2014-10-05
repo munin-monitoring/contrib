@@ -56,3 +56,7 @@ In all cases the code shall have an OSI-compatible license. Asking for a pull im
 This change was made on Jun 1st 2012. If you wrote some code earlier and you do not agree to the new licensing default, you can  :
 - submit a licensing change pull
 - submit a removal pull 
+
+# Building status
+
+master: [![Build Status](https://travis-ci.org/munin-monitoring/contrib.svg?branch=master)](https://travis-ci.org/munin-monitoring/contrib)
