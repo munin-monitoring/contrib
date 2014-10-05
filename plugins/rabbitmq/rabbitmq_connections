@@ -1,37 +1,63 @@
 #!/bin/sh
-# 
-# Plugin to monitor the number of connections to RabbitMQ
-#
-# Usage: Link or copy into /etc/munin/node.d/
-#
-# Parameters
-#     env.conn_warn <warning connections>
-#     env.conn_crit <critical connections>
-#
-# Magic markers (optional - only used by munin-config and some
-# installation scripts):
-#
-#%# family=auto
-#%# capabilities=autoconf
 
-# If run with the "autoconf"-parameter, give our opinion on wether we
-# should be run on this system or not. This is optinal, and only used by
-# munin-config. In the case of this plugin, we should most probably
-# always be included.
+: << =cut
 
-if [ "$1" = "autoconf" ]; then
-	echo yes
-	exit 0
-fi
+=head1 NAME
 
-HOME=/tmp/
+rabbitmq_connections - monitor the number of connections to RabbitMQ
+
+=head1 CONFIGURATION
+
+You will need to add configuration to
+/etc/munin/plugin-conf.d/rabbitmq_connection.conf for this plugin to
+work.
+
+=over 2
+
+=item C<user>
+
+Required. Valid choices are C<rabbitmq> and C<root>. This is required
+by C<rabbitmqctl>.
+
+=item C<env.conn_warn>
+
+Optional, default value is 500
+
+=item C<env.conn_crit>
+
+Optional, default value is 1000
+
+=back
+
+=head2 EXAMPLE CONFIGURATION
+
+  [rabbitmq_connections]
+    user rabbitmq
+    env.conn_warn 512
+    env.conn_crit 1024
+
+=head1 MAGIC MARKERS
+
+  #%# family=contrib
+
+=cut
+
+case $(whoami) in
+    rabbitmq|root)
+        ;;
+    *)
+        echo 'Error: Plugin requires "user" to be set in plugin configuration.' >&2
+        echo 'See "munindoc rabbitmq_connections" for more information'  >&2
+        exit 1
+        ;;
+esac
 
 # If run with the "config"-parameter, give out information on how the
 # graphs should look. 
 
 if [ "$1" = "config" ]; then
-        CONN_WARN=${queue_warn:-500}
-        CONN_CRIT=${queue_crit:-1000}
+        CONN_WARN=${conn_warn:-500}
+        CONN_CRIT=${conn_crit:-1000}
 
 	# The host name this plugin is for. (Can be overridden to have
 	# one machine answer for several)
@@ -63,4 +89,11 @@ fi
 # real work - i.e. display the data. Almost always this will be
 # "value" subfield for every data field.
 
-echo "connections.value $(HOME=$HOME rabbitmqctl list_connections | grep -v "^Listing" | grep -v "done.$" | wc -l)"
+if hash rabbitmqctl >/dev/null 2>&1; then
+    connections=$(HOME=/tmp rabbitmqctl list_connections state | grep -c running)
+else
+    echo "$0: Could not run rabbitmqctl" >&2
+    connections=U
+fi
+
+printf "connections.value %s\n" "$connections"

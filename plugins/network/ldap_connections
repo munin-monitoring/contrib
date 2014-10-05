@@ -55,6 +55,7 @@ NETSTAT=${netstat:-`which netstat`}
 NETSTAT=${NETSTAT:-/usr/bin/netstat}
 PORTS=${ports:-389 636}
 TEMP_FILE=$(mktemp /tmp/munin_ldap.XXXXXX)
+trap "rm -f ${TEMP_FILE}" EXIT
 PATH=/bin:/usr/bin:/usr/local/bin
 SOCKET=${socket:-/var/run/openldap/ldapi}
 
@@ -96,7 +97,7 @@ if [ "$1" = "autoconf" ]; then
   for port in $PORTS; do
     ONE_LISTENING=${ONE_LISTENING}$(find_ips_bound $port)
   done
-  rm -f $TEMP_FILE
+
   if [ -n "$ONE_LISTENING" ]; then
   	echo yes
   	exit 0
@@ -121,17 +122,26 @@ if [ "$1" = "config" ]; then
       echo "socket.label ldapi"
     fi
   fi
-  rm -f $TEMP_FILE
+
   exit 0
 fi
 
 for port in $LISTENING_PORTS; do
   for ip in $(find_ips_bound $port); do
-    echo "$(echo $ip | sed 's/\./_/g')_${port}.value $(grep "^tcp[46]\{0,1\}\([[:space:]]\{1,\}[[:digit:]]\{1,\}\)\{2\}[[:space:]]\{1,\}$ip[\.:]$port[[:space:]].*ESTABLISHED$" $TEMP_FILE | wc -l | sed 's/[[:space:]]*//g')"
+
+    label=$(printf "%s_%d" "$(echo $ip | tr ':.' '_')" "$port")
+    connections=$(
+      awk -v ip_port="${ip}:${port}" \
+        'BEGIN { counter=0 }
+         $1 ~ /tcp[46]?/ && $4 == ip_port && $6 == "ESTABLISHED" { counter++ }
+         END { print counter }' \
+        $TEMP_FILE
+    )
+
+    printf "%s.value %d\n" "$label" "$connections"
   done
 done
 if [ -e "$SOCKET" ]; then
   echo "socket.value $($NETSTAT -an ${FAMILYMARK}unix | grep $SOCKET | wc -l | sed 's/[[:space:]]*//g')"
 fi
 
-rm -f $TEMP_FILE
