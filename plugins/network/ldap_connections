@@ -128,7 +128,17 @@ fi
 
 for port in $LISTENING_PORTS; do
   for ip in $(find_ips_bound $port); do
-    echo "$(echo $ip | sed 's/\./_/g')_${port}.value $(grep "^tcp[46]\{0,1\}\([[:space:]]\{1,\}[[:digit:]]\{1,\}\)\{2\}[[:space:]]\{1,\}$ip[\.:]$port[[:space:]].*ESTABLISHED$" $TEMP_FILE | wc -l | sed 's/[[:space:]]*//g')"
+
+    label=$(printf "%s_%d" "$(echo $ip | tr ':.' '_')" "$port")
+    connections=$(
+      awk -v ip_port="${ip}:${port}" \
+        'BEGIN { counter=0 }
+         $1 ~ /tcp[46]?/ && $4 == ip_port && $6 == "ESTABLISHED" { counter++ }
+         END { print counter }' \
+        $TEMP_FILE
+    )
+
+    printf "%s.value %d\n" "$label" "$connections"
   done
 done
 if [ -e "$SOCKET" ]; then
