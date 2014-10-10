@@ -22,6 +22,7 @@ This plugin needs root privilege.
 =head1 AUTHOR
 
 vajtsz  vajtsz@gmail.com
+alpha_one_x86   alpha_one_x86@firt-world.info
 
 =head1 LICENSE
 
@@ -41,6 +42,7 @@ Unknown license
 # Ubuntu 12.04 with fstab: /sys/fs/cgroup/lxc/<container>/tasks
 # Ubuntu 12.04 with cgroup-lite: /sys/fs/cgroup/cpuacct/lxc/<container>/tasks
 # Ubuntu 12.04 with cgroup-bin: /sys/fs/cgroup/cpuacct/sysdefault/lxc/<container>/tasks
+# Ubuntu 14.04: /sys/fs/cgroup/systemd/lxc/<container>/tasks
 count_processes () {
     [ -z "$1" ] && return 0
     
@@ -54,6 +56,7 @@ count_processes () {
     for SYSFS in \
         /sys/fs/cgroup/$1/tasks \
         /sys/fs/cgroup/lxc/$1/tasks \
+        /sys/fs/cgroup/systemd/lxc/$1/tasks \
         /sys/fs/cgroup/cpuacct/lxc/$1/tasks \
         /sys/fs/cgroup/cpuacct/sysdefault/lxc/$1/tasks \
     ; do
@@ -68,7 +71,7 @@ count_processes () {
 
 guest_names=`lxc-ls | sort -u`
 for guest in $guest_names; do
- if lxc-info -n $guest 2>&1 | grep -qs RUNNING ; then
+ if [ `lxc-info -n $guest 2>&1 | grep RUNNING | wc -l` -ne 0 ] ; then
   active="$active $guest"
  fi
 done
@@ -90,7 +93,7 @@ fi
 
 if [ "$1" = "config" ]; then
 
- echo 'graph_title Processes '
+ echo 'graph_title Processes thread '
  echo 'graph_args -l 0 --base 1000'
  echo 'graph_vlabel Number of processes'
  echo 'graph_category lxc'
