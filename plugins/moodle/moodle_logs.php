@@ -5,7 +5,7 @@
  * Munin plugin to count logs entries
  *
  * It's required to define a container entry for this plugin in your
- * /etc/munin/plugin-conf.d/munin-node (or a separate and dedicated file).
+ * /etc/munin/plugin-conf.d/moodle.conf
  *
  * @example Example entry for configuration:
  * [moodle*]
