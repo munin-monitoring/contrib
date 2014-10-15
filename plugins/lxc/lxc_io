@@ -30,8 +30,7 @@ then you have to fill it, becouse if every guest restart generate new device nam
 
 =head1 AUTHOR
 
-mitty   mitty@mitty.jp
-alpha_one_x86   alpha_one_x86@firt-world.info
+alpha_one_x86   alpha_one_x86@first-world.info
 
 =head1 LICENSE
 
@@ -72,28 +71,19 @@ fi
 actives=""
 
 if [ "$1" = "config" ]; then
-    echo "graph_title Network traffic"
+    echo "graph_title IO"
     echo "graph_args --base 1000"
-    echo "graph_vlabel bits in (-) / out (+) per ${graph_period}"
+    echo "graph_vlabel bits"
     echo "graph_category lxc"
-    echo "graph_info This graph shows the traffic of active LXC containers."
+    echo "graph_info This graph shows the IO of active LXC containers."
     
     for guestname in $guest_names; do
         guest=$(clean_fieldname $guestname)
-        bps="1000000000"
         
-        echo "${guest}_down.label $guestname"
-        echo "${guest}_down.type DERIVE"
-        echo "${guest}_down.graph no"
-        echo "${guest}_down.cdef ${guest}_down,8,*"
-        echo "${guest}_down.min 0"
-        echo "${guest}_down.max $bps"
-        echo "${guest}_up.label $guestname"
-        echo "${guest}_up.type DERIVE"
-        echo "${guest}_up.negative ${guest}_down"
-        echo "${guest}_up.cdef ${guest}_up,8,*"
-        echo "${guest}_up.min 0"
-        echo "${guest}_up.max $bps"
+        echo "${guest}_io.label $guestname"
+        echo "${guest}_io.type DERIVE"
+        echo "${guest}_io.cdef ${guest}_io,8,*"
+        echo "${guest}_io.min 0"
    done
    exit 0
 fi
@@ -101,8 +91,6 @@ fi
 
 for guest in $guest_names; do
     guestclean=$(clean_fieldname $guest)
-    echo -n "${guestclean}_down.value "
-    lxc-info -H -n ${guest} | grep -F 'RX bytes' | grep -oE "[[:digit:]]{1,}"
-    echo -n "${guestclean}_up.value "
-    lxc-info -H -n ${guest} | grep -F 'TX bytes' | grep -oE "[[:digit:]]{1,}"
+    echo -n "${guestclean}_io.value "
+    lxc-info -H -n ${guest} | grep -F 'BlkIO use' | grep -oE "[[:digit:]]{1,}"
 done
