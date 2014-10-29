@@ -45,9 +45,7 @@ use strict;
 
 my $MYSQLADMIN = $ENV{mysqladmin} || "mysql";
 my $MYSQLOPTS = $ENV{mysqlopts} || "";
-
-my %WANTED = ( "Seconds"  => "seconds", 
-             );
+my $COMMAND = "$MYSQLADMIN $MYSQLOPTS -e 'show slave status\\G' | grep 'Seconds_Behind_Master'";
 
 my $arg = shift();
 
@@ -66,37 +64,12 @@ if ($arg eq 'config') {
 my $seconds = 0;
 my (@infos,$info,$i_seconds);
 
-my $COMMAND = "$MYSQLADMIN $MYSQLOPTS -e 'show slave status;' | grep 'Slave'";
-
-open(SERVICE, "$COMMAND |")
-  or die("Coult not execute '$COMMAND': $!");
-
-while (<SERVICE>) {
-    (@infos)  = split;
+my $info = `$COMMAND`;
+if($info =~ /: (\d+)/) {
+  print("seconds.value $1\n");
+} else {
+  print("seconds.value U\n");
 }
-close(SERVICE);
-
-my $i = 0;
-foreach $info (@infos) {
-    $i++;
-    if ($info eq 'Seconds_Behind_Master') {
-	$i_seconds = $i;
-	next;
-    }
-}
-
-$COMMAND = "$MYSQLADMIN $MYSQLOPTS -e 'show slave status;' | cut -f $i_seconds | grep -v leng";
-
-open(SERVICE, "$COMMAND |")
-  or die("Coult not execute '$COMMAND': $!");
-
-while (<SERVICE>) {
-    (m/(\d+).*?(\d+(?:\.\d+)?)/);
-    $seconds += $1;
-}
-close(SERVICE);
-
-print("seconds.value $seconds\n");
 
 
 sub print_config {
