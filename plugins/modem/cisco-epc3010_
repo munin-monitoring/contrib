@@ -32,6 +32,7 @@ GPLv2
 #
 # HISTORY
 # v1.0   : Initial release
+#  1.0.1 : More secure handling of tempfiles
 #
 ###############################################
 #
@@ -115,7 +116,7 @@ esac
 
 
 # Location and name of tempfile to parse
-FILENAME=/tmp/cisco_epc3010.dump
+FILENAME=$(mktemp /tmp/cisco_epc3010-XXXX.dump) || exit 1
 
 
 # Get statuspage from the modem
@@ -130,7 +131,7 @@ UP_PWR_ARRAY=( 0 $(cat $FILENAME | grep " up_pwr" | awk -F "nowrap>| <script" ' 
 
 
 #
-# Downstream info - Modem outputs both PowerLevels and Signal to Noise Ratio
+# Downstream info - Modem outputs both Power Levels and Signal to Noise Ratio
 #
 
 if [ "$DIRECTION" == "downstream" ]; then
@@ -152,7 +153,7 @@ fi
 
 
 #
-# Upstream info - Modem outputs PowerLevels
+# Upstream info - Modem outputs Power Levels
 #
 
 if [ "$DIRECTION" == "upstream" ]; then
@@ -168,4 +169,6 @@ fi
 #
 # Remove tempory file, used for parsing data
 #
-rm -f $FILENAME
+trap "rm -rf $FILENAME" EXIT
+
+
