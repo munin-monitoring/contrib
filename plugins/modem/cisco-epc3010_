@@ -115,21 +115,17 @@ config)
 esac
 
 
-FILENAME=$(mktemp -q) && {
-  # Safe to use $FILENAME only within this block.  Use quotes,
-  # since $TMPDIR, and thus $FILENAME, may contain whitespace.
+FILENAME=$(mktemp -q) || exit 1
+trap 'rm -f "$FILENAME"' EXIT
 
-  # Get statuspage from the modem
-  curl -s -o $FILENAME http://192.168.100.1/Docsis_system.asp
+# Get statuspage from the modem
+curl -s -o "$FILENAME" http://192.168.100.1/Docsis_system.asp
 
 
-  # Bash arrays starts on index 0, we 0-pad the first index. It makes it easier later on..
-  SNR_ARRAY=( 0 $(awk -F'[<>]' '/ ch_snr/{print $3}' $FILENAME) )
-  PWR_ARRAY=( 0 $(awk -F'[<>]' '/ ch_pwr/{print $3}' $FILENAME) )
-  UP_PWR_ARRAY=( 0 $(awk -F'[<>]' '/ up_pwr/{print $3}' $FILENAME) )
-
-  rm -f "$FILENAME"
-}
+# Bash arrays starts on index 0, we 0-pad the first index. It makes it easier later on..
+SNR_ARRAY=( 0 $(awk -F'[<>]' '/ ch_snr/{print $3}' "$FILENAME") )
+PWR_ARRAY=( 0 $(awk -F'[<>]' '/ ch_pwr/{print $3}' "$FILENAME") )
+UP_PWR_ARRAY=( 0 $(awk -F'[<>]' '/ up_pwr/{print $3}' "$FILENAME") )
 
 
 #
