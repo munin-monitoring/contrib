@@ -54,7 +54,7 @@ if (count($argv) === 2 && $argv[1] === 'config') {
     echo "graph_category Moodle\n";
     echo "graph_scale no\n";
     echo "graph_info Displays the sum of module, as well as module instance number by type, in your Moodle site\n";
-    echo "graph_total.label total\n";
+    echo "graph_total total\n";
     $draw = "AREA";
     foreach($data as $entry) {
         echo "modules_".$entry->modulename.".label ".$entry->modulename."\n";
