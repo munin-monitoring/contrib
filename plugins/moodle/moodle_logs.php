@@ -4,6 +4,9 @@
  * Moodle Logs
  * Munin plugin to count logs entries
  *
+ * Note : This plugin does not support Moodle 2.7 or newer versions
+ * If you want to use this plugin with Moodle 2.7 you have to enable logstore_legacy mode in your Moodle settings
+ *
  * It's required to define a container entry for this plugin in your
  * /etc/munin/plugin-conf.d/moodle.conf
  *
