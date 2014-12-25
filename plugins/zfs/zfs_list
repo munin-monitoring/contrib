@@ -1,0 +1,91 @@
+#!/bin/bash
+#
+# Plugin to monitor ZFS Filesystems
+# Author: Adam Michel (elfurbe@furbism.com)
+# Description:
+#  This is an extension of the zfs_fs plugin
+#  modified as a multigraph to graph all zfs
+#  filesystems it can find
+#
+# Tested on Ubuntu-14.04
+#
+# Parameters understood:
+#
+# 	config   (required)
+# 	autoconf (optional - used by munin-config)
+#
+#%# family=auto
+
+need_multigraph()
+
+if [ "$1" = "autoconf" ]; then
+    # Makes little sense to autoconf if you can't suggest
+    echo no
+    exit 0
+fi
+
+if [ "$1" = "suggest" ]; then
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+	for i in `zfs list -Hp | awk '{print $1}'`; do
+		values=( $(zfs get -p usedbydataset,usedbychildren,usedbysnapshots,usedbyrefreservation,available,quota $i | awk 'BEGIN {total=0;} { if( NR==1 ) next; } !/quota/ {total=total+$3;} {print $3} END{print total;}') )
+		fsname=`echo $i | sed 's/\//__/g'`
+
+		echo <<EOF "multigraph zfs_list_$fsname
+graph_title $fsname usage
+graph_order usedbydataset usedbychildren usedbysnapshots usedbyrefreservation available total quota
+graph_args --base 1024 -r -l 0 --vertical-label Bytes --upper-limit ${values[6]}
+graph_info This graph shows how is used a zfs filesystems.
+graph_category filesystem
+graph_period second
+usedbydataset.label UsedByDataset
+usedbydataset.draw AREA
+usedbydataset.info Used space by Dataset
+usedbydataset.colour FF0000
+usedbychildren.label UsedByChildren
+usedbychildren.draw STACK
+usedbychildren.info Used space by children
+usedbychildren.colour FFCC33
+usedbysnapshots.label UsedBySnapshots
+usedbysnapshots.draw STACK
+usedbysnapshots.info Used space by snapshot
+usedbysnapshots.colour 0000FF
+usedbyrefreservation.label Usedbyrefreservation
+usedbyrefreservation.draw STACK
+usedbyrefreservation.info Used space by Ref Reservation
+usedbyrefreservation.colour 33CCFF
+available.label Available
+available.draw STACK
+available.info Free space
+available.colour 00FF00
+total.label Total
+total.draw LINE1
+total.info Total
+total.colour 000000
+quota.label Quota
+quota.draw LINE1
+quota.info Quota
+quota.colour 555555"
+EOF
+	done
+	exit 0
+fi
+
+for i in `zfs list -Hp | awk '{print $1}'`; do
+	values=( $(zfs get -p usedbydataset,usedbychildren,usedbysnapshots,usedbyrefreservation,available,quota $i | awk 'BEGIN {total=0;} { if( NR==1 ) next; } !/quota/ {total=total+$3;} {print $3} END{print total;}') )
+	fsname=`echo $i | sed 's/\//__/g'`
+
+echo <<EOF "multigraph zfs_list_$fsname
+usedbydataset.value ${values[0]}
+usedbysnapshots.value ${values[2]}
+usedbychildren.value ${values[1]}
+usedbyrefreservation.value ${values[3]}
+available.value ${values[4]}
+total.value ${values[6]}
+quota.value ${values[5]}"
+EOF
+done
+
+exit 0
