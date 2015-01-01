@@ -1,0 +1,52 @@
+#! /bin/sh
+# Inspired by https://github.com/cmur2/munin-openweather
+# Steve Schnepp
+
+# This part is taken from the original plugin
+# Example usage:
+#  Do
+#    ln -s /path/to/openweather_ openweather_<type>_<id>
+#  where <type> is currently ignored (formerly one of
+#  [station, weather]) and <id> is a suitable
+#  city id from http://openweathermap.org/
+#  These parameters translate directly into a URL formed like this:
+#    http://openweathermap.org/data/<api>/weather?id=<id>
+#
+# Example config:
+#  [openweather_*]
+#
+
+entity_id=${0##*_}
+TMPFILE=$(mktemp)
+trap 'rm -f $TMPFILE' EXIT
+
+KELVIN_BIAS=273
+
+curl -s "http://openweathermap.org/data/2.5/weather?id=${entity_id}" | tr ':{},' '   \n' > $TMPFILE
+
+while read KEY VALUE EXTRA
+do
+	[ "$KEY" = '"main"' ] && KEY=$VALUE && VALUE=$EXTRA
+	[ "$KEY" = '"temp"' ] && {
+		VALUE=${VALUE%%.*}
+		[ "$1" != "config" ] && echo "temp.value $(( $VALUE - $KELVIN_BIAS ))"
+	}
+
+	[ "$KEY" = '"name"' ] && {
+		[ "$1" = "config" ] && {
+			cat <<- EOF
+			graph_title Temperature in ${VALUE}
+			graph_args --lower-limit 0
+			graph_vlabel Celsius
+			graph_category weather
+			graph_scale no
+			graph_info This graph show the temperature in ${VALUE}
+			temp.label temperature
+			temp.info Temperature in degree Celsius
+			temp.type GAUGE
+			EOF
+		}
+	}
+done < $TMPFILE
+
+exit 0
