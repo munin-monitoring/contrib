@@ -4,8 +4,16 @@
  * @author: Konstantin Kuklin <konstantin.kuklin@gmail.com>
  * Date: 24.05.12
  */
+$host = getenv('host');
+$port = getenv('port');
 
-$sCommandSystem = "echo 'show status;' | mysql -h127.0.0.1 -P9306 | grep '^queries' | awk '{ print $2}';";
+if (!$host)
+  $host = '127.0.0.1';
+
+if (!$port)
+  $port = 9306;
+
+$sCommandSystem = "echo 'show status;' | mysql -h{$host} -P{$port} | grep '^queries' | awk '{ print $2}';";
 $sTmpFilePath = "/tmp/sphinx_queries";
 
 if (isset($argc) && $argc > 1) {
@@ -46,6 +54,9 @@ if (!file_exists($sTmpFilePath)) {
     fclose($fp);
 
     $toShow = (int) ($iCurrent - (int) $iOldCount);
+    if ($toShow < 0) {
+      $toShow = 0;
+    }
 }
 
 echo "current.value $toShow\n";

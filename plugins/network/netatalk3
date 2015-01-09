@@ -1,0 +1,144 @@
+#!/bin/bash -
+#
+#### Abstract ################################################################
+#
+# Munin contributed plugin to measure open, locked and files being hold by
+# Netatalk version 3.*;
+#
+#### Author ##################################################################
+#
+# Otavio Fernandes <otaviof@gmail.com>
+# Wednesday, 01/01/2014
+#
+
+#### Functions ###############################################################
+#
+
+function afpd_full_path () {
+    echo $(which afpd |head -n 1)
+}
+
+function afp_related_file_exists () {
+    local afp_file_path=$1
+    if [ -z "$afp_file_path" -o ! -f "$afp_file_path" ]; then
+        echo "ERROR: AFP related file not found: \"${afpd_bin_path}\";" >&2
+        exit 1
+    fi
+}
+
+function is_netatalk_version_3 () {
+    local afpd_bin_path=$1
+    version_string="$(${afpd_bin_path} -version |head -n1 |grep '^afpd' |cut -d' ' -f2)"
+    if [[ $version_string != 3\.* ]]; then
+        cat <<EOM >&2
+ERROR: Netatalk is not version 3.
+  Binary: ${afpd_bin_path};
+ Version: ${version_string};
+EOM
+        exit 1
+    fi
+}
+
+function count_running_procs () {
+    local afpd_bin_path=$1
+    echo $(ps ax --no-headers -o command |grep "^${afpd_bin_path}" |wc -l)
+}
+
+function count_connected_users () {
+    local afpd_bin_path=$1
+    afpd_procs=$(ps anx --no-headers -o uid,command |grep -E "\w+\d+*\s${afpd_bin_path}" |wc -l)
+    # one of those processess will be always from root user, so it's not being
+    # used to externaly connect volumes, therefor being disconsider.
+    echo $(echo "${afpd_procs} - 1" |bc)
+}
+
+function base_lsof () {
+    local afpd_bin_path=$1
+    process_name="$(basename ${afpd_bin_path})"
+    excluded_fds="^DEL,^err,^jld,^ltx,^Mxx,^m86,^mem,^mmap,^pd,^rtd,^tr,^txt,^v86"
+    echo "lsof -a -c ${process_name} -d ${excluded_fds}"
+}
+
+function count_locked_files () {
+    local afpd_bin_path=$1
+    cmd_suffix="$(base_lsof "${afpd_bin_path}")"
+    echo "$(${cmd_suffix} -F -l |grep '^l[rRwWu]' |wc -l)"
+}
+
+function probe_afp_conf_file () {
+    local afpd_bin_path=$1
+    echo "$(${afpd_bin_path} -version 2>&1 |grep -E '^\s+afp.conf\:' |awk '{print $2}')"
+}
+
+function count_open_shares () {
+    local afpd_bin_path=$1
+    local afp_conf_path=$2
+
+    mounted=0
+    declare -a shares=($(grep '^path.*\=' ${afp_conf_path}  |awk -F '=' '{print $2}' |sed -E 's/^\s+//g'))
+    if [ ! -z "$shares" ]; then
+        # narrowing lsof results to only list configured mount directories
+        cmd_lookup_prefix=$(echo ${shares[@]} |tr " " "|")
+        cmd_suffix="$(base_lsof "${afpd_bin_path}")"
+        mounted=$(${cmd_suffix} -F n |grep '^n' |egrep "(${cmd_lookup_prefix})" |wc -l)
+    fi
+    echo $mounted
+}
+
+
+#### Main ####################################################################
+# For all routines, holds the entry points dealing with the informed parameter
+# or lack of it, meaning just print out collected data.
+#
+
+case "$1" in
+    config)
+        # printing configuration for this plugin's produced data
+        cat <<EOM
+graph_title Netatalk v3 Status
+graph_title Netatalk status
+graph_args --logarithmic --lower-limit 0.1
+graph_vlabel Number
+graph_category network
+proc.label Running processes
+proc.info Running AFPd processes
+proc.min 0
+user.label Connected users
+user.info Connected users
+user.min 0
+lock.label Locked files
+lock.info AFPd locked files
+lock.min 0
+share.label Open shares
+share.info Netatalk open shares
+share.min 0
+EOM
+        exit 0
+    ;;
+    *)
+        #### Boilerplates ####################################################
+        # Locating AFP related files:
+        #  * Binary: Using the first result of "which" command;
+        #  * Config: Using "afpd" with paremeters to pring configuration file
+        #            location;
+        #
+
+        AFPD_PATH="$(afpd_full_path)"
+        afp_related_file_exists "${AFPD_PATH}"
+        is_netatalk_version_3 "${AFPD_PATH}"
+
+        AFP_CONF_PATH="$(probe_afp_conf_file "${AFPD_PATH}")"
+        afp_related_file_exists "${AFP_CONF_PATH}"
+
+        #### Collecting Metrics ##############################################
+        #
+        echo "proc.value" $(count_running_procs "${AFPD_PATH}")
+        echo "user.value" $(count_connected_users "${AFPD_PATH}")
+        echo "lock.value" $(count_locked_files "${AFPD_PATH}")
+        echo "share.value" $(count_open_shares "${AFPD_PATH}" "${AFP_CONF_PATH}")
+
+        exit 0
+    ;;
+esac
+
+# EOF

@@ -1,0 +1,130 @@
+#!/bin/bash
+# -*- bash -*-
+
+: <<=cut
+
+=head1 NAME
+
+nginx error - Munin plugin to monitor nginx error rates (http status codes per minute).
+
+=head1 APPLICABLE SYSTEMS
+
+Any Linux host, running nginx, with bash version > 4.0
+
+=head1 CONFIGURATION
+
+This shows the default configuration of this plugin.  You can override
+the log file path and the logpattern.
+
+  [nginx_error]
+	env.logpath    /var/log/nginx
+	env.logpattern a.*.log
+
+	Nginx must also be configured to log accesses in "combined" log format (default)
+
+=head1 USAGE
+
+Link this plugin to /etc/munin/plugins/ and restart the munin-node.
+
+This plugin also can be used like wildcard-plugin for monitoring particular virtual host log.
+E.g.
+    ln -s /usr/share/munin/plugins/nginx_error /etc/munin/plugins/nginx_error_mydomaincom
+will parse the log file /var/log/nginx/a.mydomaincom.log
+
+You can change 'env.logpattern' using asterisk ('*') to match your logs filenames.
+
+=head1 INTERPRETATION
+
+The plugin shows nginx http "error" status rates by parsing access log.
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=head1 BUGS
+
+None known.
+
+=head1 VERSION
+
+$Id:$
+
+=head1 AUTHOR
+
+vovansystems@gmail.com, 2013
+
+=head1 LICENSE
+
+GPLv3
+
+=cut
+
+if [ -z $logpath ]; then
+  logpath='/var/log/nginx'
+fi
+
+name=`basename $0`
+
+domain=${name/nginx_error/}
+if [[ $domain != '_' && ${#domain} -ne 0 ]]; then
+  domain=${domain:1}
+  if [ -z $logpattern ]; then
+    logpattern='a.*.log'
+  fi
+  logpattern=${logpattern/\*/$domain}
+else
+  logpattern='access.log'
+fi
+
+log="$logpath/$logpattern"
+
+# declaring an array with http status codes, we are interested in
+declare -A http_codes
+http_codes[400]='Bad Request'
+http_codes[401]='Unauthorized'
+http_codes[403]='Forbidden'
+http_codes[404]='Not Found'
+http_codes[405]='Method Not Allowed'
+http_codes[406]='Not Acceptable'
+http_codes[408]='Request Timeout'
+http_codes[429]='Too Many Requests'
+http_codes[499]='Client Connection Terminated'
+http_codes[500]='Internal Server Error'
+http_codes[502]='Bad Gateway'
+http_codes[503]='Service Unavailable'
+
+do_ () { # Fetch
+  for k in ${!http_codes[@]}; do
+    #value=`awk -v k=$k '{if ($9 == k) { print $9 }}' $log | wc -l` # this is very slow and ugly
+    value=`awk -v k=$k '{if ($9 == k) { i += 1 }} END { print i }' $log` # this is much better
+    echo "error$k.value ${value:-0}"
+  done
+  exit 0
+}
+
+do_config () {
+  echo "graph_title $logpattern - Nginx errors per minute"
+  echo 'graph_vlabel pages with http error codes / ${graph_period}'
+  echo "graph_category nginx"
+  echo "graph_period minute"
+  echo "graph_info This graph shows nginx error amount per minute"
+  for k in ${!http_codes[@]}; do
+    echo "error$k.type DERIVE"
+    echo "error$k.min 0"
+    echo "error$k.label $k ${http_codes[$k]}"
+  done
+  exit 0
+}
+
+do_autoconf () {
+  echo yes
+  exit 0
+}
+
+case $1 in
+  config|autoconf|'')
+  eval do_$1
+esac
+
+exit $?

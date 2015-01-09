@@ -1,0 +1,70 @@
+#!/bin/bash
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+#
+# Written by Daniele Albrizio <daniele@albrizio.it> march 2014
+# Requires dhcpd-pools - ISC dhcpd pools usage analysis http://dhcpd-pools.sourceforge.net/
+#
+####
+#%# family=manual
+#%# capabilities=autoconf,multigraph
+
+export WARN=85
+export CRIT=98
+DHCPD_POOLS_BIN=/usr/local/bin/dhcpd-pools
+DHCPDCONF=/etc/dhcp3/dhcpd.conf
+
+
+if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+fi
+
+$DHCPD_POOLS_BIN -c $DHCPDCONF --minsize=15 --limit=01 -fc  | grep -v "^$" | sort | sed 's/","/\t/g' | sed 's/"//g' |\
+while read SCOPENAME IPSTART IPSTOP POOLMAX POOLCUR PERCENT TOUCH TC TCPERCENT BU BUPERCENT
+do
+    IPSTARTUS=`echo $IPSTART | sed 's/\./_/g'`
+    let POOLWARN=${POOLMAX}*${WARN}/100
+    let POOLCRIT=${POOLMAX}*${CRIT}/100
+    let GRAPHTOP=${POOLMAX}*110/100
+    if [ "$1" = "config" ]; then
+        echo "multigraph ${SCOPENAME}_$IPSTARTUS"
+        echo "graph_title $SCOPENAME $IPSTART -> $IPSTOP (${POOLMAX})"
+        echo "graph_args --base 1000 -l 0 --upper-limit $GRAPHTOP"
+        echo "graph_vlabel Active Leases"
+        echo "graph_scale no"
+        echo "graph_category network"
+
+        echo "pool.label $SCOPENAME Active Leases"
+        echo "pool.info Pool utilization"
+        echo "pool.type GAUGE"
+        echo "pool.min 0"
+        echo "pool.max $POOLMAX"
+        echo "pool.colour 00ff00"
+        echo "pool.draw AREA"
+        echo "pool.warning $POOLWARN"
+        echo "pool.line $POOLWARN:ffc000:$WARN%"
+        echo "pool.critical $POOLCRIT"
+        echo "pool_fover.label Peer available leases"
+        echo "pool_fover.colour aaaaaa"
+        echo "pool_fover.draw LINESTACK1"
+        echo "pool_fover.type GAUGE"
+        echo "pool_fover.line $POOLCRIT:ff0000:$CRIT%"
+        echo "#"
+    else
+        echo "multigraph ${SCOPENAME}_$IPSTARTUS"
+        echo "pool.value $POOLCUR"
+        echo "pool_fover.value $BU"
+    fi
+done

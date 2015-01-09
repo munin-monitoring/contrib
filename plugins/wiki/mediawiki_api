@@ -1,0 +1,144 @@
+#!/usr/bin/php
+
+<?php
+
+#######################################################################
+#API URL
+#http://localhost/mediawiki/api.php?action=query&meta=siteinfo&siprop=statistics&format=json
+
+#JSON OUTPUT
+#{"query":{"statistics":{"pages":1695,"articles":42,"views":91812,"edits":2958,"images":170,"users":25,"activeusers":6,"admins":1,"jobs":0}}}
+
+#USAGE
+#ln -s /usr/share/munin/plugins/mediawiki /etc/munin/plugins/mediawiki_views
+#######################################################################
+
+$server = "http://localhost/mediawiki";
+$wikiname = "Wiki";
+//$suffix = "views";
+
+$basename = preg_replace( '/^.+[\\\\\\/]/', '', $_SERVER['PHP_SELF'] );
+$suffix = explode("_",$basename);
+$suffix = $suffix[1];
+
+$param = "";
+if(sizeof($argv)>1)
+  $param = $argv[1];
+
+switch ($param) {
+case "config":
+
+print <<<CONFIG
+graph_title $wikiname $suffix
+graph_vlabel number
+graph_category wiki
+graph_scale no
+graph_info Reads the total number of $suffix from $wikiname\n
+CONFIG;
+
+switch ($suffix) {
+
+case "views":
+print <<<VIEWS
+views.info Total number of page views
+views.label views
+views.type COUNTER\n
+VIEWS;
+break;
+
+case "edits":
+print <<<EDITS
+edits.info Total number of page edits
+edits.label edits
+edits.type COUNTER\n
+EDITS;
+break;
+
+case "articles":
+print <<<ARTICLES
+articles.info Total number of 'good' pages (articles)
+articles.label articles
+articles.type GAUGE\n
+ARTICLES;
+break;
+
+case "pages":
+print <<<PAGES
+pages.info Total number of all pages
+pages.label pages
+pages.type GAUGE\n
+PAGES;
+break;
+
+case "users":
+print <<<USERS
+users.info Total number of user accounts
+users.label users
+users.type GAUGE\n
+USERS;
+break;
+
+case "images":
+print <<<IMAGES
+images.info Total number of uploaded images
+images.label images
+images.type GAUGE\n
+IMAGES;
+break;
+
+case "admins":
+print <<<ADMINS
+admins.info Total number of admins (sysops)
+admins.label admins
+admins.type GAUGE\n
+ADMINS;
+break;
+
+default:
+print <<<ERROR
+Error: link me as mediawiki_<type>, where type can be one of: views, edits, articles, pages, users, images or admins.\n
+ERROR;
+}
+
+}
+
+
+$s = file_get_contents($server."/api.php?action=query&meta=siteinfo&siprop=statistics&format=json");
+$json = json_decode($s);
+$value = $json->{'query'}->{'statistics'}->{$suffix};
+
+switch ($suffix) {
+
+case "views":
+print "views.value $value\n";
+break;
+
+case "edits":
+print "edits.value $value\n";
+break;
+
+case "articles":
+print "articles.value $value\n";
+break;
+
+case "pages":
+print "pages.value $value\n";
+break;
+
+case "users":
+print "users.value $value\n";
+break;
+
+case "images":
+print "images.value $value\n";
+break;
+
+case "admins":
+print "admins.value $value\n";
+break;
+
+default:
+print "link me as mediawiki_<type>, where type can be one of: views, edits, articles, pages, users, images or admins. \n";
+}
+
+?>

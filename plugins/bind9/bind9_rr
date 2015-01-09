@@ -1,0 +1,137 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+
+=head1 NAME
+
+bind9_rr - Plugin to monitor usage of bind 9 servers
+
+=head1 CONFIGURATION
+
+This plugin is configurable environment variables.  The following
+shows the default settings:
+
+ [bind9_rr]
+    env.logfile   /var/log/bind9/query.log
+
+You must also configure query logging in your named.conf. Use a stanza
+such as this:
+
+ logging {
+     channel query {
+         file "query.log" versions 2 size 1m;
+         print-time yes;
+         severity info;
+     };
+
+     category queries { query; };
+ };
+
+=head1 SEE ALSO
+
+=over
+
+=item * L<http://blog.larsstrand.org/2008/02/how-to-monitor-bind-with-munin.html>
+
+=item * BIND Administrator Reference Manual
+
+=back
+
+=head1 AUTHOR
+
+Nicolai Langfeldt
+Remi Paulmier
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+  #%# family=manual
+
+=cut
+
+use strict;
+
+my $QUERYLOG = $ENV{logfile} || '/var/log/bind9/query.log';
+my $STATEFILE= "$ENV{MUNIN_PLUGSTATE}/bind9_rr.state";
+
+my $OTHER=0;
+my %IN;
+
+sub get_state {
+    if (! -f $STATEFILE) {
+        open(Q, ">", $STATEFILE);
+        close(Q);
+    }
+    open(Q,"< $STATEFILE") or die ("Cannot open state file");
+    while (<Q>) {
+        chomp;
+        my ($q,$n) = split(/\s+/,$_,2);
+        $IN{$q}=$n unless defined($IN{$q});
+    }
+    close(Q);
+}
+
+
+sub do_stats {
+    my $k;
+
+    open(Q,"< $QUERYLOG") or die "$!";
+    while (<Q>) {
+        chomp;
+        if (/: (view \S+\: |)query\: (\S+) (\w+) (\w+)/) {
+            if ($3 eq 'IN' and $4 !~ /^TYPE/) {
+                my $crr = lc $2;
+                $IN{$crr}++;
+            } 
+        }
+    }
+    close(Q);
+
+    get_state;
+
+    my @INkeys = sort { $IN{$b} <=> $IN{$a} } keys %IN;
+
+    open(Q,"> $STATEFILE") or die;
+    foreach $k (@INkeys[0 .. 19]) {
+        next if not defined $k;
+        my $l = $k; $k =~ tr/\./_/;
+        print "rr_$k.value ",$IN{$l},"\n";
+        print Q "$l ",$IN{$l},"\n";
+    }
+    close(Q);
+}
+
+
+sub do_config {
+    my $k;
+
+    print "graph_title DNS Queries by RR
+graph_category dns
+graph_vlabel Queries / \${graph_period}
+";
+    get_state;
+
+    my @INkeys = sort { $IN{$b} <=> $IN{$a} } keys %IN;
+
+    foreach $k (@INkeys[0 .. 19]) {
+        next if not defined $k;
+        my $l = $k; $k =~ tr/\./_/;
+        print "rr_$k.label $l
+rr_$k.type DERIVE
+rr_$k.min 0
+rr_$k.draw STACK
+";
+    }
+};
+
+if (defined($ARGV[0]) and ($ARGV[0] eq 'config')) {
+    do_config;
+    exit(0);
+}
+
+do_stats;
+
+
+# vim:syntax=perl

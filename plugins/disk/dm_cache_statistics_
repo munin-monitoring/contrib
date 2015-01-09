@@ -1,0 +1,113 @@
+#!/bin/bash
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+dm_cache_statistics_ - Wildcard-plugin to dm-cache statistics.
+
+=head1 CONFIGURATION
+
+This plugin does not normally require configuration.
+
+The plugin may need to run as root to determine dm-cache status.
+This is configured like this:
+
+  [dm_cache_*]
+	  user root
+
+This is a wildcard plugin. To monitor a cached device-mapper volume,
+link volume to this file. For example,
+
+  ln -s /usr/share/munin/plugins/dm_cache_statistics_ \
+        /etc/munin/plugins/dm_cache_statistics_vg_1122____lv_home
+
+will monitor vg_1122-lv_home.
+
+Please note that ____ (4 underscores) is replaced by - (dash) symbol.
+This is workaround for http://munin-monitoring.org/ticket/1236
+
+Cached volumes found in dmsetup status can be monitored.
+
+=head1 AUTHOR
+
+Original idea: Steinar H. Gunderson <sgunderson@bigfoot.com>
+Found in Google by keywords "munin dm-cache"
+
+Copyright (C) 2014 Vladimir Stackov <amigo.elite@gmail.com>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=cut
+
+CVOL=${0##*dm_cache_statistics_}
+#workaround for http://munin-monitoring.org/ticket/1236
+CVOL=${CVOL/____/-}
+
+case $1 in
+	autoconf)
+		env dmsetup status > /dev/null 2>&1
+		if [[ $? -eq 0 ]]; then
+			echo yes
+			exit 0
+		else
+			echo "no (env dmsetup returned value > 0)"
+			exit 0
+		fi
+		;;
+	suggest)
+		dmsetup status | grep ' cache ' | awk -F: '{print $1}'
+		exit $?
+		;;
+	config)
+		echo "graph_title $CVOL dm-cache cache statistics"
+		echo 'graph_args --base 1000'
+		echo 'graph_vlabel blocks/sec'
+		echo 'graph_category disk'
+		echo "graph_info This graph shows the dm-cache cache statistics of the $CVOL cached volume."
+
+		echo 'cache_read_hits.type DERIVE'
+		echo 'cache_read_hits.label Read hits'
+		echo 'cache_read_hits.info Read hits for cache'
+
+		echo 'cache_read_misses.type DERIVE'
+		echo 'cache_read_misses.label Read misses'
+		echo 'cache_read_misses.info Read misses for cache'
+
+		echo 'cache_write_hits.type DERIVE'
+		echo 'cache_write_hits.label Write hits'
+		echo 'cache_write_hits.info Write hits for cache'
+
+		echo 'cache_write_misses.type DERIVE'
+		echo 'cache_write_misses.label Write misses'
+		echo 'cache_write_misses.info Write misses for cache'
+
+		echo 'cache_demotions.type DERIVE'
+		echo 'cache_demotions.label Demotions'
+		echo 'cache_demotions.info Demotions for cache'
+
+		echo 'cache_promotions.type DERIVE'
+		echo 'cache_promotions.label Promotions'
+		echo 'cache_promotions.info Promotions for cache'
+
+		exit 0
+		;;
+esac
+
+dmstatus=$(dmsetup status $CVOL)
+
+echo "cache_read_hits.value $(echo $dmstatus | awk '{print $8}')"
+echo "cache_read_misses.value $(echo $dmstatus | awk '{print $9}')"
+echo "cache_write_hits.value $(echo $dmstatus | awk '{print $10}')"
+echo "cache_write_misses.value $(echo $dmstatus | awk '{print $11}')"
+echo "cache_demotions.value $(echo $dmstatus | awk '{print $12}')"
+echo "cache_promotions.value $(echo $dmstatus | awk '{print $13}')"
+

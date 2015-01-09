@@ -1,0 +1,104 @@
+#!/bin/bash
+# -*- sh -*-
+
+: <<END
+
+=head1 NAME
+
+vhost_requests_ - Wildcard-plugin to monitor http requests by response status code
+to a particular virtual host.
+
+=head1 CONFIGURATION
+
+Example configuration follows.
+
+  [vhost_requests_*]
+    user root
+
+Or you can just give read access to munin.
+
+An example way to create links for all logfiles (remove the \ from the \$s):
+for f in \$(ls /var/log/apache2/*access_log) ; do ln -s /usr/share/munin/plugins/vhost_requests_ vhost_requests_\$(basename \$f); done
+
+Also refer to max_lines, logdir, date_format and status_column below if you have any issue, if
+you're on fedora you'll need to change at least logdir.
+
+=head2 ENVIRONMENT VARIABLES
+
+This plugin does not use environment variables
+
+=head2 WILDCARD PLUGIN
+
+This is a wildcard plugin.  To show requests by response status code
+on a particular virtual host, link vhost_requests_<desired_access_log_filename> to this file.
+
+E.g.
+
+#  ln -s /usr/share/munin/plugins/vhost_requests_ \
+        /etc/munin/plugins/vhost_requests_host.org-access_log
+
+=head1 AUTHOR
+
+Roberto Rodriguez
+
+END
+
+# This is the format that date will use to generate access_log like entries
+date_format='+%d/%b/%Y:%R'
+# This is where apache stores logfiles
+logdir=/var/log/apache2
+
+# By default process the whole logfile, but you can set a value different than 0 to limit the lines to process.
+# This is useful if the plugin is hurting your performance, a way to calculate this could be:
+# The expected requests in five minutes (you can grab this from the maximum value in the y legend)
+# / 5 * 6 (Because we left the last minute to the next round)
+# times how high can an unexpected peak be (Example 3 times)
+# So, if we have 1000 requests every five minutes max_lines could be:
+# 1000 / 5 * 6 * 3 = 3600
+# It should improve performance because at 1000 requests per 5 minutes you have 288000 per day but it will only read 3600 each time.
+max_lines=0
+# If your http status code comes in a different column, you can change it here: (Assuming ' ' is the column separator)
+status_column=9
+
+file_name=`basename $0 | sed 's/^vhost_requests_//g'`
+
+case $1 in
+   config)
+echo graph_category http
+echo graph_title Requests by Status Code $file_name
+echo graph_vlabel Nr of Requests
+echo S200.label 200 OK
+echo S206.label 206 Partial Content
+echo S301.label 301 Moved Permanently
+echo S302.label 302 Found
+echo S303.label 303 See Other
+echo S304.label 304 Not Modified
+echo S400.label 400 Bad Request
+echo S403.label 403 Forbidden
+echo S404.label 404 Not Found
+echo S405.label 405 Method Not Allowed
+echo S500.label 500 Internal Server Error
+echo S502.label 502 Bad Gateway
+echo S503.label 503 Service Unavailable
+echo S200.draw AREA
+echo S206.draw STACK
+echo S301.draw STACK
+echo S302.draw STACK
+echo S303.draw STACK
+echo S304.draw STACK
+echo S400.draw STACK
+echo S403.draw STACK
+echo S404.draw STACK
+echo S405.draw STACK
+echo S500.draw STACK
+echo S502.draw STACK
+echo S503.draw STACK
+        exit 0;;
+esac
+
+if [ $max_lines -eq 0 ]
+then
+	for f in $(seq 5); do grep $(date $date_format -d "-$f min") $logdir/$file_name; done | cut -d' ' -f $status_column | sort | uniq -c | awk '{ print "S"$2".value "$1; }'
+else
+	for f in $(seq 5); do tail -n $max_lines $logdir/$file_name | grep $(date $date_format -d "-$f min"); done | cut -d' ' -f $status_column | sort | uniq -c | awk '{ print "S"$2".value "$1; }'
+fi

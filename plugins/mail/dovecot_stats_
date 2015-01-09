@@ -1,0 +1,135 @@
+#!/bin/bash
+: <<=cut
+
+=head1 NAME
+
+dovecot_stats_ - Munin plugin to display statistics for the dovecot mail server
+
+=head1 CONFIGURATION
+
+This plugin must be run with permissions to run "doveadm". That usually means root, but to test, run the following as any user:
+
+  doveadm who
+
+If you get a permission denied message, check the permissions on the socket mentioned in the error line.
+
+=head1 MAGIC MARKERS
+
+   #%# family=contrib
+   #%# capability=autoconf suggest
+
+=head1 AUTHOR
+
+Paul Saunders <darac+munin@darac.org.uk>
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+is_multigraph
+
+if [[ "$1" == "autoconf" ]]; then
+    if [[ -x /usr/bin/doveadm ]]; then
+        echo yes
+    else
+        echo no
+    fi
+    exit 0
+fi
+
+if [[ "$1" == "suggest" ]]; then
+    doveadm stats dump domain|awk 'NR!=1 {print $1}'
+    exit 0
+fi
+
+domain=$(basename $0)
+domain=${domain#dovecot_stats_}
+
+if [[ -z $domain ]]; then
+   exit 1
+fi
+
+if [[ "$1" == "config" ]]; then
+    cat <<EOF
+multigraph dovecot_cpu_${domain//\./_}
+graph_title Dovecot CPU Usage for $domain
+graph_vlabel Seconds
+graph_category mail
+user_cpu.label User CPU
+user_cpu.type DERIVE
+user_cpu.min 0
+user_cpu.cdef user_cpu,1000000,/
+sys_cpu.label System CPU
+sys_cpu.type DERIVE
+sys_cpu.min 0
+sys_cpu.cdef sys_cpu,1000000,/
+
+multigraph dovecot_system_${domain//\./_}
+graph_title Dovecot System Usage for $domain
+graph_category mail
+min_faults.label Minor page faults
+min_faults.type DERIVE
+min_faults.min 0
+maj_faults.label Major page faults
+maj_faults.type DERIVE
+maj_faults.min 0
+vol_cs.label Voluntary context switches
+vol_cs.type DERIVE
+vol_cs.min 0
+invol_cs.label Involuntary context switches
+invol_cs.type DERIVE
+invol_cs.min 0
+read_count.label read() syscalls
+read_count.type DERIVE
+read_count.min 0
+write_count.label write() syscalls
+write_count.type DERIVE
+write_count.min 0
+
+multigraph dovecot_mail_${domain//\./_}
+graph_title Dovecot Mail Access for $domain
+graph_category mail
+num_logins.label Logins
+num_logins.type DERIVE
+num_logins.min 0
+num_cmds.label Commands
+num_cmds.type DERIVE
+num_cmds.min 0
+mail_lookup_path.label Path Lookups
+mail_lookup_path.type DERIVE
+mail_lookup_path.min 0
+mail_lookup_attr.label Attr lookups
+mail_lookup_attr.type DERIVE
+mail_lookup_attr.min 0
+mail_read_count.label Messages read
+mail_read_count.type DERIVE
+mail_read_count.min 0
+mail_cache_hits.label Cache hits
+mail_cache_hits.type DERIVE
+mail_cache_hits.min 0
+EOF
+    exit 0
+fi
+
+# Fetch data
+# Gawk script cadged from http://awk.info/?JanisP
+doveadm stats dump domain domain=$domain | gawk -F\\t -v cols="user_cpu sys_cpu min_faults maj_faults vol_cs invol_cs read_count write_count num_logins num_cmds mail_lookup_path mail_lookup_attr mail_read_count mail_cache_hits " -v domain=${domain//\./_} '
+    BEGIN {
+        n=split(cols,col," ")
+        for (i=1; i<=n; i++) s[col[i]]=i
+    }
+    NR==1 {
+        for (f=1;f<=NF; f++)
+            if ($f in s) c[s[$f]]=f
+        next
+    }
+    { for (f=1; f<=n; f++) {
+        if (col[f] == "user_cpu") printf ("\nmultigraph dovecot_cpu_%s\n", domain)
+        if (col[f] == "min_faults") printf ("\nmultigraph dovecot_system_%s\n", domain)
+        if (col[f] == "num_logins") printf ("\nmultigraph dovecot_mail_%s\n", domain)
+        if (col[f] == "user_cpu" || col[f] == "sys_cpu")
+            printf("%s.value %d\n",col[f],$c[f] * 1000000)
+        else
+            printf("%s.value %d\n",col[f],$c[f])
+      }
+    }
+'

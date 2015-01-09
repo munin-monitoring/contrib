@@ -17,16 +17,34 @@ This plugin uses the following configuration variables:
 
  [nvidia_gpu_*]
   env.smiexec - Location of nvidia-smi executable.
+  env.warning - Warning temperature
+  env.critical - Critical temperature
 
 =head2 DEFAULT CONFIGURATION
 
-The default configuration is to set "env.smiexec" to /usr/bin/nvidia-smi.
+The default configuration is to set "env.smiexec" to /usr/bin/nvidia-smi and
+assume warning and critical temperatures of 75 and 95 degrees celsius, respectively.
 
 =head2 EXAMPLE WILDCARD USAGE
 
 C<ln -s /usr/share/munin/plugins/nvidia_gpu_ /etc/munin/plugins/nvidia_gpu_temp>
 
 ...will monitor the temperature of available GPUs.
+
+=head1 TODO
+
+=over 4
+
+=item *
+
+Add support for specific professional GPU features such as number of compute 
+processes, clocks, power draw, utilization, and so on.
+
+=item *
+
+Use multigraphs for multiple GPUs (http://munin-monitoring.org/wiki/MultigraphSampleOutput).
+
+=back
 
 =head1 AUTHOR
 
@@ -101,15 +119,15 @@ if [ "$1" = "config" ]; then
 			while [ $nGpusCounter -lt $nGpus ]
 			do
 				gpuName=`echo "$nGpusOutput" | sed -n $(( $nGpusCounter + 1 ))p | cut -d \( -f 1`
-				echo "temp${nGpusCounter}.warning 75"
-				echo "temp${nGpusCounter}.critical 95"
+				echo "temp${nGpusCounter}.warning ${warning:-75}"
+				echo "temp${nGpusCounter}.critical ${critical:-95}"
 				echo "temp${nGpusCounter}.info Temperature information for $gpuName"
 				: $(( nGpusCounter = $nGpusCounter + 1 ))
 			done 
 			;;
 		mem)
 			# First determine total memory of each GPU...
-			gpusTotalMemOutput=`echo "$smiOutput" | grep -A 3 "Memory Usage" | grep "Total" | cut -d : -f 2 | tr -d ' '`
+			gpusTotalMemOutput=`echo "$smiOutput" | grep -v BAR1 | grep -A 3 "Memory Usage" | grep "Total" | cut -d : -f 2 | tr -d ' '`
 			gpusTotalMem=''
 			nGpusCounter=0
 			while [ $nGpusCounter -lt $nGpus ]
@@ -128,7 +146,7 @@ if [ "$1" = "config" ]; then
 			echo 'graph_args -l 0 -u 100'
 			echo 'graph_vlabel Percentage'
 			echo 'graph_category gpu'
-			echo "graph_info Memory usage for NVIDIA GPUs using driver version $driverVersion (total memory is $gpusTotalMem)"
+			echo "graph_info FB Memory usage for NVIDIA GPUs using driver version $driverVersion (total memory is $gpusTotalMem)"
 			;;
 		fan)
 			echo 'graph_title GPU fan speed'
@@ -168,11 +186,11 @@ fi
 # Get requested value
 case $name in
 	temp)
-		valueGpus=`echo "$smiOutput" | grep -A 1 "Temperature" | grep "Gpu" | cut -d : -f 2 | cut -d ' ' -f 2`
+		valueGpus=`echo "$smiOutput" | grep -A 1 "Temperature" | grep -i "Gpu" | cut -d : -f 2 | cut -d ' ' -f 2`
 		;;
 	mem)
-		totalMemGpus=`echo "$smiOutput" | grep -A 3 "Memory Usage" | grep "Total" | cut -d : -f 2 | cut -d ' ' -f 2`
-		usedMemGpus=`echo "$smiOutput" | grep -A 3 "Memory Usage" | grep "Used" | cut -d : -f 2 | cut -d ' ' -f 2`
+		totalMemGpus=`echo "$smiOutput" | grep -v BAR1 | grep -A 3 "Memory Usage" | grep "Total" | cut -d : -f 2 | cut -d ' ' -f 2`
+		usedMemGpus=`echo "$smiOutput" | grep -v BAR1 | grep -A 3 "Memory Usage" | grep "Used" | cut -d : -f 2 | cut -d ' ' -f 2`
 		valueGpus=''
 		nGpusCounter=0
 		while [ $nGpusCounter -lt $nGpus ]
@@ -180,7 +198,7 @@ case $name in
 			totalMemGpu=`echo "$totalMemGpus" | sed -n $(( $nGpusCounter + 1 ))p`
 			usedMemGpu=`echo "$usedMemGpus" | sed -n $(( $nGpusCounter + 1 ))p`
 			percentMemUsed=$(( $usedMemGpu * 100 / $totalMemGpu ))
-			valueGpus="${valueGpus}${percentMemUsed}"$'\n'
+			valueGpus="${valueGpus}${percentMemUsed}"$(printf '\n')
 			: $(( nGpusCounter = $nGpusCounter + 1 ))
 		done
 		;;

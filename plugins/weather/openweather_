@@ -1,0 +1,139 @@
+#! /bin/sh
+# Inspired by https://github.com/cmur2/munin-openweather
+# Steve Schnepp
+
+# This part is taken from the original plugin
+# Example usage:
+#  Do
+#    ln -s /path/to/openweather_ openweather_<query_string>
+#  where <query_string> is either a search query "q_Paris" or
+#  or an id search "id_2988507"
+#
+#  These parameters translate directly into a URL formed like this:
+#    http://api.openweathermap.org/data/<api>/weather?<query_string>
+#
+
+query_string=$(printf '%s' "${0#*_}" | tr '_' '=')
+TMPFILE=$(mktemp)
+trap 'rm -f $TMPFILE' EXIT
+
+# API returns temp in K, we have to convert it in C
+KELVIN_BIAS=273
+
+curl -s "http://api.openweathermap.org/data/2.5/weather?mode=xml&${query_string}" > $TMPFILE
+
+CITY=$(fgrep "<city id=" $TMPFILE | tr -sc '[:alnum:]' ' ' | cut -d " " -f 6)
+
+if [ "$1" = "config" ];
+then
+	cat <<- EOF
+		multigraph $0
+		graph_title Temperature in ${CITY}
+		graph_vlabel Celsius
+		graph_category weather
+		graph_info This graph show the temperature in ${CITY}
+		temp_avg.label avg
+		temp_avg.cdef $KELVIN_BIAS,-
+
+		multigraph $0.temp
+		graph_title Temperature in ${CITY}
+		graph_vlabel Celsius
+		graph_category weather
+		graph_info This graph show the temperature in ${CITY}
+		temp_avg.label avg
+		temp_avg.cdef $KELVIN_BIAS,-
+		temp_min.label min
+		temp_min.cdef $KELVIN_BIAS,-
+		temp_max.label max
+		temp_max.cdef $KELVIN_BIAS,-
+
+		multigraph $0.humidity
+		graph_title Humidity in ${CITY}
+		graph_vlabel %
+		graph_category weather
+		graph_info This graph show the humidity in ${CITY}
+		humidity.label humidity
+
+		multigraph $0.pressure
+		graph_title Pressure in ${CITY}
+		graph_vlabel hPa
+		graph_category weather
+		graph_info This graph show the pressure in ${CITY}
+		pressure.label pressure
+
+		multigraph $0.wind_speed
+		graph_title Wind Speed in ${CITY}
+		graph_vlabel m/s
+		graph_category weather
+		graph_info This graph show the wind speed in ${CITY}
+		speed.label wind speed
+
+		multigraph $0.wind_direction
+		graph_title Wind direction in ${CITY}
+		graph_vlabel m/s
+		graph_category weather
+		graph_info This graph show the wind direction in ${CITY}
+		direction.label wind direction
+	EOF
+
+	# Continue if dirty config is enabled
+	[ "$MUNIN_CAP_DIRTYCONFIG" = 1 ] || exit 0
+fi
+
+TEMP_AVG=$(fgrep "<temperature value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 4)
+TEMP_MIN=$(fgrep "<temperature value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 6)
+TEMP_MAX=$(fgrep "<temperature value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 8)
+
+HUMIDITY=$(fgrep "<humidity value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 4)
+PRESSURE=$(fgrep "<pressure value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 4)
+
+WD_SPEED=$(fgrep "<speed value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 4)
+WD_DIREC=$(fgrep "<direction value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 4)
+
+cat <<- EOF
+	multigraph $0
+	temp_avg.value	$TEMP_AVG
+
+	multigraph $0.temp
+	temp_avg.value $TEMP_AVG
+	temp_min.value $TEMP_MIN
+	temp_max.value $TEMP_MAX
+
+	multigraph $0.humidity
+	humidity.value $HUMIDITY
+
+	multigraph $0.pressure
+	pressure.value $PRESSURE
+
+	multigraph $0.wind_speed
+	speed.value $WD_SPEED
+
+	multigraph $0.wind_direction
+	direction.label $WD_DIREC
+EOF
+
+
+exit 0
+
+: <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<current>
+  <city id="2988507" name="Paris">
+    <coord lon="2.35" lat="48.85"/>
+    <country>FR</country>
+    <sun rise="2015-01-01T07:43:52" set="2015-01-01T16:04:40"/>
+  </city>
+  <temperature value="275.099" min="275.099" max="275.099" unit="kelvin"/>
+  <humidity value="100" unit="%"/>
+  <pressure value="1038.33" unit="hPa"/>
+  <wind>
+    <speed value="2.46" name="Light breeze"/>
+    <direction value="190.509" code="S" name="South"/>
+  </wind>
+  <clouds value="0" name="clear sky"/>
+  <visibility/>
+  <precipitation mode="no"/>
+  <weather number="800" value="Sky is Clear" icon="01d"/>
+  <lastupdate value="2015-01-01T11:42:50"/>
+</current>
+EOF

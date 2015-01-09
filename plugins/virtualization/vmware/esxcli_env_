@@ -1,0 +1,118 @@
+#!/bin/bash
+# -*- sh -*-
+<< END
+esxcli_env_ - Plugin to monitor ESXi host temperature or power via esxcli.
+    This plugin should be linked as esxi_env_temp or esxi_env_power.
+
+Configuration variables (/etc/munin/plugin-conf.d/):
+    Munin native:
+        host_name - Name of you ESXi host as defined in munin.conf
+        timeout - Plugin specific timeout
+    Plugin specific:
+        env.esxi_host - (REQUIRED) hostname/ip esxcli connect to 
+        env.esxi_user - (REQUIRED) ESXi username to connect
+        env.esxi_password - (REQUIRED) password for user given above
+        env.cache_file - path to cache file (we do not want two or more sequential reconnections to ESXi host)
+        env.cache_max_age - if cache file is an older than this, we will fetch new data from ESXi host
+        env.warning - warning limit
+        env.critical - critical limit
+        env.margin_warning - warning limit for temperature margin values
+        env.margin_critical - critical limit for temperature margin values
+
+Please be aware that Munin has a 10 second default timeout on plugins. On some hosts esxcli can take longer
+than that, but you could set timeout in plugin config.
+
+by Oleg Selin <oleg.selin@gmail.com>
+
+#%# family=auto
+#%# capabilities=autoconf suggest
+END
+
+# Set default config if not given
+if [ -z "$cache_file" ]; then cache_file="/tmp/munin.esxcli_env.cache"; fi
+if [ -z "$cache_max_age" ]; then cache_max_age="120"; fi
+
+case $1 in
+    autoconf)
+        type -p esxcli &>/dev/null ||
+          { echo "no (missing esxcli command)" && exit 0; }
+        echo "yes"
+        exit 0;;
+    suggest)
+	echo "temp"
+        echo "power"
+        exit 0;;
+esac
+
+# Is connection information given?
+if [ -z "$esxi_host" ] || [ -z "$esxi_user" ] || [ -z $esxi_password ];
+then
+    echo "Please configure connection information"
+    exit 1
+fi
+
+### PROCESSING ###
+# Case insensetive regex
+shopt -s nocasematch
+
+# Determine sensor type
+type=${0##*/esxcli_env_}
+case "$type" in
+    temp)
+	regex="(temp.*degrees|therm.*degrees)"
+	graph_title="ESXi host temperatures"
+	graph_vlabel="C"
+	;;
+    power)
+	regex="([0-9]\\\\s?v.* volts )"
+	graph_title="ESXi host voltages"
+	graph_vlabel="V"
+	;;
+    *)
+	echo "This plugin should be linked as esxi_env_temp or esxi_env_power"
+	exit 1
+esac
+
+# Get ipmi sdr data
+if [ -f $cache_file ]; then cache=`stat --printf=%Y $cache_file`; fi
+if [ `expr $cache + $cache_max_age` -lt `date +%s` ]
+then
+	data=`esxcli -s $esxi_host -u $esxi_user -p $esxi_password hardware ipmi sdr list`
+	echo "$data" > $cache_file
+else
+	data=`cat $cache_file`
+fi
+
+# Convert to array
+OLDIFS=$IFS
+IFS=$'\n'
+sensor_names=(`echo "$data" | awk -v regexp="${regex}" 'BEGIN{IGNORECASE=1;FS="\\\\s{2,}"} $0~regexp {gsub(" ","_",$2);print tolower($2)}'`)
+sensor_labels=(`echo "$data" | awk -v regexp="${regex}" 'BEGIN{IGNORECASE=1;FS="\\\\s{2,}"} $0~regexp {print $2}'`)
+sensor_values=(`echo "$data" | awk -v regexp="${regex}" 'BEGIN{IGNORECASE=1;FS="\\\\s{2,}"} $0~regexp {print $4}'`)
+IFS=$OLDIFS
+
+# Array holds all sensor indexes
+indexes=${!sensor_names[@]}
+
+# Processing
+case $1 in
+    config) # Config run
+	echo "graph_title $graph_title"
+	echo "graph_vlabel $graph_vlabel"
+	echo "graph_category sensors"
+	for index in $indexes; do
+	   echo ${sensor_names[$index]/./,}.label ${sensor_labels[$index]}
+	   if [[ ${sensor_names[$index]} =~ margin ]]; then
+		echo ${sensor_names[$index]/./,}.warning $margin_warning
+		echo ${sensor_names[$index]/./,}.critical $margin_critical
+	   else
+	       echo ${sensor_names[$index]/./,}.warning $warning
+ 	       echo ${sensor_names[$index]/./,}.critical $critical
+	   fi
+	done
+        exit 0;;
+    *) # Normal run
+	for index in $indexes; do
+	    echo ${sensor_names[$index]/./,}.value ${sensor_values[$index]}
+	done
+esac

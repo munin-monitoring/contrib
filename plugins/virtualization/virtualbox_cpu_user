@@ -1,0 +1,54 @@
+#!/bin/bash
+#
+# evaluate the current cpu usage of every vm running on this host
+# separated by time spend in user mode and kernel mode
+#
+# Date: 2011-09-09
+# Author: Gerald Schnabel ger@ldschnabel.de
+#
+# Usage: Place in /etc/munin/plugins (or link it there using ln -s)
+#
+# This plugin has to run with the same user like the VirtualBox Server rans
+# Update munin plugin-conf.d/munin-node file with
+# [virtualbox_cpu]
+# user VIRTUAL_BOX_SERVER_USER
+#
+# Parameters understood:
+#
+# config (required)
+# autoconf (optional - used by munin-config)
+#
+# Versions
+# 2013-05-25 robi fix for handling vm names with dots and dashes; separate Kernel and User CPU graphs
+# 2011-09-22 ger@ldschnabel.de fix for handling vm names with spaces and setup metric period to get values
+# 2011-09-09 ger@ldschnabel.de initial version
+
+
+if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title User CPU used by virtual machines'
+        echo "graph_args --base 1000 -r --lower-limit 0 "
+        echo 'graph_vlabel %'
+        echo 'graph_scale no'
+        echo 'graph_info This graph shows the percentage of processor time spent in user mode by the every single VM process.'
+        echo 'graph_category Virtualization'
+        echo 'graph_period second'
+        vboxmanage list vms | sed -r 's/^\"(.*)\" \{.*\}$/\1/' | while read VM_NAME; do
+                VM_NAME_PRINT=`echo -e "${VM_NAME}" | sed 's/[^A-Za-z0-9_]/_/g'`
+                echo "${VM_NAME_PRINT}_user.label ${VM_NAME}"
+        done
+        exit 0
+fi
+
+vboxmanage metrics setup --period 5 --samples 3
+sleep 5
+
+vboxmanage list vms | sed -r 's/^\"(.*)\" \{.*\}$/\1/' | while read VM_NAME; do
+        VM_NAME_PRINT=`echo -e "${VM_NAME}" |  sed 's/[^A-Za-z0-9_]/_/g'`
+        vboxmanage metrics query "${VM_NAME}" CPU/Load/User | grep -E "^${VM_NAME}" | sed -r 's/^.*([0-9]+\.[0-9]+)%/'''${VM_NAME_PRINT}'''_user.value \1/'
+done
+

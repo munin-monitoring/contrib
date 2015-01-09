@@ -1,0 +1,29 @@
+#!/bin/sh
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+device=`basename $0 | sed 's/^powered_up_//g'`
+if [ ! -e /dev/$device ]; then
+        device="disk/by-id/$device"
+fi
+
+case $1 in
+   config)
+        cat <<EOM
+graph_title Power State (/dev/$device)
+graph_vlabel Power State
+power.label power
+graph_info The power state of drives on the system.
+power.info The power state of the drive (1 is on, 0 is off)
+EOM
+        exit 0;;
+    suggest)
+        ls -1 /dev/sd? |cut -d / -f 3
+        exit 0;;
+    autoconf)
+        echo yes
+        exit 0;;
+esac
+
+printf "power.value "
+hdparm -C /dev/$device |grep -c active

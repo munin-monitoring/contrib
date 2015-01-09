@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+# Description  : Plugin to monitor a server/network availability.
+# Author       : Thomas VIAL
+# Author URL   : http://tvi.al
+# Usage        : ln -s /path/to/fping_ /etc/munin/plugins/fping_www.google.com
+# Explaination : Will graph connection to www.google.com  
+# Requirements :
+# * fping
+#
+
+target=`basename $0 | sed 's/^fping_//g'`
+item=`echo $target | sed -e 's/\.//g'`
+
+#
+# Config
+#
+
+if [ "$1" = "config" ]; then
+  echo "graph_title ${target} availability"
+  echo "graph_args --base 1000 -r -l 0 -u 100"
+  echo "graph_vlabel Availability in %"
+  echo "graph_category network"
+  echo "graph_info Displays Network Availability"
+  # Failure
+  echo "failure.label Unreachable"
+  echo "failure.draw AREA"
+  echo "failure.colour ff0000"
+  # Success
+  echo "success.label Reachable"
+  echo "success.draw STACK"
+  echo "success.colour 00CC00CC"
+  exit 0
+fi
+
+#
+# Let's go!
+#
+
+fping -q $target
+status=$?
+
+if [ $status -eq 0 ]; then
+    # Success
+    echo "success.value 100"
+    echo "failure.value 0"
+else
+    # Failure
+    echo "success.value 0"
+    echo "failure.value 100" 
+fi

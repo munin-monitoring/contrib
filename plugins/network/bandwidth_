@@ -23,6 +23,11 @@ public IP and if so it will suggest monitoring those interfaces.  If all
 IP addresses are private the setup will have to be done manually.  Suggest
 does not handle IPv6 addresses.
 
+Environment Variables:
+
+* monthlycap => monthly cap to draw warnings at in bytes
+* uploadonly => if set display (and count against warnings) only upload bytes
+
 =head1 USAGE
 
 Any device found in /proc/net/dev can be monitored.  Examples include ipsec*,
@@ -32,7 +37,7 @@ Please note that aliases cannot be monitored with this plugin.
 
 =head1 VERSION
 
-$Id: bandwidth_,v 1.35 2012/01/23 20:04:33 root Exp $
+$Id: bandwidth_,v 1.37 2012/01/23 20:04:33 root Exp $
 
 =head1 AUTHOR
 
@@ -75,12 +80,14 @@ my $count30  = 2592000;      # The number of seconds in 30 days
 my $unix_ts  = time;
 my $rollover = 4294967295;
 
-eval { init(); };
+my $monthlyCap = ($ENV{monthlycap} or 268435456000);
+my $warnRate = $monthlyCap/$count30;
+
+init();
 
 sub autoconf {
     $0 =~ /bandwidth_(.+)*$/;
     $interface = $1;
-    exit 2 unless defined $interface;
     $history = "/var/lib/munin/plugin-state/bandwidth_$interface.state";
 }
 
@@ -166,7 +173,7 @@ sub arg {
 
 sub print_config {
     print <<EOM;
-graph_title Monthly Bandwidth average
+graph_title Monthly Bandwidth average ($interface)
 graph_vlabel Bytes (per sec)
 average.label current 30 day average bytes/sec
 monthly.label monthly project based on 30 day average
@@ -177,9 +184,9 @@ monthly.info Your projected monthly network rate based on your average network r
 graph_category network
 graph_args  --base 1024 -l 0
 graph_info This graph show your current average bandwidth usage and projected 30 day average based on your last 30 day usage.
-average.warning 103563
-monthly.warning 268435456000
-30dayusage.warning 268435456000
+average.warning $warnRate
+monthly.warning $monthlyCap
+30dayusage.warning $monthlyCap
 EOM
     exit 0;
 }
@@ -201,8 +208,8 @@ sub uptime {
     my $puptime = "/proc/uptime";
     open( TIME, "<", $puptime ) || die "Unable to read $puptime: $!";
     while (<TIME>) {
-        split;
-        $uptime = @_[0];
+        my @arr = split;
+        $uptime = $arr[0];
     }
     close(TIME);
     chomp $uptime;
@@ -263,7 +270,9 @@ sub sum_old {
 
 sub munin_output {
     my $period    = $unix_ts - $oldest_ts;
-    my $total30   = $input_30days + $output_30days;
+    return unless $period;  #can't estimate anything from a single point, so don't.
+    my $total30   = $output_30days;
+    $total30 += $input_30days unless $ENV{uploadonly};
     my $average30 = $total30 / $period;
     print "average.value  $average30\n";
     print "monthly.value " . $average30 * $count30 . "\n";
@@ -271,8 +280,9 @@ sub munin_output {
 }
 
 sub init {
-    arg();
     autoconf();
+    arg();
+    exit 2 unless defined $interface;
     retrieve_history();
     read_traffic();
     bit32or64();
