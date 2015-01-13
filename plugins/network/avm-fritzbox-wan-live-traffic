@@ -2,20 +2,20 @@
 <?php
 ##############################
 # Plugin: AVM Fritz!Box WAN traffic (over UPNP)
-#
 # Author: Andreas Kreisl
 #
 # Licence: Creative Commons - Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0) 
 # http://creativecommons.org/licenses/by-sa/3.0/
 ##############################
 # Modification by: Vincent Kocher / www.wombat.ch/munin
+# Modicication data/reason: 12.01.2015 / removed all Max UP and Max Down and created new file
 # Modification date/reason: 09.01.2015 / upnp path changed with AVM Fritzbox IOS 6.20 (7390)
 # Modification date/reason: 08.01.2015 / "graph_category" Titel modified from Network to WAN
 ##############################
 #%# family=auto
 #%# capabilities=autoconf
 
-# if you don't get a graph, change "fritz.box" to your IP Adresse
+# if you don't get a graph, change "fritz.box" to your Router IP Adresse
 $host = "fritz.box";
 
 if(isset($argv[1]) && $argv[1] == "autoconf") {
@@ -23,39 +23,27 @@ if(isset($argv[1]) && $argv[1] == "autoconf") {
 } else if(isset($argv[1]) && $argv[1] == "config") {
 	$data_prop = GetCommonLinkProperties();
 	//$data_ip = GetExternalIP(); // $data_ip['NewExternalIPAddress']
-	echo "graph_order down up maxdown maxup\n";
-	echo "graph_title AVM Fritz!Box WAN traffic\n";
+	echo "graph_order down up\n";
+	echo "graph_title AVM Fritz!Box WAN (live) traffic\n";
 	echo "graph_args --base 1024\n";
 	echo "graph_vlabel bits in (-) / out (+) per \${graph_period}\n";
 	echo "graph_category WAN\n";
-	echo "graph_info This graph shows the traffic of the AVM Fritz!Box WAN network interface. Please note that the traffic is shown in bits per second, not bytes.\n";
+	echo "graph_info This graph shows the traffic of the AVM Fritz!Box WAN network interface. Without showing MaxUP and MaxDOWN. Please note that the traffic is shown in bits per second, not bytes.\n";
 	echo "down.label received\n";
 	echo "down.type COUNTER\n";
 	echo "down.graph no\n";
 	echo "down.cdef down,8,*\n";
-	echo "down.max 1000000000\n";
 	echo "up.label " . $data_prop['NewWANAccessType'] . " (" . $data_prop['NewPhysicalLinkStatus'] . ")\n";
 	echo "up.type COUNTER\n";
 	echo "up.negative down\n";
 	echo "up.draw AREA\n";
 	echo "up.cdef up,8,*\n";
-	echo "up.max 1000000000\n";
 	echo "up.info Traffic of the WAN interface.\n";
-	echo "maxdown.label received\n";
-	echo "maxdown.type GAUGE\n";
-	echo "maxdown.graph no\n";
-	echo "maxup.label MAX\n";
-	echo "maxup.type GAUGE\n";
-	echo "maxup.negative maxdown\n";
-	echo "maxup.draw LINE1\n";
-	echo "maxup.info Maximum speed of the WAN interface.\n";
 } else {
 	$data_prop = GetCommonLinkProperties();
 	$data_stats = GetAddonInfos();
 	echo "up.value " . $data_stats['NewTotalBytesSent'] . "\n";
 	echo "down.value " . $data_stats['NewTotalBytesReceived'] . "\n";
-	echo "maxup.value " . $data_prop['NewLayer1UpstreamMaxBitRate'] . "\n";
-	echo "maxdown.value " . $data_prop['NewLayer1DownstreamMaxBitRate'] . "\n";
 }
 
 
