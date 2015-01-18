@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+
+# nscd (name server caching daemon) statistics
+#
+# Tested with nscd 2.13 on Debian 7.8
+#
+# This plugin is capable to show:
+# - per-database (passwd, group, hosts, services):
+#     - Suggested size
+#     - Cache hit rate
+#     - Number of currently cached values
+#     - Number of max cached values
+#
+# Required permissions:
+# - root permissions to run "nscd -g"
+#
+# OS: *NIX
+#
+# Author: Oliver Ladner <waste@lugh.ch>
+#
+# Configuration:
+# - set env.nscd_cfg to nscd.conf path if necessary
+# - Configure to run as root in /etc/munin/plugin-conf.d/munin-node
+#   [nscd_*]
+#    user root
+#
+# Notes:
+#
+# A low cache hit rate in combination with a shared cache configuration is
+# normal, as clients can search the cache directly without asking the nscd
+# daemon first. See http://goo.gl/dkwzDH
+
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+source $MUNIN_LIBDIR/plugins/plugin.sh
+NSCD_CFG=${nscd_cfg:-/etc/nscd.conf}
+AUTOCONF_CHECK=$(nscd -g | grep -ic 'yes.*cache is enabled')
+SUGGEST_CHECK=$(nscd -g | grep -iB2 'yes.*cache is enabled' | awk {'print $1'} | head -1)
+MODE=$(basename $0 | sed 's/^nscd_//g' | tr '_' '.')
+
+case $1 in
+	autoconf)
+		[ -r "$NSCD_CFG" ] && [ $AUTOCONF_CHECK -gt 0 ] && echo yes || echo "no (nscd config not found or no database enabled)" 
+		exit 0
+		;;
+	suggest)
+		echo $SUGGEST_CHECK
+		exit 0
+		;;
+	config)
+		# --lower-limit needs to be > 0 for logarithmic scaling
+		cat <<CONFIG
+graph_args --base 1000  --lower-limit 0
+graph_scale yes
+graph_title nscd - ${MODE//_/ } cache
+graph_info This graph shows nscd $MODE statistics
+graph_vlabel % or count
+suggestedsize.label Suggested size
+cachehitrate.label Cache hit rate in %
+cachehitrate.info A low cache hit rate in combination with a shared cache configuration is normal, as clients can search the cache directly without asking the nscd daemon first
+currnumber.label Current number of cached values
+maxnumber.label Maximum number of cached values
+graph_category system
+CONFIG
+		;;
+	fetch|*)
+			nscd -g | awk "/^$MODE cache/ {printline = 1; print; next} /^.*cache:/ {printline = 0} printline" | \
+			egrep '(suggested size|cache hit rate|current number of cached values|maximum number of cached values)' | \
+			sed 's/%//' | awk {' if (NR==1) print "suggestedsize.value " $1; if (NR==2) print "cachehitrate.value " $1; if (NR==3) print "currnumber.value " $1; if (NR==4) print "maxnumber.value " $1'}
+		;;
+esac
