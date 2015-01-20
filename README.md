@@ -36,12 +36,15 @@ This serves as a repository for examples of various configs. You know, the ''lea
 
 ### Commits, Comments & Pull requests
 
-We like to have ''elementary'' commits as it is much easier to manage for reviewing and debugging. 
+We like to have _elementary_ commits as it is much easier to manage for reviewing and debugging. 
 So please **don't** be afraid to make **as many** commits as needed. Merging many commits is as easy
 as merging one, if not easier.
 
 A good rationale is that each commit shall have a one-liner commit comment as its first line. 
-Next lines are optional and should only explain the ''why'' it is done this particular way.
+Ideally that first line has a prefix that shows the part the commit is about. It makes it very
+easy to see grouped changes, and it enable avoiding to look at the --stat. To know the prefix you should
+use, you can have a look at already existing commits. Next lines are optional and should only
+explain the _why_ it is done this particular way. 
 
 On the other side, pull requests can regroup many commits at once.
 Just try to explain in the pull comment the ''why'' we should merge it (if it's not obvious).
