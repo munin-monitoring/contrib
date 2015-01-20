@@ -42,7 +42,7 @@ as merging one, if not easier.
 
 A good rationale is that each commit shall have a one-liner commit comment as its first line. 
 Ideally that first line has a prefix that shows the part the commit is about. It makes it very
-easy to see grouped changes, and it enable avoiding to look at the --stat. To know the prefix you should
+easy to see grouped changes, and it enable avoiding to look at the `--stat`. To know the prefix you should
 use, you can have a look at already existing commits. Next lines are optional and should only
 explain the _why_ it is done this particular way. 
 
