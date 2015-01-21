@@ -36,6 +36,8 @@ If trouble reading output, use:
 
 =item 2013.02.03: Converted to use iptables/ip6tables by Michiel Holtkamp <michiel@supermind.nl>
 
+=item 2015.01.25: Fixed regexp and make use of a status file by Pierre Schweitzer <pierre@reactos.org>
+
 =back
 
 =head1 LICENSE
@@ -49,6 +51,7 @@ GPLv2
 
 =cut
 
+STAT_FILE=$MUNIN_PLUGSTATE/plugin-traffic_ipt.state
 
 if [ "$1" == "config" ]
 then
@@ -100,11 +103,20 @@ EOF
         exit 0
 fi
 
+if [ ! -r $STAT_FILE ]; then
+	oldv4=0
+	oldv6=0
+else
+	oldv4=$(grep IPv4 $STAT_FILE | cut -f2 -d '=')
+	oldv6=$(grep IPv6 $STAT_FILE | cut -f2 -d '=')
+fi
 
 ipv4=0
 ipv6=0
+diffv4=0
+diffv6=0
 
-IPv4_bytes=$(iptables -L -n -v -x | egrep '^\W+[0-9]+\W+[0-9]+\W+all\W+--\W+\*\W+\*\W+0.0.0.0/0\W+0.0.0.0/0\W+$' | while read pkts bytes rest; do echo $bytes; done)
+IPv4_bytes=$(iptables -L -n -v -x | egrep '^\W*[0-9]+\W+[0-9]+\W+all\W+--\W+\*\W+\*\W+0.0.0.0/0\W+0.0.0.0/0\W*$' | while read pkts bytes rest; do echo $bytes; done)
 if [ -z "$IPv4_bytes" ];
 then
 	echo "W: Unable to read rule from iptables, please add rules" >&2
@@ -112,7 +124,7 @@ else
 	ipv4=$(echo $IPv4_bytes | sed -e 's/ / + /' | bc -l)
 fi
 
-IPv6_bytes=$(ip6tables -L -n -v -x | egrep '^\W+[0-9]+\W+[0-9]+\W+all\W+\*\W+\*\W+::/0\W+::/0\W+$' | while read pkts bytes rest; do echo $bytes; done)
+IPv6_bytes=$(ip6tables -L -n -v -x | egrep '^\W*[0-9]+\W+[0-9]+\W+all\W+\*\W+\*\W+::/0\W+::/0\W*$' | while read pkts bytes rest; do echo $bytes; done)
 if [ -z "$IPv6_bytes" ];
 then
 	echo "W: Unable to read rule from ip6tables, please add rules" >&2
@@ -120,9 +132,25 @@ else
 	ipv6=$(echo $IPv6_bytes | sed -e 's/ / + /' | bc -l)
 fi
 
-echo "IPv4.value $ipv4"
-echo "IPv6.value $ipv6"
-echo "total.value $( echo $ipv4 + $ipv6 | bc )"
+if [ $ipv4 -ge $oldv4 ];
+then
+	diffv4=$(($ipv4 - $oldv4))
+else
+	diffv4=$ipv4
+fi
+
+if [ $ipv6 -ge $oldv6 ];
+then
+	diffv4=$(($ipv6 - $oldv6))
+else
+	diffv4=$ipv6
+fi
+
+echo "IPv4=$ipv4" > $STAT_FILE
+echo "IPv6=$ipv6" >> $STAT_FILE
+
+echo "IPv4.value $diffv4"
+echo "IPv6.value $diffv6"
+echo "total.value $( echo $diffv4 + $diffv6 | bc )"
 
 exit 0
-
