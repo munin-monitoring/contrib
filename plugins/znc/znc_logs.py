@@ -63,7 +63,8 @@ def data():
                 last_value = last[network_channel]
                 # what munin gets
                 value = (current_value - last_value) / 5  # subtrate last from current and divide through 5 to get new lines / minute
-
+                if value < 0:
+                    value = 0
             # save it to the states-file
             current[network_channel] = current_value
 
