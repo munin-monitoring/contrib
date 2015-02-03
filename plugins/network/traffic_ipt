@@ -74,28 +74,24 @@ total.draw LINE1
 EOF
 
 		# Adapted from http://munin-monitoring.org/wiki/PercentGraphHowto
-		cat <<'EOF'
+        cat << 'EOF'
 multigraph traffic_ipt_percent
+update no
+graph_category network
+graph_args --base 1000 -l 0 -u 100 -r
 graph_scale no
 graph_title Throughput of IP protocols by percentage
 graph_vlabel Percentage
-graph_order IPv4=traffic_ipt.IPv4 IPv6=traffic_ipt.IPv6 total=traffic_ipt.total IPv4_percent=traffic_ipt.total IPv6_percent=traffic_ipt.total total_percent=traffic_ipt.total
-graph_category network
-graph_args --upper-limit 100 -l 0 -r
-IPv4.label no
-IPv6.label no
-total.label no
-total_percent.label no
+graph_order IPv4=traffic_ipt.IPv4 IPv6=traffic_ipt.IPv6 total=traffic_ipt.total IPv4_percent=traffic_ipt.total IPv6_percent=traffic_ipt.total
 IPv4.graph no
 IPv6.graph no
 total.graph no
-total_percent.graph no
-total_percent.cdef total,0.0000001,+
+total.cdef IPv4,IPv6,0.00001,+,+
+IPv4_percent.cdef IPv4,total,/,100,*
 IPv4_percent.label IPv4
-IPv4_percent.cdef IPv4,total_percent,/,100,*
 IPv4_percent.draw AREASTACK
+IPv6_percent.cdef IPv6,total,/,100,*
 IPv6_percent.label IPv6
-IPv6_percent.cdef IPv6,total_percent,/,100,*
 IPv6_percent.draw AREASTACK
 EOF
         exit 0
@@ -139,9 +135,9 @@ fi
 
 if [ $ipv6 -ge $oldv6 ];
 then
-	diffv4=$(($ipv6 - $oldv6))
+	diffv6=$(($ipv6 - $oldv6))
 else
-	diffv4=$ipv6
+	diffv6=$ipv6
 fi
 
 echo "IPv4=$ipv4" > $MUNIN_STATEFILE
