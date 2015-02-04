@@ -21,7 +21,7 @@
 # Configuration:
 # - set env.ejabberdctl_cfg to ejabberdctl.cfg path if necessary
 # - or set env.ERLANG_NODE, env.EJABBERD_PID_PATH to proper values manually
-# - set erl_path to unregular erlang interpreter cli location
+# - set erl_call_path to unregular erl_call location
 
 #%# family=auto
 #%# capabilities=autoconf suggest
@@ -33,22 +33,14 @@ source $MUNIN_LIBDIR/plugins/plugin.sh
 ERLANG_HOST=${ERLANG_NODE/*@/}
 ERLANG_MUNIN_NODE=munin
 
-ERL=${erl_path:-$(which erl)}
+if [ -n "$erl_path" ] && [ -z "$erl_call_path" ]; then
+	erl_call_path="$erl_path"_call
+fi
+
+ERL_CALL=${erl_call_path:-$(which erl_call)}
 
 function ejabberd_exec() {
-	COMMAND=${1//\"/\\\"}
-	su - ejabberd $ERL -noinput \
-		-sname $ERLANG_MUNIN_NODE@$ERLANG_HOST \
-		-noinput \
-		-hidden \
-		-eval "try {ok,S,_} = erl_scan:string(\"$COMMAND\"),
-				   {ok,P} = erl_parse:parse_exprs(S),
-				   {value,V,_} = rpc:call('$ERLANG_NODE', erl_eval, exprs, [P,[]]),
-				   io:format(\"~p\n\", [V])
-			   catch
-				   _:Err -> io:format(\"~p\n\", [Err])
-			   end." \
-		-s init stop
+	echo "$1" | su - ejabberd -c "$ERL_CALL -e -n $ERLANG_NODE" | sed -re 's/^\{ok, (.*)\}$/\1/'
 }
 
 SCRIPT_NAME=$(basename $0)
@@ -94,6 +86,7 @@ CONFIG
 	done
 }
 
+
 function ejabberd_report_memory() {
 	if [ "$1" = "config" ]; then
 		cat <<CONFIG
@@ -127,13 +120,8 @@ INFO_FROM_DOC
 			let memory_value=$memory_value*1024
 			echo "$memory_type.value $memory_value"
 		done
-		ejabberd_exec 'erlang:memory().' | tr '"[]{}' ' ' | grep -Fv _used |
-		while read memory_entry; do
-			clean_entry=${memory_entry/ ,/}
-			entry_name=${clean_entry/,*/}
-			entry_value=${clean_entry/*,/}
-			echo $entry_name.value $entry_value
-		done
+		ejabberd_exec 'io_lib:format("~p", [erlang:memory()]).' | grep -Eo '"[a-z_0-9]+"' |
+		  sed -re 'N;s/"(.*)"\n"(.*)"/\1.value \2/' | grep -Fv _used
 	fi
 }
 
