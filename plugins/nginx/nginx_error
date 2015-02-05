@@ -95,10 +95,15 @@ http_codes[502]='Bad Gateway'
 http_codes[503]='Service Unavailable'
 
 do_ () { # Fetch
+  declare -A line_counts
+  values=`awk '{print $9}' $log | sort | uniq -c`
+  while read -r line; do
+        read -a tmp <<< "$line";
+        line_counts[${tmp[1]}]=${tmp[0]};
+  done <<< "$values"
+
   for k in ${!http_codes[@]}; do
-    #value=`awk -v k=$k '{if ($9 == k) { print $9 }}' $log | wc -l` # this is very slow and ugly
-    value=`awk -v k=$k '{if ($9 == k) { i += 1 }} END { print i }' $log` # this is much better
-    echo "error$k.value ${value:-0}"
+    echo "error$k.value ${line_counts[$k]:-0}"
   done
   exit 0
 }
