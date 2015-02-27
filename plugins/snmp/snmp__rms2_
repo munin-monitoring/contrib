@@ -1,0 +1,222 @@
+#!/usr/bin/perl -w
+#
+# This plugin is for querying Knuerr RMS Compact II Rack Monitoring Units
+# by SNMP.
+#
+# Michael Meier <michael.meier@fau.de>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+#
+# Usage:
+# ln -s /usr/share/munin/node/plugins-auto/snmp__rms2_ /etc/munin/node.d/snmp_HOSTNAME_rms2_MODE
+# available MODEs:
+#   temp     for temperature sensors
+#   humidity for humidity sensors (untested!)
+#   contact  for contact sensors
+#
+# Note: Due to shortcomings of munin-node-configure, it is not currently
+# possible to make this plugin properly autodetect/autoconfigure. That is
+# because for SNMP plugins that need more than just a hostname, only numbers
+# that come from an SNMP tree can be the second parameter. Parameters like
+# "temp" do not exist in the short-sighted world of munin-node-configure.
+# Combining SNMP with the "suggest" plugin-feature is currently not possible.
+
+#%# family=snmpauto
+#%# capabilities=snmpconf
+
+use strict;
+use Net::SNMP;
+
+my $DEBUG = 0;
+
+my $host      = $ENV{host}      || undef;
+my $port      = $ENV{port}      || 161;
+my $community = $ENV{community} || "public";
+my $mode      = $ENV{mode}      || undef;
+
+my $response;
+
+my $graphs = {
+    'temp' => {     'title'   => 'Temperatures',
+                    'unit'    => 'degC', # This can actually be overwritten later with retard-units (F)
+                    'scale'   => 0.1,
+                    'thatype' => 2,
+                    'list'    => '.1.3.6.1.4.1.3711.24.1.1.1.2.2.1.1' },
+    'humidity' => { 'title'   => 'Humidity',
+                    'unit'    => '%',
+                    'scale'   => 0.1,  # FIXME?
+                    'thatype' => 3,
+                    'list'    => '.1.3.6.1.4.1.3711.24.1.1.1.2.2.1.1' },
+    'contact' => {  'title'   => 'Contact sensors',
+                    'unit'    => 'n',
+                    'list'    => '.1.3.6.1.4.1.3711.24.1.1.1.3.1.1.1' },
+};
+
+if (defined($ARGV[0]) && ($ARGV[0] eq "snmpconf")) {
+    print "require .1.3.6.1.4.1.3711.24.1.1.99.1.0\n"; # The inventory tree
+    exit(0);
+}
+
+if ($0 =~ /^(?:|.*\/)snmp_([^_]+)_rms2_(.+)$/) {
+    $host  = $1;
+    $mode = $2;
+    if ($host =~ /^([^:]+):(\d+)$/) {
+        $host = $1;
+        $port = $2;
+    }
+} elsif (!defined($host)) {
+    print "# Debug: $0 -- $1 -- $2\n" if $DEBUG;
+    print("# Error: couldn't understand what I'm supposed to monitor.\n");
+    print("# You need to either name this plugin properly in the scheme\n");
+    print("#  snmp_HOSTNAME_rms2_MODE\n");
+    print("# or alternatively set the environment variables 'host' and 'mode'\n");
+    exit(1);
+}
+
+my ($session, $error) = Net::SNMP->session(
+                -hostname  => $host,
+                -community => $community,
+                -port      => $port,
+                -version   => 'snmpv2c',
+                -timeout   => 1.0
+);
+
+if (!defined ($session)) {
+    print("# Failed to open SNMP session: $error");
+    exit(1);
+}
+
+unless (defined($graphs->{$mode}->{'title'})) {
+  print("# Unknown mode '$mode'! Available modes are:\n");
+  foreach my $m (keys(%{$graphs})) {
+    if (defined($graphs->{$m}->{'title'})) {
+      printf("#  %-18s %s\n", $m, $graphs->{$m}->{'title'});
+    }
+  }
+  exit(1);
+}
+
+# This is mostly copy&paste from the snmpwalk.pl-example in the Net::SNMP sourcecode.
+# I'm not really sure this is the simplest way to do this, but could not find a
+# better WORKING example.
+my $last_oid = $graphs->{$mode}->{'list'};
+my @indexes = ( );
+my @args = ( -varbindlist => [ $last_oid ] );
+push(@args, -maxrepetitions => 2);
+GET_BULK: while (defined $session->get_bulk_request(@args)) {
+  my @oids = $session->var_bind_names();
+  if (!scalar @oids) {
+    print("# ERROR: Empty SNMP tree\n");
+    exit(1);
+  }
+  foreach my $oid (@oids) {
+    # Make sure we have not hit the end of the MIB.
+    if ($session->var_bind_types()->{$oid} == ENDOFMIBVIEW) {
+      $oid =~ s/.*\.//g;
+      push(@indexes, $oid);
+      last GET_BULK;
+    }
+    if (substr($oid, 0, length($graphs->{$mode}->{'list'})) ne $graphs->{$mode}->{'list'}) {
+      last GET_BULK;
+    }
+    $last_oid = $oid;
+    $oid =~ s/.*\.//g;
+    push(@indexes, $oid);
+  }
+  @args = (-maxrepetitions => 2, -varbindlist => [ $last_oid ]);
+}
+
+if (defined($graphs->{$mode}->{'thatype'})) { # Analogue sensor requested
+  if ($graphs->{$mode}->{'thatype'} == 2) { # Temperature-Sensor
+    if (defined($response = $session->get_request(".1.3.6.1.4.1.3711.24.1.1.1.2.1"))) {
+      my $tempscale = $response->{".1.3.6.1.4.1.3711.24.1.1.1.2.1"} eq '2';
+      if ($tempscale == 2) { $graphs->{$mode}->{'unit'} = 'degF'; }
+      if ($tempscale == 3) { $graphs->{$mode}->{'unit'} = 'K'; }
+    }
+  }
+}
+
+# Now this is a little cheating: We "calculate" various other start OIDs from
+# the list OID.
+my $nameoid = my $stateoid = my $valueoid = $graphs->{$mode}->{'list'};
+# The start OID for names just ends with .3 instead of .1
+$nameoid =~ s/1$/3/;
+# the one for input status ends with .2 instead of .1
+$stateoid =~ s/1$/2/;
+# the start OID for the value ends with .7 instead of .1
+$valueoid =~ s/1$/7/;
+
+# Now check which of the inputs we detected are valid
+my @validindexes = ( );
+foreach my $i (@indexes) {
+  unless (defined($response = $session->get_request($stateoid . "." . $i))) {
+    next;
+  }
+  if ($response->{$stateoid . "." . $i} ne '1') { # 1 means active and valid.
+    next;
+  }
+  if (defined($graphs->{$mode}->{'thatype'})) { # Analogue sensor requested
+    my $typeoid = $graphs->{$mode}->{'list'};
+    $typeoid =~ s/1$/6/;
+    unless (defined($response = $session->get_request($typeoid . "." . $i))) {
+      next;
+    }
+    if ($response->{$typeoid . "." . $i} ne $graphs->{$mode}->{'thatype'}) {
+      next; # Not the correct type (humidity vs. temperature)
+    }
+  }
+  push(@validindexes, $i);
+}
+
+if ($ARGV[0] and $ARGV[0] eq "config") {
+  print("host_name $host\n");
+  printf("graph_title %s\n", $graphs->{$mode}->{'title'});
+  # print "graph_args --base 1000\n";
+  print("graph_category envsensor\n");
+  printf("graph_vlabel %s\n", $graphs->{$mode}->{'unit'});
+  unless (defined($graphs->{$mode}->{'thatype'})) {
+    print("graph_info For contact sensors, the values mean: 1 = open, 2 = closed, 3 = armed, 4 = triggered\n");
+  }
+
+  foreach my $i (@validindexes) {
+    if (defined($response = $session->get_request($nameoid . "." . $i))) {
+      printf("%s%u.label %s\n", $mode, $i, $response->{$nameoid . "." . $i});
+    } else {
+      printf("%s%u.label Port %u\n", $mode, $i, $i);
+    }
+    if (defined($response = $session->get_request($graphs->{$mode}->{'list'} . "." . $i))) {
+      printf("%s%u.info Port %s\n", $mode, $i, $response->{$graphs->{$mode}->{'list'} . "." . $i});
+    }
+    printf("%s%u.type GAUGE\n", $mode, $i);
+    if (defined($ENV{"${mode}${i}.warning"})) { printf("%s%s.warning %s\n", $mode, $i, $ENV{"${mode}${i}.warning"}); }
+    if (defined($ENV{"${mode}${i}.critical"})) { printf("%s%s.critical %s\n", $mode, $i, $ENV{"${mode}${i}.critical"}); }
+  }
+  exit(0);
+}
+
+foreach my $i (@validindexes) {
+  if (defined($response = $session->get_request($valueoid . "." . $i))) {
+    my $v = $response->{$valueoid . "." . $i};
+    if (defined($graphs->{$mode}->{'scale'})) {
+      $v = $v * $graphs->{$mode}->{'scale'};
+      printf("%s%u.value %.1f\n", $mode, $i, $v);
+    } else {
+      printf("%s%u.value %u\n", $mode, $i, $v);
+    }
+  } else {
+    printf("%s%u.value U\n", $mode, $i);
+  }
+}
