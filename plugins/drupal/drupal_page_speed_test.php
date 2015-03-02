@@ -19,7 +19,7 @@
  * env.url_login_post_fields target=http://www.example.com
  *
  * // Each page to test should be specified in the format of <label>=<url> where label is alphanumeric with no spaces and url is the page URL to test
- * // You may specify multiple pages to time their page load by seperating them with commas ,
+ * // You may specify multiple pages to time their page load by separating them with commas ,
  * env.urls label_page1=http://www.example.com/page1.php,label_page2=http://www.example.com/page2.php
  * env.cookie_file /tmp/cookie.txt
  *
