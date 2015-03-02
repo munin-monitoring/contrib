@@ -1,7 +1,7 @@
 #!/bin/bash
 # Wildcard-plugin to monitor Firebird database transaction stats. To monitor a
-# database, link firebird_<interface> to this file. E.g.
-#    ln -s /usr/share/munin/plugins/if_ /etc/munin/plugins/firebird_employee
+# database, link firebird_<db> to this file. E.g.
+#    ln -s /usr/share/munin/plugins/firebird_ /etc/munin/plugins/firebird_employee
 #
 # ...will monitor firebird database "employee"
 #
@@ -47,9 +47,11 @@ EOM
 exit 0;;
 esac
 
-db=`echo $0 | awk -F'_' '{print $2}'`
+db=$(echo $0 | awk -F'_' '{print $2}')
 
-/opt/firebird/bin/gstat -h ${db} | awk -F'[\t]+' \
+gstat=$(which gstat 2> /dev/null)
+
+${gstat:=/opt/firebird/bin/gstat} -h ${db} | awk -F'[\t]+' \
 	 '{ sub(/^ */,"");
 		if ($2 == "Oldest transaction") 
 		{ 
