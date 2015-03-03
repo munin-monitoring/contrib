@@ -51,6 +51,7 @@ int config() {
 	for (i = 0; i < ncpu; i++) {
 		printf("cpu%d.label CPU %d\n", i, i);
 		printf("cpu%d.draw %s\n", i, "AREASTACK");
+		printf("cpu%d.type %s\n", i, "DERIVE");
 		printf("cpu%d.min 0\n", i);
 	}
 
