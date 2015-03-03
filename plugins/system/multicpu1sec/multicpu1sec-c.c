@@ -126,7 +126,7 @@ int acquire() {
 
 int fetch() {
 	printf("fetch()\n");
-	FILE* cache_file = fopen(cache_filename, "r");
+	FILE* cache_file = fopen(cache_filename, "r+");
 
 	/* cat the cache_file to stdout */
 	char buffer[1024];
