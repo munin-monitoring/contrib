@@ -3,6 +3,9 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+
+#include <time.h>
 
 #define PROC_STAT "/proc/stat"
 
@@ -35,7 +38,7 @@ int config() {
 	printf(
 		"graph_title multicpu1sec\n"
 		"graph_category system::1sec\n"
-		"graph_vlabel average cpu use %\n"
+		"graph_vlabel average cpu use %%\n"
 		"graph_scale no\n"
 		"graph_total All CPUs\n"
 		"update_rate 1\n"
@@ -50,14 +53,81 @@ int config() {
 	}
 
 
+	return 0;
+}
+
+char* pid_filename = "./multicpu1sec.pid";
+char* cache_filename = "./multicpu1sec.value";
+
+/* Wait until the next second, and return the EPOCH */
+time_t wait_until_next_second() {
+	struct timespec tp;
+	clock_gettime(CLOCK_REALTIME, &tp);
+
+	time_t current_epoch = tp.tv_sec;
+	long nsec_to_sleep = 1000*1000*1000 - tp.tv_nsec;
+
+
+	/* Only sleep if needed */
+	if (nsec_to_sleep > 0) {
+		tp.tv_sec = 0;
+		tp.tv_nsec = nsec_to_sleep;
+		nanosleep(&tp, NULL);
+	}
+
+	return current_epoch + 1;
 }
 
 int acquire() {
 	printf("acquire()\n");
+
+	/* write the pid */
+	FILE* pid_file = fopen(pid_filename, "w");
+	fprintf(pid_file, "%d\n", getpid());
+	fclose(pid_file);
+
+	/* loop each second */
+	while (1) {
+		/* wait until next second */
+		time_t epoch = wait_until_next_second();
+
+		/* Reading /proc/stat */
+		FILE* f = fopen(PROC_STAT, "r");
+		// Read and ignore the 1rst line
+		char buffer[1024];
+		fgets(buffer, 1024, f);
+
+		/* open the spoolfile */
+
+		FILE* cache_file = fopen(cache_filename, "a");
+
+		while (! feof(f)) {
+			if (fgets(buffer, 1024, f) == 0) {
+				// EOF
+				break;
+			}
+
+			// Not on CPU lines anymore
+			if (strncmp(buffer, "cpu", 3)) break;
+
+			char cpu_id[64];
+			long usr, nice, sys, idle, iowait, irq, softirq;
+			sscanf(buffer, "%s %ld %ld %ld %ld %ld", cpu_id, &usr, &nice, &sys, &idle, &iowait, &irq, &softirq);
+
+			long used = usr + nice + sys + idle + iowait + irq + softirq;
+
+			fprintf(cache_file, "%s.value %ld:%ld\n", cpu_id, epoch, used);
+		}
+
+		fclose(cache_file);
+		fclose(f);
+	}
 }
 
 int fetch() {
 	printf("fetch()\n");
+
+	return 0;
 }
 
 int main(int argc, char **argv) {
