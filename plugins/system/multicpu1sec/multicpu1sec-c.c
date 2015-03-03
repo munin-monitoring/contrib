@@ -133,7 +133,7 @@ int acquire() {
 			long usr, nice, sys, idle, iowait, irq, softirq;
 			sscanf(buffer, "%s %ld %ld %ld %ld %ld", cpu_id, &usr, &nice, &sys, &idle, &iowait, &irq, &softirq);
 
-			long used = usr + nice + sys + idle + iowait + irq + softirq;
+			long used = usr + nice + sys + iowait + irq + softirq;
 
 			fprintf(cache_file, "%s.value %ld:%ld\n", cpu_id, epoch, used);
 		}
