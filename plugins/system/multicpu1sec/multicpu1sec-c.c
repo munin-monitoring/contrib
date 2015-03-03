@@ -81,7 +81,6 @@ time_t wait_until_next_second() {
 }
 
 int acquire() {
-	printf("acquire()\n");
 
 	/* write the pid */
 	FILE* pid_file = fopen(pid_filename, "w");
@@ -128,7 +127,6 @@ int acquire() {
 }
 
 int fetch() {
-	printf("fetch()\n");
 	FILE* cache_file = fopen(cache_filename, "r+");
 
 	/* lock */
