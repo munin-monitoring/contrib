@@ -7,6 +7,8 @@
 
 #include <time.h>
 
+#include <sys/file.h>
+
 #define PROC_STAT "/proc/stat"
 
 int fail(char* msg) {
@@ -98,8 +100,9 @@ int acquire() {
 		fgets(buffer, 1024, f);
 
 		/* open the spoolfile */
-
 		FILE* cache_file = fopen(cache_filename, "a");
+		/* lock */
+		flock(fileno(cache_file), LOCK_EX);
 
 		while (! feof(f)) {
 			if (fgets(buffer, 1024, f) == 0) {
@@ -127,6 +130,9 @@ int acquire() {
 int fetch() {
 	printf("fetch()\n");
 	FILE* cache_file = fopen(cache_filename, "r+");
+
+	/* lock */
+	flock(fileno(cache_file), LOCK_EX);
 
 	/* cat the cache_file to stdout */
 	char buffer[1024];
