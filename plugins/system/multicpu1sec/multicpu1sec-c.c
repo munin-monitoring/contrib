@@ -1,6 +1,7 @@
 /*
  * multicpu1sec C plugin
  */
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -82,6 +83,21 @@ time_t wait_until_next_second() {
 }
 
 int acquire() {
+
+	/* fork ourselves if not asked otherwise */
+	char* no_fork = getenv("no_fork");
+	if (! no_fork || strcmp("1", no_fork)) {
+		if (fork()) return;
+		// we are the child, complete the daemonization
+
+		/* Close standard IO */
+		fclose(stdin);
+		fclose(stdout);
+		fclose(stderr);
+
+		/* create new session and process group */
+		setsid();
+	}
 
 	/* write the pid */
 	FILE* pid_file = fopen(pid_filename, "w");
