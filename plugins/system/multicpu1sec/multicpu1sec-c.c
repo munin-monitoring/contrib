@@ -60,8 +60,8 @@ int config() {
 	return 0;
 }
 
-char* pid_filename = "./multicpu1sec.pid";
-char* cache_filename = "./multicpu1sec.value";
+char* pid_filename;
+char* cache_filename;
 
 /* Wait until the next second, and return the EPOCH */
 time_t wait_until_next_second() {
@@ -160,6 +160,23 @@ int fetch() {
 }
 
 int main(int argc, char **argv) {
+	/* resolve paths */
+	char *MUNIN_PLUGSTATE = getenv("MUNIN_PLUGSTATE");
+
+	/* Default is current directory */
+	if (! MUNIN_PLUGSTATE) MUNIN_PLUGSTATE = ".";
+
+	size_t MUNIN_PLUGSTATE_length = strlen(MUNIN_PLUGSTATE);
+
+	pid_filename = malloc(MUNIN_PLUGSTATE_length + strlen("/multicpu1sec.") + strlen("pid") + 1); pid_filename[0] = '\0';
+	cache_filename = malloc(MUNIN_PLUGSTATE_length + strlen("/multicpu1sec.") + strlen("value") + 1); cache_filename[0] = '\0';
+
+	strcat(pid_filename, MUNIN_PLUGSTATE);
+	strcat(pid_filename, "/multicpu1sec.pid");
+
+	strcat(cache_filename, MUNIN_PLUGSTATE);
+	strcat(cache_filename, "/multicpu1sec.value");
+
 	if (argc > 1) {
 		char* first_arg = argv[1];
 		if (! strcmp(first_arg, "config")) {
