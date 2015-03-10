@@ -8,7 +8,7 @@ Installation
 ------------
 
 - Copy `varnish4_` to the Munin plugins directory (`/usr/share/munin/plugins/`)
-- Make varnish_ runnable (`chmod +x /usr/share/munin/plugins/varnish_`)
+- Make `varnish4_` runnable (`chmod +x /usr/share/munin/plugins/varnish4_`)
 
 Configuration
 -------------

@@ -238,7 +238,8 @@ my %ASPECTS = (
 			'client_req' => {
 				'type' => 'DERIVE',
 				'min' => '0',
-				'graph' => 'off'
+				'graph' => 'off',
+				'rpn' => [ 'cache_hit' , 'cache_miss' , 'cache_hitpass' , '+' , '+' ]
 			},
 			'cache_hit' => {
 				'type' => 'DERIVE',
@@ -304,6 +305,7 @@ my %ASPECTS = (
 	},
 	'objects' => {
 		'title' => 'Number of objects',
+		'order' => 'n_object n_objectcore n_vampireobject n_objecthead',
 		'values' => {
 			'n_object' => {
 				'type' => 'GAUGE',
@@ -673,6 +675,7 @@ my %ASPECTS = (
 	},
 	'expunge' => {
 		'title' => 'Object expunging',
+		'order' => 'n_expired n_lru_nuked',
 		'values' => {
 			'n_expired' => {
 				'type' => 'DERIVE',
@@ -885,7 +888,6 @@ sub usage
 my %state = (
 	'stat' => 0,     # inside <stat> or not
 	'field' => 'none', # <name>, <value>, <stat>, etc.
-	'values' => ()
 );
 
 # Reset the state of XML, mainly used for end-elements.
@@ -924,7 +926,7 @@ sub xml_commit_state
 		if ($key eq 'flag') {
 			$data = translate_type($data);
 		}
-		if (defined($type) and $type ne "") {
+		if (defined($type) and $type ne '' and defined($ident) and $ident ne '') {
 			$data{$type}{$ident}{$name}{$key} = $data;
 		} else {
 			$data{$name}{$key} = $data
