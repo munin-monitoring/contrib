@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# ejabberd_resources_ revision 3 (Nov 2013)
+# ejabberd_resources_ revision 4 (Mar 2015)
 #
 # Tested with ejabberd 2.1.x
 #
@@ -8,6 +8,7 @@
 # - ejabberd memory usage (RSS, VSZ, erlang internal)
 # - ejabberd ports/processes usage
 # - online/registered users by vhost
+# - mnesia table sizes and location
 #
 # Required permissions:
 # - read ejabberdctl configuration file
@@ -19,9 +20,10 @@
 # Author: Artem Sheremet <dot.doom@gmail.com>
 #
 # Configuration:
-# - set env.ejabberdctl_cfg to ejabberdctl.cfg path if necessary
+# - set env.ejabberdctl_cfg to ejabberdctl.cfg path if not in /etc
 # - or set env.ERLANG_NODE, env.EJABBERD_PID_PATH to proper values manually
-# - set erl_path to unregular erlang interpreter cli location
+# - set erl_call_path to unregular erl_call location
+# - set env.ejabberdctl to ejabberdctl script path if not on PATH
 
 #%# family=auto
 #%# capabilities=autoconf suggest
@@ -30,25 +32,19 @@ EJABBERDCTL_CFG=${ejabberdctl_cfg:-/etc/ejabberd/ejabberdctl.cfg}
 source $EJABBERDCTL_CFG 2>/dev/null
 source $MUNIN_LIBDIR/plugins/plugin.sh
 
+EJABBERDCTL=${ejabberdctl:-$(which ejabberdctl)}
+
 ERLANG_HOST=${ERLANG_NODE/*@/}
 ERLANG_MUNIN_NODE=munin
 
-ERL=${erl_path:-$(which erl)}
+if [ -n "$erl_path" ] && [ -z "$erl_call_path" ]; then
+	erl_call_path="$erl_path"_call
+fi
+
+ERL_CALL=${erl_call_path:-$(which erl_call)}
 
 function ejabberd_exec() {
-	COMMAND=${1//\"/\\\"}
-	su - ejabberd $ERL -noinput \
-		-sname $ERLANG_MUNIN_NODE@$ERLANG_HOST \
-		-noinput \
-		-hidden \
-		-eval "try {ok,S,_} = erl_scan:string(\"$COMMAND\"),
-				   {ok,P} = erl_parse:parse_exprs(S),
-				   {value,V,_} = rpc:call('$ERLANG_NODE', erl_eval, exprs, [P,[]]),
-				   io:format(\"~p\n\", [V])
-			   catch
-				   _:Err -> io:format(\"~p\n\", [Err])
-			   end." \
-		-s init stop
+	echo "$1" | su - ejabberd -c "$ERL_CALL -e -n $ERLANG_NODE" | sed -re 's/^\{ok, (.*)\}$/\1/'
 }
 
 SCRIPT_NAME=$(basename $0)
@@ -94,6 +90,7 @@ CONFIG
 	done
 }
 
+
 function ejabberd_report_memory() {
 	if [ "$1" = "config" ]; then
 		cat <<CONFIG
@@ -127,13 +124,8 @@ INFO_FROM_DOC
 			let memory_value=$memory_value*1024
 			echo "$memory_type.value $memory_value"
 		done
-		ejabberd_exec 'erlang:memory().' | tr '"[]{}' ' ' | grep -Fv _used |
-		while read memory_entry; do
-			clean_entry=${memory_entry/ ,/}
-			entry_name=${clean_entry/,*/}
-			entry_value=${clean_entry/*,/}
-			echo $entry_name.value $entry_value
-		done
+		ejabberd_exec 'io_lib:format("~p", [erlang:memory()]).' | grep -Eo '"[a-z_0-9]+"' |
+		  sed -re 'N;s/"(.*)"\n"(.*)"/\1.value \2/' | grep -Fv _used
 	fi
 }
 
@@ -165,6 +157,53 @@ limit.value $limit
 DATA
 		[ -n "$ERL_MAX_PORTS" ] && echo "configured.value $ERL_MAX_PORTS"
 	fi
+}
+
+function ejabberd_report_mnesia() {
+	local draw sed_re long_bits
+
+	sed_re='([a-z_]+) *: with ([0-9]+) +records occupying ([0-9]+) +([a-z]+) o[fn] ([a-z]+)'
+	# 1 = table_name
+	# 2 = records number
+	# 3 = bytes/words number
+	# 4 = unit (bytes or words)
+	# 5 = storage (disc or mem)
+
+	if [ "$1" = config ]; then
+		echo "graph_vlabel $2"
+		draw=LINE2
+		[ "$2" = bytes ] && draw=AREASTACK
+
+		$EJABBERDCTL mnesia info | sed -re 's/'"$sed_re"'/\1 \5/;tx;d;:x' |
+			while read table_name table_storage; do
+				echo "${table_name}_${table_storage}.draw $draw"
+				echo "${table_name}_${table_storage}.label $table_name ($table_storage)"
+			done
+	else
+		if [ "$2" = recs ]; then
+			$EJABBERDCTL mnesia info | sed -re 's/'"$sed_re"'/\1_\5.value \2/;tx;d;:x'
+		else
+			long_bits=$(getconf LONG_BIT)
+			$EJABBERDCTL mnesia info |
+				sed -re 's/'"$sed_re"'/\1_\5.value \3 \4/;tx;d;:x' |
+				awk "
+					/ words\$/ {
+						print \$1, \$2 * $long_bits / 8
+					}
+					/ bytes\$/ {
+						print \$1, \$2
+					}
+				"
+		fi
+	fi
+}
+
+function ejabberd_report_mnesia_bytes() {
+	ejabberd_report_mnesia "$1" bytes
+}
+
+function ejabberd_report_mnesia_recs() {
+	ejabberd_report_mnesia "$1" recs
 }
 
 function open_files_counter_util() {
@@ -244,6 +283,8 @@ processes
 ports
 online_users
 registered_users
+mnesia_recs
+mnesia_bytes
 SUGGESTIONS
 		open_files_counter_util &>/dev/null && echo open_files
 		exit 0
