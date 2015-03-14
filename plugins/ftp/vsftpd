@@ -1,58 +1,104 @@
-LOGFILE=/var/log/vsftpd.log
+#!/bin/bash
+
+logfile=${logfile:-/var/log/vsftpd.log}
 
 if [ "$1" = "autoconf" ]; then
-    if [ -f "${LOGFILE}" ]; then
-        echo yes
-	exit 0
-    else
-        echo no
-	exit 1
-    fi
+	if [ -f "${logfile}" ]; then
+		echo yes
+		exit 0
+	else
+		echo no
+		exit 1
+	fi
 fi
 
 if [ "$1" = "config" ]; then
-        echo 'graph_title FTP Server'
-        echo 'graph_args --base 1000 -l 0'
-        echo 'graph_vlabel Requests'
-	echo 'graph_category FTP'
-        echo 'ftp_c.label connections'
-        echo 'ftp_sl.label successful_logins'
-	echo 'ftp_fl.label failed_logins'
-	echo 'ftp_su.label successful_uploads'
-	echo 'ftp_fu.label failed_uploads'
-	echo 'ftp_sd.label successful_downloads'
-	echo 'ftp_fd.label failed_downloads'
-	echo 'ftp_sde.label successful_deletes'
-	echo 'ftp_fde.label failed_deletes'
-        exit 0
+	cat <<EOF
+graph_title vsftpd Server
+graph_args --base 1000 -l 0
+graph_vlabel Requests
+graph_category ftp
+ftp_c.label connections
+ftp_c.type DERIVE
+ftp_c.min 0
+ftp_sl.label successful_logins
+ftp_sl.type DERIVE
+ftp_sl.min 0
+ftp_fl.label failed_logins
+ftp_fl.type DERIVE
+ftp_fl.min 0
+ftp_su.label successful_uploads
+ftp_su.type DERIVE
+ftp_su.min 0
+ftp_fu.label failed_uploads
+ftp_fu.type DERIVE
+ftp_fu.min 0
+ftp_sd.label successful_downloads
+ftp_sd.type DERIVE
+ftp_sd.min 0
+ftp_fd.label failed_downloads
+ftp_fd.type DERIVE
+ftp_fd.min 0
+ftp_sr.label successful_renames
+ftp_sr.type DERIVE
+ftp_sr.min 0
+ftp_fr.label failed_renames
+ftp_fr.type DERIVE
+ftp_fr.min 0
+ftp_sde.label successful_deletes
+ftp_sde.type DERIVE
+ftp_sde.min 0
+ftp_fde.label failed_deletes
+ftp_fde.type DERIVE
+ftp_fde.min 0
+EOF
+	exit 0
 fi
 
-ftp_c=U
-ftp_sl=U
-ftp_fl=U
-ftp_su=U
-ftp_fu=U
-ftp_sd=U
-ftp_fd=U
-ftp_sde=U
-ftp_fde=U
-
-ftp_c=`grep "CONNECT" ${LOGFILE} | wc -l`
-ftp_sl=`grep "OK LOGIN" ${LOGFILE} | wc -l`
-ftp_fl=`grep "FAIL LOGIN" ${LOGFILE} | wc -l`
-ftp_su=`grep "OK UPLOAD" ${LOGFILE} | wc -l`
-ftp_fu=`grep "FAIL UPLOAD" ${LOGFILE} | wc -l`
-ftp_sd=`grep "OK DOWNLOAD" ${LOGFILE} |wc -l`
-ftp_fd=`grep "FAIL DOWNLOAD" ${LOGFILE} | wc -l`
-ftp_sde=`grep "OK DELETE" ${LOGFILE} |wc -l`
-ftp_fde=`grep "FAIL DELETE" ${LOGFILE} | wc -l`
-
-echo "ftp_c.value ${ftp_c}"
-echo "ftp_sl.value ${ftp_sl}"
-echo "ftp_fl.value ${ftp_fl}"
-echo "ftp_su.value ${ftp_su}"
-echo "ftp_fu.value ${ftp_fu}"
-echo "ftp_sd.value ${ftp_sd}"
-echo "ftp_fd.value ${ftp_fd}"
-echo "ftp_sde.value ${ftp_sde}"
-echo "ftp_fde.value ${ftp_fde}"
+if [ -f "${logfile}" ]; then
+	awk '
+		BEGIN {
+			counts["ftp_c"] = 0;
+			counts["ftp_sl"] = 0;
+			counts["ftp_fl"] = 0;
+			counts["ftp_su"] = 0;
+			counts["ftp_fu"] = 0;
+			counts["ftp_sd"] = 0;
+			counts["ftp_fd"] = 0;
+			counts["ftp_sr"] = 0;
+			counts["ftp_fr"] = 0;
+			counts["ftp_sde"] = 0;
+			counts["ftp_fde"] = 0;
+		}
+		/CONNECT/       { counts["ftp_c"]++;   next; }
+		/OK LOGIN/      { counts["ftp_sl"]++;  next; }
+		/FAIL LOGIN/    { counts["ftp_fl"]++;  next; }
+		/OK UPLOAD/     { counts["ftp_su"]++;  next; }
+		/FAIL UPLOAD/   { counts["ftp_fu"]++;  next; }
+		/OK DOWNLOAD/   { counts["ftp_sd"]++;  next; }
+		/FAIL DOWNLOAD/ { counts["ftp_fd"]++;  next; }
+		/OK RENAME/     { counts["ftp_sr"]++;  next; }
+		/FAIL RENAME/   { counts["ftp_fr"]++;  next; }
+		/OK DELETE/     { counts["ftp_sde"]++; next; }
+		/FAIL DELETE/   { counts["ftp_fde"]++; next; }
+		END {
+			for (idx in counts) {
+				printf "%s.value %d\n", idx, counts[idx];
+			}
+		}
+	' "${logfile}"
+else
+	cat <<EOF
+ftp_c.value U
+ftp_sl.value U
+ftp_fl.value U
+ftp_su.value U
+ftp_fu.value U
+ftp_sd.value U
+ftp_fd.value U
+ftp_sr.value U
+ftp_fr.value U
+ftp_sde.value U
+ftp_fde.value U
+EOF
+fi
