@@ -1,0 +1,247 @@
+#!/usr/bin/perl
+
+# This script is used to feed sensor information from Allnet-Devices like e.g.
+# Allnet 4000 or 4500 into munin. It uses the XML-Interface of the devices to
+# fetch data.
+#
+# written by Michael Meier <michael.meier@fau.de>, License GPLv2
+#
+# Usage:
+# Put this script onto some server, either on your munin-server or onto some
+# other server that can reach the actual device. Then symlink to it from the
+# munin-node plugin dir (usually /etc/munin/plugins). The naming of the symlink
+# is a critical part of the configuration, it needs to be:
+#  SOMETHING_HOSTNAME_TYPE,  e.g. allnet_monitordevice42.yourdomain.com_temp
+# SOMETHING really is just a random name containing no special chars, use
+# whatever you like.
+# HOSTNAME is the hostname of the Allnet-Device. This is also the hostname
+# under which the sensors will show up in munin.
+# TYPE is the type of sensors you're interested in, valid values are:
+#                                                   temp, hum, amps
+# If you want to monitor more than one type of sensor, create more than one
+# symlink.
+# The plugin will automatically feed all sensors of the selected type to munin,
+# under the names that you set in the allnets config. Take care with special
+# characters, in particular Umlauts and the such - munin will probably not like
+# those in names.
+#
+# Note that the format of the XML output these devices deliver varies vastly
+# between different firmware versions. This script currently understands 3
+# completely different outputs, but there is no guarantee that's all the
+# variations that exist. If the script doesn't understand the output of your
+# device, set the beextratolerant parameter. You might also want to try a
+# different firmware version.
+#
+# The behaviour of the script can be influenced by environment variables. The
+# variables are (note this is case sensitive!):
+#  username  Username for basic HTTP auth (if your device is password protected)
+#  password  Password for basic HTTP auth (if your device is password protected)
+#  beextratolerant   This needs to be set to 1 for some extremely old/stripped
+#                    down devices. Note that this relaxes sanity checks and
+#                    will lead to nonsense-sensors showing up on devices that
+#                    do not require this.
+#  DUMP      set to 1 to enable some debug output (only outside of munin!)
+#  internalsensorname.warning   The warning-threshold for the sensor reported
+#                               to munin. You need to replace
+#                               "internalsensorname" with the munin-internal
+#                               name of the sensor, usually sensor+somenumber.
+#                               Can be seen in the webinterface.
+#  internalsensorname.critical  Same as above, but for the critical-threshold.
+#
+# As an example, you could put the following file into /etc/munin/plugin-conf.d:
+# [allnet_monitordevice42.yourdomain.com_*]
+#       env.username horst
+#       env.password topsecret
+#       env.sensor14.warning 10.0
+#       env.sensor14.critical 15.0
+
+# One tuneable:
+# Timeout for requests.
+my $timeout = 3; # the LWP default of 180 secs would be way too long
+
+# -----------------------------------------------------------------------------
+
+# No need to change those, can be overriden from commandline.
+my $hostname = 'localhost';
+my $valtype = 'temp'; # or humidity or amps
+# These are tried one after another.
+my @xmlpaths = ('/xml/sensordata.xml', '/xml');
+
+use LWP::UserAgent;
+use XML::Simple;
+
+# AuthAgent is simply LWP::UserAgent with a reimplemented version of the
+# method basic auth. Theoretically/according to the documentation, the base
+# implementation should be able to do everything that is needed as well, but
+# it seems to broken and "the internet" suggests it has been for a long time.
+{
+  package AuthAgent;
+  use base 'LWP::UserAgent';
+    
+  sub get_basic_credentials {
+    if (defined($ENV{'username'}) && defined($ENV{'password'})) {
+      return $ENV{'username'}, $ENV{'password'};
+    } else {
+      return 'admin', 'password';
+    }
+  }
+}
+
+# Par. 0: URL
+# Returns: The contents of the website
+sub geturl($) {
+  my $url = shift();
+
+  my $ua = AuthAgent->new();
+  $ua->agent($0);
+  $ua->timeout($timeout);
+  # Create a request
+  my $req = HTTP::Request->new(GET => $url);
+  # Pass request to the user agent and get a response back
+  my $res = $ua->request($req);
+  # Check the outcome of the response
+  unless ($res->is_success()) {
+    #print("ERROR getting data from $url\n");
+    return undef;
+  }
+  return $res->content();
+}
+
+if ((@ARGV > 0) && ($ARGV[0] eq "autoconf")) {
+  print("No\n");
+  exit(0);
+}
+my $progname = $0;
+if      ($progname =~ m/[-_]temp$/) {
+  $valtype = 'temp';
+} elsif ($progname =~ m/[-_]temperature$/) {
+  $valtype = 'temp';
+} elsif ($progname =~ m/[-_]hum$/) {
+  $valtype = 'humidity';
+} elsif ($progname =~ m/[-_]humidity$/) {
+  $valtype = 'humidity';
+} elsif ($progname =~ m/[-_]amps$/) {
+  $valtype = 'amps';
+} elsif ($progname =~ m/[-_]ampere$/) {
+  $valtype = 'amps';
+}
+if ($progname =~ m/.+_(.+?)_.+/) {
+  $hostname = $1;
+}
+my $sensorxml;
+foreach $xp (@xmlpaths) {
+  $sensorxml = geturl('http://' . $hostname . $xp);
+  if (defined($sensorxml)) { last; }
+}
+unless (defined($sensorxml)) {
+  print("# Sorry, Failed to fetch data.");
+  exit(1);
+}
+# VERY old firmware versions have HTML crap around the actual XML.
+$sensorxml =~ s!.*<xml>(.*)</xml>.*!$1!sg;
+if (defined($ENV{'DUMP'}) && ($ENV{'DUMP'} eq '1')) {
+  print($sensorxml . "\n");
+}
+if ((@ARGV > 0) && ($ARGV[0] eq "config")) {
+  if ($valtype eq 'humidity') {
+    print("graph_title Humidity sensors\n");
+    print("graph_args --lower-limit 0 --upper-limit 100.0\n");
+    print("graph_vlabel percent\n");
+  } elsif ($valtype eq 'temp') {
+    print("graph_title Temperature sensors\n");
+    print("graph_vlabel degC\n");
+  } elsif ($valtype eq 'amps') {
+    print("graph_title Electric current sensors\n");
+    print("graph_args --lower-limit 0\n");
+    print("graph_vlabel Ampere\n");
+  }
+  print("graph_category envsensors\n");
+  print("host_name $hostname\n");
+}
+my $sensordata = XMLin($sensorxml, KeyAttr => { }, ForceArray => [ 'data' ] );
+my $beextratolerant = 0;
+if (defined($ENV{'beextratolerant'})) {
+  if (($ENV{'beextratolerant'} =~ m/^y/) || ($ENV{'beextratolerant'} eq '1')) {
+    $beextratolerant = 1;
+  }
+}
+#print($sensordata->[0]);
+foreach $k (keys($sensordata)) {
+  if ($k =~ m/^n(\d+)$/) { # Special handling: Could be output from the OLD XML interface.
+    my $nr = $1;
+    if (defined($sensordata->{'s'.$nr})
+     && defined($sensordata->{'t'.$nr})
+     && defined($sensordata->{'min'.$nr})
+     && defined($sensordata->{'max'.$nr})) {
+      # OK, all values available, really is from the old XML interface.
+      if ($sensordata->{'s'.$nr} eq '0') { next; } # 0 means no sensor.
+      # OK, lets map the sensortype.
+      my $st = 'temp';
+      if ($sensordata->{'s'.$nr} eq '65') { $st = 'humidity'; }
+      if ($sensordata->{'s'.$nr} eq '101') {
+        # potential FIXME: 101 is actually "water/contact sensor", but since it
+        # returns 0.0 and 100.0 as values, we can treat it just like humidity
+        # for simplicity.
+        $st = 'humidity';
+      }
+      if ($valtype ne $st) { next; } # these aren't the droids you're looking for
+      if ((@ARGV > 0) && ($ARGV[0] eq "config")) {
+        print("sensor${nr}.label " . $sensordata->{'n'.$nr} . "\n");
+        print("sensor${nr}.type GAUGE\n");
+        if (defined($ENV{"sensor${nr}.warning"})) { printf("sensor%s.warning %s\n", $nr, $ENV{"sensor${nr}.warning"}); }
+        if (defined($ENV{"sensor${nr}.critical"})) { printf("sensor%s.critical %s\n", $nr, $ENV{"sensor${nr}.critical"}); }
+      } else {
+        print("sensor${nr}.value " . $sensordata->{'t'.$nr}. "\n");
+      }
+    }
+    # Fall through - probably wasn't the old XML anyways.
+  }
+  my $onesens = $sensordata->{$k};
+  unless (defined($onesens->{'value_float'})
+       && defined($onesens->{'name'})
+       && defined($onesens->{'min_abs_float'})
+       && defined($onesens->{'max_abs_float'})
+       && defined($onesens->{'unit'})) {
+    # Not all values available -> no sane sensor data (or the "system" block in the XML)
+    unless ($beextratolerant) { next; }
+    # Maybe yet another firmware version that does not deliver all of these values,
+    # so lets check for the absolute MINIMUM set.
+    unless (defined($onesens->{'value_float'}) && defined($onesens->{'name'})) {
+      next; # Minimum set not available either.
+    }
+    if ($onesens->{'value_float'} < -20000.0) { next; } # Invalid value
+    # OK, so fill in the blanks
+    unless (defined($onesens->{'unit'})) { $onesens->{'unit'} = 'C'; }
+    unless (defined($onesens->{'min_abs_float'})) {
+      $onesens->{'min_abs_float'} = $onesens->{'value_float'} - 0.01;
+    }
+    unless (defined($onesens->{'max_abs_float'})) {
+      $onesens->{'max_abs_float'} = $onesens->{'value_float'} + 0.01;
+    }
+  }
+  if (($onesens->{'min_abs_float'} == 0.0)
+   && ($onesens->{'max_abs_float'} == 0.0)
+   && ($onesens->{'value_float'} == 0.0)) {
+    next; # If the sensor never showed anything but 0.0, we do not care about it.
+  }
+  if ($onesens->{'unit'} eq 'A AC') { $onesens->{'unit'} = 'A'; }
+  if ($onesens->{'unit'} =~ m/C$/) {
+    $onesens->{'unit'} = 'C'; # Remove WTF8-Fuckup
+  }
+  if (($valtype eq 'temp') && ($onesens->{'unit'} ne 'C')) { next; }
+  if (($valtype eq 'humidity') && ($onesens->{'unit'} ne '%')) { next; }
+  if (($valtype eq 'amps') && ($onesens->{'unit'} ne 'A')) { next; }
+  if ((@ARGV > 0) && ($ARGV[0] eq "config")) {
+    print("${k}.label " . $onesens->{'name'} . "\n");
+    #print("${k}.info " . $onesens->{'name'} . "\n");
+    print("${k}.type GAUGE\n");
+    if (defined($ENV{"${k}.warning"})) { printf("%s.warning %s\n", $k, $ENV{"${k}.warning"}); }
+    if (defined($ENV{"${k}.critical"})) { printf("%s.critical %s\n", $k, $ENV{"${k}.critical"}); }
+  } else {
+    if ($onesens->{'value_float'} < -20000.0) { # Invalid readings return -20480.0
+      print("${k}.value U\n");
+    } else {
+      print("${k}.value " . $onesens->{'value_float'} . "\n");
+    }
+  }
+}
