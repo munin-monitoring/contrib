@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <time.h>
 
@@ -110,36 +111,45 @@ int acquire() {
 		time_t epoch = wait_until_next_second();
 
 		/* Reading /proc/stat */
-		FILE* f = fopen(PROC_STAT, "r");
-		// Read and ignore the 1rst line
-		char buffer[1024];
-		fgets(buffer, 1024, f);
+		int f = open(PROC_STAT, O_RDONLY);
+
+		const int buffer_size = 64 * 1024;
+		char buffer[buffer_size];
+
+		// whole /proc/stat can be read in 1 syscall
+		if (read(f, buffer, buffer_size) <= 0) {
+			return fail("cannot read " PROC_STAT);
+		}
+
+		// ignore the 1rst line
+		char* line;
+		const char* newl = "\n";
+		line = strtok(buffer, newl);
 
 		/* open the spoolfile */
-		FILE* cache_file = fopen(cache_filename, "a");
+		int cache_file = open(cache_filename, O_CREAT | O_APPEND | O_WRONLY);
+
 		/* lock */
-		flock(fileno(cache_file), LOCK_EX);
+		flock(cache_file, LOCK_EX);
 
-		while (! feof(f)) {
-			if (fgets(buffer, 1024, f) == 0) {
-				// EOF
-				break;
-			}
-
+		for (line = strtok(NULL, newl); line; line = strtok(NULL, newl)) {
 			// Not on CPU lines anymore
-			if (strncmp(buffer, "cpu", 3)) break;
+			if (strncmp(line, "cpu", 3)) break;
 
 			char cpu_id[64];
 			long usr, nice, sys, idle, iowait, irq, softirq;
-			sscanf(buffer, "%s %ld %ld %ld %ld %ld %ld %ld", cpu_id, &usr, &nice, &sys, &idle, &iowait, &irq, &softirq);
+			sscanf(line, "%s %ld %ld %ld %ld %ld %ld %ld", cpu_id, &usr, &nice, &sys, &idle, &iowait, &irq, &softirq);
 
 			long used = usr + nice + sys + iowait + irq + softirq;
 
-			fprintf(cache_file, "%s.value %ld:%ld\n", cpu_id, epoch, used);
+			char out_buffer[1024];
+			sprintf(out_buffer, "%s.value %ld:%ld\n", cpu_id, epoch, used);
+
+			write(cache_file, out_buffer, strlen(out_buffer));
 		}
 
-		fclose(cache_file);
-		fclose(f);
+		close(cache_file);
+		close(f);
 	}
 }
 
