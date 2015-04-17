@@ -1,0 +1,176 @@
+#!/usr/bin/env /usr/local/bin/python2
+# -*- coding: utf-8 -*-
+# vim: set sts=4 sw=4 encoding=utf-8
+
+# Based on plugins from https://github.com/pcdummy/mongomon
+# Copyright (c) 2015, Tomas Zvala
+# Copyright (c) 2010, Rene Jochum
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#    * Redistributions of source code must retain the above copyright
+#      notice, this list of conditions and the following disclaimer.
+#    * Redistributions in binary form must reproduce the above copyright
+#      notice, this list of conditions and the following disclaimer in the
+#      documentation and/or other materials provided with the distribution.
+#    * Neither the name of the Rene Jochum nor the
+#      names of its contributors may be used to endorse or promote products
+#      derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+#%# family=auto
+#%# capabilities=suggest autoconf
+
+
+from pymongo import Connection
+from operator import itemgetter
+
+settings_host = '127.0.0.1'
+settings_port = 27017
+settings_db = 'mydb'
+settings_user = ''
+settings_password = ''
+settings_ignoredb = {}
+
+typeIndex = {}
+typeIndex['collcount'] = {}
+typeIndex['collcount']['index'] = 'count'
+typeIndex['collcount']['title'] = 'per collection document count'
+typeIndex['collcount']['yaxis'] = 'documents'
+typeIndex['collcount']['base'] = '1000'
+typeIndex['collcount']['scale'] = '--logarithmic -l1'
+
+typeIndex['collsize'] = {}
+typeIndex['collsize']['index'] = 'size'
+typeIndex['collsize']['title'] = 'per collection data size'
+typeIndex['collsize']['yaxis'] = 'Byte'
+typeIndex['collsize']['base'] = '1024'
+typeIndex['collsize']['scale'] = '--logarithmic -l1 --units=si'
+
+typeIndex['avgsize'] = {}
+typeIndex['avgsize']['index'] = 'avgObjSize'
+typeIndex['avgsize']['title'] = 'average object size'
+typeIndex['avgsize']['yaxis'] = 'Byte'
+typeIndex['avgsize']['base'] = '1024'
+typeIndex['avgsize']['scale'] = '--logarithmic --units=si'
+
+typeIndex['storage'] = {}
+typeIndex['storage']['index'] = 'storageSize'
+typeIndex['storage']['title'] = 'per collection storage size'
+typeIndex['storage']['yaxis'] = 'Byte'
+typeIndex['storage']['base'] = '1024'
+typeIndex['storage']['scale'] = '--logarithmic -l1 --units=si'
+
+typeIndex['indexsize'] = {}
+typeIndex['indexsize']['index'] = 'totalIndexSize'
+typeIndex['indexsize']['title'] = 'per collection index size'
+typeIndex['indexsize']['yaxis'] = 'Byte'
+typeIndex['indexsize']['base'] = '1024'
+typeIndex['indexsize']['scale'] = '--logarithmic -l 1 --units=si'
+
+
+
+def getCollstats(graphtype):
+        con = Connection(settings_host, int(settings_port), slave_okay=True)
+
+        if settings_user:
+                db = con['admin']
+                db.authenticate(settings_user, settings_password)
+
+        stats_tmp = {}
+        for dbname in con.database_names():
+                if dbname in settings_ignoredb:
+                    continue
+                db = con[dbname]
+                for coll in db.collection_names():
+                        if coll.startswith('system.'):
+                                continue
+                        stats = db.command("collstats", coll)
+                        collname = dbname + "_" + coll.replace('.', '_')
+                        if not stats_tmp.has_key(collname):
+                                stats_tmp[collname] = {}
+                                stats_tmp[collname]['value'] = 0
+                                stats_tmp[collname]['dbname'] = dbname
+                        if typeIndex[graphtype]['index'] in stats:
+                            stats_tmp[collname]['value'] += long(stats[typeIndex[graphtype]['index']])
+
+
+        con.disconnect()
+
+        for collname, item in sorted(stats_tmp.items()):
+                yield ("%s" % collname, item['value'], item['dbname'])
+
+
+def doData(base,graphtype):
+    lastdb = ""
+    for coll, stats, db in sorted(getCollstats(graphtype), key=itemgetter(2)):
+        if lastdb != db:
+            print "multigraph " + base + "_" + graphtype + "_" + db
+            lastdb = db
+        print "%s_%s.value %s" % (graphtype, coll, stats)
+
+
+def doConfig(base,graphtype):
+
+    lastdb = ""
+    for k,v,d in sorted(getCollstats(graphtype), key=itemgetter(2)):
+        if lastdb != d:
+            print "multigraph " + base + "_" + graphtype + "_" + d
+            lastdb = d
+#            print "graph_total total"
+            print "graph_title MongoDB " + typeIndex[graphtype]['title'] + " for database " + d
+            print "graph_args --base " + typeIndex[graphtype]['base'] + " " + typeIndex[graphtype]['scale']
+            print "graph_vlabel " + typeIndex[graphtype]['yaxis']
+            print "graph_category MongoDB"
+        print "%s_%s.label %s" % (graphtype, k, k)
+        print "%s_%s.min 0" % (graphtype, k)
+        print "%s_%s.draw LINE1" % (graphtype, k)
+
+def doSuggest():
+        print "keys"
+        for k in typeIndex.keys():
+                print k
+
+
+if __name__ == "__main__":
+    from sys import argv,exit
+    from os import environ,path
+    import re
+
+    # Could be done by a for loop
+    # but i think if's are faster
+    if 'HOST' in environ:
+        settings_host = environ['HOST']
+    if 'PORT' in environ:
+        settings_port = environ['PORT']
+    if 'DB' in environ:
+        settings_db = environ['DB']
+    if 'MONGO_USER' in environ:
+        settings_user = environ['MONGO_USER']
+    if 'PASSWORD' in environ:
+        settings_password = environ['PASSWORD']
+    if 'IGNOREDB' in environ:
+        settings_ignoredb = environ['IGNOREDB'].split(',')
+    m = re.search('^(.*)_([a-zA-Z0-9]*)$', path.basename(argv[0]))
+    if len(argv) < 2:
+        doData(m.group(1),m.group(2))
+    elif argv[1] == "config":
+        doConfig(m.group(1),m.group(2))
+    elif argv[1] == "autoconf":
+        print "yes"
+    elif argv[1] == "suggest":
+        doSuggest()
+    else:
+        print "invalid argument"
+        exit(1)
