@@ -37,17 +37,17 @@ close($mdstat);
 my($devinfo_re, $devstat_re, $action_re) = (
     '(md\d+)\s+:\s+active\s+(\(read-only\)\s+|\(auto-read-only\)\s+|)(\w+)\s+(.*)',
     '.*\[(\d+)\/(\d+)]\s+\[(\w+)]',
-    '(.*(check|resync)\s=\s+(\d+\.\d+)%)',
+    '.*(reshape|check|resync|recovery)\s*=\s*(\d+\.\d+%|\w+)',
 );
 # Interestingly, swap is presented as "active (auto-read-only)"
 # and mdadm has '--readonly' option to make the array 'active (read-only)'
 
-my($dev, $type, $members, $nmem, $nact, $status, $proc);
+my($dev, $type, $members, $nmem, $nact, $status, $action, $proc);
 while (@text) {
     my $line = shift @text;
     if ($line =~ /$devinfo_re/) {
         # first line should like "active raid1 sda1[0] sdc1[2] sdb1[1]"
-        $dev =  $1;
+        $dev = $1;
         $type = $3;
         $members = $4;
         
@@ -67,10 +67,19 @@ while (@text) {
         if ($line =~ /$action_re/) {
             # third line should like " [==>..................]  check = 10.0% (12345/123456) finish=123min speed=12345/sec"
             # this line will appear only when the array is in action
-            $proc = $3;
+            $action = $1;
+            my $percent = $2;
+            if ($percent =~ /(\d+\.\d+)%/) {
+                $proc = $1;
+            }
+            else {
+                # 'resync=DELAYED' or 'resync=PENDING'
+                $proc = -1;
+            }
         }
         else {
             # array is not in action
+            $action = 'idle';
             unshift(@text, $line);
         }
     }
@@ -94,19 +103,23 @@ while (@text) {
     } else {
         my $pct = 100 * $nact / $nmem;
         my $rpct = 100;
-        if ( $pct < 100 ) {
-            my @output = `/sbin/mdadm -D /dev/$dev | grep Rebuild`;
-            if( $output[0] and $output[0] =~ /([0-9]+)% complete/ ) {
-                    $rpct = $1;
-            } else {
-                    $rpct = 0;
+        my $cpct = 100;
+        if ($action =~ /reshape|recovery/) {
+            $rpct = $proc;
+            $cpct = 0;  # check/resync is not done
+        }
+        elsif ($action =~ /check|resync/) {
+            if ($proc < 0) {
+                # array is on DELAYED or PENDING, further info is unknown
+                $rpct = 0;
+                $cpct = 0;
+            }
+            else {
+                # reshape/recovery was done, $rpct => 100
+                $cpct = $proc;
             }
         }
-        if ( $proc ) {
-            $cpct = $proc;
-        } else {
-            $cpct = 0;
-        }
+
         print "$dev.value $pct\n";
         print $dev, "_rebuild.value $rpct\n";
         print $dev, "_check.value $cpct\n";
