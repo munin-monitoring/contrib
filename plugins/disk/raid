@@ -12,11 +12,11 @@
 
 if ($ARGV[0] and $ARGV[0] eq "autoconf") {
     if (-r "/proc/mdstat" and `grep md /proc/mdstat`) {
-	print "yes\n";
-	exit 0;
+        print "yes\n";
+        exit 0;
     } else {
-	print "no RAID devices\n";
-	exit 1;
+        print "no RAID devices\n";
+        exit 1;
     }
 }
 
@@ -29,52 +29,52 @@ if ( $ARGV[0] and $ARGV[0] eq "config" ) {
     print "graph_scale  no\n";
 }
 
+open(my $mdstat, "/proc/mdstat");
+my $text;
 {
-    local( $/, *MDSTAT ) ;
-    open (MDSTAT, "/proc/mdstat") or exit 1;
-    #open (MDSTAT, "/etc/munin/plugins/sample.failed") or exit 1;
-    my $text = <MDSTAT>;
-    close MDSTAT;
+    local($/);
+    $text = <$mdstat>;
+}
+close($mdstat);
 
-    # Should look like "active raid1 sda1[0] sdc1[2] sdb1[1]"
-    # Interestingly, swap is presented as "active (auto-read-only)"
-    while ($text =~ /(md\d+)\s+:\s+active\s+(\(auto-read-only\)\s+|)(\w+)\s+(.*)\n.*\[(\d+)\/(\d+)]\s+\[(\w+)]\n(.*(check|resync)\s=\s+(\d+\.\d+)%|.*\n)/ ) {
-        my($dev,$dummy,$type,$members,$nmem,$nact,$status,$dummy2,$dummy3,$proc) = ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10);
-#       print "$text\nitem: $dev $type ($members) status=$status $proc\n";
-	if ( $ARGV[0] and $ARGV[0] eq "config" ) {
-	    print "$dev.label $dev\n";
-	    print "$dev.info $type $members\n";
-	    # 100: means less than 100
-	    # Because of an unfound bug, sometimes reported as 99.XX even when OS reports 100.
-	    print "$dev.critical 98:\n";	
-	    print $dev, "_rebuild.label $dev rebuilt\n";
-	    print $dev, "_rebuild.info $type\n";
-	    # Because of an unfound bug, sometimes reported as 99.XX even when OS reports 100.
-	    print $dev, "_rebuild.critical 98:\n";	
-            print $dev, "_check.label $dev check/resync \n";
-            print $dev, "_check.info $type\n";
-	} else {
-	    my $pct = 100 * $nact / $nmem;
-	    my $rpct = 100;
-	    if ( $pct < 100 ) {
-		my @output = `/sbin/mdadm -D /dev/$dev | grep Rebuild`;
-                if( $output[0] and $output[0] =~ /([0-9]+)% complete/ ) {
-			$rpct = $1;
-		} else {
-			$rpct = 0;
-		}
-	    }
-            if ( $proc ) {
-                $cpct = $proc;
+# Should look like "active raid1 sda1[0] sdc1[2] sdb1[1]"
+# Interestingly, swap is presented as "active (auto-read-only)"
+while ($text =~ /(md\d+)\s+:\s+active\s+(\(auto-read-only\)\s+|)(\w+)\s+(.*)\n.*\[(\d+)\/(\d+)]\s+\[(\w+)]\n(.*(check|resync)\s=\s+(\d+\.\d+)%|.*\n)/ ) {
+    my($dev,$dummy,$type,$members,$nmem,$nact,$status,$dummy2,$dummy3,$proc) = ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10);
+#   print "$text\nitem: $dev $type ($members) status=$status $proc\n";
+    if ( $ARGV[0] and $ARGV[0] eq "config" ) {
+        print "$dev.label $dev\n";
+        print "$dev.info $type $members\n";
+        # 100: means less than 100
+        # Because of an unfound bug, sometimes reported as 99.XX even when OS reports 100.
+        print "$dev.critical 98:\n";
+        print $dev, "_rebuild.label $dev rebuilt\n";
+        print $dev, "_rebuild.info $type\n";
+        # Because of an unfound bug, sometimes reported as 99.XX even when OS reports 100.
+        print $dev, "_rebuild.critical 98:\n";
+        print $dev, "_check.label $dev check/resync \n";
+        print $dev, "_check.info $type\n";
+    } else {
+        my $pct = 100 * $nact / $nmem;
+        my $rpct = 100;
+        if ( $pct < 100 ) {
+            my @output = `/sbin/mdadm -D /dev/$dev | grep Rebuild`;
+            if( $output[0] and $output[0] =~ /([0-9]+)% complete/ ) {
+                    $rpct = $1;
             } else {
-                $cpct = 0;
+                    $rpct = 0;
             }
-	    print "$dev.value $pct\n";
-	    print $dev, "_rebuild.value $rpct\n";
-            print $dev, "_check.value $cpct\n";	    
-	}
-	$text = $';
-    } 
+        }
+        if ( $proc ) {
+            $cpct = $proc;
+        } else {
+            $cpct = 0;
+        }
+        print "$dev.value $pct\n";
+        print $dev, "_rebuild.value $rpct\n";
+        print $dev, "_check.value $cpct\n";
+    }
+    $text = $';
 }
 
 exit 0;
