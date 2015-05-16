@@ -29,38 +29,62 @@ BC='/usr/bin/bc -q'
 ARCSTATS="/proc/spl/kstat/zfs/arcstats"
 ZFETCHSTATS="/proc/spl/kstat/zfs/zfetchstats"
 
-ARC_HITS=`cat $ARCSTATS | grep ^hits | awk '{print $3}'`
-ARC_MISSES=`cat $ARCSTATS | grep ^misses | awk '{print $3}'`
+#
+# Pull all values from arcstats
+#
 
-DEMAND_DATA_HITS=`cat $ARCSTATS | grep ^demand_data_hits | awk '{print $3}'`
-DEMAND_DATA_MISSES=`cat $ARCSTATS | grep ^demand_data_misses | awk '{print $3}'`
-DEMAND_METADATA_HITS=`cat $ARCSTATS | grep ^demand_metadata_hits | awk '{print $3}'`
-DEMAND_METADATA_MISSES=`cat $ARCSTATS | grep ^demand_metadata_misses | awk '{print $3}'`
+while read name type data
+do
+    [[ $name =~ ^[0-9].* ]] && continue
+    [[ $name == "name" ]] && continue
+    case $name in
+        "hits" )
+            export ARC_HITS=$data
+            ;;
+        "misses" )
+            export ARC_MISSES=$data
+            ;;
+        "p" )
+            export MRU_SIZE=$data
+            ;;
+        "c_max" )
+            export MAX_SIZE=$data
+            ;;
+        "c_min" )
+            export MIN_SIZE=$data
+            ;;
+        "c" )
+            export TARGET_SIZE=$data
+            ;;
+        * )
+            VARNAME=`echo $name | tr '[:lower:]' '[:upper:]'`
+            #declare $VARNAME=$data
+            export $VARNAME=$data
+            ;;
+    esac
+done < /proc/spl/kstat/zfs/arcstats
 
-MFU_GHOST_HITS=`cat $ARCSTATS | grep ^mfu_ghost_hits | awk '{print $3}'`
-MFU_HITS=`cat $ARCSTATS | grep ^mfu_hits | awk '{print $3}'`
-MRU_GHOST_HITS=`cat $ARCSTATS | grep ^mru_ghost_hits | awk '{print $3}'`
-MRU_HITS=`cat $ARCSTATS | grep ^mru_hits | awk '{print $3}'`
+#
+# Pull all values from zfetchstats
+#
 
-PREFETCH_DATA_HITS=`cat $ARCSTATS | grep ^prefetch_data_hits | awk '{print $3}'`
-PREFETCH_DATA_MISSES=`cat $ARCSTATS | grep ^prefetch_data_misses | awk '{print $3}'`
-PREFETCH_METADATA_HITS=`cat $ARCSTATS | grep ^prefetch_metadata_hits | awk '{print $3}'`
-PREFETCH_METADATA_MISSES=`cat $ARCSTATS | grep ^prefetch_metadata_misses | awk '{print $3}'`
-
-DMU_HITS=`cat $ZFETCHSTATS | grep ^hits | awk '{print $3}'`
-DMU_MISSES=`cat $ZFETCHSTATS | grep ^misses | awk '{print $3}'`
-
-SIZE=`cat $ARCSTATS | grep ^size | awk '{print $3}'`
-MRU_SIZE=`cat $ARCSTATS | grep ^p\  | awk '{print $3}'`
-MAX_SIZE=`cat $ARCSTATS | grep ^c_max | awk '{print $3}'`
-MIN_SIZE=`cat $ARCSTATS | grep ^c_min | awk '{print $3}'`
-TARGET_SIZE=`cat $ARCSTATS | grep ^c\  | awk '{print $3}'`
-
-L2_SIZE=`cat $ARCSTATS | grep ^l2_size | awk '{print $3}'`
-L2_HDR_SIZE=`cat $ARCSTATS | grep ^l2_hdr_size | awk '{print $3}'`
-
-L2_HITS=`cat $ARCSTATS | grep ^l2_hits | awk '{print $3}'`
-L2_MISSES=`cat $ARCSTATS | grep ^l2_misses | awk '{print $3}'`
+while read name type data
+do
+    [[ $name =~ ^[0-9].* ]] && continue
+    [[ $name == "name" ]] && continue
+    case $name in
+        "hits" )
+            export DMU_HITS=$data
+            ;;
+        "misses" )
+            export DMU_MISSES=$data
+            ;;
+        * )
+            VARNAME=`echo $name | tr '[:lower:]' '[:upper:]'`
+            export $VARNAME=$data
+            ;;
+    esac
+done < /proc/spl/kstat/zfs/zfetchstats
 
 #
 # Calculation macros
