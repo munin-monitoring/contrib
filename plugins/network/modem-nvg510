@@ -3,12 +3,17 @@
 
 =head1 NAME
 
-modem-nvg510 - Plugin to monitor Motorola/Arris NVG510 DSL modem stats
+modem-nvg510 - Plugin to monitor Motorola/Arris NVG510 DSL modem stats (AT&T ADSL2+)
 
 =head1 CONFIGURATION
 
 	[modem-nvg510]
 	env.url http://192.168.1.254/cgi-bin/dslstatistics.ha
+
+=head1 MAGIC MARKERS
+
+	#%# family=auto
+	#%# capabilities=autoconf
 
 =head1 AUTHOR
 
@@ -43,9 +48,19 @@ use constant {
 	crc_up => 29,
 };
 
+
 if(defined $ARGV[0] and $ARGV[0] eq 'autoconf'){
-	print "yes\n";
-	exit;
+	my $url = $ENV{url} || "http://192.168.1.254/cgi-bin/dslstatistics.ha";
+	my $html = HTTP::Tiny->new(timeout => 1 )->get($url);
+
+	if($html->{success} && $html->{content} =~ m{Broadband Status}){
+		print "yes\n";
+	}
+	else{
+		print "no\n";
+	}
+
+	exit 0;
 }
 
 if(defined $ARGV[0] and $ARGV[0] eq "config"){
@@ -135,7 +150,7 @@ lof_up.type DERIVE
 lof_up.min 0
 |;
 
-	exit;
+	exit 0;
 }
 
 
