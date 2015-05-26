@@ -112,16 +112,24 @@ int acquire() {
 	fprintf(pid_file, "%d\n", getpid());
 	fclose(pid_file);
 
+	/* Reading /proc/stat */
+	int f = open(PROC_STAT, O_RDONLY);
+
+	/* open the spoolfile */
+	int cache_file = open(cache_filename, O_CREAT | O_APPEND | O_WRONLY);
+
 	/* loop each second */
 	while (1) {
 		/* wait until next second */
 		time_t epoch = wait_until_next_second();
 
-		/* Reading /proc/stat */
-		int f = open(PROC_STAT, O_RDONLY);
 
 		const int buffer_size = 64 * 1024;
 		char buffer[buffer_size];
+
+		if (lseek(f, 0, SEEK_SET) < 0) {
+			return fail("cannot seek " PROC_STAT);
+		}
 
 		// whole /proc/stat can be read in 1 syscall
 		if (read(f, buffer, buffer_size) <= 0) {
@@ -132,9 +140,6 @@ int acquire() {
 		char* line;
 		const char* newl = "\n";
 		line = strtok(buffer, newl);
-
-		/* open the spoolfile */
-		int cache_file = open(cache_filename, O_CREAT | O_APPEND | O_WRONLY);
 
 		/* lock */
 		flock(cache_file, LOCK_EX);
@@ -155,9 +160,12 @@ int acquire() {
 			write(cache_file, out_buffer, strlen(out_buffer));
 		}
 
-		close(cache_file);
-		close(f);
+		/* unlock */
+		flock(cache_file, LOCK_UN);
 	}
+
+	close(cache_file);
+	close(f);
 }
 
 int fetch() {
