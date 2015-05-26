@@ -1,0 +1,193 @@
+#! /usr/bin/env perl
+
+
+=head1 NAME
+
+modem-nvg510 - Plugin to monitor Motorola/Arris NVG510 DSL modem stats (AT&T ADSL2+)
+
+=head1 CONFIGURATION
+
+	[modem-nvg510]
+	env.url http://192.168.1.254/cgi-bin/dslstatistics.ha
+
+=head1 MAGIC MARKERS
+
+	#%# family=auto
+	#%# capabilities=autoconf
+
+=head1 AUTHOR
+
+Samuel Smith <esaym (snail) cpan.org>
+
+=cut
+
+use strict;
+use warnings;
+use HTTP::Tiny;
+
+
+
+use constant {
+	down_rate => 0,
+	up_rate => 1,
+	sn_down => 14,
+	sn_up => 15,
+	line_attn_down => 16,
+	line_attn_up => 17,
+	power_down => 18,
+	power_up => 19,
+	err_sec_down => 20,
+	err_sec_up => 21,
+	los_down => 22,
+	los_up => 23,
+	lof_down => 24,
+	lof_up => 25,
+	fec_down => 26,
+	fec_up => 27,
+	crc_down => 28,
+	crc_up => 29,
+};
+
+
+if(defined $ARGV[0] and $ARGV[0] eq 'autoconf'){
+	my $url = $ENV{url} || "http://192.168.1.254/cgi-bin/dslstatistics.ha";
+	my $html = HTTP::Tiny->new(timeout => 1 )->get($url);
+
+	if($html->{success} && $html->{content} =~ m{Broadband Status}){
+		print "yes\n";
+	}
+	else{
+		print "no\n";
+	}
+
+	exit 0;
+}
+
+if(defined $ARGV[0] and $ARGV[0] eq "config"){
+	print q|multigraph nvg510_speed
+graph_args --base 1000
+graph_category network
+graph_info This graph show modem upload and download speeds in kilo bits per second
+graph_title Modem Link Speed
+graph_vlabel Kbits per ${graph_period}
+down_rate.label downstream kbps
+down_rate.info Link downstream speed (kbits/second)
+down_rate.type GAUGE
+up_rate.label upstream kbps
+up_rate.info Link upload speed (kbits/second)
+up_rate.type GAUGE
+
+multigraph nvg510_line_quality
+graph_args --base 1000
+graph_category network
+graph_info This graph shows modem line quality statistics like attenuation and noise ratios.
+graph_title Modem Line Quality
+graph_vlabel Line Statistics
+sn_down.label sn_down
+sn_down.info Downstream signal to noise margin, in decibels (dB)
+sn_down.type GAUGE
+sn_up.label sn_up
+sn_up.info Upstream signal to noise margin, in decibels (dB)
+sn_up.type GAUGE
+line_attn_down.label line_attn_down
+line_attn_down.info Downstream reduction in signal strength, in decibels (dB)
+line_attn_down.type GAUGE
+line_attn_up.label line_attn_up
+line_attn_up.info Upstream reduction in signal strength, in decibels (dB)
+line_attn_up.type GAUGE
+power_down.label power_down
+power_down.info Downstream power output to one milliwatt (dBm)
+power_down.type GAUGE
+power_up.label power_up
+power_up.info Upstream power output to one milliwatt (dBm)
+power_up.type GAUGE
+
+multigraph nvg510_error_counts
+graph_args --base 1000
+graph_category network
+graph_info This graph shows internal error counters of the modem.
+graph_title Modem Errors
+graph_vlabel Modem Errors per ${graph_period}
+fec_down.label fec_down
+fec_down.info Downstream Forwarded Error Correction: Number of times received errored packets were fixed without a retry.
+fec_down.type DERIVE
+fec_down.min 0
+fec_up.label fec_up
+fec_up.info Upstream Forwarded Error Correction: Number of times received errored packets were fixed without a retry.
+fec_up.type DERIVE
+fec_up.min 0
+crc_down.label crc_down
+crc_down.info Downstream number of times data packets have had to be resent due to errors
+crc_down.type DERIVE
+crc_down.min 0
+crc_up.label crc_up
+crc_up.info Upstream number of times data packets have had to be resent due to errors
+crc_up.type DERIVE
+crc_up.min 0
+err_sec_down.label err_sec_down
+err_sec_down.info The number of unconnected seconds after being down for seven consecutive seconds
+err_sec_down.type DERIVE
+err_sec_down.min 0
+err_sec_up.label err_sec_up
+err_sec_up.info The number of unconnected seconds after being down for seven consecutive seconds
+err_sec_up.type DERIVE
+err_sec_up.min 0
+los_down.label los_down
+los_down.info Loss of signal: Number of times for any reason, the signal is lost
+los_down.type DERIVE
+los_down.min 0
+los_up.label los_up
+los_up.info Loss of signal: Number of times for any reason, the signal is lost
+los_up.type DERIVE
+los_up.min 0
+lof_down.label lof_down
+lof_down.info Loss of frame: Number of times the signal is detected, but cannot sync
+lof_down.type DERIVE
+lof_down.min 0
+lof_up.label lof_up
+lof_up.info Loss of frame: Number of times the signal is detected, but cannot sync
+lof_up.type DERIVE
+lof_up.min 0
+|;
+
+	exit 0;
+}
+
+
+
+
+##########################  MAIN  #############################
+
+my $url = $ENV{url} || "http://192.168.1.254/cgi-bin/dslstatistics.ha";
+my $html = HTTP::Tiny->new(timeout => 1 )->get($url);
+die "Couldn't fetch $url" unless $html->{success};
+my @stats = $html->{content} =~ m{<td class="col2">\s*([\d\.]+)\s*</td>}g;
+
+
+print qq|multigraph nvg510_speed
+down_rate.value $stats[down_rate]
+up_rate.value $stats[up_rate]
+
+multigraph nvg510_line_quality
+sn_down.value $stats[sn_down]
+sn_up.value $stats[sn_up]
+line_attn_down.value $stats[line_attn_down]
+line_attn_up.value $stats[line_attn_up]
+power_down.value $stats[power_down]
+power_up.value $stats[power_up]
+
+multigraph nvg510_error_counts
+fec_down.value $stats[fec_down]
+fec_up.value $stats[fec_up]
+crc_down.value $stats[crc_down]
+crc_up.value $stats[crc_up]
+err_sec_down.value $stats[err_sec_down]
+err_sec_up.value $stats[err_sec_up]
+los_down.value $stats[los_down]
+los_up.value $stats[los_up]
+lof_down.value $stats[lof_down]
+lof_up.value $stats[lof_up]
+
+|;
+
+
