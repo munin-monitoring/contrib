@@ -21,23 +21,30 @@ int fail(char* msg) {
 
 int config() {
 	/* Get the number of CPU */
-	FILE* f;
-	if ( !(f=fopen(PROC_STAT, "r")) ) {
+	int f;
+	if ( !(f=open(PROC_STAT, O_RDONLY)) ) {
 		return fail("cannot open " PROC_STAT);
 	}
 
 	// Starting with -1, since the first line is the "global cpu line"
 	int ncpu = -1;
-	while (! feof(f)) {
-		char buffer[1024];
-		if (fgets(buffer, 1024, f) == 0) {
-			break;
-		}
 
-		if (! strncmp(buffer, "cpu", 3)) ncpu ++;
+	const int buffer_size = 64 * 1024;
+	char buffer[buffer_size];
+
+	// whole /proc/stat can be read in 1 syscall
+	if (read(f, buffer, buffer_size) <= 0) {
+		return fail("cannot read " PROC_STAT);
 	}
 
-	fclose(f);
+	// tokenization per-line
+	char* line;
+	char* newl = "\n";
+	for (line = strtok(buffer, newl); line; line = strtok(NULL, newl)) {
+		if (! strncmp(line, "cpu", 3)) ncpu ++;
+	}
+
+	close(f);
 
 	printf(
 		"graph_title multicpu1sec\n"
