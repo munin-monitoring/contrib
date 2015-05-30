@@ -166,6 +166,8 @@ int acquire() {
 
 	close(cache_file);
 	close(f);
+
+	return 0;
 }
 
 int fetch() {
@@ -182,6 +184,8 @@ int fetch() {
 
 	ftruncate(fileno(cache_file), 0);
 	fclose(cache_file);
+
+	return 0;
 }
 
 int main(int argc, char **argv) {
