@@ -1,0 +1,59 @@
+#!/bin/bash
+# -*- sh -*-
+: <<=cut
+
+=head1 NAME
+
+sphinx - Munin plugin to display Sphinx average query wall time
+
+=head1 CONFIGURATION
+
+Config file must be readable by your munin user.
+  [sphinx_*]
+  user sphinx
+
+optional is category, default is empty
+  [sphinx_*]
+  env.category mysql
+
+=head1 AUTHOR
+
+martin fuxa <root@unihost.cz>
+
+=head1 LICENSE
+
+CC
+
+=cut
+
+CATEGORY=${category:-""}
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+if [ "$1" = "config" ]; then
+  # draw default LINE1
+  echo 'graph_args -l 0'
+  echo 'graph_title Sphinx average query time'
+  echo "graph_category $CATEGORY"
+  echo 'graph_vlabel seconds'
+  echo 'graph_scale no'
+  echo 'graph_info Sphinx average query wall time'
+  echo 'avg_query_wall.label Average query wall time'
+  exit 0
+fi
+
+STAT=`searchd --status`
+RT=$?
+if [ $RT -eq 0 ]; then
+  # be prepared for something else
+  SEARCHFOR="avg_query_wall"
+  for _sf in $SEARCHFOR; do
+   echo -n "$_sf.value "
+    echo "$STAT" | grep -E "^$_sf:" | awk -F ": " '{print $2}'
+  done
+else
+  echo "ERROR unexpected result:"
+  echo "$STAT"
+fi
+
+exit $RT
