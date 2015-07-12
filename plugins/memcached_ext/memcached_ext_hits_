@@ -1,0 +1,60 @@
+#!/usr/bin/env perl
+# ex:ts=4
+
+use strict;
+use warnings;
+
+use Cache::Memcached;
+
+# Based on original plugin, extended to unix socket use
+# https://github.com/western, westroads@gmail.com
+
+=head1 example config for /plugin-conf.d/munin-node
+
+[memcached_hits_1]
+env.server 127.0.0.1:11211
+env.label "first local server"
+
+[memcached_hits_2]
+env.server /var/run/memcached/memcached.sock
+env.label "second local server"
+
+=cut
+
+my $label = exists $ENV{'label'} ? $ENV{'label'} : '';
+unless( $label ){
+	
+	if( $0 =~ /memcached_ext_hits_([\w\d]+)$/ ){
+		$label = $1;
+	}
+}
+
+
+
+my $cmd = shift || '';
+if ($cmd eq 'config') {
+	print "graph_title Memcached cache hits and misses on $label\n";
+	print "graph_args --base 1000 -l 0\n";
+	print "graph_vlabel requests\n";
+	print "graph_category memcached\n";
+	print "graph_info This graph monitors the number of cache hits and misses.\n";
+	print "hits.label hits\n";
+	print "hits.info Number of cache hits\n";
+	print "hits.min 0\n";
+	print "hits.type DERIVE\n";
+	print "misses.label misses\n";
+	print "misses.info Number of cache misses\n";
+	print "misses.min 0\n";
+	print "misses.type DERIVE\n";
+	print "misses.draw AREA\n";
+	exit 0;
+}
+
+my $server = exists $ENV{'server'} ? $ENV{'server'} : '127.0.0.1:11211';
+
+my $memd = new Cache::Memcached { 'servers' => [$server] };
+my $memstats = $memd->stats(['misc']);
+
+print "hits.value " . $memstats->{hosts}->{$server}->{misc}->{get_hits} . "\n";
+print "misses.value " .
+	$memstats->{hosts}->{$server}->{misc}->{get_misses} . "\n";
