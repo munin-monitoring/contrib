@@ -35,9 +35,11 @@
 
 use strict;
 use IO::Socket::INET;
+use IO::Socket::UNIX;
 use Switch;
 
 my $HOST = exists $ENV{'host'} ? $ENV{'host'} : "127.0.0.1";
+my $UNIX_SOCKET = exists $ENV{'unixsocket'} ? $ENV{'unixsocket'} : ''; # path to Redis Unix sock file
 my $PORT = exists $ENV{'port'} ? $ENV{'port'} : 6379;
 my $PASSWORD = exists $ENV{'password'} ? $ENV{'password'} : undef;
 my $TITLE_PREFIX = exists $ENV{'title_prefix'} ? $ENV{'title_prefix'} . ": " : "";
@@ -208,12 +210,26 @@ switch ($0) {
 close ($sock);
 
 sub get_conn {
-    my $sock = IO::Socket::INET->new(
-        PeerAddr => $HOST,
-        PeerPort => $PORT,
-        Timeout => 10,
-        Proto => 'tcp'
-    );
+    
+    my $sock;
+    
+    if( $UNIX_SOCKET && -S $UNIX_SOCKET ){
+	
+	$sock = IO::Socket::UNIX->new(
+		Type => SOCK_STREAM(),
+		Peer => $UNIX_SOCKET,
+	);
+	
+    }else{
+	
+	$sock = IO::Socket::INET->new(
+		PeerAddr => $HOST,
+		PeerPort => $PORT,
+		Timeout => 10,
+		Proto => 'tcp'
+	);
+    }
+    
     if ( defined( $PASSWORD )  ) {
         print $sock "AUTH ", $PASSWORD, "\r\n";
         my $result = <$sock> || die "can't read socket: $!";
