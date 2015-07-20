@@ -106,7 +106,7 @@ if ($CAN_LOG) {
     Log::Log4perl::init( \$loggerconf );
     our $logger = Log::Log4perl->get_logger($ACCT);
 } else {
-	our $logger = undef;
+	our $logger = "";
 }
 
 my $lastread;
@@ -129,7 +129,7 @@ sub save_data {
             push @save_vector, $_ . '¬' . $hashref->{$_};
         }
 
-        $logger->info(
+        $::logger->info(
             "Saving Data (LastRead is " . localtime($lastread) . "\n" )
           if $CAN_LOG;
 
@@ -156,7 +156,7 @@ sub load_data {
 
         # Data is stale
         print "# Data is " . ( time - $lastread ) . " seconds old\n";
-        $logger->info( "Data is " . ( time - $lastread ) . " seconds old\n" )
+        $::logger->info( "Data is " . ( time - $lastread ) . " seconds old\n" )
           if $CAN_LOG;
 
         if ( exists $hashref->{backoff} ) {
@@ -164,13 +164,13 @@ sub load_data {
 
                 # We're in a back-off period
                 print "# Back-off in effect\n";
-                $logger->info("Back-off in effect\n") if $CAN_LOG;
+                $::logger->info("Back-off in effect\n") if $CAN_LOG;
                 exit 0;
             }
             else {
                 # We've just come out of a back-off period
                 print "# Back-off ends\n";
-                $logger->info("Back-off ends\n") if $CAN_LOG;
+                $::logger->info("Back-off ends\n") if $CAN_LOG;
                 delete $hashref->{backoff};
             }
         }
@@ -186,7 +186,7 @@ sub load_data {
             # back-off for 24 hours.
             print "# Starting Back-Off\n";
             $hashref->{backoff} = time + ( 24 * 60 * 60 );
-            $logger->info(
+            $::logger->info(
                 "Backing off until " . localtime( $hashref->{backoff} ) . "\n" )
               if $CAN_LOG;
             save_data( $hashref, 0 );
@@ -194,7 +194,7 @@ sub load_data {
         }
 
         print "# REFRESHING DATA\n";
-        $logger->info("Refreshing Data\n") if $CAN_LOG;
+        $::logger->info("Refreshing Data\n") if $CAN_LOG;
         my $temphash;
         eval {
             zenus::login( $USER, $PASS );
@@ -223,7 +223,7 @@ sub load_data {
     }
     else {
         print "# Using existing data\n";
-        $logger->info("Using existing data\n") if $CAN_LOG;
+        $::logger->info("Using existing data\n") if $CAN_LOG;
     }
     save_data( $hashref, 1 ) if $force_save;
     return $hashref;
