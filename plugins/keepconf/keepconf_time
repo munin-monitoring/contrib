@@ -1,0 +1,92 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+keepconf_time -Indicate the times of keepconf execution
+
+=head1 APPLICABLE SYSTEMS
+Linux box with keepconf installed.
+
+=head1 CONFIGURATION
+
+[keepconf_*]
+env.files /var/tmp/keepconf-mon.csv
+# Multifile its available
+#env.files /var/tmp/keepconf-client1.csv /var/tmp/keepconf-client2.csv
+
+
+=head1 AUTHOR
+
+Ricardo F. <rfrail3@yahoo.es>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 VERSION
+v.1.1.0
+
+=head1 MAGICK MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+
+if [ "$1" = "autoconf" ]; then
+	echo yes 
+	exit 0
+fi
+
+LIST=$files
+
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title Keepconf times'
+	echo 'graph_args --base 1000 -l 0 '
+	echo 'graph_vlabel Seconds'
+	echo 'graph_scale no'
+	echo 'graph_category keepconf'
+	echo 'graph_info Indicate the times of a keepconf execution.'
+
+        for i in ${LIST}; do
+
+                HNAME=`echo ${i} | md5sum | cut -d - -f1 | sed 's/ //g'`
+
+                NAME=`cat ${i}  | grep ^\"CFG-FILE\" | awk -F, '{print $2}' | tr -d '"'`
+
+                echo "fetch${HNAME}.label Fetch ${NAME}"
+                echo "fetch${HNAME}.type GAUGE"
+                echo "fetch${HNAME}.min 0"
+
+                echo "commit${HNAME}.label Commit ${NAME}"
+                echo "commit${HNAME}.type GAUGE"
+                echo "commit${HNAME}.min 0"
+
+                echo "total${HNAME}.label Total ${NAME}"
+                echo "total${HNAME}.type GAUGE"
+                echo "total${HNAME}.min 0"
+        done
+
+	exit 0
+fi
+
+
+for i in ${LIST}; do
+	FET=`cat ${i}  | grep ^\"FETCH-T\" | awk -F, '{print $2}' | tr -d '"'`
+	COM=`cat ${i}  | grep ^\"COMMIT-T\" | awk -F, '{print $2}' | tr -d '"'`
+	TOT=`cat ${i}  | grep ^\"TOTAL-T\" | awk -F, '{print $2}' | tr -d '"'`
+
+        HNAME=`echo ${i} | md5sum | cut -d - -f1 | sed 's/ //g'`
+
+	echo "fetch${HNAME}.value `echo ${FET}`"
+	echo "commit${HNAME}.value `echo ${COM}`"
+	echo "total${HNAME}.value `echo ${TOT}`"
+
+done
