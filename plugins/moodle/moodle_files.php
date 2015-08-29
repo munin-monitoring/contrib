@@ -81,7 +81,6 @@ if (count($argv) === 2 && $argv[1] === 'config') {
     echo "graph_args --base 1024 --lower-limit 0\n";
     echo "graph_vlabel size\n";
     echo "graph_category Moodle\n";
-    echo "graph_scale no\n";
     echo "graph_total total\n";
     echo "graph_info Displays the total size of moodle users files and repartition by type\n";
 
@@ -119,7 +118,6 @@ echo "graph_title Moodle Files Size\n";
 echo "graph_args --base 1024 --lower-limit 0\n";
 echo "graph_vlabel size\n";
 echo "graph_category Moodle\n";
-echo "graph_scale yes\n";
 echo "graph_total total\n";
 echo "graph_info Displays the total size of moodle users files and repartition by type\n";
 
