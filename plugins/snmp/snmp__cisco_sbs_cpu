@@ -1,0 +1,90 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+# vim: ft=perl
+
+=head1 NAME
+
+snmp__cisco_sbs_cpu - Munin plugin to monitor CPU Usage on Cisco Small Business Switches.
+
+=head1 APPLICABLE SYSTEMS
+
+Cisco Small Business Switches (SBXXXX devices)
+
+=head1 CONFIGURATION
+
+As a rule SNMP plugins need site specific configuration.  The default
+configuration (shown here) will only work on insecure sites/devices.
+
+   [snmp_*]
+        env.version 2
+        env.community public
+
+In general SNMP is not very secure at all unless you use SNMP version
+3 which supports authentication and privacy (encryption).  But in any
+case the community string for your devices should not be "public".
+
+Please see 'perldoc Munin::Plugin::SNMP' for further configuration
+information.
+
+=head1 INTERPRETATION
+
+CPU Percentage gives an idea of utilization of the device. High CPU
+can indicate a configuration problem or overutilization of the device.
+
+=head1 MAGIC MARKERS
+
+  #%# family=snmpauto
+  #%# capabilities=snmpconf
+
+=head1 VERSION
+
+  $Id$
+
+=head1 BUGS
+
+None known.
+
+=head1 AUTHOR
+
+Copyright (C) 2015 James DeVincentis
+
+=head1 LICENSE
+
+GPLv3.
+
+=cut
+
+use strict;
+use Munin::Plugin::SNMP;
+
+if (defined $ARGV[0] and $ARGV[0] eq 'snmpconf') {
+        print "require 1.3.6.1.4.1.9.6.1.101.1.7.0 [0-9]\n";
+        exit 0;
+}
+
+if (defined $ARGV[0] and $ARGV[0] eq "config") {
+        my ($host) = Munin::Plugin::SNMP->config_session();
+
+        print "host_name $host\n" unless $host eq 'localhost';
+        print <<"EOF";
+graph_title CPU Utilization
+graph_args --base 1000 -l 0 -u 100
+graph_vlabel CPU %
+graph_category system
+graph_info This graph shows the percentage of CPU used at different intervals. High CPU Utilization can indicate a configuration problem or overutilization of the device.
+load5sec.label 5s
+load5sec.info 5 Second CPU Utilization Average
+load5sec.draw LINE1
+load1min.label 1m
+load1min.info 1 Minute CPU Utilization Average
+load1min.draw LINE1
+load5min.label 5m
+load5min.info 5 Minute CPU Utilization Average
+EOF
+        exit 0;
+}
+
+my $session = Munin::Plugin::SNMP->session();
+print "load5sec.value ", $session->get_single('1.3.6.1.4.1.9.6.1.101.1.7.0'), "\n";
+print "load1min.value ", $session->get_single('1.3.6.1.4.1.9.6.1.101.1.8.0'), "\n";
+print "load5min.value ", $session->get_single('1.3.6.1.4.1.9.6.1.101.1.9.0'), "\n";
