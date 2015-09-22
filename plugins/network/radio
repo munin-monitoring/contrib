@@ -1,155 +1,140 @@
 #!/usr/bin/php
 <?php
-
 /*
-        Plugin: radio
-        Author: Philipp Giebel (spam@stimpyrama.org)
-        Version: 0.1
-
-        Munin (http://munin.projects.linpro.no/) Plugin for counting
-        listeners to both shout- and icecast streams.
-
-        Requirements: * PHP (jap, I know that sucks.. ;) )
+  Plugin: radio
+  Author: Philipp Giebel (spam@stimpyrama.org)
+  Version: 0.2
+  Munin (http://munin-monitoring.org/) Plugin for counting
+  listeners to both shout- and icecast streams.
+  Get the latest version at:
+  http://munin-monitoring.org/log/munin-contrib/plugins/network/radio
+  Requirements: * PHP (jap, I know that sucks.. ;) )
+  CHANGELOG
+  v0.1 - Quick & Dirty proof of concept
+  v0.2 - Updated to match output of current versions of ice- and shoutcast.
 */
-
-// -------------- CONFIGURATION START ---------------------------------------------------------------
-
-	$cfg = array(	
-                                                                          // SERVER #1
-			array(	"type"		=> "ice",                 // server-type (ice/shout)
-				"host"		=> "192.168.1.5",         // server hostname or ip
-				"port"		=> 8000,                  // server port
-				"mountpoint"	=> "eclectix.mp3",        // mountpoint to check (icecast only)
-				"name"		=> "IceCast"              // name for use in munin graphs
-				),
-                                                                          // SERVER #2
-			array(	"type"		=> "shout",               // server-type
-				"host"		=> "radio.eclectix.de",   // server hostname or ip
-				"port"		=> 8000,                  // server port
-				"name"		=> "ShoutCast"            // name for use in munin graphs
-				)
-			);
-
-// -------------- CONFIGURATION END ----------------------------------------------------------------
-
-        function getIce( $host, $port, $mount, $name ) {
-                $error = false;
-                $fp = fsockopen( $host, $port, $errno, $errstr, 10 );
-                if ( !$fp ) {
-                        $error = $errstr ."(". $errno .")";
-                } else {
-                        fputs( $fp, "GET /status HTTP/1.1\r\n" );
-                        fputs( $fp, "Host: ". $host ."\r\n" );
-                        fputs($fp, "User-Agent: Mozilla\r\n");
-                        fputs( $fp, "Connection: close\r\n\r\n" );
-
-                        $xml = "";
-
-                        while ( !feof( $fp ) ) {
-                                $xml .= fgets( $fp, 512 );
-                        }
-
-                        fclose($fp);
-
-                        if ( stristr( $xml, "HTTP/1.0 200 OK" ) == true ) {
-                                $xml = trim( substr( $xml, 42 ) );
-                        } else {
-                                $error = "Bad login";
-                        }
-                        if ( !$error ) {
-                                $res = array( "found" => true );
-
-				$mount = str_replace( ".", "\.", $mount );
-				preg_match_all( "/Mount Point : \(\/(". $mount .")\).*?\<tr\>\<td\>Current Listeners:\<\/td\>\<td class=\"streamdata\"\>(\d*?)\<\/td\>\<\/tr\><tr>\<td\>Peak Listeners:\<\/td\>\<td class=\"streamdata\"\>(\d*?)\<\/td\>\<\/tr\>/s", $xml, $parser );
-
-				$res["mount"] = $parser[1][0];
-				$res["listeners"] = $parser[2][0];
-				$res["listeners_peak"] = $parser[3][0];
-				$res["name"] = $name;
-                        } else {
-                                $res = $error;
-                        }
-                }
-                return $res;
-	}
-
-        function getShout( $host, $port, $name ) {
-                $error = false;
-                $fp = fsockopen( $host, $port, $errno, $errstr, 10 );
-                if ( !$fp ) {
-                        $error = $errstr ."(". $errno .")";
-                } else {
-                        fputs( $fp, "GET / HTTP/1.0\r\n" );
-                        fputs($fp, "User-Agent: Mozilla\r\n");
-                        fputs( $fp, "Connection: close\r\n\r\n" );
-
-                        $xml = "";
-
-                        while ( !feof( $fp ) ) {
-                                $xml .= fgets($fp, 512);
-                        }
-                        fclose( $fp );
-
-                        if ( stristr( $xml, "HTTP/1.0 200 OK" ) == true ) {
-                                $xml = trim( substr( $xml, 42 ) );
-                        } else {
-                                $error = "Bad login";
-                        }
-                        if ( !$error ) {
-                                $res = array( "found" => true );
-
-				preg_match_all( "/.*?Stream Status: \<\/font\>\<\/td\>\<td\>\<font class=default\>\<b\>Stream is up at \d*? kbps with \<B\>(\d*?) of \d*? listeners \(\d*? unique\)\<\/b\>\<\/b\>/s", $xml, $parser );
-
-				$res["listeners"] = $parser[1][0];
-				$res["name"] = $name;
-
-                        } else {
-                                $res = $error;
-                        }
-                }
-                return $res;
+// -------------- CONFIGURATION START ---------------------------------------
+  $cfg = array(	
+    // SERVER #1
+    array(  "name"        => "IceCast",         // name for munin
+            "type"        => "ice",             // server-type (ice/shout)
+            "host"        => "ice.example.com", // server hostname or ip
+            "port"        => 8000,              // server port
+            "mountpoint"  => "live"             // mountpoint to check
+                                                // (icecast only)
+    ),
+    // SERVER #2
+    array(  "name"  => "ShoutCast",             // name for munin
+            "type"  => "shout",                 // server-type
+            "host"  => "127.0.0.1",             // server hostname or ip
+            "port"  => 8000                     // server port
+    )
+  );
+// -------------- CONFIGURATION END -----------------------------------------
+  error_reporting(E_ERROR);
+  function getIce( $host, $port, $mount, $name ) {
+    $error = false;
+    if ( !$fp = fsockopen( $host, $port, $errno, $errstr, 10 ) ) {
+      $error = $errstr ."(". $errno .")";
+    } else {
+      fputs( $fp, "GET /status.xsl HTTP/1.1\r\n" );
+      fputs( $fp, "Host: ". $host ."\r\n" );
+      fputs( $fp, "User-Agent: Mozilla\r\n" );
+      fputs( $fp, "Connection: close\r\n\r\n" );
+      $xml = "";
+      while ( !feof( $fp ) ) {
+        $xml .= fgets( $fp, 512 );
+      }
+      fclose( $fp );
+      if ( stristr( $xml, "HTTP/1.0 200 OK" ) == true ) {
+        $xml = trim( substr( $xml, 42 ) );
+      } else {
+        $error = "Bad login";
+      }
+      if ( !$error ) {
+        $res = array( "found" => true );
+        $mount = str_replace( ".", "\.", $mount );
+        preg_match_all( "/Mount Point \/(". $mount .").*?\<tr\>\<td\>Current Listeners:\<\/td\>\<td class=\"streamdata\"\>(\d*?)\<\/td\>\<\/tr\><tr>\<td\>Peak Listeners:\<\/td\>\<td class=\"streamdata\"\>(\d*?)\<\/td\>\<\/tr\>/s", $xml, $parser );
+        $res["mount"] = $parser[1][0];
+        $res["listeners"] = intval( $parser[2][0] );
+        $res["listeners_peak"] = intval( $parser[3][0] );
+        $res["name"] = $name;
+      } else {
+        $res = $error;
+      }
+    }
+    return $res;
+  }
+  function getShout( $host, $port, $name ) {
+    $error = false;
+    if ( !$fp = fsockopen( $host, $port, $errno, $errstr, 10 ) ) {
+      $error = $errstr ."(". $errno .")";
+    } else {
+      fputs( $fp, "GET /index.html?sid=1 HTTP/1.0\r\n" );
+      fputs( $fp, "User-Agent: Mozilla\r\n" );
+      fputs( $fp, "Connection: close\r\n\r\n" );
+      $xml = "";
+      while ( !feof( $fp ) ) {
+        $xml .= fgets( $fp, 512 );
+      }
+      fclose( $fp );
+      if ( stristr( $xml, "HTTP/1.1 200 OK" ) == true ) {
+        $xml = trim( substr( $xml, 42 ) );
+      } else {
+        $error = "Bad login";
+      }
+      if ( !$error ) {
+        $res = array( "found" => true );
+        preg_match_all( "/.*?Stream Status: <\/td\>\<td\><b\>Stream is up at \d*? kbps with (\d*?) of \d*? listeners/s", $xml, $parser );
+        $res["listeners"] = intval( $parser[1][0] );
+        $res["name"] = $name;
+      } else {
+        $res = $error;
+      }
+    }
+    return $res;
+  }
+  if ( !isset( $argv[1] ) ) $argv[1] = '';
+  switch( $argv[1] ) {
+    case "config":
+      echo "graph_title Stream Listeners\n";
+      echo "graph_category Network\n";
+      echo "graph_vlabel listeners\n";
+      echo "graph_hlabel listeners\n";
+      echo "graph_args --base 1000 -l 0\n";
+      echo "graph_scale no\n";
+      echo "graph_info Number of listeners to shout- and / or icecast streams\n";
+      echo "complete.info Complete listeners\n";
+      echo "complete.label complete\n";
+      echo "graph_order";
+      foreach ( $cfg as $c ) {
+        echo " ". strtolower( $c["name"] );
+      }
+      echo " complete\n";
+      foreach ( $cfg as $c ) {
+        echo strtolower( $c["name"] ) .".info ". $c["name"] ." listeners\n";
+        echo strtolower( $c["name"] ) .".label ". strtolower( $c["name"] ) ."\n";
+      }
+    break;
+    default:
+      $complete = 0;
+      foreach ( $cfg as $c ) {
+        switch ( $c["type"] ) {
+          case "ice":
+            $res = getIce( $c["host"], $c["port"], $c["mountpoint"], $c["name"] );
+          break;
+          case "shout":
+            $res = getShout( $c["host"], $c["port"], $c["name"] );
+          break;
         }
-
-	switch( $argv[1] ) {
-		case "config":
-			echo "graph_title Stream Listeners\n";
-			echo "graph_category Network\n";
-			echo "graph_vlabel listeners\n";
-			echo "graph_hlabel listeners\n";
-			echo "graph_args --base 1000 -l 0\n";
-			echo "graph_scale no\n";
-			echo "graph_order";
-			foreach ( $cfg as $c ) {
-				echo " ". strtolower( $c["name"] );
-			}
-			echo " complete\n";
-//			echo "\n";
-			echo "graph_info Number of listeners to shout- and / or icecast streams\n";
-			foreach ( $cfg as $c ) {
-				echo strtolower( $c["name"] ) .".info ". $c["name"] ." listeners\n";
-				echo strtolower( $c["name"] ) .".label ". strtolower( $c["name"] ) ."\n";
-			}
-			echo "complete.info Complete listeners\n";
-			echo "complete.label complete\n";
-		break;
-		default:
-			$complete = 0;
-
-			foreach ( $cfg as $c ) {
-				switch ( $c["type"] ) {
-					case "ice":
-							$res = getIce( $c["host"], $c["port"], $c["mountpoint"], $c["name"] );
-						$complete += $res["listeners"];
-					break;
-					case "shout":
-						$res = getShout( $c["host"], $c["port"], $c["name"] );
-						$complete += $res["listeners"];
-					break;
-				}
-				echo strtolower($c["name"]) .".value ". $res["listeners"] ."\n";
-			}
-
-			echo "complete.value ". $complete ."\n";
-		break;
-	}
+        if ( is_array( $res ) ) {
+          echo strtolower($c["name"]) .".value ". $res["listeners"] ."\n";
+          $complete += $res["listeners"];
+        } else {
+          echo strtolower($c["name"]) .".value 0\n";
+        }
+      }
+      echo "complete.value ". $complete ."\n";
+    break;
+  }
 ?>
