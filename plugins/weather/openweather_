@@ -19,15 +19,13 @@
 # env.apikey XYZ
 
 query_string=$(printf '%s' "${0#*_}" | tr '_' '=')
-TMPFILE=$(mktemp)
-trap 'rm -f $TMPFILE' EXIT
 
+OWAPI=$( curl -s "http://api.openweathermap.org/data/2.5/weather?mode=xml&${query_string}")
 # API returns temp in K, we have to convert it in C
+# &units=metric would change that ;-)
 KELVIN_BIAS=273
 
-curl -s "http://api.openweathermap.org/data/2.5/weather?mode=xml&${query_string}&APPID=${apikey}" > $TMPFILE
-
-CITY=$(fgrep "<city id=" $TMPFILE | tr -sc '[:alnum:]' ' ' | cut -d " " -f 6)
+CITY=$( expr "$OWAPI" : '.*\<city.*name=\"\(.*\)\"><coord.*' )
 
 if [ "$1" = "config" ];
 then
@@ -85,15 +83,15 @@ then
 	[ "$MUNIN_CAP_DIRTYCONFIG" = 1 ] || exit 0
 fi
 
-TEMP_AVG=$(fgrep "<temperature value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 4)
-TEMP_MIN=$(fgrep "<temperature value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 6)
-TEMP_MAX=$(fgrep "<temperature value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 8)
+TEMP_AVG=$( expr "$OWAPI" : '.*\<temperature value=\"\(.*\)\" min.*/temperature.*' )
+TEMP_MIN=$( expr "$OWAPI" : '.*\<temperature .*min=\"\(.*\)\" max.*/temperature.*' )
+TEMP_MAX=$( expr "$OWAPI" : '.*\<temperature .*max=\"\(.*\)\" unit.*/temperature.*' )
 
-HUMIDITY=$(fgrep "<humidity value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 4)
-PRESSURE=$(fgrep "<pressure value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 4)
+HUMIDITY=$( expr "$OWAPI" : '.*\<humidity .*value=\"\(.*\)\" unit.*/humidity.*' )
+PRESSURE=$( expr "$OWAPI" : '.*\<pressure .*value=\"\(.*\)\" unit.*/pressure.*' )
 
-WD_SPEED=$(fgrep "<speed value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 4)
-WD_DIREC=$(fgrep "<direction value=" $TMPFILE | tr -sc '[:alnum:].' ' ' | cut -d " " -f 4)
+WD_SPEED=$( expr "$OWAPI" : '.*\<speed .*value=\"\(.*\)\" name.*/speed.*' )
+WD_DIREC=$( expr "$OWAPI" : '.*\<direction .*value=\"\(.*\)\" code.*/direction.*' )
 
 cat <<- EOF
 	multigraph $0
