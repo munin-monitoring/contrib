@@ -19,6 +19,7 @@
 # env.apikey XYZ
 
 query_string=$(printf '%s' "${0#*_}" | tr '_' '=')
+plugin_name=$( basename $0 )
 
 OWAPI=$( curl -s "http://api.openweathermap.org/data/2.5/weather?mode=xml&${query_string}")
 # API returns temp in K, we have to convert it in C
@@ -30,7 +31,7 @@ CITY=$( expr "$OWAPI" : '.*\<city.*name=\"\(.*\)\"><coord.*' )
 if [ "$1" = "config" ];
 then
 	cat <<- EOF
-		multigraph $0
+		multigraph $plugin_name
 		graph_title Temperature in ${CITY}
 		graph_vlabel Celsius
 		graph_category weather
@@ -38,7 +39,7 @@ then
 		temp_avg.label avg
 		temp_avg.cdef $KELVIN_BIAS,-
 
-		multigraph $0.temp
+		multigraph $plugin_name.temp
 		graph_title Temperature in ${CITY}
 		graph_vlabel Celsius
 		graph_category weather
@@ -50,28 +51,28 @@ then
 		temp_max.label max
 		temp_max.cdef $KELVIN_BIAS,-
 
-		multigraph $0.humidity
+		multigraph $plugin_name.humidity
 		graph_title Humidity in ${CITY}
 		graph_vlabel %
 		graph_category weather
 		graph_info This graph show the humidity in ${CITY}
 		humidity.label humidity
 
-		multigraph $0.pressure
+		multigraph $plugin_name.pressure
 		graph_title Pressure in ${CITY}
 		graph_vlabel hPa
 		graph_category weather
 		graph_info This graph show the pressure in ${CITY}
 		pressure.label pressure
 
-		multigraph $0.wind_speed
+		multigraph $plugin_name.wind_speed
 		graph_title Wind Speed in ${CITY}
 		graph_vlabel m/s
 		graph_category weather
 		graph_info This graph show the wind speed in ${CITY}
 		speed.label wind speed
 
-		multigraph $0.wind_direction
+		multigraph $plugin_name.wind_direction
 		graph_title Wind direction in ${CITY}
 		graph_vlabel m/s
 		graph_category weather
@@ -94,24 +95,24 @@ WD_SPEED=$( expr "$OWAPI" : '.*\<speed .*value=\"\(.*\)\" name.*/speed.*' )
 WD_DIREC=$( expr "$OWAPI" : '.*\<direction .*value=\"\(.*\)\" code.*/direction.*' )
 
 cat <<- EOF
-	multigraph $0
+	multigraph $plugin_name
 	temp_avg.value	$TEMP_AVG
 
-	multigraph $0.temp
+	multigraph $plugin_name.temp
 	temp_avg.value $TEMP_AVG
 	temp_min.value $TEMP_MIN
 	temp_max.value $TEMP_MAX
 
-	multigraph $0.humidity
+	multigraph $plugin_name.humidity
 	humidity.value $HUMIDITY
 
-	multigraph $0.pressure
+	multigraph $plugin_name.pressure
 	pressure.value $PRESSURE
 
-	multigraph $0.wind_speed
+	multigraph $plugin_name.wind_speed
 	speed.value $WD_SPEED
 
-	multigraph $0.wind_direction
+	multigraph $plugin_name.wind_direction
 	direction.label $WD_DIREC
 EOF
 
