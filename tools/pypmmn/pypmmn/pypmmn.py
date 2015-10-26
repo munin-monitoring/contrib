@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """
 A very simple munin-node written in pure python (no external libraries
 required)

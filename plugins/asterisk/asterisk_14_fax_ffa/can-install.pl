@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 #
 # can-install.pl - Can we install this set of Munin plugins?

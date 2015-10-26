@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (C) 2013 Helmut Grohne <helmut@subdivi.de>
 # License: GPLv2 like the rest of munin
 """

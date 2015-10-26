@@ -1,4 +1,4 @@
-#!/usr/bin/php
+#!/usr/bin/env php
 # Author Andrey Kozhokaru <andrey@kozhokaru.com>
 # Plugin to monitor Rackspace CloudFile storage usage
 #
