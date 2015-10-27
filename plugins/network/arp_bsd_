@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# Wildcard-plugin to monitor arp on interfaces. To monitor an
+# interface, link arp_bsd_<interface> to this file. E.g.
+#
+#    ln -s /usr/local/share/munin/plugins/arp_bsd_ /usr/local/etc/munin/plugins/arp_bsd_vlanX
+#
+# ...will monitor arp on interface vlanX.
+#
+# Any device found in /sbin/ifconfig can be monitored.
+#
+# Bugs : This plugins has been tested extensively on FreeBSD only
+#
+# Author : Luc Duchosal <luc.duchosal (at) arcantel (dot) ch>
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+
+INTERFACE=`basename $0 | sed 's/^arp_bsd_//g'`
+
+if [ "$1" = "autoconf" ]; then
+        if [ -x /sbin/ifconfig ]; then
+                echo yes
+                exit 0
+        else
+                echo "no (/sbin/ifconfig not found)"
+                exit 0
+        fi
+fi
+
+if [ "$1" = "suggest" ]; then
+        if [ -x /sbin/ifconfig ]; then
+                /sbin/ifconfig -a | /usr/bin/grep -E '^[a-z]' | /usr/bin/awk -F\: '{print $1;}'
+                exit 0
+        else
+                exit 1
+        fi
+fi
+
+if [ "$1" = "config" ]; then
+
+        echo "graph_title $INTERFACE arp"
+        echo 'graph_args --base 1000'
+        echo 'graph_vlabel arp per ${graph_period}'
+        echo 'graph_category network'
+        echo 'arp.label arp'
+        exit 0
+fi
+
+/usr/sbin/arp -an | /usr/bin/grep $INTERFACE  | /usr/bin/wc -l | /usr/bin/awk '{ print "arp.value", $1;}'
