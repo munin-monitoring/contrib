@@ -94,6 +94,14 @@ sub process_file {
             }
         );
     }
+    elsif ( $interpreter =~ m{python3} ) {
+        run_check(
+            {   command     => [ 'python3', '-m', 'py_compile', $file ],
+                description => 'python3 compile',
+                filename    => $filename
+            }
+        );
+    }
     elsif ( $interpreter =~ m{python} ) {
         run_check(
             {   command     => [ 'python', '-m', 'py_compile', $file ],
