@@ -1,0 +1,105 @@
+#!/bin/sh
+#
+# Monitor the wifi channel occupation (taken from "iw dev wlan0 survey dump").
+#
+# Symlink this plugin with the name of the wifi interface added (e.g. "wlan0").
+#
+#
+# Copyright (C) 2015 Lars Kruse <devel@sumpfralle.de>
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Magic markers
+#%# capabilities=autoconf suggest
+#%# family=auto
+
+set -eu
+
+
+SCRIPT_PREFIX="wireless_channel_occupation_"
+
+
+clean_fieldname() {
+	echo "$1" | sed 's/^\([^A-Za-z_]\)/_\1/; s/[^A-Za-z0-9_]/_/g'
+}
+
+
+get_wifi_devices() {
+	iw dev | grep Interface | awk '{print $2}'
+}
+
+
+get_wifi_device_from_suffix() {
+	local suffix
+	local called
+	called=$(basename "$0")
+	suffix="${called#$SCRIPT_PREFIX}"
+	# empty result if the prefix did not match (and was not removed)
+	[ "$suffix" = "$0" ] && echo "" || echo "$suffix"
+}
+
+
+if [ "${1:-}" = "autoconf" ]; then
+	if which iw 2>/dev/null; then
+		if [ -n "$(get_wifi_devices)" ]; then
+			echo "yes"
+		else
+			echo "no (missing wifi devices)"
+		fi
+	else
+		echo "no (missing 'iw' dependency)"
+	fi
+elif [ "${1:-}" = "suggest" ]; then
+	get_wifi_devices
+elif [ "${1:-}" = "config" ]; then
+	device=$(get_wifi_device_from_suffix)
+	[ -z "$device" ] && echo >&2 "Invalid wifi device name given" && exit 1
+	echo "graph_title Channel Occupation of $device"
+	echo "graph_vlabel %"
+	echo "graph_category wireless"
+	echo "graph_args --base 1000 -r --lower-limit 0 --upper-limit 100"
+	dev_field=$(clean_fieldname "$device")
+
+	# active: listening time on this channel (usually: 5 minutes = 300000ms)
+	echo "${dev_field}_active.label Transmit"
+	echo "${dev_field}_active.type DERIVE"
+	echo "${dev_field}_active.graph no"
+
+	# busy = receive + transmit + unknown
+	echo "${dev_field}_busy.label unknown"
+	echo "${dev_field}_busy.type DERIVE"
+	echo "${dev_field}_busy.draw AREA"
+	echo "${dev_field}_busy.cdef 100,1,${dev_field}_active,${dev_field}_busy,${dev_field}_receive,${dev_field}_transmit,+,-,/,/,*"
+
+	# receive: this radio receives traffic for itself
+	echo "${dev_field}_receive.label Receive"
+	echo "${dev_field}_receive.type DERIVE"
+	echo "${dev_field}_receive.draw STACK"
+	echo "${dev_field}_receive.cdef 100,${dev_field}_receive,${dev_field}_active,/,*"
+
+	# transmit: this radio transmits traffic
+	echo "${dev_field}_transmit.label Transmit"
+	echo "${dev_field}_transmit.type DERIVE"
+	echo "${dev_field}_transmit.draw STACK"
+	echo "${dev_field}_transmit.cdef 100,${dev_field}_transmit,${dev_field}_active,/,*"
+else
+	device=$(get_wifi_device_from_suffix)
+	[ -z "$device" ] && echo >&2 "Invalid wifi device name given" && exit 1
+	iw dev "$device" survey dump \
+		| grep -F -A 5 "[in use]" \
+		| grep -E "channel (busy|receive|transmit|active) time:" \
+		| awk '{print "'${device}_'"$2"'.value'",$4}'
+fi
+
+exit 0
