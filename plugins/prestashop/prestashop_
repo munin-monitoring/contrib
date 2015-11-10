@@ -1,0 +1,109 @@
+#!/bin/bash
+
+: << =cut
+=head1 NAME
+
+Munin Plugin to grab PrestaShop statistics
+
+=head1 CONFIGURATION
+
+# Sample:
+[prestashop]
+	user root
+	env.database prestashop
+	env.dbprefix ps_
+
+=head1 AUTHOR
+
+# (c) 2015 Raphaël Droz <raphael.droz+floss@gmail.com>
+# General Public Licence v3 or later
+
+=head1 LICENSE
+
+GPLv3
+
+=head1 MAGIC MARKERS
+
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+=cut
+
+graph_type=${0##*_}
+
+
+if [[ $1 = autoconf ]]; then
+    let ok=1
+    [[ -z $database ]] && echo "no (env.database not defined)" && ok=0
+    [[ -z $dbprefix ]] && echo "no (env.dbprefix not defined)" && ok=0
+    [[ -z $graph_type ]] && echo "no plugins linked with a bad name (unknown graph type '$graph_type')" && ok=0
+    [[ ! -r /etc/mysql/debian.cnf ]] && echo "no /etc/mysql/debian.cnf isn't readable" && ok=0
+    ! type -P mysql &>/dev/null && echo "no (one of mysql not found)" && ok=0
+    
+    (( $ok == 1 )) && echo yes
+    exit 0
+fi
+
+if [[ $1 = suggest ]]; then
+    for i in visits products orders ; do
+	echo $i
+    done
+    exit 0
+fi
+
+if [[ $1 = config ]]; then
+    if [[ $graph_type  == visits ]]; then
+	cat <<EOF
+graph_title PrestaShop connections
+graph_args --base 1000 -l 0
+graph_category php
+graph_info PrestaShop connections
+graph_period minute
+connection.label connections
+connection.info Connections
+connection.min 0
+connection.type DERIVE
+guest.label guests
+guest.info Guests
+guest.min 0
+guest.type DERIVE
+EOF
+	exit 0
+    elif [[ $graph_type  == products ]]; then
+	cat <<EOF
+graph_title PrestaShop products
+graph_args --base 1000 -l 0
+graph_category php
+graph_info PrestaShop products
+graph_total Total
+productsavailable.label products available
+productsoos.label products out of stock
+EOF
+	exit 0
+    elif [[ $graph_type  == orders ]]; then
+	cat <<EOF
+graph_title PrestaShop orders
+graph_args --base 1000 -l 0
+graph_category php
+graph_info PrestaShop orders
+order.label Orders
+order.info Orders
+order.min 0
+order.type COUNTER
+EOF
+	exit 0
+    fi
+fi
+
+if [[ $graph_type  == visits ]]; then 
+    mysql --defaults-file=/etc/mysql/debian.cnf -N "$database" <<<"SELECT 'connection.value', MAX(id_connections) FROM ${dbprefix}connections UNION SELECT 'guest.value', MAX(id_guest) FROM ${dbprefix}guest"
+    exit 0
+
+elif [[ $graph_type  == products ]]; then 
+    mysql --defaults-file=/etc/mysql/debian.cnf -N "$database" <<<"SELECT IF(available_for_order = 0, 'productsoos.value', 'productsavailable.value'), COUNT(1) FROM ${dbprefix}product WHERE active = 1 GROUP BY available_for_order"
+    exit 0
+
+elif [[ $graph_type  == orders ]]; then 
+    mysql --defaults-file=/etc/mysql/debian.cnf -N "$database" <<<"SELECT 'order.value', COUNT(1) FROM ${dbprefix}orders"
+    exit 0
+fi
