@@ -1,5 +1,6 @@
 #!/bin/sh
 #
+# (c) 2015, Raphaël Droz <raphael.droz@gmail.com>
 # (c) 2014, Gilles Fauvie <gfauvie@opendbteam.com>
 # Based on the 'du_multidirs' plugin, written by Christian Kujau <lists@nerdbynature.de>
 #
@@ -10,33 +11,56 @@
 # [proc_mem_by_user]
 # env.users     munin-node         jprod
 #
+# see bug:
+# http://munin-monitoring.org/ticket/921
+# /usr/share/munin/plugins/plugin.sh (clean_fieldname())
 
-. $MUNIN_LIBDIR/plugins/plugin.sh
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+users=${users:-munin-node}
 
-if [ "$1" = "autoconf" ]; then
-        echo yes
-        exit 0
+
+if [ "$1" = autoconf ]; then
+    ok=1
+    [ -z "$users" ] && ok=0
+
+    for user in $users; do
+	ps u -U "$user" 1> /dev/null 2>&1 || ok=0
+    done
+
+    if [ $ok = 1 ]; then echo yes
+    else echo no; fi
+    exit 0
 fi
 
-users=${users:="munin-node"}
+if [ "$1" = config ]; then
+    cat <<EOF
+graph_title Memory usage by process by user
+graph_args --base 1024 -l 0
+graph_vlabel Bytes
+graph_category processes
+graph_info This graph shows the memory usage of several processes of one user
+graph_order $(echo "$users"|sed 's/\broot\b/__root/g')
+EOF
 
-if [ "$1" = "config" ]; then
-        echo 'graph_title Memory usage by process by user'
-        echo 'graph_args --base 1024 -l 0'
-        echo 'graph_vlabel Bytes'
-        echo 'graph_category processes'
-        echo 'graph_info This graph shows the memory usage of several processes of one user'
+    for user in $users; do
+	munin_safe_name=$(clean_fieldname "$user")
+	cat<<EOF
+$munin_safe_name.label $user
+$munin_safe_name.info $user
+$munin_safe_name.min 0
+$munin_safe_name.draw LINESTACK2
+$munin_safe_name.type GAUGE
+EOF
+    done
 
-        for user in $users; do
-                echo "$user.label $user"
-        done
+    #       echo "$u".warning 0
+    #       echo "$u".critical 0
 
-#       echo "$u".warning 0
-#       echo "$u".critical 0
-
-        exit 0
+    exit 0
 fi
 
 for user in $users; do
-        echo "$user.value " `ps u -U $user | awk 'BEGIN { sum = 0 } NR > 1 { sum += $6 }; END { print sum * 1024 }'`
+    munin_safe_name=$(clean_fieldname "$user")
+    sum=$(ps u -U "$user" | awk 'BEGIN { sum = 0 } NR > 1 { sum += $6 }; END { print sum * 1024 }')
+    echo "$munin_safe_name.value ${sum:-U}"
 done
