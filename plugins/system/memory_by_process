@@ -30,18 +30,21 @@ if [ "$1" = "config" ]; then
 		{
 			@a = split;
 			$proc = $a[10];
-			$proc =~ s|.*/||;
+			$label = $proc;
+			$proc =~ s/ .*//;
+			if($proc =~ /^\[/) { $proc =~ s|/.*||; } else { $proc =~ s|.*/||; }
 			$proc =~ s/:.*//;
 			$proc =~ tr/[]//d;
 			$proc =~ tr/A-Za-z0-9/_/c;
 			$vsz = $a[4];
 			$total{$proc} += $vsz;
+			$labels{$proc} = $label;
 		}
 		my $stack = 0;
 		sub draw() { return $stack++ ? "STACK" : "AREA" }
 		print map
 		{
-			"$_.label $_\n" .
+			"$_.label " . $labels{$_} . "\n" .
 			"$_.min 0\n" .
 			"$_.draw " . draw() . "\n" .
 			"$_.cdef $_,1024,*\n"
@@ -56,7 +59,7 @@ else
 		{
 			@a = split;
 			$proc = $a[10];
-			$proc =~ s|.*/||;
+			if($proc =~ /^\[/) { $proc =~ s|/.*||; } else { $proc =~ s|.*/||; }
 			$proc =~ s/:.*//;
 			$proc =~ tr/[]//d;
 			$proc =~ tr/A-Za-z0-9/_/c;
