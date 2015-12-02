@@ -21,7 +21,7 @@
 
 """
 
-import sys, os
+import sys, os, re
 from subprocess import check_output
 from time import sleep
 
@@ -87,7 +87,18 @@ class GunicornStatus():
         return user_time + kernel_time
 
 def print_config():
-    print "graph_title Gunicorn - Status"
+    instance = None
+    name = os.path.basename(sys.argv[0])
+    if name != "gunicorn_status":
+        for r in ("^gunicorn_(.*?)_status$", "^gunicorn_status_(.*?)$"):
+            m = re.match(r, name, re.IGNORECASE)
+            if m:
+                instance = m.group(1)
+                break
+    graph_title = "graph_title Gunicorn - Status"
+    if instance:
+        graph_title = "%s - %s" % (graph_title, instance)
+    print graph_title
     print "graph_args -l 0"
     print "graph_vlabel Number of workers"
     print "graph_category gunicorn"
