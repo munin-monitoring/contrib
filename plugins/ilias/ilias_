@@ -1,0 +1,119 @@
+#!/usr/bin/env python
+
+# The Plugin needs the following configuration settings
+#[ilias_*]
+#env.ildbuser ilias
+#env.ildbpassword youriliaspasword
+#env.ildb ilias
+
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+import os
+import sys
+import MySQLdb
+import _mysql
+class ILIAS():
+    title = "ILIAS session" 
+    args = "--base 1000 -l 0"
+    vlabel = "ilias"
+    category = "ilias"
+
+    def __init__(self):
+        self.con = None
+        self.user = os.environ.get('ildbuser', 'root')
+        self.pw = os.environ.get('ildbpassword', '')
+        self.ildb = os.environ.get('ildb','ilias')
+
+    def connectdb(self):
+        self.con = MySQLdb.connect("localhost", self.user, self.pw,self.ildb)
+        self.pluginname = sys.argv[0].split('_')[1]
+
+
+    def config_sessions(self):        
+        print("graph_title ILIAS Session")
+        print("graph_vlabel ilsessions")
+        print("graph_category ILIAS")
+        print("ilsessions.label ilSessions")
+
+    def execute_sessions(self):
+        cursor = self.con.cursor()
+        cursor.execute("select count(user_id) from usr_session where `expires` > UNIX_TIMESTAMP( NOW( ) ) AND user_id != 0")
+        usrs = cursor.fetchone()[0]
+        print("ilsessions %s"%(usrs))
+
+
+    def config_10minavg(self):      
+        print("graph_title ILIAS 10 avg")
+        print("graph_vlabel il10minavg")
+        print("graph_category ILIAS")
+        print("il10minavg.label 10 min Count")
+
+    def execute_10minavg(self):
+        cursor = self.con.cursor()
+        cursor.execute("select count(user_id) from usr_session where 10 * 60 > UNIX_TIMESTAMP( NOW( ) ) - ctime AND user_id != 0")
+        usrs = cursor.fetchone()[0]
+        print("il10minavg %s"%(usrs))
+
+    def config_60minavg(self):      
+        print("graph_title ILIAS 60 avg")
+        print("graph_vlabel il60minavg")
+        print("graph_category ILIAS")
+        print("il60minavg.label 60 min Count")
+
+    def execute_60minavg(self):
+        cursor = self.con.cursor()
+        cursor.execute("select count(user_id) from usr_session where 60 * 60 > UNIX_TIMESTAMP( NOW( ) ) - ctime AND user_id != 0")
+        usrs = cursor.fetchone()[0]
+        print("il60minavg %s"%(usrs))
+
+    def config_total1day(self):      
+        print("graph_title Users in 24h")
+        print("graph_vlabel iltotal1day")
+        print("graph_category ILIAS")
+        print("iltotal1day.label User/24h")
+
+    def execute_total1day(self):
+        cursor = self.con.cursor()
+        cursor.execute("select count(usr_id) FROM  `usr_data` WHERE last_login >= DATE_SUB( NOW( ) , INTERVAL 1 DAY )")
+        usrs = cursor.fetchone()[0]
+        print("iltotal1day %s"%(usrs))
+
+
+    def run(self):
+        cmd =  ((len(sys.argv) > 1) and sys.argv[1] or None) or "execute"        
+        function = None
+        if cmd == "execute":
+            function = "execute"            
+        elif cmd == "config":
+            function = "config"
+        if function != None:
+            self.connectdb()
+            try:
+                func = getattr(self, "%s_%s"%(function,self.pluginname))
+            except AttributeError:
+                print 'function not found "%s" (%s)' % ("config_%s"%self.pluginname, "self")
+            else:
+                func()
+        if self.con:
+            self.con.close()
+        if cmd == "suggest":
+            print ("sessions")
+            print ("10minavg")
+            print ("60minavg")
+            print ("total1day")
+        if cmd == "autoconf":
+            try:
+                con = MySQLdb.connect("localhost", self.user, self.pw,self.ildb)
+                cursor = con.cursor()
+                cursor.execute("SELECT count(component) FROM  il_pluginslot")
+            except _mysql.Error, e:              
+                print "no (Error %d: %s)" % (e.args[0], e.args[1])
+            else:    
+                print "yes"
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    ILIAS().run()
+  
