@@ -66,14 +66,18 @@ for my $i (1 .. $#containers)
    $name =~ s/[-\+*\/\.]/_/g;
    # truncate container name with "," character.
    $name =~ s/,.*//g;
-   open(my $file, '<', "/sys/fs/cgroup/cpuacct/docker/$id/cpuacct.usage") or die "Unable to open file, $!";
-   my $total_cpu_ns = <$file>;
-   $total_cpu_ns =~ s/\s+$//;
-   close $file;
-   open($file, '<', "/sys/fs/cgroup/cpuacct/docker/$id/cpuacct.usage_percpu") or die "Unable to open file, $!";
-   my @ncpu = split / /, <$file>;
-   close $file;
-   push @result, {'name'=>$name, 'total_cpu_ns'=>$total_cpu_ns, 'ncpu'=>$#ncpu};
+   if (open(my $file, '<', "/sys/fs/cgroup/cpuacct/docker/$id/cpuacct.usage"))
+   {
+      my $total_cpu_ns = <$file>;
+      $total_cpu_ns =~ s/\s+$//;
+      close $file;
+      if (open($file, '<', "/sys/fs/cgroup/cpuacct/docker/$id/cpuacct.usage_percpu"))
+      {
+         my @ncpu = split / /, <$file>;
+         close $file;
+         push @result, {'name'=>$name, 'total_cpu_ns'=>$total_cpu_ns, 'ncpu'=>$#ncpu};
+      }
+   }
 }
  
 if (defined $ARGV[0] and $ARGV[0] eq "config")
