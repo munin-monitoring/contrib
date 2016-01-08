@@ -1,0 +1,123 @@
+#!/bin/bash
+
+: << =cut
+
+=head1 NAME
+
+Munin plugin to monitor apache mod_cache_disk usage.
+
+=head1 CONFIGURATION
+
+[apache_cache_disk_count]
+	user www-data
+	env.cache_path /var/cache/apache2/mod_cache_disk
+	env.strings css js
+	env.label_cs CSS
+	env.colour_css FFFF00
+	env.label_js JS
+	env.colour_js FF0000
+
+=head1 AUTHOR
+
+Raphaël Droz <raphael.droz+floss@gmail.com>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGICK MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+my_cache_path="${cache_path:-/var/cache/apache2/mod_cache_disk}"
+declare -a fieldnames labels colours
+
+getenvdata() {
+    let during_autoconf=0
+    [[ $1 == -v ]] && during_autoconf=1
+    arg=( "${strings:-}" )
+    for i in ${arg[*]}; do
+        if [[ ! $i =~ ^[a-zA-Z0-9]+$ ]]; then
+            (( $during_autoconf )) && echo "no ($i isn't a valid fixed-string)"
+            ok=0
+            continue
+        fi
+        label=label_$i
+        if [[ -z "${!label}" ]]; then
+            (( $during_autoconf )) && echo "no ($i isn't given a label)"
+            ok=0
+            continue
+        fi
+        colour=colour_$i
+        if [[ -z "${!colour}" ]]; then
+            (( $during_autoconf )) && echo "no ($i isn't given a colour)"
+            ok=0
+            continue
+        fi
+
+        fieldnames+=($i)
+        labels+=("${!label}")
+        colours+=("${!colour}")
+    done
+}
+
+if [[ $1 == autoconf ]]; then
+    let ok=1
+
+    [[ -z $strings ]] && echo "no strings to monitor defined" && ok=0
+    ! type -P htcacheclean &>/dev/null && echo "can't find htcacheclean" && ok=0
+    ! test -d "$my_cache_path" && echo "cache_path \"$cache_path\" is not readable" && ok=0
+
+    getenvdata -v
+
+    (( ${#fieldnames[*]} == 0 )) && echo "no (no valid strings)" && ok=0
+    (( $ok == 1 )) && echo yes
+    exit 0
+fi
+
+getenvdata
+
+if [[ $1 == config ]]; then
+cat <<EOF
+graph_title Apache mod_cache_disk usage
+graph_title Number of entries in mod_cache_disk Apache cache
+graph_args --base 1000 -l 0
+graph_vlabel Y
+graph_category Apache
+graph_order ${fieldnames[*]} total
+total.draw LINE1
+total.label all
+total.type GAUGE
+total.min 0
+EOF
+
+    let i=0
+    while (( $i < ${#fieldnames[*]} )); do
+        string=${fieldnames[$i]}
+        label="${labels[$i]}"
+        colour="${colours[$i]}"
+        cat <<EOF
+${string}.draw AREASTACK
+${string}.label ${label}
+${string}.colour ${colour}
+EOF
+        ((i++))
+    done
+    exit 0
+fi
+
+total=$(htcacheclean -a -p "$my_cache_path"|wc -l)
+asset_count=$(htcacheclean -a -p "$my_cache_path"|egrep -o "\.($(echo ${fieldnames[*]}|tr ' ' '|'))"|sort|uniq --count)
+printf "total.value %d\n" "$total"
+for i in ${fieldnames[*]}; do
+    c=$(echo "$asset_count"|sed -rn "/$i/s;^\s*([0-9]+).*;\1;p")
+    [[ -z $c ]] && c=U
+    printf "%s.value %s\n" "$i" "$c"
+done
+
+exit 0
