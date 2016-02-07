@@ -1,0 +1,126 @@
+#!/bin/bash
+# wordpress-multisite plugin
+# 
+# Author Jonas Palm
+# Version 0.1
+# Date 2016-02-07
+# 
+: <<=cut
+=head1 NAME
+Wordpress-Multisite Munin Plugin
+
+A Munin plugin to monitor posts, comments and pingbacks from every multisite instance.
+It uses multigraphs and also shows the combined number of posts, comments, pingbacks, instances and users.
+
+Most database requests came from the wordpress-mu-plugin which was written by Andre Darafarin and Chris Bair
+
+=head1 CONFIGURATION
+The plugin need access to the wordpress database
+
+=head2 Config file
+Create the config file plugin-conf.d/wordpress with the following values:
+
+=over 5
+=item * [wordpress*]
+=item * env.DB_USER <database user (mandatory)>
+=item * env.DB_PASSWORD <database password (mandatory)>
+=item * env.DB_NAME <database name (defaults to wordpress>
+=item * env.DB_PREFIX <database prefix (defaults to wp_)>
+=item * env.DB_HOST <database host (defaults to localhost)>
+
+=back
+
+=head1 VERSION                                                                                                                                                                                                                      
+
+0.1 2016-02-07
+
+=head1 AUTHOR
+
+Jonas Palm <jonaspalm . posteo . de>
+
+=cut
+
+# Fill some variables
+DB_USER=${DB_USER}
+DB_PASSWORD=${DB_PASSWORD}
+DB_NAME=${DB_NAME:-wordpress}
+DB_PREFIX=${DB_PREFIX:-wp_}
+DB_HOST=${DB_HOST:-localhost}
+DB_PORT=${DB_PORT:-3306}
+
+MYSQLOPTS="-h$DB_HOST -P $DB_PORT -p$DB_PASSWORD -u$DB_USER -D $DB_NAME --column-names=0 -s"
+
+if [ "$1" = "config" ]; then
+        echo "multigraph wordpress"
+        echo "graph_title Wordpress Mulitsite"
+        echo "graph_order instances users posts comments pingbacks"
+        echo "graph_vlabel Wordpress"
+        echo "graph_category Wordpress"
+        echo "graph_info Some Statistics of Wordpress"
+        echo "instances.label Instances"
+        echo "users.label Users"
+        echo "posts.label Posts"
+        echo "comments.label Comments"
+        echo "pingbacks.label Pingbacks"
+else
+        CNT=0
+        for n in `mysql $MYSQLOPTS --execute="select blog_id from ${DB_PREFIX}blogs"`; do
+                if [ "$n" == "1" ]; then
+                        i=
+                else
+                        i=${n}_
+                fi
+
+                POSTS=`mysql $MYSQLOPTS --execute="SELECT COUNT(*) FROM ${DB_PREFIX}${i}posts WHERE post_status = 'publish' AND post_password = '' AND post_type = 'post';"`
+                (( POSTS_ += POSTS ))
+
+                COMMENTS=`mysql $MYSQLOPTS --execute="SELECT COUNT(*) FROM ${DB_PREFIX}${i}comments WHERE comment_approved = '1' AND comment_type = '';"`
+                (( COMMENTS_ += COMMENTS ))
+
+                PINGBACKS=`mysql $MYSQLOPTS --execute="SELECT COUNT(*) FROM ${DB_PREFIX}${i}comments WHERE comment_approved = '1' AND comment_type = 'pingback';"`
+                (( PINGBACKS_ += PINGBACKS ))
+
+                (( CNT += 1 ))
+        done
+
+        # return values
+        echo "multigraph wordpress"
+        echo "posts.value $POSTS_"
+        echo "comments.value $COMMENTS_"
+        echo "pingbacks.value $PINGBACKS_"
+        echo "instances.value $CNT"
+        echo "users.value `mysql $MYSQLOPTS --execute="SELECT COUNT(*) FROM ${DB_PREFIX}users ;"`"
+fi
+
+# single blogs
+for n in `mysql $MYSQLOPTS --execute="select blog_id from ${DB_PREFIX}blogs"`; do
+        if [ "${n}" == "1" ]; then
+                i=
+        else
+                i=${n}_
+        fi
+
+        if [ "$n" -le "9" ]; then
+                n=0${n}
+        fi
+
+        if [ "$1" = "config" ]; then
+                echo "multigraph wordpress.site_${n}"
+                echo "graph_title `mysql $MYSQLOPTS --execute=\"select option_value from ${DB_PREFIX}${i}options where option_name = 'siteurl';\"`"
+                echo "graph_order posts comments pingbacks"
+                echo "graph_vlabel Wordpress ID ${n}"
+                echo "posts.label Posts"
+                echo "comments.label Comments"
+                echo "pingbacks.label Pingbacks"
+        else
+                POSTS=`mysql $MYSQLOPTS --execute="SELECT COUNT(*) FROM ${DB_PREFIX}${i}posts WHERE post_status = 'publish' AND post_password = '' AND post_type = 'post';"`
+                COMMENTS=`mysql $MYSQLOPTS --execute="SELECT COUNT(*) FROM ${DB_PREFIX}${i}comments WHERE comment_approved = '1' AND comment_type = '';"`
+                PINGBACKS=`mysql $MYSQLOPTS --execute="SELECT COUNT(*) FROM ${DB_PREFIX}${i}comments WHERE comment_approved = '1' AND comment_type = 'pingback';"`
+
+                # return values
+                echo "multigraph wordpress.site_${n}"
+                echo "posts.value $POSTS"
+                echo "comments.value $COMMENTS"
+                echo "pingbacks.value $PINGBACKS"
+        fi
+done
