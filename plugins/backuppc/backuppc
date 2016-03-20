@@ -4,10 +4,10 @@
 #    [backuppc]
 #    user backuppc
 #    env.pcdir /var/lib/BackupPC/pc
-#    env.full_warning 10    # warn if last backup older than N days
-#    env.full_critical 20   # critical if last backup older than N days
-#    env.incr_warning 1     # warn if last backup older than N days
-#    env.incr_critical 3    # critical if last backup older than N days
+#    env.full_warning 10    # warn if FULL backup older than N days
+#    env.full_critical 20   # critical if FULL backup older than N days
+#    env.incr_warning 1     # warn if INCR backup older than N days
+#    env.incr_critical 3    # critical if INCR backup older than N days
 #
 #%# family=backuppc
 #%# capabilities=autoconf
@@ -32,8 +32,8 @@ if [ "$1" = "config" ]; then
 
 	for h in ${HOSTS}
 	do
-		echo "$(clean_fieldname ${h})_size_full.label $(clean_fieldname ${h}) Full"
-		echo "$(clean_fieldname ${h})_size_incr.label $(clean_fieldname ${h}) Incr"
+		echo "$(clean_fieldname ${h})_full.label $(clean_fieldname ${h}) Full"
+		echo "$(clean_fieldname ${h})_incr.label $(clean_fieldname ${h}) Incr"
 	done
 
 	echo "multigraph backuppc_ages"
@@ -44,19 +44,19 @@ if [ "$1" = "config" ]; then
 
 	for h in ${HOSTS}
 	do
-		echo "$(clean_fieldname ${h})_age_full.label $(clean_fieldname ${h}) Full"
-		echo "$(clean_fieldname ${h})_age_incr.label $(clean_fieldname ${h}) Incr"
+		echo "$(clean_fieldname ${h})_full.label $(clean_fieldname ${h}) Full"
+		echo "$(clean_fieldname ${h})_incr.label $(clean_fieldname ${h}) Incr"
 		if [ -n "$full_warning" ]; then
-			echo "$(clean_fieldname ${h})_age_full.warning $full_warning"
+			echo "$(clean_fieldname ${h})_full.warning $full_warning"
 		fi
 		if [ -n "$incr_warning" ]; then
-			echo "$(clean_fieldname ${h})_age_incr.warning $incr_warning"
+			echo "$(clean_fieldname ${h})_incr.warning $incr_warning"
 		fi
 		if [ -n "$full_critical" ]; then
-			echo "$(clean_fieldname ${h})_age_full.critical $full_critical"
+			echo "$(clean_fieldname ${h})_full.critical $full_critical"
 		fi
 		if [ -n "$incr_critical" ]; then
-			echo "$(clean_fieldname ${h})_age_incr.critical $incr_critical"
+			echo "$(clean_fieldname ${h})_incr.critical $incr_critical"
 		fi
 	done
 
@@ -67,18 +67,18 @@ echo "multigraph backuppc_sizes"
 for h in $HOSTS
 do
 	SIZE=$(awk '/full/ { size = $6 } END { print size; }' ${PCDIR}/${h}/backups)
-	echo "$(clean_fieldname ${h})_size_full.value $SIZE"
+	echo "$(clean_fieldname ${h})_full.value $SIZE"
 	SIZE=$(awk '/incr/ { size = $6 } END { print size; }' ${PCDIR}/${h}/backups)
-	echo "$(clean_fieldname ${h})_size_incr.value $SIZE"
+	echo "$(clean_fieldname ${h})_incr.value $SIZE"
 done
 
 echo "multigraph backuppc_ages"
 for h in $HOSTS
 do
 	SIZE=$(awk '/full/ { age = systime() - $3 } END { print age / 3600 / 24; }' ${PCDIR}/${h}/backups)
-	echo "$(clean_fieldname ${h})_age_full.value $SIZE"
+	echo "$(clean_fieldname ${h})_full.value $SIZE"
 	SIZE=$(awk '/incr/ { age = systime() - $3 } END { print age / 3600 / 24; }' ${PCDIR}/${h}/backups)
-	echo "$(clean_fieldname ${h})_age_incr.value $SIZE"
+	echo "$(clean_fieldname ${h})_incr.value $SIZE"
 done
 
 <<'__END__'
