@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # Plugin to monitor error.log from apache server.
 # Revision 0.1  2011/06/17 12:00:00  Ulrich Lusseau
@@ -14,27 +14,28 @@
 #%# capabilities=autoconf
 # config example for /etc/munin/plugin-conf.d/munin-node
 #[apache_log]
-#user root
-#env.logfile /home/newsite/logs/errors.log
+#user www-data
+#env.logfile /home/newsite/logs/errors.log /var/log/php/otherlog.log
 #
  
  
-LOG=${logfile:-/var/log/apache2/error.log}
+LOGS=${logfile:-/var/log/apache2/error.log}
  
  
 if [ "$1" = "autoconf" ]; then
-        if [ -r "$LOG" ]; then
-                echo yes
-                exit 0
-        else
-                echo no
-                exit 1
+    for LOG in $LOGS; do
+	if [[ ! -r $LOGS ]]; then
+            echo no
+            exit 1
         fi
+    done
+
+    echo yes
+    exit 0
 fi
  
 if [ "$1" = "config" ]; then
- 
-        echo 'graph_title PHP Errors from ' $LOG
+        echo 'graph_title PHP Errors from ' $LOGS
         echo 'graph_args --base 1000 -l 0'
         echo 'graph_vlabel Errors'
         echo 'LogWarning.label PHP Warning errors'
@@ -49,4 +50,4 @@ awk 'BEGIN{c["LogWarning"]=0;c["LogNotice"]=0;c["LogFatal"]=0;c["LogFile"]=0; }
      /PHP Notice/{c["LogNotice"]++}
      /PHP Fatal error/{c["LogFatal"]++}
      /File does not exist/{c["LogFile"]++}
-     END{for(i in c){print i".value " c[i]} }' < $LOG
+     END{for(i in c){print i".value " c[i]} }' $LOGS
