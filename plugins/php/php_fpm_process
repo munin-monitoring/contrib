@@ -10,23 +10,23 @@ Inspirated by php5-fpm_status plugin by Daniel Caillibaud
 
 =head1 APPLICABLE SYSTEMS
 
-Any php-fpm host 
-You will need the perl fastcgi::client on your host 
+Any php-fpm host
+You will need the perl fastcgi::client on your host
 
 =head1 CONFIGURATION
 
-You have to put this in your plugin.conf.d folder 
+You have to put this in your plugin.conf.d folder
 
-# If your php process is listening on TCP 
+# If your php process is listening on TCP
 [php_fpm_process]
    env.serveraddr 127.0.0.1
    env.port 9000
-   env.path /status 
+   env.path /status
 
 # If your php process is listening on Unix Socket
 [php_fpm_process]
    env.sock /var/run/php5-fpm.sock
-   env.path /status 
+   env.path /status
 
 =head1 MAGIC MARKERS
 
@@ -35,11 +35,11 @@ You have to put this in your plugin.conf.d folder
 
 =head1 VERSION
 
-  v1.0 
+  v1.0
 
 =head1 AUTHOR
 
-Minitux 
+Minitux
 
 =head1 LICENSE
 
@@ -55,6 +55,7 @@ my $body = "";
 my $IDLE = 0;
 my $ACTIVE = 0;
 my $TOTAL = 0;
+my $SLOW_REQUESTS = 0;
 
 my $SERVERADDR = $ENV{'serveraddr'} || "127.0.0.1";
 my $PORT = $ENV{'port'} || "9000";
@@ -68,7 +69,7 @@ if ($UNIX_SOCK) {
   $sock = IO::Socket::UNIX->new(
     Peer =>  $UNIX_SOCK,
   );
-  if (!$sock) { 
+  if (!$sock) {
     print "Server maybe down, unabled to connect to $UNIX_SOCK";
     exit 2;
   }
@@ -78,7 +79,7 @@ if ($UNIX_SOCK) {
     PeerAddr =>  $SERVERADDR,
     PeerPort =>  $PORT,
   );
-  if (!$sock) { 
+  if (!$sock) {
     print "Server maybe down, unabled to connect to $SERVERADDR:$PORT";
     exit 2;
   }
@@ -86,7 +87,7 @@ if ($UNIX_SOCK) {
 
 my $client = FCGI::Client::Connection->new( sock => $sock );
 
-my ( $stdout, $stderr, $appstatus )  = $client->request( 
+my ( $stdout, $stderr, $appstatus )  = $client->request(
     +{
         REQUEST_METHOD => 'GET',
         SCRIPT_FILENAME => '',
@@ -112,7 +113,7 @@ while($stdout =~ /([^\n]*)\n?/g) {
 
 if ( defined $ARGV[0] and $ARGV[0] eq "config" )
 {
- 
+
   if($body =~ m/pool:\s+(.*?)\n/) {
     $pool = $1;
   }
@@ -135,10 +136,14 @@ if ( defined $ARGV[0] and $ARGV[0] eq "config" )
   print "total.type GAUGE\n";
   print "total.draw LINE2\n";
   print "total.info The number of idle + active processes\n";
+  print "slow_requests.label Slow requests\n";
+  print "slow_requests.type GAUGE\n";
+  print "slow_requests.draw LINE2\n";
+  print "slow_requests.info The number of slow requests\n";
   exit 0
-} 
+}
 
-print $body;
+# print $body;
 
 if($body =~ m/idle processes: (.*?)\n/) {
         $IDLE = $1;
@@ -151,4 +156,8 @@ if($body =~ m/active processes: (.*?)\n/) {
 if($body =~ m/total processes: (.*?)\n/) {
         $TOTAL = $1;
   print "total.value ".$TOTAL."\n";
+}
+if($body =~ m/slow requests: (.*?)\n/) {
+        $SLOW_REQUESTS = $1;
+  print "slow_requests.value ".$SLOW_REQUESTS."\n";
 }
