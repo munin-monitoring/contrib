@@ -1,6 +1,7 @@
 #!/bin/bash
 # I'm not the author, just wanted to add this plugin to github
 #  Author & instructions: http://wiki.natenom.name/minecraft/munin-plugin
+#  CPU usage update and translation by Leandro Späth (https://github.com/LeoDJ)
 
 LC_LANG=C
 MC_PORT=${0##*_}
@@ -9,9 +10,11 @@ if [ "$1" = "config" ]
 then
     printf 'graph_title Minecraft-Server (Port %s)\n' ${MC_PORT}
     printf 'graph_category games'
-    printf 'graph_vlabel Anzahl\n'
-    printf 'users.label Benutzer\n'
-    printf 'ramusage.label Verwendeter RAM in GiB\n'
+    printf 'graph_scale no\n'
+    printf 'graph_vlabel Players / RAM / CPU\n'
+    printf 'users.label Players\n'
+    printf 'ramusage.label RAM usage in GiB\n'
+    printf 'cpuusage.label CPU usage\n'
     exit 0
 fi
 
@@ -22,9 +25,13 @@ then #is running
     MEMORYRSS=$(ps -p ${MC_PID} -o rss | cut -d'
 ' -f2)
     MEMGiB=$(echo "scale=2;${MEMORYRSS}/1024/1024" | bc -l)
+    CPUPERCENT=$(ps -p ${MC_PID} -o %cpu | sed -n 2p)
+    CPU=$(echo "scale=2;${CPUPERCENT}/100" | bc -l)
 else
     MEMGiB=0
+    CPU=0
 fi
 
 printf "users.value %i\n" "${PLAYERCOUNT}"
 printf "ramusage.value %3.2f\n" "${MEMGiB}"
+printf "cpuusage.value %3.2f\n" "${CPU}"
