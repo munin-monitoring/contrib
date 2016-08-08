@@ -1,12 +1,55 @@
 #!/bin/sh
 
+: << =cut
+
+=head1 NAME
+
+senderbase - Gives the current SenderBase reputation for a mail host.
+
+=head1 CONFIGURATION
+
+By default, the script will use the first IP address returned by C<hostname -I>.
+If that's not the right address to use, set the C<ip_address> environment
+variable to the appropriate value.
+
+ [senderbase]
+   env.ip_address 8.8.8.8
+
+=head1 AUTHOR
+
+Phil! Gold <phil_g@pobox.com>
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
 real_ip_address=${ip_address:-$(hostname -I | head -1)}
+ip_reversed=$(echo $real_ip_address | sed -re 's/^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$/\4.\3.\2.\1/')
+query_host=${ip_reversed}.rf.senderbase.org
+
+if [ "$1" = "autoconf" ]; then
+    if which dig >/dev/null; then
+        value=$(dig +short $query_host TXT | sed 's/"//g' | head -1)
+        if [ -n "$value" ]; then
+            echo 'yes'
+        else
+            echo "no (No SenderBase reputation for IP address ${ip_address}.)"
+        fi
+    else
+        echo 'no (No "dig" executable found.)'
+    fi
+    exit 0
+fi
 
 if [ "$1" = "config" ]; then
     cat <<EOF
 graph_category mail
 graph_title SenderBase Reputation for $real_ip_address
 graph_info Current reputation from senderbase.org.  Ranges from -10 (very poor) through 0 (neutral) to 10 (very good).
+graph_args --lower-limit -10 --upper-limit 10
 reputation.label Reputation
 reputation.warning :0
 reputation.critical :-5
@@ -14,7 +57,5 @@ EOF
     exit 0
 fi
 
-ip_reversed=$(echo $real_ip_address | sed -re 's/^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$/\4.\3.\2.\1/')
-query_host=${ip_reversed}.rf.senderbase.org
 value=$(dig +short $query_host TXT | sed 's/"//g' | head -1)
 echo reputation.value ${value:-U}
