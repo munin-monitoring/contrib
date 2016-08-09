@@ -1,0 +1,274 @@
+#!/usr/bin/perl
+
+# munin plugin for BalanceNG
+# https://www.inlab.de/load-balancer/index.html
+#
+# (w) 2015 by Rhonda D'Vine <rhonda@strg.at>
+# (c) 2015 by strg.at GmbH <http://strg.at/>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+
+
+use warnings;
+use strict;
+
+use Munin::Plugin;
+
+my $host;
+
+my %servers;
+my %targets;
+
+# we support autoconf
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+# Check for multigraph capabilities
+need_multigraph();
+
+# Handle munin 'autoconf' command
+do_autoconf() if ( $ARGV[0] && $ARGV[0] eq 'autoconf' );
+
+# Fetch data values
+do_fetch_values();
+
+# Handle munin 'config' command
+# This can only be done after getting the data
+if ( defined $ARGV[0] && $ARGV[0] eq 'config' ) {
+	do_config();
+}
+
+
+generate_output();
+
+exit 0;
+
+sub do_autoconf {	# {{{	check if we can offer autoconf
+	print (-x '/sbin/bng' ? "yes\n" : "no\n");
+	exit 0;
+}	# }}}
+
+sub do_fetch_values {	# {{{	fetch all the names and values needed
+
+	## MIBs from https://www.inlab.de/load-balancer/BalanceNG-V3-Manual.pdf
+
+	# node name
+	open READ, "/sbin/bng -g .1.3.6.1.4.1.2771.1.5 |" || die "$0: can't fork bng: $!\n";
+	<READ>;
+	<READ>;
+	$host = <READ>;
+	chomp $host;
+	close READ;
+
+	my $next;
+
+	# server names
+	$next = '.1.3.6.1.4.1.2771.1.60.3';
+	while (open READ, "/sbin/bng -n $next |") {
+		$next = <READ>;
+		chomp $next;
+
+		if ($next !~ /^\.1\.3\.6\.1\.4\.1\.2771\.1\.60\.3/) {
+			close READ;
+			last;
+		}
+
+		<READ>;
+		my $name = <READ>;
+		chomp $name;
+		push @{$servers{name}}, clean_fieldname($name);
+
+		close READ;
+	}
+
+	# server sent bytes
+	$next = '.1.3.6.1.4.1.2771.1.60.15';
+	while (open READ, "/sbin/bng -n $next |") {
+		$next = <READ>;
+		chomp $next;
+
+		if ($next !~ /^\.1\.3\.6\.1\.4\.1\.2771\.1\.60\.15/) {
+			close READ;
+			last;
+		}
+
+		<READ>;
+		my $name = <READ>;
+		chomp $name;
+		push @{$servers{sent}}, $name;
+		$servers{senttotal} += $name;
+
+		close READ;
+	}
+
+	# server recv bytes
+	$next = '.1.3.6.1.4.1.2771.1.60.17';
+	while (open READ, "/sbin/bng -n $next |") {
+		$next = <READ>;
+		chomp $next;
+
+		if ($next !~ /^\.1\.3\.6\.1\.4\.1\.2771\.1\.60\.17/) {
+			close READ;
+			last;
+		}
+
+		<READ>;
+		my $name = <READ>;
+		chomp $name;
+		push @{$servers{recv}}, $name;
+		$servers{recvtotal} += $name;
+
+		close READ;
+	}
+
+	# target names
+	$next = '.1.3.6.1.4.1.2771.1.70.3';
+	while (open READ, "/sbin/bng -n $next |") {
+		$next = <READ>;
+		chomp $next;
+
+		if ($next !~ /^\.1\.3\.6\.1\.4\.1\.2771\.1\.70\.3/) {
+			close READ;
+			last;
+		}
+
+		<READ>;
+		my $name = <READ>;
+		chomp $name;
+		push @{$targets{name}}, clean_fieldname($name);
+
+		close READ;
+	}
+
+	# target sent bytes
+	$next = '.1.3.6.1.4.1.2771.1.70.27';
+	while (open READ, "/sbin/bng -n $next |") {
+		$next = <READ>;
+		chomp $next;
+
+		if ($next !~ /^\.1\.3\.6\.1\.4\.1\.2771\.1\.70\.27/) {
+			close READ;
+			last;
+		}
+
+		<READ>;
+		my $name = <READ>;
+		chomp $name;
+		push @{$targets{sent}}, $name;
+		$targets{senttotal} += $name;
+
+		close READ;
+	}
+
+	# target recv bytes
+	$next = '.1.3.6.1.4.1.2771.1.70.29';
+	while (open READ, "/sbin/bng -n $next |") {
+		$next = <READ>;
+		chomp $next;
+
+		if ($next !~ /^\.1\.3\.6\.1\.4\.1\.2771\.1\.70\.29/) {
+			close READ;
+			last;
+		}
+
+		<READ>;
+		my $name = <READ>;
+		chomp $name;
+		push @{$targets{recv}}, $name;
+		$targets{recvtotal} += $name;
+
+		close READ;
+	}
+
+}	# }}}
+
+sub do_config {	# {{{	write out the configuration
+	print <<"EOF";
+multigraph bng
+graph_title Bng Throughput
+graph_order sent recv
+graph_args --base 1000 -l 0
+graph_vlabel Packets/\${graph_period}
+graph_category network
+graph_info this graph shows the outbound traffic for $host
+
+sent.label Sent
+sent.draw AREA
+sent.type DERIVE
+sent.min 0
+recv.label Received
+recv.draw AREA
+recv.type DERIVE
+recv.min 0
+
+EOF
+
+	foreach my $interface (@{$servers{name}}, @{$targets{name}}) {
+		print <<"EOF";
+multigraph bng.${interface}
+
+graph_title Interface $interface traffic
+graph_order sent recv
+graph_args --base 1000 -l 0
+graph_vlabel Packets/\${graph_period}
+graph_category network
+graph_info this graph shows the total traffic for ${interface}
+
+sent.label ${interface}_Sent
+sent.draw AREA
+sent.type DERIVE
+sent.min 0
+recv.label ${interface}_Received
+recv.draw AREA
+recv.type DERIVE
+recv.min 0
+
+EOF
+	}
+
+	exit 0;
+}	# }}}
+
+sub generate_output {	# {{{	write out the data
+	print <<"EOF";
+multigraph bng
+sent.value $servers{senttotal}
+recv.value $servers{recvtotal}
+EOF
+
+	my $i;
+	$i = 0;
+	foreach my $interface (@{$servers{name}}) {
+		print <<"EOF";
+multigraph bng.${interface}
+sent.value $servers{sent}[$i]
+recv.value $servers{recv}[$i]
+EOF
+		$i++;
+	}
+
+	$i = 0;
+	foreach my $interface (@{$targets{name}}) {
+		print <<"EOF";
+multigraph bng.${interface}
+sent.value $targets{sent}[$i]
+recv.value $targets{recv}[$i]
+EOF
+		$i++;
+	}
+
+}	# }}}
+
+# vim:fdm=marker:

@@ -1,0 +1,98 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+
+=head1 NAME
+
+docker_memory - Munin plugin to monitor docker container memory usage.
+
+=head1 APPLICABLE SYSTEMS
+
+Should work on any Linux system that has docker support.
+
+=head1 CONFIGURATION
+
+Root privilege required to execute docker command.
+
+1. Create a new file named "docker" inside the folder /etc/munin/plugin-conf.d/
+2. Docker file content:
+
+[docker_memory]
+user root
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+  v.0.1
+
+=head1 AUTHOR
+
+Copyright (C) 2015 Samuel Cantero.
+Email: scanterog at gmail dot com
+
+=head1 LICENSE
+
+GPLv3
+
+=cut
+
+my $docker=`which docker`;
+
+if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
+   if ($docker) {
+      print "yes\n";
+      exit 0;
+   }
+   else{
+      print "no (Docker has not been found)\n";
+      exit 0;
+   }
+}
+
+$docker =~ s/\s+$//;
+
+my @containers = split "\n" , `$docker ps --no-trunc=true`;
+my $result;
+
+for my $i (1 .. $#containers)
+{
+   my @fields = split / +/, $containers[$i];
+   my $id = $fields[0];
+   my $name = $fields[$#fields];
+   # manage container name containing arithmetic operators and dots. E.g, my-container.
+   $name =~ s/[-\+*\/\.]/_/g;
+   # truncate container name with "," character.
+   $name =~ s/,.*//g;
+   if (open(my $file, '<', "/sys/fs/cgroup/memory/docker/$id/memory.usage_in_bytes"))
+   {
+      my $memory_bytes = <$file>;
+      $memory_bytes =~ s/\s+$//;
+      push @result, {'name'=>$name, 'memory_bytes'=>$memory_bytes};
+   }
+}
+
+if (defined $ARGV[0] and $ARGV[0] eq "config")
+{
+   print "graph_title Docker container memory usage\n";
+   print "graph_args --base 1024 -l 0\n";
+   print "graph_vlabel Bytes\n";
+   print "graph_category Docker\n";
+   print "graph_info This graph shows docker container memory usage.\n";
+   
+   foreach(@result)
+   {
+      print "$$_{'name'}.label $$_{'name'}\n";
+      print "$$_{'name'}.draw LINE2\n";
+   }
+   exit 0;
+}
+
+foreach(@result)
+{
+   print "$$_{'name'}.value $$_{'memory_bytes'}\n";
+}
+
+# vim:syntax=perl

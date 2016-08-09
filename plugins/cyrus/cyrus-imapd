@@ -66,11 +66,14 @@ GPLv2
 =cut
 
 # IMAP Configuration Directory
-CONFIGDIR=$(awk -F : '/^configdirectory:/ { gsub(/ /, "", $2); print $2 }' /etc/imapd.conf 2> /dev/null)
-PROCDIR="${CONFIGDIR}/proc"
+PROCDIR=$(awk -F : '/^proc_path:/ { gsub(/ /, "", $2); print $2 }' /etc/imapd.conf 2> /dev/null)
+if [ "x${PROCDIR}x" = "xx" ]; then
+	CONFIGDIR=$(awk -F : '/^configdirectory:/ { gsub(/ /, "", $2); print $2 }' /etc/imapd.conf 2> /dev/null)
+	PROCDIR="${CONFIGDIR}/proc"
+fi
 
 if [ "$1" = "autoconf" ]; then
-	if [ "x${CONFIGDIR}x" != "xx" ] && [ -d ${PROCDIR} ]; then
+	if [ "x${PROCDIR}x" != "xx" ] && [ -d ${PROCDIR} ]; then
 		echo yes
 	else
 		echo "no (no cyrus-imapd procdir found)"
@@ -79,7 +82,7 @@ if [ "$1" = "autoconf" ]; then
 fi
 
 # Check if we actually got some sensible data
-if [ "x${CONFIGDIR}x" = "xx" ]; then
+if [ "x${PROCDIR}x" = "xx" ]; then
 	exit 1
 fi
 

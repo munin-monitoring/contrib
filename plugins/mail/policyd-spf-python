@@ -1,0 +1,88 @@
+#! /bin/bash
+#
+#   Munin plugin to monitor postfix-policyd-spf-python results
+#   Contributed by Alexander Koch <lynix47@gmail.com> 
+#
+#   This plugin is published under the terms of the MIT License.
+# 
+# Parameters understood:
+#	config		(required)
+#	autoconf 	(optional - used by munin-config)
+# 
+# Config variables:
+#       logfile      - Where to find the postfix log (mail.log)
+#
+# Add the following line to a file in /etc/munin/plugin-conf.d:
+# 	env.logfile /var/log/your/mail.log
+#
+# Magic markers (optional - used by munin-config and installation scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+
+#
+# Configuration
+#
+
+STAT_FILE=${STAT_FILE:-/var/lib/munin/plugin-state/plugin-plcyd-spf-python.state}
+LOGFILE=${logfile:-/var/log/mail.log}
+
+if [ "$1" = "autoconf" ]; then
+	echo yes
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title SPF Check Results'
+	echo 'graph_category postfix'
+	echo 'graph_args --base 1000 -l 0'
+	echo 'graph_vlabel Count/s'
+
+	echo 'count_pass.label Pass'
+	echo 'count_pass.type DERIVE'
+	echo 'count_pass.min 0'
+	echo 'count_pass.colour 00cc00'
+	echo 'count_fail.label Fail'
+	echo 'count_fail.type DERIVE'
+	echo 'count_fail.min 0'
+	echo 'count_fail.colour cc0000'
+	echo 'count_none.label None'
+	echo 'count_none.type DERIVE'
+	echo 'count_none.min 0'
+	echo 'count_none.colour 0066b3'
+	echo 'count_temperror.label Temperror'
+	echo 'count_temperror.type DERIVE'
+	echo 'count_temperror.min 0'
+	echo 'count_temperror.colour ff8000'
+	echo 'count_neutral.label Neutral'
+	echo 'count_neutral.type DERIVE'
+	echo 'count_neutral.min 0'
+	echo 'count_neutral.colour ffcc00'
+
+	exit 0
+fi
+
+
+#
+# Log parsing
+#
+
+function get_log_count() {
+	egrep "policyd-spf\[[0-9]+\]: $1;" "$LOGFILE" | grep "$(date '+%b %e')" | wc -l
+}
+
+PASS=$(get_log_count "Pass")
+FAIL=$(get_log_count "Fail")
+NONE=$(get_log_count "None")
+TEMPERR=$(get_log_count "Temperror")
+NEUTRAL=$(get_log_count "Neutral")
+
+echo "count_pass.value $PASS"
+echo "count_fail.value $FAIL"
+echo "count_none.value $NONE"
+echo "count_temperror.value $TEMPERR"
+echo "count_neutral.value $NEUTRAL"
+
+
+exit 0

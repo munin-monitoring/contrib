@@ -25,7 +25,7 @@ import os
 import telnetlib
 import re
 
-def main(): 
+def main():
     try:
         mode = sys.argv[1]
     except IndexError:
@@ -33,7 +33,7 @@ def main():
     wildcard = sys.argv[0].split("prosody_")[1].split("_")[0]
     host = os.environ.get('host', 'localhost')
     port = int(os.environ.get('port', 5582))
-    
+
     if mode == "suggest":
         print "c2s"
         print "s2s"
@@ -47,7 +47,7 @@ def main():
             print "graph_title Prosody C2S Connections"
             print "graph_vlabel users"
             print "graph_category Prosody"
-        
+
             print "all_client_connections.label client connections"
             print "secure_client_connections.label secure client connections"
             print "insecure_client_connections.label insecure client " \
@@ -64,7 +64,7 @@ def main():
             secure_client_connections = int(parsed_info[0])
             print "secure_client_connections.value %s" % \
                   (secure_client_connections)
-            
+
             telnet.write("c2s:show_insecure()\n")
             telnet_response = telnet.read_until("insecure client connections",
                                                 5)
@@ -75,19 +75,19 @@ def main():
             all_client_connections = secure_client_connections + \
                                      insecure_client_connections
             print "all_client_connections.value %s" % (all_client_connections)
-            telnet.write("quit")
-            
+            telnet.write("quit\n")
+
     elif wildcard == "s2s":
         if mode == "config":
             print "graph_title Prosody S2S Connections"
             print "graph_vlabel servers"
             print "graph_category Prosody"
-        
+
             print "outgoing_connections.label outgoing connections"
             print "incoming_connections.label incoming connections"
             sys.exit(0)
-            
-        else:   
+
+        else:
             server_connections_re = re.compile(r"(\d+) outgoing, (\d+)")
             telnet = telnetlib.Telnet(host, port)
             telnet.write("s2s:show()\n")
@@ -95,8 +95,8 @@ def main():
             parsed_info = server_connections_re.findall(telnet_response)
             print "outgoing_connections.value %s" % (parsed_info[0][0])
             print "incoming_connections.value %s" % (parsed_info[0][1])
-            telnet.write("quit")
-            
+            telnet.write("quit\n")
+
     elif wildcard == "presence":
         if mode == "config":
             print "graph_title Prosody Client Presence"
@@ -110,8 +110,8 @@ def main():
             print "dnd.label Do Not Disturb Clients"
             sys.exit(0)
 
-        else:   
-            client_presence_re = re.compile(r"- (.*?)\(\d+\)")
+        else:
+            client_presence_re = re.compile(r"[-\]] (.*?)\(\d+\)")
             telnet = telnetlib.Telnet(host, port)
             telnet.write("c2s:show()\n")
             telnet_response = telnet.read_until("clients", 5)
@@ -121,7 +121,7 @@ def main():
             print "away.value %s" % (parsed_info.count("away"))
             print "xa.value %s" % (parsed_info.count("xa"))
             print "dnd.value %s" % (parsed_info.count("dnd"))
-            telnet.write("quit")
+            telnet.write("quit\n")
 
     elif wildcard == "uptime":
         if mode == "config":
@@ -147,7 +147,7 @@ def main():
             uptime_value = float(parsed_info[0]) + float(parsed_info[1])/24 +\
                            float(parsed_info[2])/60/24
             print "uptime.value %s" % (uptime_value)
-            telnet.write("quit")
+            telnet.write("quit\n")
 
     elif wildcard == "users":
         if mode == "config":

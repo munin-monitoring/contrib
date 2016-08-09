@@ -66,8 +66,20 @@ my $wgetBin = "/usr/bin/wget";
 my $type = basename($0);
 $type =~ s/jenkins_//;
 
-my %states = ('blue' =>'stable', 'blue_anime' =>'stable', 'yellow'=>'unstable', 'yellow_anime'=>'unstable', 'red'=>'failing', 'red_anime'=>'failing', 'disabled'=>'disabled', 'notbuilt_anime' =>'disabled', 'aborted'=>'failing', 'aborted_anime'=>'failing' );
-my %counts = ('blue' => 0, 'yellow'=>0, 'red'=>0, 'disabled'=>0);
+my %states = (
+	'blue' =>'stable',
+	'blue_anime' =>'stable',
+	'yellow'=>'unstable',
+	'yellow_anime'=>'unstable',
+	'red'=>'failing',
+	'red_anime'=>'failing',
+	'disabled'=>'disabled',
+	'notbuilt' => 'disabled',
+	'notbuilt_anime' =>'disabled',
+	'aborted'=>'failing',
+	'aborted_anime'=>'failing'
+);
+my %counts = ('stable' => 0, 'unstable'=>0, 'failing'=>0, 'disabled'=>0);
 
 if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 	if( $type eq "results" ) {
@@ -123,11 +135,15 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 		my $result = `$cmd/api/json`;
 		my $parsed = decode_json($result);
 		foreach my $cur(@{$parsed->{'jobs'}}) {
-			$counts{$cur->{'color'}} += 1;
+			if (defined $states{$cur->{'color'}}) {
+				$counts{$states{$cur->{'color'}}} += 1;
+			} else {
+				warn "Ignoring unknown color " . $cur->{'color'} . "\n"
+			}
 		}
 		
 		foreach my $status (keys %counts) {
-			print "build_$states{$status}.value $counts{$status}\n";
+			print "build_$status.value $counts{$status}\n";
 		}
 		exit;
 	}

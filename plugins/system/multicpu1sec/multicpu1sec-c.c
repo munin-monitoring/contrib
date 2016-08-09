@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <time.h>
 
@@ -20,23 +21,30 @@ int fail(char* msg) {
 
 int config() {
 	/* Get the number of CPU */
-	FILE* f;
-	if ( !(f=fopen(PROC_STAT, "r")) ) {
+	int f;
+	if ( !(f=open(PROC_STAT, O_RDONLY)) ) {
 		return fail("cannot open " PROC_STAT);
 	}
 
 	// Starting with -1, since the first line is the "global cpu line"
 	int ncpu = -1;
-	while (! feof(f)) {
-		char buffer[1024];
-		if (fgets(buffer, 1024, f) == 0) {
-			break;
-		}
 
-		if (! strncmp(buffer, "cpu", 3)) ncpu ++;
+	const int buffer_size = 64 * 1024;
+	char buffer[buffer_size];
+
+	// whole /proc/stat can be read in 1 syscall
+	if (read(f, buffer, buffer_size) <= 0) {
+		return fail("cannot read " PROC_STAT);
 	}
 
-	fclose(f);
+	// tokenization per-line
+	char* line;
+	char* newl = "\n";
+	for (line = strtok(buffer, newl); line; line = strtok(NULL, newl)) {
+		if (! strncmp(line, "cpu", 3)) ncpu ++;
+	}
+
+	close(f);
 
 	printf(
 		"graph_title multicpu1sec\n"
@@ -104,43 +112,62 @@ int acquire() {
 	fprintf(pid_file, "%d\n", getpid());
 	fclose(pid_file);
 
+	/* Reading /proc/stat */
+	int f = open(PROC_STAT, O_RDONLY);
+
+	/* open the spoolfile */
+	int cache_file = open(cache_filename, O_CREAT | O_APPEND | O_WRONLY);
+
 	/* loop each second */
 	while (1) {
 		/* wait until next second */
 		time_t epoch = wait_until_next_second();
 
-		/* Reading /proc/stat */
-		FILE* f = fopen(PROC_STAT, "r");
-		// Read and ignore the 1rst line
-		char buffer[1024];
-		fgets(buffer, 1024, f);
 
-		/* open the spoolfile */
-		FILE* cache_file = fopen(cache_filename, "a");
+		const int buffer_size = 64 * 1024;
+		char buffer[buffer_size];
+
+		if (lseek(f, 0, SEEK_SET) < 0) {
+			return fail("cannot seek " PROC_STAT);
+		}
+
+		// whole /proc/stat can be read in 1 syscall
+		if (read(f, buffer, buffer_size) <= 0) {
+			return fail("cannot read " PROC_STAT);
+		}
+
+		// ignore the 1rst line
+		char* line;
+		const char* newl = "\n";
+		line = strtok(buffer, newl);
+
 		/* lock */
-		flock(fileno(cache_file), LOCK_EX);
+		flock(cache_file, LOCK_EX);
 
-		while (! feof(f)) {
-			if (fgets(buffer, 1024, f) == 0) {
-				// EOF
-				break;
-			}
-
+		for (line = strtok(NULL, newl); line; line = strtok(NULL, newl)) {
 			// Not on CPU lines anymore
-			if (strncmp(buffer, "cpu", 3)) break;
+			if (strncmp(line, "cpu", 3)) break;
 
 			char cpu_id[64];
 			long usr, nice, sys, idle, iowait, irq, softirq;
-			sscanf(buffer, "%s %ld %ld %ld %ld %ld %ld %ld", cpu_id, &usr, &nice, &sys, &idle, &iowait, &irq, &softirq);
+			sscanf(line, "%s %ld %ld %ld %ld %ld %ld %ld", cpu_id, &usr, &nice, &sys, &idle, &iowait, &irq, &softirq);
 
 			long used = usr + nice + sys + iowait + irq + softirq;
 
-			fprintf(cache_file, "%s.value %ld:%ld\n", cpu_id, epoch, used);
+			char out_buffer[1024];
+			sprintf(out_buffer, "%s.value %ld:%ld\n", cpu_id, epoch, used);
+
+			write(cache_file, out_buffer, strlen(out_buffer));
 		}
 
-		fclose(cache_file);
-		fclose(f);
+		/* unlock */
+		flock(cache_file, LOCK_UN);
 	}
+
+	close(cache_file);
+	close(f);
+
+	return 0;
 }
 
 int fetch() {
@@ -157,6 +184,8 @@ int fetch() {
 
 	ftruncate(fileno(cache_file), 0);
 	fclose(cache_file);
+
+	return 0;
 }
 
 int main(int argc, char **argv) {

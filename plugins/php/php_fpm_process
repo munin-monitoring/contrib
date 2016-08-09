@@ -10,23 +10,23 @@ Inspirated by php5-fpm_status plugin by Daniel Caillibaud
 
 =head1 APPLICABLE SYSTEMS
 
-Any php-fpm host 
-You will need the perl fastcgi::client on your host 
+Any php-fpm host
+You will need the perl fastcgi::client on your host
 
 =head1 CONFIGURATION
 
-You have to put this in your plugin.conf.d folder 
+You have to put this in your plugin.conf.d folder
 
-# If your php process is listening on TCP 
+# If your php process is listening on TCP
 [php_fpm_process]
    env.serveraddr 127.0.0.1
    env.port 9000
-   env.path /status 
+   env.path /status
 
 # If your php process is listening on Unix Socket
 [php_fpm_process]
    env.sock /var/run/php5-fpm.sock
-   env.path /status 
+   env.path /status
 
 =head1 MAGIC MARKERS
 
@@ -35,11 +35,11 @@ You have to put this in your plugin.conf.d folder
 
 =head1 VERSION
 
-  v1.0 
+  v1.0
 
 =head1 AUTHOR
 
-Minitux 
+Minitux
 
 =head1 LICENSE
 
@@ -47,6 +47,7 @@ GNU General Public License, version 3
 
 =cut
 
+use File::Basename;
 use FCGI::Client;
 
 my $ish = 1;
@@ -55,6 +56,8 @@ my $body = "";
 my $IDLE = 0;
 my $ACTIVE = 0;
 my $TOTAL = 0;
+my $SLOW_REQUESTS = 0;
+my $PLUGIN_NAME = basename($0);
 
 my $SERVERADDR = $ENV{'serveraddr'} || "127.0.0.1";
 my $PORT = $ENV{'port'} || "9000";
@@ -68,7 +71,7 @@ if ($UNIX_SOCK) {
   $sock = IO::Socket::UNIX->new(
     Peer =>  $UNIX_SOCK,
   );
-  if (!$sock) { 
+  if (!$sock) {
     print "Server maybe down, unabled to connect to $UNIX_SOCK";
     exit 2;
   }
@@ -78,7 +81,7 @@ if ($UNIX_SOCK) {
     PeerAddr =>  $SERVERADDR,
     PeerPort =>  $PORT,
   );
-  if (!$sock) { 
+  if (!$sock) {
     print "Server maybe down, unabled to connect to $SERVERADDR:$PORT";
     exit 2;
   }
@@ -86,7 +89,7 @@ if ($UNIX_SOCK) {
 
 my $client = FCGI::Client::Connection->new( sock => $sock );
 
-my ( $stdout, $stderr, $appstatus )  = $client->request( 
+my ( $stdout, $stderr, $appstatus )  = $client->request(
     +{
         REQUEST_METHOD => 'GET',
         SCRIPT_FILENAME => '',
@@ -112,33 +115,53 @@ while($stdout =~ /([^\n]*)\n?/g) {
 
 if ( defined $ARGV[0] and $ARGV[0] eq "config" )
 {
- 
+
   if($body =~ m/pool:\s+(.*?)\n/) {
     $pool = $1;
   }
 
-  print "graph_title php5-fpm status $pool\n";
-  print "graph_args --base 1000 -l 0\n";
-  print "graph_vlabel Processes\n";
-  print "graph_scale yes\n";
-  print "graph_category php-fpm\n";
-  print "graph_info This graph shows the php5-fpm process manager status from pool: $pool\n";
-  print "active.label Active processes\n";
-  print "active.type GAUGE\n";
-  print "active.draw AREA\n";
-  print "active.info The number of active processes\n";
-  print "idle.label Idle processes\n";
-  print "idle.type GAUGE\n";
-  print "idle.draw STACK\n";
-  print "idle.info The number of idle processes\n";
-  print "total.label Total processes\n";
-  print "total.type GAUGE\n";
-  print "total.draw LINE2\n";
-  print "total.info The number of idle + active processes\n";
-  exit 0
-} 
+  print <<"EOF";
+multigraph ${PLUGIN_NAME}_process
+graph_title php5-fpm processes for $pool
+graph_args --base 1000 -l 0
+graph_vlabel Processes
+graph_scale yes
+graph_category php-fpm
+graph_info This graph shows the php5-fpm process manager status from pool: $pool
+active.label Active processes
+active.type GAUGE
+active.draw AREA
+active.info The number of active processes
+idle.label Idle processes
+idle.type GAUGE
+idle.draw STACK
+idle.info The number of idle processes
+total.label Total processes
+total.type GAUGE
+total.draw LINE2
+total.info The number of idle + active processes
 
-print $body;
+multigraph ${PLUGIN_NAME}_slowrequests
+graph_title php5-fpm slow requests $pool
+graph_args --base 1000 -l 0
+graph_vlabel Slow requests
+graph_scale yes
+graph_category php-fpm
+graph_info This graph shows the php5-fpm slow request from pool: $pool
+slow_requests.label Slow requests
+slow_requests.type DERIVE
+slow_requests.draw LINE2
+slow_requests.min 0
+slow_requests.info evolution of slow requests
+
+EOF
+
+  exit 0
+}
+
+# print $body;
+
+print "multigraph ${PLUGIN_NAME}_process\n";
 
 if($body =~ m/idle processes: (.*?)\n/) {
         $IDLE = $1;
@@ -151,4 +174,11 @@ if($body =~ m/active processes: (.*?)\n/) {
 if($body =~ m/total processes: (.*?)\n/) {
         $TOTAL = $1;
   print "total.value ".$TOTAL."\n";
+}
+
+if($body =~ m/slow requests: (.*?)\n/) {
+  $SLOW_REQUESTS = $1;
+  print "\n";
+  print "multigraph ${PLUGIN_NAME}_slowrequests\n";
+  print "slow_requests.value ".$SLOW_REQUESTS."\n";
 }

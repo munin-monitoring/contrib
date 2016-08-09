@@ -19,9 +19,12 @@ your actual plugins directory.
 In your plugins.conf add
 ```
 [varnish4_*]
+     group varnish
      env.varnishstat varnishstat
      env.name
 ```
+`group varnish` Since Varnish version 4.1, Varnish shared log utilities must be run in a context with *varnish* group membership.
+
 `env.varnishstat` can be a full path to varnishstat if it's
 not in the path already.
 

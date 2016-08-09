@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
-# $Id$
 # Author: Nicolas Mendoza <nicolasm@opera.com> - 2008-06-18
+#	  Raphaël Droz <raphael.droz@gmail.com> - 2016-01-08
 #
 # Monitors the average time requests matching a custom regexp takes
 # For instance monitor time execution of files in http://example.com/foo/bar, 
@@ -16,12 +16,37 @@
 # For instance: 
 #   LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-agent}i\" %T %v"
 # Check http://httpd.apache.org/docs/2.2/mod/mod_log_config.html#formats for more info
+#
+# Configurable variables
+#	fieldno      - Override the default field number
+#	linecount    - How many last request to consider
+# Multiples instances for specific log files could be created by suffixing a configuration group.
+# Eg: ln -s apache_average_time_last_n_requests apache_average_time_last_n_requests_vhost1
+# Then:
+# [apache_average_time_last_n_requests]
+# 	logfile_vhost1 /var/log/apache/vhost1.log
+#
+#%# family=auto
 
 use strict;
 
-my $LAST_N_REQUESTS = 100000; # calculate based on this amount of requests
-my $ACCESS_LOG_PATTERN = '/var/log/apache2/access.log.*'; # log pattern, if many it will take the last one.
-my $TIME_FIELD_INDEX = -2; # second last field
+$0 =~ /apache_average_time_last_n_requests_(.+)*$/;
+my $name = $1;
+
+my $LAST_N_REQUESTS = exists $ENV{'linecount'} ? $ENV{'linecount'} : 100000; # calculate based on this amount of requests
+my $TIME_FIELD_INDEX = exists $ENV{'fieldno'} ? $ENV{'fieldno'} : -2; # second last field
+my $ACCESS_LOG_PATTERN;
+
+# log pattern, if globbing is used, it will take the last one.
+if (! $name) {
+    $ACCESS_LOG_PATTERN = exists $ENV{'logfile'} ? $ENV{'logfile'} : '/var/log/apache2/access.log.*';
+}
+elsif (exists $ENV{'logfile_' . $name}) {
+    $ACCESS_LOG_PATTERN = $ENV{'logfile_' . $name};
+}
+else {
+    $ACCESS_LOG_PATTERN = '/var/log/apache2/access.log.*';
+}
 
 my $config =<< "CONFIG"
 graph_title Apache average seconds last $LAST_N_REQUESTS requests
@@ -61,12 +86,12 @@ my $types = {
       my ($fields) = @_; 
       my $script; 
       ($script = $fields->[6]) =~ s/\?.*\z //mx; 
-      return $script =~ m{ \.(png|jpe?g|jpg|gif|tiff|ilbm|tga) \z }mx; 
+      return $script =~ m{ \.(png|jpe?g|gif|tiff|ilbm|tga) \z }mx; 
     },
   },
 };
 
-if (defined(@ARGV) && ($ARGV[0] eq 'config')) {
+if (@ARGV && $ARGV[0] eq 'config') {
 
   print $config;
 
@@ -84,16 +109,21 @@ chomp $config_file;
 
 my @lines = `tail -n $LAST_N_REQUESTS "$config_file"`;
 
+FOO: {
 foreach my $line (@lines) {
   foreach my $type (keys %{$types}) {
     my @fields = split /\s+/, $line;
     if ($types->{$type}->{'matches'}(\@fields)) {
+		if ($fields[$TIME_FIELD_INDEX] !~ m/^[0-9]+$/) {
+		    last FOO;
+		}
       $types->{$type}->{'sum'} += $fields[$TIME_FIELD_INDEX];
       $types->{$type}->{'lines'}++;
     }
   }
 } 
 
+}
 foreach my $type (keys %{$types}) {
   my $value = $types->{$type}->{'lines'} ? $types->{$type}->{'sum'} / $types->{$type}->{'lines'} : 'U';
   printf "%s.value %s\n", ($type, $value);

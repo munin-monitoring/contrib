@@ -1,0 +1,120 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+
+=head1 NAME
+
+docker_cpu - Munin plugin to monitor docker container CPU usage.
+
+=head1 APPLICABLE SYSTEMS
+
+Should work on any Linux system that has docker support.
+
+=head1 CONFIGURATION
+
+Root privilege required to execute docker command.
+
+1. Create a new file named "docker" inside the folder /etc/munin/plugin-conf.d/
+2. Docker file content:
+
+[docker_cpu]
+user root
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+  v.0.1
+
+=head1 AUTHOR
+
+Copyright (C) 2015 Samuel Cantero.
+Email: scanterog at gmail dot com
+
+=head1 LICENSE
+
+GPLv3
+
+=cut
+
+my $docker=`which docker`;
+
+if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
+   if ($docker) {
+      print "yes\n";
+      exit 0;
+   }
+   else{
+      print "no (Docker has not been found)\n";
+      exit 0;
+   }
+}
+
+$docker =~ s/\s+$//;
+
+my @containers = split "\n" , `$docker ps --no-trunc=true`;
+my $result;
+
+for my $i (1 .. $#containers)
+{
+   my @fields = split / +/, $containers[$i];
+   my $id = $fields[0];
+   my $name = $fields[$#fields];
+   # manage container name containing arithmetic operators and dots. E.g, my-container.
+   $name =~ s/[-\+*\/\.]/_/g;
+   # truncate container name with "," character.
+   $name =~ s/,.*//g;
+   if (open(my $file, '<', "/sys/fs/cgroup/cpuacct/docker/$id/cpuacct.usage"))
+   {
+      my $total_cpu_ns = <$file>;
+      $total_cpu_ns =~ s/\s+$//;
+      close $file;
+      if (open($file, '<', "/sys/fs/cgroup/cpuacct/docker/$id/cpuacct.usage_percpu"))
+      {
+         my @ncpu = split / /, <$file>;
+         close $file;
+         push @result, {'name'=>$name, 'total_cpu_ns'=>$total_cpu_ns, 'ncpu'=>$#ncpu};
+      }
+   }
+}
+ 
+if (defined $ARGV[0] and $ARGV[0] eq "config")
+{
+   my $nanoSecondsInSecond=1000000000;
+   my $graphlimit = $result[0]{'ncpu'};
+   foreach(@result){
+      if ($$_{'ncpu'} > $graphlimit){
+         $graphlimit = $$_{'ncpu'};
+      }
+   } 
+   $graphlimit = $graphlimit * 100;
+   print "graph_title Docker container CPU usage\n";
+   print "graph_args --base 1000 -r --lower-limit 0 --upper-limit $graphlimit\n";
+   print "graph_vlabel %\n";
+   print "graph_scale no\n";
+   print "graph_period second\n";
+   print "graph_category Docker\n";
+   print "graph_info This graph shows docker container CPU usage.\n";
+   
+   foreach(@result)
+   {
+      print "$$_{'name'}.label $$_{'name'}\n";
+      print "$$_{'name'}.draw LINE2\n";
+      print "$$_{'name'}.min 0\n";
+      print "$$_{'name'}.type DERIVE\n";
+      print "$$_{'name'}.cdef $$_{'name'},$nanoSecondsInSecond,/\n";
+   }
+   exit 0;
+}
+
+# Note: Counters/derive need to report integer values.
+
+foreach(@result)
+{
+   $tcpu = ($$_{'total_cpu_ns'}*100); #to percentage
+   print "$$_{'name'}.value $tcpu\n";
+}
+
+# vim:syntax=perl

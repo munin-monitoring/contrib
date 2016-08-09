@@ -22,7 +22,7 @@
 
 """
 
-import sys, os
+import sys, os, re
 from subprocess import check_output
 
 # set path to your gunicorn pid
@@ -44,10 +44,8 @@ class GunicornMemoryStatus():
         except:
             raise Exception("Couldn't read gunicorn pid information")
 
-
     def print_total_memory(self):
         print ('total_memory.value %d' % self._get_total_memory())
-
 
     def _get_master_pid(self):
         master_pid_file = open(GUNICORN_PID_PATH)
@@ -74,7 +72,18 @@ class GunicornMemoryStatus():
         return worker_memory_usage
 
 def print_config():
-    print "graph_title Gunicorn - Memory Usage"
+    instance = None
+    name = os.path.basename(sys.argv[0])
+    if name != "gunicorn_memory_status":
+        for r in ("^gunicorn_(.*?)_memory_status$", "^gunicorn_memory_status_(.*?)$"):
+            m = re.match(r, name, re.IGNORECASE)
+            if m:
+                instance = m.group(1)
+                break
+    graph_title = "graph_title Gunicorn - Memory Usage"
+    if instance:
+        graph_title = "%s - %s" % (graph_title, instance)
+    print graph_title
     print "graph_args --base 1024 -l 0"
     print "graph_vlabel Megabytes"
     print "graph_category gunicorn"

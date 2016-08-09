@@ -1,0 +1,196 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+acng - Graph activity for Apt-Cacher NG, request count and bytes
+
+=head1 APPLICABLE SYSTEMS
+
+Systems with "Apt-Cacher NG" installed and running.
+
+=head1 DESCRIPTION
+
+This plugin will add graphs for "bytes in and out" and "requests in
+and out" for systems with "Apt-Cacher NG" installed.
+
+=head1 CONFIGURATION
+
+The plugin must have permission to read the log of Apt-Cacher NG.  (On
+Debian 8, this file is world readable by default).
+
+The path to the logfile can be set with the "logfile" environment
+variable.
+
+=head2 DEFAULT CONFIGURATION
+
+  [acng]
+    env.logfile /var/log/apt-cacher-ng/apt-cacher.log
+
+=head1 USAGE
+
+Link this plugin to /etc/munin/plugins/ and restart the munin-node.
+
+=head1 MAGIC MARKERS
+
+  #%# family=contrib
+  #%# capabilities=autoconf
+
+=head1 AUTHOR
+
+Stig Sandbeck Mathisen
+
+=head1 LICENSE
+
+GPLv3
+
+=cut
+
+use strict;
+use warnings;
+use Munin::Plugin;
+
+use Storable qw(nfreeze thaw);
+use MIME::Base64;
+
+my $logfile = $ENV{'logfile'} ||= '/var/log/apt-cacher-ng/apt-cacher.log';
+
+need_multigraph;
+
+# Read or initialize state used by the log tailer, and the plugin.
+sub read_state {
+
+    my ($pos, $statsin) = restore_state;
+    my $stats = thaw(decode_base64 $statsin) if $statsin;
+
+    $pos = 0 unless defined $pos;
+    $stats = {} unless defined $stats;
+
+    return ($pos, $stats);
+}
+
+# Write state.
+#
+# "pos" is logfile position, and "stats" is a data structure with
+# counters used by the plugin.
+#
+# Note: Munin::Plugin::save_state has limited functionality, so the
+# data structure is serialized and converted to plain text.
+sub write_state {
+    my ($pos, $stats) = @_;
+
+    my $statsout = encode_base64 nfreeze($stats);
+    save_state($pos, $statsout);
+}
+
+sub parse_logfile {
+    my $logfile = shift;
+    my ($pos, $stats) = read_state;
+
+    my @keys = ( 'time', 'direction', 'size', 'client', 'file' );
+
+    # Open log
+    my ( $fh, $reset ) = tail_open( $logfile, $pos );
+
+    die "Unable to open logfile\n" unless ($fh);
+
+    while (<$fh>) {
+        chomp;
+        my @values = split( /\|/, $_ );
+
+        my %logentry;
+        @logentry{@keys} = @values;
+
+        $stats->{'bytes'}{ $logentry{'direction'} } += $logentry{'size'};
+        $stats->{'requests'}{ $logentry{'direction'} }++;
+    }
+
+    # Close log
+    $pos = tail_close($fh);
+
+    write_state($pos, $stats);
+
+    return $stats;
+}
+
+sub print_autoconf{
+    my $logfile = shift;
+    if ( open(my $fh, '<', $logfile) ) {
+        print "yes\n";
+    }
+    else {
+        printf "no (could not open %s)\n", $logfile;
+    }
+}
+
+sub print_config{
+    my $stats = shift;
+
+    print << 'EOC';
+multigraph acng_bytes
+graph_title Apt-Cacher NG bytes
+graph_order origin client
+graph_vlabel bytes per ${graph_period}
+graph_info Bytes transferred between origin, apt-cacher-ng and clients
+origin.info bytes transferred between origin and apt-cacher-ng
+origin.label origin
+origin.type DERIVE
+origin.min 0
+client.info bytes transferred between apt-cacher-ng and clients
+client.label client
+client.type DERIVE
+client.min 0
+EOC
+    print << "EOV" if $ENV{'MUNIN_CAP_DIRTYCONFIG'};
+origin.value $stats->{bytes}{I}
+client.value $stats->{bytes}{O}
+EOV
+
+    print << 'EOC';
+
+multigraph acng_requests
+graph_title Apt-Cacher NG requests
+graph_order origin client
+graph_vlabel requests per ${graph_period}
+graph_info Requests from clients to apt-cacher-ng, and from apt-cacher-ng to origin
+origin.info requests from apt-cacher-ng to origin
+origin.label origin
+origin.type DERIVE
+origin.min 0
+client.info requests from clients to apt-cacher-ng
+client.label client
+client.type DERIVE
+client.min 0
+EOC
+
+    print << "EOV" if $ENV{'MUNIN_CAP_DIRTYCONFIG'};
+origin.value $stats->{requests}{I}
+client.value $stats->{requests}{O}
+EOV
+
+}
+
+sub print_values{
+    my $stats = shift;
+
+    print << "EOV";
+multigraph acng_bytes
+origin.value $stats->{bytes}{I}
+client.value $stats->{bytes}{O}
+
+multigraph acng_requests
+origin.value $stats->{requests}{I}
+client.value $stats->{requests}{O}
+EOV
+}
+
+if ($ARGV[0] and $ARGV[0] eq 'autoconf') {
+    print_autoconf($logfile);
+}
+elsif ($ARGV[0] and $ARGV[0] eq 'config') {
+    my $stats = parse_logfile($logfile);
+    print_config($stats);
+}
+else {
+    my $stats = parse_logfile($logfile);
+    print_values($stats);
+}
