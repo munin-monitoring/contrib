@@ -1,0 +1,109 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+systemd - Plugin to monitor systemd units state
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems with systemd installed.
+
+=head1 CONFIGURATION
+
+None needed.
+
+=head1 AUTHOR
+
+Olivier Mehani
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=cut
+
+states="active \
+	reloading \
+	inactive \
+	failed \
+	activating \
+	deactivating"
+autoconf() {
+	which systemctl >/dev/null && \
+	       systemctl  --state=failed --no-pager --no-legend	>/dev/null 2>&1 && echo yes || echo "no (No systemctl or error running it)"
+}
+
+suggest() {
+	echo "units"
+}
+
+config () {
+	case $1 in
+		"units")
+			cat << EOF
+graph_title Systemd units state
+graph_args -l 0
+graph_category system
+graph_scale no
+graph_vlabel units
+EOF
+for state in $states; do
+	echo "$state.label $state"
+	echo "$state.draw AREASTACK"
+	if [ $state = failed ]; then
+		echo "$state.warning 1"
+		echo "$state.critical 10"
+	fi
+done
+			;;
+		"*")
+			echo "$0: unknown mode '$1'" >&2
+			exit 1
+	esac
+}
+
+fetch () {
+	case $1 in
+		"units")
+			tmp=`mktemp -t munin-systemd.XXXXXX`
+			systemctl --no-pager --no-legend --all | awk '{print $1, $3}' > $tmp
+			for state in \
+				$states ; do
+				echo -n "$state.value "
+				grep $state$ $tmp | wc -l
+				echo -n "$state.extinfo "
+				echo $(grep $state$ $tmp | cut -d " " -f 1)
+			done
+			rm $tmp
+			;;
+		"*")
+			echo "$0: unknown mode '$1'" >&2
+			exit 1
+	esac
+}
+
+# mode=`echo $0 | sed 's/.*_//'`
+mode=units
+
+case $1 in
+	"autoconf")
+		autoconf
+		;;
+	"suggest")
+		suggest
+		;;
+	"config")
+		config $mode
+		;;
+	*)
+		fetch $mode
+		;;
+esac
