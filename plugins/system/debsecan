@@ -64,22 +64,33 @@ EOF_
 fi
 
 CVERE="\(\(CVE\|TMP\)[-0-9A-Fa-f]\+\)"
+CVECOUNTRE="s/^.*\([0-9]\+\) \+\([^ ]\+\)/\2 (\1)/"
 
 OUT=`mktemp -t debescan.XXXXXX`
+HIGH=`mktemp -t debescan.XXXXXX`
+MEDIUM=`mktemp -t debescan.XXXXXX`
+LOW=`mktemp -t debescan.XXXXXX`
+OTHER=`mktemp -t debescan.XXXXXX`
 debsecan 2> /dev/null > ${OUT}
-high=`grep -c 'high urgency' ${OUT}`
-medium=`grep -c 'medium urgency' ${OUT}`
-low=`grep -c 'low urgency)' ${OUT}`
-other=`grep -c -v '\(low\|medium\|high\) urgency' ${OUT}`
-cat <<EOF_
+grep 'high urgency' ${OUT} > ${HIGH}
+grep 'medium urgency' ${OUT} > ${MEDIUM}
+grep 'low urgency)' ${OUT} > ${LOW}
+grep -v '\(low\|medium\|high\) urgency' ${OUT} > ${OTHER}
+
+high=`cat ${HIGH} | wc -l`
+medium=`cat ${MEDIUM} | wc -l`
+low=`cat ${LOW} | wc -l`
+other=`cat ${OTHER} | wc -l`
+
+cat <<EOF
 high.value $high
-high.extinfo `echo $(sed -n "s#^${CVERE}.*high urgency.*#\1 #p" ${OUT})`
+high.extinfo `echo $(cut -f 2 -d" " ${HIGH} | uniq -c | sort -nr | sed  "${CVECOUNTRE}")`
 medium.value $medium
-medium.extinfo `echo $(sed -n "s#^${CVERE}.*medium urgency.*#\1 #p" ${OUT})`
+medium.extinfo `echo $(cut -f 2 -d" " ${MEDIUM} | uniq -c | sort -nr | sed  "${CVECOUNTRE}")`
 low.value $low
-low.extinfo `echo $(sed -n "s#^${CVERE}.*low urgency.*#\1 #p" ${OUT})`
+low.extinfo `echo $(cut -f 2 -d" " ${LOW} | uniq -c | sort -nr | sed  "${CVECOUNTRE}")`
 other.value $other
-other.extinfo `echo $(grep -v -e '\(low\|medium\|high\) urgency' ${OUT} | sed -n "s#^${CVERE}.*#\1 #p")`
+other.extinfo `echo $(cut -f 2 -d" " ${OTHER} | uniq -c | sort -nr | sed  "${CVECOUNTRE}")`
 EOF
 
-rm -f ${OUT}
+rm -f ${OUT} ${HIGH} ${MEDIUM} ${LOW} ${OTHER}
