@@ -63,17 +63,24 @@ EOF_
   exit 0
 fi
 
+CVERE="\(\(CVE\|TMP\)[-0-9A-Fa-f]\+\)"
+CVEBASEURL="https://security-tracker.debian.org/tracker/"
+
 OUT=`mktemp -t debescan.XXXXXX`
 debsecan 2> /dev/null > ${OUT}
 high=`grep -c 'high urgency' ${OUT}`
 medium=`grep -c 'medium urgency' ${OUT}`
 low=`grep -c 'low urgency)' ${OUT}`
-other=`grep -c -v -e 'low urgency' -e 'medium urgency' -e 'high urgency' ${OUT}`
+other=`grep -c -v '\(low\|medium\|high\) urgency' ${OUT}`
 cat <<EOF_
 high.value $high
+high.extinfo `echo $(sed -n "s#^${CVERE}.*high urgency.*#<a href=\"${CVEBASEURL}\1\">\1</a> #p" ${OUT})`
 medium.value $medium
+medium.extinfo `echo $(sed -n "s#^${CVERE}.*medium urgency.*#<a href=\"${CVEBASEURL}\1\">\1</a> #p" ${OUT})`
 low.value $low
+low.extinfo `echo $(sed -n "s#^${CVERE}.*low urgency.*#<a href=\"${CVEBASEURL}\1\">\1</a> #p" ${OUT})`
 other.value $other
+other.extinfo `echo $(grep -v -e '\(low\|medium\|high\) urgency' ${OUT} | sed -n "s#^${CVERE}.*#<a href=\"${CVEBASEURL}\1\">\1</a> #p")`
 EOF_
 
 rm -f ${OUT}
