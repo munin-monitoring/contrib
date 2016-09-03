@@ -1,0 +1,64 @@
+#!/bin/bash
+#
+# Plugin to monitor the number of orphaned packages on the
+# system (using deborphan). Might work on section distib, who knows...
+#
+# Based on the debsecan plugin by Nicolas Bouthors. 2016-09-02
+#
+# Olivie Mehani <shtrom@ssji.net>
+#
+# Licence : GPLv2
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+# Auto enable if we have deborphan only
+if [ "$1" = "autoconf" ] ; then
+  if [ -x /usr/bin/deborphan ]; then
+    echo yes
+  else
+    echo no
+  fi
+  exit 0
+fi
+
+# Fail if we don't have deborphan
+if [ ! -x /usr/bin/deborphan ]; then
+  exit 1
+fi
+
+OUT=`mktemp -t deborphan.XXXXXX`
+deborphan --show-section --guess-all | sed 's/\//_/' | sort > ${OUT}
+
+CATEGORIES="$(sed 's/ .*//' ${OUT} | uniq)"
+
+if [ "$1" = "config" ]; then
+  cat <<EOF
+graph_title Orphaned packages
+graph_args -l 0 --base 1000
+graph_vlabel number of packages
+graph_category system
+graph_period second
+graph_info This graph show the number of orphaned packages on your system. Use deborphan to see details.
+EOF
+  for cat in ${CATEGORIES}; do
+    cat <<EOF
+${cat}.label ${cat/_/\/}
+${cat}.type GAUGE
+${cat}.draw AREASTACK
+${cat}.min 0
+${cat}.info The number of orphaned packages in ${cat/_/\/}
+EOF
+  done
+
+else
+  for cat in ${CATEGORIES}; do
+    TMP=`mktemp -t deborphan.XXXXXX`
+    sed -n "s/${cat} *//p" ${OUT} > ${TMP}
+    echo "${cat}.value `cat ${TMP} | wc -l`"
+    echo "${cat}.extinfo `echo $(cat ${TMP})`"
+    rm ${TMP}
+  done
+fi
+
+rm -f ${OUT}
