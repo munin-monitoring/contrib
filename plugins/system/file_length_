@@ -1,0 +1,63 @@
+#!/bin/bash
+
+: << =cut
+
+=head1 NAME
+
+file_length_ - Plugin to monitor the length of specified files
+
+Useful for things such as lists (white, black, user, ...).
+
+=head1 CONFIGURATION
+
+    [file_length_IDENTIFIER]
+    env.files FILEPATHGLOB1 FILEPATHGLOB2 ...
+    env.category DEFAULTS_TO_system
+    env.title OPTIONAL_TITLE
+
+=head1 AUTHOR
+
+Olivier Mehani (based on disk/log_sizes)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=cut
+
+#NAME=`echo $0 | sed 's/.*_//'`
+NAME=${0#*_}
+TITLE=${title:-File lengths for $NAME}
+CATEGORY=${category:-system}
+
+FILES=${files:-/var/log/messages}
+FILES=$(echo $(ls $FILES))
+
+if [ "$1" = "config" ] ; then
+	cat <<EOF
+graph_title ${TITLE}
+graph_args -l 0 --base 1000
+graph_category ${CATEGORY}
+graph_info This graph shows the length of ${FILES}
+graph_vlabel length (lines)"
+EOF
+
+	for F in $FILES; do
+		MF=`echo $F | sed 's/[-\/\.]/_/g'`
+		echo "$MF.label ${F##*/}"
+	done
+
+else
+	for F in $FILES; do
+		MF=`echo $F | sed 's/[-\/\.]/_/g'`
+		echo -n "$MF.value "
+		cat $F | wc -l
+		echo -n "$MF.extinfo "
+		stat --printf="%sB\n" $F
+	done
+fi
