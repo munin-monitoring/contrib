@@ -73,7 +73,7 @@ else {
     # For each pool, count how many leases from that pool are currently active
     foreach $start (keys %pools) {
 	$size = $pools{$start};
-	$end = $start+$size;
+	$end = $start+$size-1;
 	$free = $size;
 
 	foreach $lease (@activeleases) {
@@ -98,12 +98,17 @@ sub determine_pools {
     close (CONFFILE);
 
     foreach $line (@conffile) {
+	next if $line =~ /^\s*#/;
+
 	if ($line =~ /range[\s]+([\d]+\.[\d]+\.[\d]+\.[\d]+)[\s]+([\d]+\.[\d]+\.[\d]+\.[\d]+)/) {
 	    $start = string2ip($1);
 	    $end = string2ip($2);
-	    $size = $end - $start;
+
 	    defined($start) || next;
 	    defined($end) || next;
+
+            # The range statement gives the lowest and highest IP addresses in a range.
+	    $size = $end - $start + 1;
 	    
 	    $pools{$start} = $size;
 	}

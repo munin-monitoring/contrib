@@ -1,0 +1,460 @@
+#!/bin/sh
+# weird shebang? See below: "interpreter selection"
+#
+# Collect information related to ath9k wireless events and states.
+#   * rate control statistics ("rc_stats")
+#   * events (dropped, transmitted, beacon loss, ...)
+#   * traffic (packets, bytes)
+#
+# All data is collected for each separate station (in case of multiple
+# connected peers). Combined graphs are provided as a summary.
+#
+#
+# This plugin works with the following python interpreters:
+#   * Python 3
+#   * micropython
+#
+#
+# Copyright (C) 2015 Lars Kruse <devel@sumpfralle.de>
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Magic markers
+#%# capabilities=autoconf suggest
+#%# family=auto
+
+"""true"
+# ****************** Interpreter Selection ***************
+# This unbelievable dirty hack allows to find a suitable python interpreter.
+# This is specifically useful for OpenWRT where typically only micropython is available.
+#
+# This "execution hack" works as follows:
+#   * the script is executed by busybox ash or another shell
+#   * the above line (three quotes before and one quote after 'true') evaluates differently for shell and python:
+#    * shell: run "true" (i.e. nothing happens)
+#    * python: ignore everything up to the next three consecutive quotes
+# Thus we may place shell code here that will take care for selecting an interpreter.
+
+# prefer micropython if it is available - otherwise fall back to any python (2 or 3)
+if which micropython >/dev/null; then
+    /usr/bin/micropython "$0" "$@"
+else
+    python3 "$0" "$@"
+fi
+exit $?
+
+# For shell: ignore everything starting from here until the last line of this file.
+# This is necessary for syntax checkers that try to complain about invalid shell syntax below.
+true <<EOF
+"""
+
+
+"""
+The following graphs are generated for each physical ath9k interface:
+    phy0_wifi0_traffic
+      phy0_wifi0_traffic.station0
+      ...
+    pyh0_wifi0_events
+      phy0_wifi0_events.station0
+      ...
+    pyh0_wifi0_rc_stats
+      phy0_wifi0_rc_stats.station0
+      ...
+"""
+
+
+plugin_version = "0.2"
+
+STATION_TRAFFIC_COUNTERS = ("rx_bytes", "tx_bytes", "rx_packets", "tx_packets")
+STATION_EVENT_COUNTERS = ("tx_retry_count", "tx_retry_failed", "tx_filtered", "tx_fragments",
+                          "rx_dropped", "rx_fragments", "rx_duplicates", "beacon_loss_count")
+# 16 colors (see http://munin-monitoring.org/wiki/fieldname.colour) for visualizing
+# rate control selection (see rc_stats)
+QUALITY_GRAPH_COLORS_16 = ("FF1F00", "FF4500", "FF7000", "FF9700",
+                           "FFBC00", "FAE600", "D1FF00", "7BFF00",
+                           "1CFF00", "06E41B", "00C43B", "009D60",
+                           "007986", "0058A8", "0033CC", "0018DE")
+SYS_BASE_DIR = "/sys/kernel/debug/ieee80211"
+GRAPH_BASE_NAME = "ath9k_stats"
+PLUGIN_SCOPES = ("traffic", "events", "rcstats")
+
+
+import os
+import os.path
+import subprocess
+import sys
+
+
+class Station:
+
+    config_map = {"events": lambda station, **kwargs: station._get_events_config(**kwargs),
+                  "traffic": lambda station, **kwargs: station._get_traffic_config(**kwargs),
+                  "rcstats": lambda station, **kwargs: station._get_rc_stats_config(**kwargs)}
+    values_map = {"events": lambda station: station._events_stats,
+                  "traffic": lambda station: station._traffic_stats,
+                  "rcstats": lambda station: station._get_rc_stats_success()}
+
+    def __init__(self, label, key, path):
+        self._path = path
+        self.label = label
+        self.key = key
+        self._events_stats = self._parse_file_based_stats(STATION_EVENT_COUNTERS)
+        self._traffic_stats = self._parse_file_based_stats(STATION_TRAFFIC_COUNTERS)
+        self._rc_stats = self._parse_rc_stats()
+
+    def _parse_rc_stats(self):
+        """ example content
+
+         type           rate      tpt eprob *prob ret  *ok(*cum)        ok(      cum)
+         HT20/LGI       MCS0      5.6 100.0 100.0   3    0(   0)         3(        3)
+         HT20/LGI       MCS1     10.5 100.0 100.0   0    0(   0)         1(        1)
+         HT20/LGI       MCS2     14.9 100.0 100.0   0    0(   0)         1(        1)
+         HT20/LGI       MCS3     18.7  96.5 100.0   5    0(   0)       261(      328)
+         HT20/LGI       MCS4     25.3  95.6 100.0   5    0(   0)      4267(     5460)
+         HT20/LGI       MCS5     30.6  95.8 100.0   5    0(   0)     11735(    17482)
+         HT20/LGI       MCS6     32.9  95.7 100.0   5    0(   0)     24295(    32592)
+         HT20/LGI    DP MCS7     35.0  90.4  95.2   5    0(   0)     63356(    88600)
+         HT20/LGI       MCS8     10.5 100.0 100.0   0    0(   0)         1(        1)
+
+        beware: sometimes the last two pairs of columns are joined without withespace: "90959383(100188029)"
+        """
+        stats = {}
+        with open(os.path.join(self._path, "rc_stats"), "r") as statsfile:
+            rate_column = None
+            skip_retry_column = False
+            for index, line in enumerate(statsfile.readlines()):
+                # remove trailing linebreak, replace braces (annoyingly present in the lasf four columns)
+                line = line.rstrip().replace("(", " ").replace(")", " ")
+                # ignore the trailing summary lines
+                if not line:
+                    break
+                if index == 0:
+                    # we need to remember the start of the "rate" column (in order to skip the flags)
+                    rate_column = line.index("rate")
+                    if rate_column == 0:
+                        # the following weird format was found on a Barrier Breaker host (2014, Linux 3.10.49):
+                        #   rate      throughput  ewma prob  this prob  this succ/attempt   success    attempts
+                        #   ABCDP  6         5.4       89.9      100.0             0(  0)       171         183
+                        # Thus we just assume that there are five flag letters and two blanks.
+                        # Let's hope for the best!
+                        rate_column = 6
+                        # this format does not contain the "retry" column
+                        skip_retry_column = True
+                    # skip the header line
+                    continue
+                cutoff_line = line[rate_column:]
+                tokens = cutoff_line.split()
+                entry = {}
+                entry["rate"] = tokens.pop(0)
+                entry["throughput"] = float(tokens.pop(0))
+                entry["ewma_probability"] = float(tokens.pop(0))
+                entry["this_probability"] = float(tokens.pop(0))
+                if skip_retry_column:
+                    entry["retry"] = 0
+                else:
+                    entry["retry"] = int(tokens.pop(0))
+                entry["this_success"] = int(tokens.pop(0))
+                entry["this_attempts"] = int(tokens.pop(0))
+                entry["success"] = int(tokens.pop(0))
+                entry["attempts"] = int(tokens.pop(0))
+                # some "rate" values are given in MBit/s - some are MCS0..15
+                try:
+                    entry["rate_label"] = "{rate:d} MBit/s".format(rate=int(entry["rate"]))
+                except ValueError:
+                    # keep the MCS string
+                    entry["rate_label"] = entry["rate"]
+                stats[entry["rate"]] = entry
+        return stats
+
+    def _get_rc_stats_success(self):
+        rc_values = {self._get_rate_fieldname(rate["rate"]): rate["success"] for rate in self._rc_stats.values()}
+        rc_values["sum"] = sum(rc_values.values())
+        return rc_values
+
+    def _parse_file_based_stats(self, counters):
+        stats = {}
+        for counter in counters:
+            # some events are not handled with older versions (e.g. "beacon_loss_count")
+            filename = os.path.join(self._path, counter)
+            if os.path.exists(filename):
+                content = open(filename, "r").read().strip()
+                stats[counter] = int(content)
+        return stats
+
+    def get_values(self, scope, graph_base):
+        func = self.values_map[scope]
+        yield "multigraph {base}_{suffix}.{station}".format(base=graph_base, suffix=scope, station=self.key)
+        for key, value in func(self).items():
+            yield "{key}.value {value}".format(key=key, value=value)
+        yield ""
+
+    @classmethod
+    def get_summary_values(cls, scope, siblings, graph_base):
+        func = cls.values_map[scope]
+        yield "multigraph {base}_{suffix}".format(base=graph_base, suffix=scope)
+        stats = {}
+        for station in siblings:
+            for key, value in func(station).items():
+                stats[key] = stats.get(key, 0) + value
+        for key, value in stats.items():
+            yield "{key}.value {value}".format(key=key, value=value)
+        yield ""
+
+    def get_config(self, scope, graph_base):
+        func = self.config_map[scope]
+        yield "multigraph {base}_{suffix}.{station}".format(base=graph_base, suffix=scope, station=self.key)
+        yield from func(self, label=self.label, siblings=[self])
+
+    @classmethod
+    def get_summary_config(cls, scope, siblings, graph_base):
+        func = cls.config_map[scope]
+        yield "multigraph {base}_{suffix}".format(base=graph_base, suffix=scope)
+        for station in siblings:
+            yield from func(station, siblings=[station])
+
+    @classmethod
+    def _get_traffic_config(cls, label=None, siblings=None):
+        if label:
+            yield "graph_title ath9k Station Traffic {label}".format(label=label)
+        else:
+            yield "graph_title ath9k Station Traffic"
+        yield "graph_args --base 1024"
+        yield "graph_vlabel received (-) / transmitted (+)"
+        yield "graph_category wireless"
+        # convert bytes/s into kbit/s (x * 8 / 1000 = x / 125)
+        yield from _get_up_down_pair("kBit/s", "tx_bytes", "rx_bytes", divider=125, use_negative=False)
+        yield from _get_up_down_pair("Packets/s", "tx_packets", "rx_packets", use_negative=False)
+        yield ""
+
+    @classmethod
+    def _get_events_config(cls, label=None, siblings=None):
+        if label:
+            yield "graph_title ath9k Station Events {label}".format(label=label)
+        else:
+            yield "graph_title ath9k Station Events"
+        yield "graph_vlabel events per ${graph_period}"
+        yield "graph_category wireless"
+        events = set()
+        for station in siblings:
+            for event in STATION_EVENT_COUNTERS:
+                events.add(event)
+        for event in events:
+            yield "{event}.label {event}".format(event=event)
+            yield "{event}.type COUNTER".format(event=event)
+        yield ""
+
+    @classmethod
+    def _get_rate_fieldname(cls, rate):
+        return "rate_{0}".format(rate.lower()).replace(".", "_")
+
+    @classmethod
+    def _get_rc_stats_config(cls, label=None, siblings=None):
+        if label:
+            yield "graph_title ath9k Station Transmit Rates {label} Success".format(label=label)
+        else:
+            yield "graph_title ath9k Station Transmit Rates Success"
+        yield "graph_vlabel transmit rates %"
+        yield "graph_category wireless"
+        yield "graph_args --base 1000 -r --lower-limit 0 --upper-limit 100"
+        all_rates = {}
+        # collect alle unique rates
+        for station in siblings:
+            for rate, details in station._rc_stats.items():
+                all_rates[rate] = details
+        # return all rates
+        is_first = True
+        num_extract = lambda text: int("".join([char for char in text if "0" <= char <= "9"]))
+        get_key = lambda rate_name: cls._get_rate_fieldname(all_rates[rate_name]["rate"])
+        # add all rates for percent visualization ("MCS7,MCS6,MCS5,MCS4,MCS3,MCS2,MCS1,MCS0,+,+,+,+,+,+,+")
+        cdef = None
+        for sum_rate in all_rates:
+            if cdef is None:
+                cdef = get_key(sum_rate)
+            else:
+                cdef = "{key},{cdef},+".format(key=get_key(sum_rate), cdef=cdef)
+        yield "sum.label Sum of all counters"
+        yield "sum.type DERIVE"
+        yield "sum.graph no"
+        for index, rate in enumerate(sorted(all_rates, key=num_extract)):
+            details = all_rates[rate]
+            key = get_key(rate)
+            yield "{key}.label {rate_label}".format(key=key, rate_label=details["rate_label"])
+            yield "{key}.type DERIVE".format(key=key)
+            yield "{key}.min 0".format(key=key)
+            if index < len(QUALITY_GRAPH_COLORS_16):
+                yield "{key}.colour {colour}".format(key=key, colour=QUALITY_GRAPH_COLORS_16[index])
+            yield "{key}.draw {draw_type}".format(key=key, draw_type=("AREA" if is_first else "STACK"))
+            # divide the current value by the above sum of all counters and calculate percent
+            yield "{key}.cdef 100,{key},sum,/,*".format(key=key, cdef=cdef)
+            is_first = False
+        yield ""
+
+
+class WifiInterface:
+
+    def __init__(self, name, path, graph_base):
+        self._path = path
+        self._graph_base = graph_base
+        self.name = name
+        self.stations = tuple(self._parse_stations())
+
+    def _parse_arp_cache(self):
+        """ read IPs and MACs from /proc/net/arp and return a dictionary for MAC -> IP """
+        arp_cache = {}
+        # example content:
+        #   IP address       HW type     Flags       HW address            Mask     Device
+        #   192.168.2.70     0x1         0x0         00:00:00:00:00:00     *        eth0.10
+        #   192.168.12.76    0x1         0x2         24:a4:3c:fd:76:98     *        eth1.10
+        for line in open("/proc/net/arp", "r").read().split("\n"):
+            # skip empty lines
+            if not line: continue
+            tokens = line.split()
+            ip, mac = tokens[0], tokens[3]
+            # the header line can be ignored - all other should have well-formed MACs
+            if not ":" in mac: continue
+            # ignore remote peers outside of the broadcast domain
+            if mac == "00:00:00:00:00:00": continue
+            arp_cache[mac] = ip
+        return arp_cache
+
+    def _parse_stations(self):
+        stations_base = os.path.join(self._path, "stations")
+        arp_cache = self._parse_arp_cache()
+        for item in os.listdir(stations_base):
+            peer_mac = item
+            # use the IP or fall back to the MAC without separators (":")
+            if peer_mac in arp_cache:
+                label = arp_cache[peer_mac]
+                key = peer_mac.replace(":", "")
+            else:
+                label = peer_mac
+                key = "host_" + peer_mac.replace(":", "").replace(".", "")
+            yield Station(label, key, os.path.join(stations_base, item))
+
+    def get_config(self, scope):
+        yield from Station.get_summary_config(scope, self.stations, self._graph_base)
+        for station in self.stations:
+            yield from station.get_config(scope, self._graph_base)
+        yield ""
+
+    def get_values(self, scope):
+        yield from Station.get_summary_values(scope, self.stations, self._graph_base)
+        for station in self.stations:
+            yield from station.get_values(scope, self._graph_base)
+        yield ""
+
+
+class Ath9kDriver:
+
+    def __init__(self, path, graph_base):
+        self._path = path
+        self._graph_base = graph_base
+        self.interfaces = tuple(self._parse_interfaces())
+
+    def _parse_interfaces(self):
+        for phy in os.listdir(self._path):
+            phy_path = os.path.join(self._path, phy)
+            for item in os.listdir(phy_path):
+                if item.startswith("netdev:"):
+                    wifi = item.split(":", 1)[1]
+                    label = "{phy}/{interface}".format(phy=phy, interface=wifi)
+                    wifi_path = os.path.join(phy_path, item)
+                    graph_base = "{base}_{phy}_{interface}".format(base=self._graph_base, phy=phy, interface=wifi)
+                    yield WifiInterface(label, wifi_path, graph_base)
+
+    def get_config(self, scope):
+        for interface in self.interfaces:
+            yield from interface.get_config(scope)
+
+    def get_values(self, scope):
+        for interface in self.interfaces:
+            yield from interface.get_values(scope)
+
+
+
+def _get_up_down_pair(unit, key_up, key_down, factor=None, divider=None, use_negative=True):
+    """ return all required statements for a munin-specific up/down value pair
+        "factor" or "divider" can be given for unit conversions
+    """
+    for key in (key_up, key_down):
+        if use_negative:
+            yield "{key}.label {unit}".format(key=key, unit=unit)
+        else:
+            yield "{key}.label {key} {unit}".format(key=key, unit=unit)
+        yield "{key}.type COUNTER".format(key=key)
+        if factor:
+            yield "{key}.cdef {key},{factor},*".format(key=key, factor=factor)
+        if divider:
+            yield "{key}.cdef {key},{divider},/".format(key=key, divider=divider)
+    if use_negative:
+        yield "{key_down}.graph no".format(key_down=key_down)
+        yield "{key_up}.negative {key_down}".format(key_up=key_up, key_down=key_down)
+
+
+def get_scope():
+    called_name = os.path.basename(sys.argv[0])
+    name_prefix = "ath9k_"
+    if called_name.startswith(name_prefix):
+        scope = called_name[len(name_prefix):]
+        if not scope in PLUGIN_SCOPES:
+            print_error("Invalid scope requested: {0} (expected: {1})".format(scope, PLUGIN_SCOPES))
+            sys.exit(2)
+    else:
+        print_error("Invalid filename - failed to discover plugin scope")
+        sys.exit(2)
+    return scope
+
+
+def print_error(message):
+    # necessary fallback for micropython
+    linesep = getattr(os, "linesep", "\n")
+    sys.stderr.write(message + linesep)
+
+
+if __name__ == "__main__":
+    ath9k = Ath9kDriver(SYS_BASE_DIR, GRAPH_BASE_NAME)
+    # parse arguments
+    if len(sys.argv) > 1:
+        if sys.argv[1]=="config":
+            for item in ath9k.get_config(get_scope()):
+                print(item)
+            sys.exit(0)
+        elif sys.argv[1] == "autoconf":
+            if os.path.exists(SYS_BASE_PATH):
+                print('yes')
+            else:
+                print('no')
+            sys.exit(0)
+        elif sys.argv[1] == "suggest":
+            for scope in PLUGIN_SCOPES:
+                print(scope)
+            sys.exit(0)
+        elif sys.argv[1] == "version":
+            print_error('olsrd Munin plugin, version %s' % plugin_version)
+            sys.exit(0)
+        elif sys.argv[1] == "":
+            # ignore
+            pass
+        else:
+            # unknown argument
+            print_error("Unknown argument")
+            sys.exit(1)
+
+    # output values
+    for item in ath9k.get_values(get_scope()):
+        print(item)
+
+# final marker for shell / python hybrid script (see "Interpreter Selection")
+EOF = True
+EOF

@@ -21,7 +21,13 @@ $aborted = 0;
 
 ($dirname = $0) =~ s/[^\/]+$//;
 
+$dovelogfile = 0 ;
+
 $logfile = $ENV{'LOGFILE'} || '/var/log/mail.log';
+
+if ( $logfile =~ /dovecot/ ) {
+ $dovelogfile = 1 ;
+}
 
 # Use an overrided $PATH for all external programs if needed
 $DOVEADM = "doveadm";
@@ -208,25 +214,26 @@ sub parseDovecotfile {
     my $line =<logf>;
     chomp ($line);
 
-    if ($line !~ m/dovecot/) { next; }
+    if ( $dovelogfile == 0 and $line !~ m/dovecot/) { next; }
+    else {
+     if ($line =~ m/Aborted/) {
+       $aborted++;
 
-    if ($line =~ m/Aborted/) {
-      $aborted++;
+     } elsif ($line =~ m/Login:/) {
+       $login++;
 
-    } elsif ($line =~ m/Login:/) {
-      $login++;
+       if (     $line =~ m/TLS/) {
+         $tls++;
+       } elsif ($line =~ m/SSL/) {
+         $ssl++;
+       }
 
-      if (     $line =~ m/TLS/) {
-        $tls++;
-      } elsif ($line =~ m/SSL/) {
-        $ssl++;
-      }
-
-      if (     $line =~ m/pop3-login:/) {
-        $pop3login++;
-      } elsif ($line =~ m/imap-login:/) {
-        $imaplogin++;
-      }
+       if (     $line =~ m/pop3-login:/) {
+         $pop3login++;
+       } elsif ($line =~ m/imap-login:/) {
+         $imaplogin++;
+       }
+     }
     }
   }
   close(logf);

@@ -25,9 +25,12 @@
 # Use it in your site configuration (/etc/nginx/sites-enabled/anything.conf):
 # access_log /var/log/nginx/upstream.log upstream;
 #
+# Attention! Because munin-node does not have read permission for nginx log files we need to run it as root.
+#
 # And specify some options in /etc/munin/plugin-conf.d/munin-node:
 #
 #     [nginx_upstream_multi_upstream]
+#     user root
 #     env.graphs cache http time request
 #     env.log /var/log/nginx/upstream.log
 #     env.upstream 10.0.0.1:80 10.0.0.2:8080 unix:/tmp/upstream3
@@ -199,8 +202,8 @@ else:
 
     try:
         logHandle = open(logPath, "r")
-    except Exception:
-        print "Log file %s not readable" % logPath
+    except Exception as e:
+        print "Log file %s not readable: %s" % (logPath, e.strerror)
         sys.exit(1)
 
     try:
@@ -278,7 +281,8 @@ else:
         lastByteHandle = open(lastBytePath, "w")
         lastByteHandle.write(str(logHandle.tell()))
         lastByteHandle.close()
-    except Exception:
+    except Exception as e:
+        print e.strerror
         sys.exit(1)
 
     logHandle.close()
