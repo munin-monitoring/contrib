@@ -66,14 +66,16 @@ for guest in `ls $lxcpath`; do
         continue;
     fi
     if [ -f "$lxcpath/$guest/config" ]; then
-        device=`grep '^lxc\.network\.veth\.pair[ \t]*=[ \t]*' $lxcpath/$guest/config | \
+        devices=`grep '^lxc\.network\.veth\.pair[ \t]*=[ \t]*' $lxcpath/$guest/config | \
             awk '{ split($0, a, /=/); gsub(/[ \t]/, "", a[2]); print a[2]; }'`
-        if [ -n "$device" ]; then
-            device_re=`echo $device | sed -e 's/\./\\\\./g'`
-            if [ `grep -c "^ *$device_re:" /proc/net/dev` -eq 1 ]; then
-                actives="$actives $guest"
-                eval "dev_$(clean_fieldname $guest)=$device"
-            fi
+        if [ -n "$devices" ]; then
+            for device in $devices; do
+                device_re=`echo $device | sed -e 's/\./\\\\./g'`
+                if [ `grep -c "^ *$device_re:" /proc/net/dev` -eq 1 ]; then
+                    actives="$actives $guest"
+                    eval "dev_$(clean_fieldname $guest)=$device"
+                fi
+            done
         fi
     fi
 done

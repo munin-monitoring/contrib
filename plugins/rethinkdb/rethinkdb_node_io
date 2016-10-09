@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""
+  rethinkdb_node_io - A munin plugin for Linux to monitor the io count
+  per second on the local node
+
+  This plugin is licensed under the AGPL 3.0 license
+
+  AGPL 3.0 RubenKelevra
+  Author: @RubenKelevra - <ruben@vfn-nrw.de>
+
+  This plugin is written with the known limitation to a single instance per
+  host. Patches which remove this limitation are very welcome.
+
+  If your port / host is somewhat else than the default
+  localhost:28015, and/or your database-server differes in name from
+  `hostname` (short hostname), you can add rethinkdb-node-io config vars
+  like:
+	  [rethinkdb_*]
+	  env.rethinkdb_port 12345
+	  env.rethinkdb_host localhost.com
+	  env.rethinkdb_servername localhost.com
+
+  The following munin configuration parameters are supported:
+  #%# family=auto contrib
+  #%# capabilities=autoconf
+
+"""
+
+from importlib.util import find_spec
+from multiprocessing import Process
+from os import environ as env
+from shutil import which
+from socket import gethostname
+from sys import argv
+from sys import exit as fatal_
+from sys import stderr
+
+
+# functions
+def fatal(status):
+    fatal_("ERROR: " + status)
+
+
+def rclose_async():
+    conn.close()
+
+
+def check_load_rethinkdb() -> bool:
+    try:
+        rdb_spec = find_spec("rethinkdb")
+        if rdb_spec is None:
+            return False
+        return True
+    except:
+        fatal("Unknown error while try to load RethinkDB-Driver")
+
+
+def eprint(*args, **kwargs):
+    print(*args, file=stderr, **kwargs)
+
+
+def getFirstLine(respond):
+    assert isinstance(respond, net.DefaultCursor)
+    for e in respond:
+        return e
+
+
+def print_config(servername):
+    print("graph_title RethinkDB on '%s'- Local Database IOPS and Queries" % servername)
+    print("graph_args --base 1000 -l 0")
+    print("graph_vlabel Operations / second")
+    print("graph_category rethinkdb")
+    print("total_qps.label queries per sec")
+    print("total_qps.type COUNTER")
+    print("total_rdps.label read docs per sec")
+    print("total_rdps.type COUNTER")
+    print("total_wdps.label written docs per sec")
+    print("total_wdps.type COUNTER")
+    exit(0)
+
+
+def check_autoconf() -> bool:
+    # this might be too easy, but gonna try.
+    if which("rethinkdb"):
+        return True
+    return False
+
+
+if __name__ == '__main__':
+    try:
+        RETHINKDB_SERVERNAME = env['rethinkdb_servername']
+    except:
+        RETHINKDB_SERVERNAME = gethostname()
+
+    if len(argv) > 2:
+        fatal("unsupported argument count")
+    elif len(argv) == 2:
+        if str(argv[1]) == "config":
+            print_config(RETHINKDB_SERVERNAME)
+        elif str(argv[1]) == "autoconf":
+            if check_autoconf():
+                print("yes")
+            else:
+                print("no")
+            if not check_load_rethinkdb():
+                # FIXME: Correct display of error message when driver is missing should be checked
+                fatal("RethinkDB-Driver not available!")
+            exit(0)
+        else:
+            fatal("unsupported argument")
+
+    if not check_load_rethinkdb():
+        fatal("RethinkDB-Driver not available!")
+    from rethinkdb import net, connect, db
+
+    # load environment
+    try:
+        RETHINKDB_PORT = env['rethinkdb_port']
+    except:
+        RETHINKDB_PORT = "28015"
+
+    try:
+        RETHINKDB_HOST = env['rethinkdb_host']
+    except:
+        RETHINKDB_HOST = "localhost"
+
+    try:
+        conn = connect(RETHINKDB_HOST, RETHINKDB_PORT)
+    except:
+        fatal("connection attempt to the rethinkdb-host \"%s\" via port \"%s\" failed" % (
+            str(RETHINKDB_HOST), str(RETHINKDB_PORT)))
+
+    query_engine_info = getFirstLine(
+        db('rethinkdb').table("stats").filter({"server": RETHINKDB_SERVERNAME}).pluck('query_engine').limit(1).run(
+            conn))['query_engine']
+
+    rclose = Process(target=rclose_async())
+    rclose.start()
+
+    print("total_qps.value %s" % (query_engine_info["queries_total"]))
+    print("total_rdps.value %s" % (query_engine_info["read_docs_total"]))
+    print("total_wdps.value %s" % (query_engine_info["written_docs_total"]))
+
+    # wait for connection termination
+    rclose.join()

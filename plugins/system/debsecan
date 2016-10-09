@@ -1,19 +1,37 @@
 #!/bin/sh
-#
-# Plugin to monitor the number of CVE vulnerabilities present on a Debian
-# system (using debsecan). Might work on other distib, who knows...
-#
-# Inspiration of the moment 10/10/2007
-#
-# Nicolas BOUTHORS <nbouthors@nbi.fr> http://nbi.fr/
-#
-# Licence : Public Domain
-#
-#%# family=auto
-#%# capabilities=autoconf
+
+: << =cut
+
+=head1 NAME
+
+debsecan - Plugin to monitor the number of CVE vulnerabilities present on a Debian
+system (using debsecan). Might work on other distib, who knows...
+
+=head1 CONFIGURATION
+
+    [debsecan]
+    env.suite jessie
+    env.fixed_warn 1
+    env.fixed_critical 1000
+
+=head1 AUTHORS
+
+* Nicolas BOUTHORS <nbouthors@nbi.fr> http://nbi.fr/, Inspiration of the moment 10/10/2007
+* Olivier Mehani <shtrom+munin@ssji.net>, 2016
+
+=head1 LICENSE
+
+Public Domain
+
+=head1 MAGIC MARKERS
+
+%# family=auto
+%# capabilities=autoconf
+
+=cut
 
 # Auto enable if we have debsecan only
-if [ "$1" = "autoconf" ] ; then 
+if [ "$1" = "autoconf" ] ; then
   if [ -x /usr/bin/debsecan ]; then
     echo yes
   else
@@ -22,53 +40,95 @@ if [ "$1" = "autoconf" ] ; then
   exit 0
 fi
 
-# Fail if we don't have debsecan 
+# Fail if we don't have debsecan
 if [ ! -x /usr/bin/debsecan ]; then
   exit 1
 fi
 
+# Determine suite from filename...
+SUITE=`echo $0 | sed 's/.*_//'`
+if [ ${SUITE} = ${0} ]; then
+	# ...or fall back onto configuration in environment
+	SUITE=${suite:-sid}
+fi
+FIXEDWARN=${fixed_warning:-1}
+FIXEDCRIT=${fixed_critical:-1000}
+
+CVERE="\(\(CVE\|TMP\)[-0-9A-Fa-f]\+\)"
 if [ "$1" = "config" ] ; then
   cat <<EOF_
-graph_title DebSecan : vulnerabilities
+graph_title DebSecan : vulnerabilities for ${SUITE}
 graph_args -l 0 --base 1000
 graph_vlabel number of CVE
 graph_category system
 graph_period second
-graph_info This graph show the number of known vulnerabilities present on your system. Use debsecan to see detail.
+graph_info This graph show the number of known vulnerabilities present on your system. Use debsecan to see details.
 high.label high
+high.colour FF0000
 high.type GAUGE
-high.max 50000
+high.draw AREASTACK
 high.min 0
-high.info The number CVE marked high high priority
+high.info The number of CVEs marked high priority
 medium.label medium
+medium.colour FFA500
 medium.type GAUGE
-medium.max 50000
+medium.draw AREASTACK
 medium.min 0
-medium.info The number CVE marked medium high priority
+medium.info The number of CVEs marked medium priority
 low.label low
+low.colour 0000FF
 low.type GAUGE
-low.max 50000
+low.draw AREASTACK
 low.min 0
-low.info The number CVE marked low high priority
+low.info The number of CVEs marked low priority
 other.label other
+other.colour 00A5FF
 other.type GAUGE
-other.max 50000
+other.draw AREASTACK
 other.min 0
-other.info The number CVE with unspecified priority
+other.info The number of CVEs with unspecified priority
+fixed.label fixed
+fixed.type GAUGE
+fixed.draw LINE2
+fixed.min 0
+fixed.info The number of CVEs fixed by available updates
+fixed.warning ${FIXEDWARN}
+fixed.critical ${FIXEDCRIT}
 EOF_
   exit 0
 fi
 
-debsecan 2> /dev/null > /tmp/debsecan.munin.$$
-high=`grep -c 'high urgency' /tmp/debsecan.munin.$$`
-medium=`grep -c 'medium urgency' /tmp/debsecan.munin.$$`
-low=`grep -c 'low urgency)' /tmp/debsecan.munin.$$`
-other=`grep -c -v -e 'low urgency' -e 'medium urgency' -e 'high urgency' /tmp/debsecan.munin.$$`
-cat <<EOF_
-high.value $high
-medium.value $medium
-low.value $low
-other.value $other
-EOF_
+CVECOUNTRE="s/^ *\([0-9]\+\) \+\([^ ]\+\)/\2 (\1)/"
 
-rm -f /tmp/debsecan.munin.$$
+OUT=`mktemp -t debsecan.XXXXXX`
+HIGH=`mktemp -t debsecan.XXXXXX`
+MEDIUM=`mktemp -t debsecan.XXXXXX`
+LOW=`mktemp -t debsecan.XXXXXX`
+OTHER=`mktemp -t debsecan.XXXXXX`
+FIXED=`mktemp -t debsecan.XXXXXX`
+debsecan --suite ${SUITE} 2> /dev/null > ${OUT}
+grep 'high urgency' ${OUT} > ${HIGH}
+grep 'medium urgency' ${OUT} > ${MEDIUM}
+grep 'low urgency)' ${OUT} > ${LOW}
+grep '(fixed' ${OUT} > ${FIXED}
+
+high=`cat ${HIGH} | wc -l`
+medium=`cat ${MEDIUM} | wc -l`
+low=`cat ${LOW} | wc -l`
+other=`cat ${OTHER} | wc -l`
+fixed=`cat ${FIXED} | wc -l`
+
+cat <<EOF
+high.value $high
+high.extinfo `echo $(cut -f 2 -d" " ${HIGH} | uniq -c | sort -nr | sed  "${CVECOUNTRE}")`
+medium.value $medium
+medium.extinfo `echo $(cut -f 2 -d" " ${MEDIUM} | uniq -c | sort -nr | sed  "${CVECOUNTRE}")`
+low.value $low
+low.extinfo `echo $(cut -f 2 -d" " ${LOW} | uniq -c | sort -nr | sed  "${CVECOUNTRE}")`
+other.value $other
+other.extinfo `echo $(cut -f 2 -d" " ${OTHER} | uniq -c | sort -nr | sed  "${CVECOUNTRE}")`
+fixed.value $fixed
+fixed.extinfo `echo $(cut -f 2 -d" " ${FIXED} | uniq -c | sort -nr | sed  "${CVECOUNTRE}")`
+EOF
+
+rm -f ${OUT} ${HIGH} ${MEDIUM} ${LOW} ${FIXED} ${OTHER}
