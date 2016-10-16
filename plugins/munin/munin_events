@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # -*- sh -*-
 : <<=cut
 
@@ -39,7 +39,7 @@ INFO, WARNING, ERROR, FATAL.
 
 =head1 VERSION
 
-  1.2.20160514
+  1.2.20161017
 
 =head1 AUTHOR
 
@@ -55,7 +55,8 @@ GPLv2
 ##############################
 # Includes
 
-. $MUNIN_LIBDIR/plugins/plugin.sh
+# shellcheck disable=SC1090
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
 
 ##############################
 # Configurable variables
@@ -67,12 +68,11 @@ logtail_bin=${logtail_bin:-/usr/sbin/logtail2}
 
 # Print one value
 do_value() {
-    local FIELD="$1"
-    local EVENT_LABEL="$2"
-    local EVENT_COUNT
-
+    FIELD="$1"
+    EVENT_LABEL="$2"
     EVENT_COUNT="$("$logtail_bin" -t "$muninupdate" 2> /dev/null | grep -c "^[0-9/: ]\{19\} \[${EVENT_LABEL}\]")"
-    if ! [ -z "${EVENT_COUNT//[0-9]/}" ]; then
+
+    if ! [ -z "$(echo "$EVENT_COUNT" | sed 's|[0-9]\+||')" ]; then
         echo "Cannot determine event count" 1>&2
         exit 10
     fi
@@ -87,7 +87,7 @@ values() {
     do_value 'munin_error' 'ERROR'
     do_value 'munin_fatal' 'FATAL'
     # Set offset
-    "$logtail_bin" "$muninupdate" &> /dev/null
+    "$logtail_bin" "$muninupdate" > /dev/null 1>&2
     chmod 640 "${muninupdate}.offset"
 }
 
