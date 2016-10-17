@@ -71,6 +71,14 @@ sub process_file {
             }
         );
     }
+    elsif ( $interpreter =~ m{/bin/zsh} ) {
+        run_check(
+            {   command     => [ 'zsh', '-n', $file ],
+                description => 'zsh syntax check',
+                filename    => $filename
+            }
+        );
+    }
     elsif ( $interpreter =~ m{bash} ) {
         run_check(
             {   command     => [ 'bash', '-n', $file ],
