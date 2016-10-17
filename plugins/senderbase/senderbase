@@ -42,20 +42,36 @@ This plugin is made available under a CC0 waiver:
 
 =cut
 
-real_ip_address=${ip_address:-$(hostname -I | awk '{print $1}')}
-ip_reversed=$(echo $real_ip_address | sed -re 's/^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$/\4.\3.\2.\1/')
-query_host=${ip_reversed}.rf.senderbase.org
+if which dig >/dev/null; then
+    query_program=dig
+    do_query () {
+        hostname=$1
+        dig +short $hostname TXT | sed 's/"//g' | head -1
+    }
+elif which host >/dev/null; then
+    query_program=host
+    do_query () {
+        hostname=$1
+        host -t TXT $hostname | grep -m 1 'descriptive text' | cut -d\" -f2
+    }
+else
+    query_program=
+    do_query () {
+        true
+    }
+fi
+
+real_ip_address="${ip_address:-$(hostname -I | awk '{print $1}')}"
+ip_reversed="$(echo $real_ip_address | sed -re 's/^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$/\4.\3.\2.\1/')"
+query_host="${ip_reversed}.rf.senderbase.org"
 
 if [ "$1" = "autoconf" ]; then
-    if which dig >/dev/null; then
-        value=$(dig +short $query_host TXT | sed 's/"//g' | head -1)
-        if [ -n "$value" ]; then
-            echo 'yes'
-        else
-            echo "no (No SenderBase reputation for IP address ${ip_address}.)"
-        fi
+    if [ -z "$query_program" ]; then
+        echo 'no (No "dig" or "host" executable found.)'
+    elif [ -z "$(do_query "$query_host")" ]; then
+        echo "no (No SenderBase reputation for IP address ${ip_address}.)"
     else
-        echo 'no (No "dig" executable found.)'
+        echo 'yes'
     fi
     exit 0
 fi
@@ -73,5 +89,5 @@ EOF
     exit 0
 fi
 
-value=$(dig +short $query_host TXT | sed 's/"//g' | head -1)
-echo reputation.value ${value:-U}
+value="$(do_query "$query_host")"
+echo reputation.value "${value:-U}"
