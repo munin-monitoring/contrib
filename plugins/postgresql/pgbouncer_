@@ -16,11 +16,17 @@ my $db_user = $ENV{'pgbouncer_user'}  || 'postgres';
 my $db_port = $ENV{'pgbouncer_port'}  || '6432';
 my $db_host = $ENV{'pgbouncer_host'}  || 'localhost';
 my $db_pass = $ENV{'pgbouncer_pass'}  || '';
+my $db_pool = $ENV{'pgbouncer_pool'}  || '';
 my $db_name = 'pgbouncer';
 my @data = ();
 # get the DB (pool) name we want to fetch
 $plugin_name =~ /pgbouncer_(.*)$/;
-my $pool_name = $1;
+my $plugin_suffix = $1;
+#if pool name is specified explicitly in config file
+#use plugin name together with pool name in graph title:
+my $pool_name = ($db_pool) ? $db_pool : $plugin_suffix;
+my $plugin_title = ($db_pool) ? $plugin_suffix." ".$pool_name : $pool_name;
+
 # bail if no name
 if (!$pool_name)
 {
@@ -52,8 +58,9 @@ if (defined($ARGV[0]))
 	{
 		# create the basic RRD
 		# stats: average connections
+
 		print "multigraph ".$plugin_name."_stats_avg_req\n";
-		print "graph_title PgBouncer $pool_name average connections\n";
+		print "graph_title PgBouncer $plugin_title average connections\n";
 		print "graph_args --base 1000\n"; # numbers not bytes
 		print "graph_vlabel Average connections\n";
 		print "graph_scale no\n"; # so we do not print "micro, milli, kilo, etc"
@@ -64,7 +71,7 @@ if (defined($ARGV[0]))
 		print $pool_name."_avg_req.draw LINE2\n";
 		# stats: average time for query
 		print "multigraph ".$plugin_name."_stats_avg_query\n";
-		print "graph_title PgBouncer $pool_name average query time\n";
+		print "graph_title PgBouncer $plugin_title average query time\n";
 		print "graph_args --base 1000\n"; # numbers not bytes
 		print "graph_vlabel Average time per query (microseconds)\n";
     		print "graph_category pgbouncer\n";
@@ -74,7 +81,7 @@ if (defined($ARGV[0]))
 		print $pool_name."_avg_query.draw LINE2\n";
 		# stats: in/out bytes
 		print "multigraph ".$plugin_name."_stats_bytesinout\n";
-		print "graph_title PgBouncer $pool_name average bytes received/sent\n";
+		print "graph_title PgBouncer $plugin_title average bytes received/sent\n";
 		print "graph_args --base 1024\n"; # numbers in bytes
 		print "graph_vlabel Average bytes received (-)/sent (+)\n";
     		print "graph_category pgbouncer\n";
@@ -92,7 +99,7 @@ if (defined($ARGV[0]))
 		print $pool_name."_avg_sent.negative ".$pool_name."_avg_recv\n";
 		# pools: server (sv_)
 		print "multigraph ".$plugin_name."_pools_server\n";
-		print "graph_title PgBouncer $pool_name servers\n";
+		print "graph_title PgBouncer $plugin_title servers\n";
 		print "graph_category pgbouncer\n";
 		print "graph_args --base 1000\n"; # numbers not bytes
 		print "graph_vlabel Server connections\n";
@@ -124,7 +131,7 @@ if (defined($ARGV[0]))
 		print $pool_name."_server_login.draw STACK\n";
 		# pools: client (cl_)
 		print "multigraph ".$plugin_name."_pools_client\n";
-		print "graph_title PgBouncer $pool_name clients\n";
+		print "graph_title PgBouncer $plugin_title clients\n";
 		print "graph_category pgbouncer\n";
 		print "graph_args --base 1000\n"; # numbers not bytes
 		print "graph_vlabel Client connections\n";
@@ -141,7 +148,7 @@ if (defined($ARGV[0]))
 		print $pool_name."_client_waiting.draw STACK\n";
 		# pools: maxwait (longest waiting connection, should be 0)
 		print "multigraph ".$plugin_name."_pools_maxwait\n";
-		print "graph_title PgBouncer $pool_name maximum waiting time\n";
+		print "graph_title PgBouncer $plugin_title maximum waiting time\n";
 		print "graph_args --base 1000\n"; # numbers not bytes
 		print "graph_vlabel Maximum wait time (seconds)\n";
     		print "graph_category pgbouncer\n";
@@ -219,6 +226,7 @@ perl and DBD::Pg is required, and pgbouncer must been installed with a correct s
 =head1 CONFIGURATION
 
 the plugin that will be run needs to have the pool name after the plugin base name.
+alternatively, pool name can be specified in config file as env.pgbouncer_pool option, separating plugin name from pool name.
 
 =head2 plugin configuration
 
@@ -240,6 +248,21 @@ more extended would be:
     env.pgbouncer_user bar
     env.pgbouncer_port 6542
     env.pgbouncer_host localhost
+
+another example, where different pgbouncers (and so munin plugins) connecting to same db:
+   [pgbouncer_weblogin]
+     env.pgbouncer_pass barfoo
+     env.pgbouncer_user bar
+     env.pgbouncer_port 6542
+     env.pgbouncer_host localhost
+     env.pgbouncer_pool dbname
+    
+   [pgbouncer_webmain]
+     env.pgbouncer_pass barfoo
+     env.pgbouncer_user bar
+     env.pgbouncer_port 6543
+     env.pgbouncer_host localhost
+     env.pgbouncer_pool dbname
 
 The database name is always pgbouncer
 
