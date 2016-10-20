@@ -1,6 +1,18 @@
-#!/bin/bash
+#!/bin/zsh
 #
 # Created by Jan Rękorajski <baggins@pld-linux.org> based on vserver_cpu_ plugin.
+#
+# Obtained from https://github.com/munin-monitoring/contrib.git
+#
+# Changes by Andras Korn, 2015:
+#
+#  * Convert to zsh
+#  * Fix to remove dots from vserver names (replace them with _)
+#  * Drop support for old (pre 2.6.19) kernels
+#  * Replace cat | grep | cut pipelines with a single sed
+#  * Add env.stripdomain (a domain name to strip from the
+#    end of vserver names when generating labels; be sure
+#    to include the leading dot)
 #
 # Graph Vserver cumulative cpu usage stats
 #
@@ -11,47 +23,45 @@
 #
 # see vserver_resources for example uses of configuration files
 
-VSERVERS="$vservers"
+VSERVERS=(${=vservers})
+STRIPDOMAIN="$stripdomain"
 
-INFO=(`sed 's/.*:\t//' /proc/virtual/info 2>/dev/null || echo '<none>'`)
+INFO=($(sed 's/.*:\t//' /proc/virtual/info 2>/dev/null || echo '<none>'))
 KCIN="$[ 16#${INFO[2]} ]";
 
-# If this is 1, then VCI_SPACES is present in the kernel (new in 2.6.19)
-if [ $[ (KCIN >> 10) & 1 ] -eq 1 ]
-then 
-    NAMELOC="nsproxy"
-else 
-    NAMELOC="cvirt"
-fi
+NAMELOC="nsproxy"
 
-if [ -z "$VSERVERS" ] ; then
-    XIDS=`find /proc/virtual/* -type d -exec basename {} \;`
+if [[ -z "$VSERVERS" ]] ; then
+    cd /proc/virtual
+    XIDS=($(echo *(/)))
 else
     # it's really more performant to specify vservers by ids or by linking but not in the configuration-file by name
     XIDS=""
-    for i in $VSERVERS ; do
-	if [ -d /proc/virtual/$i ] ; then
-	    XIDS="${XIDS}${i} "
+    for i in $VSERVERS[@] ; do
+	if [[ -d /proc/virtual/$i ]] ; then
+	    XIDS=($XIDS[@] $i)
 	else
-	    for j in `find /proc/virtual/* -type d -exec basename {} \;` ; do
-		if [ "$i" = "`cat /proc/virtual/$j/$NAMELOC |grep NodeName |cut -f2`" ] ; then
-		    XIDS="${XIDS}${j} "
+	    for j in /proc/virtual/*(/) -type d; do
+	    	if [[ "$i" = $(sed -n '/NodeName/s/^NodeName:[[:space:]]*//p' $j/$NAMELOC) ]]; then
+		    XIDS=($XIDS[@] ${j:t})
 		fi
 	    done
 	fi
     done
 fi
 
-if [ "$1" = "config" ]; then
+if [[ "$1" = "config" ]]; then
 	echo 'graph_category Virtualization'
 	echo 'graph_args --base 1000'
 	echo 'graph_title Vserver cpu usage'
 	echo 'graph_vlabel jiffies used per ${graph_period}'
 	echo 'graph_info Shows jiffies used on each vserver.'
 
-	for i in $XIDS ; do 
-		LABEL=`grep NodeName /proc/virtual/$i/$NAMELOC | cut -f2`
-		NAME=`echo $LABEL | tr '-' '_'`
+	for i in $XIDS[@]; do 
+		LABEL=$(sed -n '/NodeName/s/^NodeName:[[:space:]]*//p' /proc/virtual/$i/$NAMELOC)
+		LABEL=${LABEL%$STRIPDOMAIN}
+		NAME=${LABEL//./_}
+		NAME=${NAME//-/_}
 		echo "${NAME}_hold.label on hold for cpu on $LABEL"
 		echo "${NAME}_hold.info on hold for cpu on $LABEL."
 		echo "${NAME}_hold.type COUNTER"
@@ -65,8 +75,11 @@ if [ "$1" = "config" ]; then
 	exit 0
 fi
 
-for i in $XIDS ; do
-	NAME=`grep NodeName /proc/virtual/$i/$NAMELOC | cut -f2 | tr '-' '_'`
+for i in $XIDS[@]; do 
+	LABEL=$(sed -n '/NodeName/s/^NodeName:[[:space:]]*//p' /proc/virtual/$i/$NAMELOC)
+	LABEL=${LABEL%$STRIPDOMAIN}
+	NAME=${LABEL//./_}
+	NAME=${NAME//-/_}
 	awk -v name=$NAME -v u=0 -v s=0 -v h=0 '
 		/^cpu [0-9]+:/ { u+=$3; s+=$4; h+=$5}
 		END {
