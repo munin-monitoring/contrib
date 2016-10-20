@@ -81,7 +81,7 @@ my( $name, $id1, $id2, $type, $rate, $parent);
 for( my $x = 0; $x < scalar(@class); $x++ ) {
     if($class[$x] =~ m/^class/i ) {
 	( $name, $id1, $id2, $type, $parent) = ( $class[$x] =~ m/^class\s+(\w+)\s+(\d+):(\d+)\s+(\w+)\s([^\s]+)/i );
-	if($type eq "parent") {
+	if($type && $type eq "parent") {
 	    $x++;
     	    ( $rate ) = ( $class[$x] =~ m/Sent\s+(\d+)\s+/i );
 	    $handle = "$name"."${id1}_${id2}";
@@ -106,6 +106,8 @@ if ( exists $ARGV[0] and $ARGV[0] eq 'config' ) {
   print "graph_data_size $ENV{graph_data_size}\n" if $ENV{graph_data_size};
   print "graph_order ";
   foreach my $key (sort by_handle keys %queues) {
+    delete $queues{$key} if $key =~ /sfq/i;
+    next if $key =~ /sfq/i;
     $haschild = 0;
     foreach my $key2 (sort by_handle keys %queues) {
 	if($queues{$key}->{id} eq $queues{$key2}->{parent}) {
@@ -136,7 +138,7 @@ if ( exists $ARGV[0] and $ARGV[0] eq 'config' ) {
     } elsif (exists $ENV{"max$queues{$key}->{handle}"}) {
       print $queues{$key}->{queue},$queues{$key}->{handle}, ".max ",$ENV{"max$queues{$key}->{handle}"},"\n";
     }
-    print $queues{$key}->{queue},$queues{$key}->{handle}, ".type COUNTER\n";
+    print $queues{$key}->{queue},$queues{$key}->{handle}, ".type DERIVE\n";
     if($count == 0){
 	print $queues{$key}->{queue},$queues{$key}->{handle}, ".draw AREA\n";
     } else {
@@ -157,6 +159,7 @@ sub by_handle {
 }
 
 foreach my $key (sort by_handle keys %queues) {
+    next if $key =~ /sfq/i;
     $haschild = 0;
     foreach my $key2 (sort by_handle keys %queues) {
 	if($queues{$key}->{id} eq $queues{$key2}->{parent}) {

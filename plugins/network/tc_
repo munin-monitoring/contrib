@@ -16,7 +16,7 @@
 DEVICE=${0##*/tc_}
 
 mytc() {
-	tc -s class show dev $1 | tr "\n" "|" | sed "s/ \+/ /g" | sed "s/ |/|/g" | sed "s/| /|/g" | sed "s/||/\n/g" | sed "s/|/ /g" | tr ":" "_" | sort -n
+	tc -s class show dev $1 | tr "\n" "|" | sed "s/ \+/ /g" | sed "s/ |/|/g" | sed "s/| /|/g" | sed "s/||/\n/g" | sed "s/|/ /g" | tr ":" "_" | grep -v -i sfq | sort -n
 }
 
 case $1 in
@@ -43,14 +43,14 @@ case $1 in
 	;;
     config)
 		       
-	echo "graph_order `mytc $DEVICE | awk '{ print $2 "_" $3 }' | sort -n | tr "\n" " "`"
+	echo "graph_order `mytc $DEVICE | awk '{ print $2 "_" $3 }' | tr "\n" " "`"
 	echo "graph_title $DEVICE TC traffic"
         echo 'graph_args --base 1000'
         echo 'graph_vlabel bits per ${graph_period}'
 	echo 'graph_category network'
 	echo "graph_info This graph shows the TC classes traffic of the $DEVICE network interface. Please note that the traffic is shown in bits per second, not bytes."
 	
-	mytc $DEVICE | tr "_" " " | awk '{ print $2 "_" $3 "_" $4 ".label " $2 "/" $3 ":" $4 "\n" $2 "_" $3 "_" $4 ".type COUNTER\n" $2 "_" $3 "_" $4 ".min 0\n" $2 "_" $3 "_" $4 ".cdef " $2 "_" $3 "_" $4 ",8,*" }'
+	mytc $DEVICE | tr "_" " " | awk '{ print $2 "_" $3 "_" $4 ".label " $2 "/" $3 ":" $4 "\n" $2 "_" $3 "_" $4 ".type DERIVE\n" $2 "_" $3 "_" $4 ".min 0\n" $2 "_" $3 "_" $4 ".cdef " $2 "_" $3 "_" $4 ",8,*" }'
         exit 0
 	;;
 esac
