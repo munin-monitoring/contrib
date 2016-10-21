@@ -37,6 +37,8 @@
 #%# family=auto
 #%# capabilities=autoconf
 
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
 if [ "$1" = "autoconf" ]; then
 	if [ -n "$USERS" ]; then
 		echo "yes"
@@ -54,11 +56,11 @@ if [ "$1" = "config" ]; then
 	echo "graph_vlabel %"
 	echo "graph_scale no"
 	echo "graph_period second"
-	_USERS=${USERS//[-.]/_}
+	_USERS="$(for user in $USERS; do clean_fieldname "$user" | tr '\n' ' '; done)"
 	echo "graph_order $_USERS others"
 	FIRSTUSER=1;
 	for USER in $USERS "others"; do
-		_USER=${USER//[-.]/_}
+	        _USER="$(clean_fieldname "$USER")"
 		echo "${_USER}.label $USER"
 		echo "${_USER}.info CPU used by user $USER"
 		echo "${_USER}.type GAUGE"
