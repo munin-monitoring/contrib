@@ -1,13 +1,13 @@
-#!/bin/bash
+#!/bin/sh
 #
 # Plugin to monitor CPU usage, for a selected set of users
 #
-# Usage: Place in /etc/munin/node.d/ (or link it there  using ln -s)
-#        Add this to your /etc/munin/plugin-conf.d/munin-node:
+# Usage: Place in /etc/munin/node.d/ (or link it there using ln -s)
+#	Add this to your /etc/munin/plugin-conf.d/munin-node:
 #		[cpubyuser]
 #		env.USERS root yann
 #
-#        If env.USERS is set to ALL, count all logged in users.
+#	If env.USERS is set to ALL, count all logged in users.
 #
 #	 root and yann being a list of the users to monitor.
 #	 You need to also make sure that awk is installed
@@ -30,18 +30,24 @@
 #
 # Parameters understood:
 #
-#       config   (required)
-#       autoconf (optional - used by munin-config)
+#	config		(required)
+#	autoconf	(optional - used by munin-config)
 #
 
 #%# family=auto
 #%# capabilities=autoconf
 
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+OTHER_FIELD="others"
+[ "$USERS" = "ALL" ] && USERS=$(w --no-header | awk '{ print $1 }' | sort | uniq)
+
+
 if [ "$1" = "autoconf" ]; then
 	if [ -n "$USERS" ]; then
 		echo "yes"
 	else
-		echo "\$USERS not defined."
+		echo "no (USERS setting is missing)"
 	fi
 	exit
 fi
@@ -54,41 +60,46 @@ if [ "$1" = "config" ]; then
 	echo "graph_vlabel %"
 	echo "graph_scale no"
 	echo "graph_period second"
-	_USERS=${USERS//[-.]/_}
-	echo "graph_order $_USERS others"
-	FIRSTUSER=1;
-	for USER in $USERS "others"; do
-		_USER=${USER//[-.]/_}
-		echo "${_USER}.label $USER"
-		echo "${_USER}.info CPU used by user $USER"
-		echo "${_USER}.type GAUGE"
-		if [ $FIRSTUSER -eq 1 ]; then
-			echo "${_USER}.draw AREA"
-			FIRSTUSER=0
-		else
-			echo "${_USER}.draw STACK"
-		fi
+	user_fields="$(for user in $USERS; do clean_fieldname "$user" | tr '\n' ' '; done)"
+	echo "graph_order $user_fields $OTHER_FIELD"
+	for user in $USERS "$OTHER_FIELD"; do
+		user_field="$(clean_fieldname "$user")"
+		echo "${user_field}.label $user"
+		echo "${user_field}.info CPU used by user $user"
+		echo "${user_field}.type GAUGE"
+		echo "${user_field}.draw AREASTACK"
 	done
 	exit
 fi
 
-if [ "$USERS" = "ALL" ]; then
-       USERS=$( w | awk '{ print $1 }' )
-fi
-
-top -b -n 1 | tail -n +8 | \
+top -b -n 1 | sed '1,/^ *PID /d' | \
 	awk -v USERS="$USERS" '
-		{ if ($2 != "USER") CPU_USER[$2]+=$9 }
+		# Store the CPU usage of each process - the mapping to the
+		# user happens later. We cannot use the second column
+		# (username) directly, since it may be abbreviated (ending
+		# with "+").
+		{ CPU_PER_PID[$1]=$9 }
 		END {
-			others_sum = 0
-			for (user in CPU_USER) {
-				m = match(USERS,user)
-				if (m != 0) {
-					_user=user
-					gsub(/[-.]/,"_", _user);
-					print _user".value", CPU_USER[user]
-				} else
-					others_sum += CPU_USER[user]
+			split(USERS, user_array)
+			for (user_index in user_array) {
+				user = user_array[user_index]
+				# retrieve all process IDs belonging to the user
+				"ps -u "user" -o pid --no-headers 2>/dev/null | tr \"\n\" \" \"" | getline pids
+				user_cpu = 0
+				split(pids, pid_array)
+				# summarize the cpu usage of this usage
+				for (pid_index in pid_array) {
+					pid = pid_array[pid_index]
+					user_cpu += CPU_PER_PID[pid]
+					delete CPU_PER_PID[pid]
+				}
+				print user, user_cpu
 			}
-		print "others.value", others_sum;
-	}'
+			# add all remaining cpu usages into "others"
+			others_sum = 0
+			for (other_usage in CPU_PER_PID) others_sum+=CPU_PER_PID[other_usage]
+			print "'"$OTHER_FIELD"'", others_sum;
+		}' | while read -r user count; do
+			# apply fieldname cleanup
+			echo "$(clean_fieldname "$user").value $count"
+		done
