@@ -19,8 +19,10 @@ work like a charm already.
 
 =head1 INSTALLATION
 
-This wildcard plugin should be symlinked using one of these names:
-mpdstats_artists, mpdstats_albums, mpdstats_songs
+This wildcard plugin can be symlinked using one of the statistic
+categories of mpd. See the output of "echo stats | nc MPD_HOST 6600".
+Without a symlink configuration (no suffix after the underscore) all
+stats are shown.
 
 =head1 CONFIGURATION
 
@@ -66,32 +68,25 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 =cut
 
 
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
 
 MPDHOST=${mpd_host:-localhost}
 MPDPORT=${mpd_port:-6600}
-NCBIN=${netcat:-/bin/nc}
+NCBIN=${netcat:-$(which nc)}
+
+ACTION="$(basename "$0" | sed 's/^.*_//')"
 
 #
 # FUNCTIONS
 #
 
 do_autoconf () {
-    case "$ACTION" in
-        albums|artists|songs)
-            ;;
-        *)
-            echo "no (not a valid symlink name, please read the plugin doc)"
-            exit 1
-            ;;
-    esac
-
-    if [ ! -x $NCBIN ] ; then
-        echo "no ($NCBIN: not found or not executable)"
+    if [ -z "$NCBIN" ] ; then
+        echo "no (missing netcat program ('nc'))"
         exit 1
     fi
 
-    echo version | $NCBIN -q 2 $MPDHOST $MPDPORT 1>/dev/null 2>&1
-    if [ "$?" != 0 ] ; then
+    if ! echo version | "$NCBIN" "$MPDHOST" "$MPDPORT" >/dev/null 2>&1; then
         echo "no (connection failed)"
         exit 1
     fi
@@ -100,35 +95,65 @@ do_autoconf () {
     exit 0
 }
 
+
+get_mpd_stats_keys() {
+    echo stats | "$NCBIN" "$MPDHOST" "$MPDPORT" | awk 'BEGIN {FS=":"} /^[^ ]+:/ {print $1}'
+}
+
+
+print_mpd_stat_value() {
+    local key="$1"
+    local fieldname
+    local stat_value
+    fieldname="$(clean_fieldname "$key")"
+    stat_value="$(echo stats | "$NCBIN" "$MPDHOST" "$MPDPORT" | awk "/^${key}:/ {print \$2}")"
+    echo "${fieldname}.value $stat_value"
+}
+
+
 #
 # MAIN
 #
 
-SCRIPTNAME=${0##*/}
-ACTION=${SCRIPTNAME##*_}
 
 case "$1" in
     autoconf)
         do_autoconf
         ;;
     suggest)
-        echo "$ACTION"
-        exit 0
+        get_mpd_stats_keys
         ;;
     config)
-        echo "graph_category MPD
-graph_title $ACTION in the database
-graph_info Number of $ACTION in the database.
-graph_vlabel $ACTION in the db
-graph_args --base 1000 -l 0
-graph_scale no
-$ACTION.type GAUGE
-$ACTION.draw LINE2
-$ACTION.label $ACTION"
-        exit 0
+        echo "graph_category MPD"
+        echo "graph_args --base 1000 -l 0"
+        echo "graph_scale no"
+        if [ -z "$ACTION" ]; then
+            echo "graph_title MPD Statistics"
+            echo "graph_vlabel number of items"
+            for stat_key in $(get_mpd_stats_keys); do
+                fieldname="$(clean_fieldname "$stat_key")"
+                echo "${fieldname}.type GAUGE"
+                echo "${fieldname}.draw LINE"
+                echo "${fieldname}.label $stat_key"
+            done
+        else
+            # Show only a single stat
+            echo "graph_title $ACTION in the MPD database"
+            echo "graph_info Number of $ACTION in the database."
+            echo "graph_vlabel $ACTION in the db"
+            echo "$ACTION.type GAUGE"
+            echo "$ACTION.draw LINE2"
+            echo "$ACTION.label $ACTION"
+        fi
         ;;
     *)
-        printf "$ACTION.value "
-        echo stats | $NCBIN -q 2 $MPDHOST $MPDPORT | awk " /^${ACTION}/ {print \$2}"
+        if [ -z "$ACTION" ]; then
+            for stat_key in $(get_mpd_stats_keys); do
+                print_mpd_stat_value "$stat_key"
+            done
+        else
+            print_mpd_stat_value "$ACTION"
+        fi
         ;;
 esac
+exit 0
