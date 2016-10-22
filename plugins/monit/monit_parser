@@ -8,9 +8,11 @@
 
 STATUS_CMD = "monit status"
 
-import sys
+import os
 import re
-from commands import getstatusoutput
+import subprocess
+import sys
+
 
 def sanitize(s):
     OK_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -22,12 +24,16 @@ def sanitize(s):
 
 procs = dict()
 
-status, output = getstatusoutput(STATUS_CMD)
-if status != 0:
-    print "Errror running status command: %s" % (output)
-    sys.exit(status)
+try:
+    output = subprocess.check_output(STATUS_CMD.split())
+except (OSError, subprocess.CalledProcessError) as exc:
+    sys.stderr.write("Error running monit status command: %s%s" % (exc, os.linesep))
+    sys.exit(1)
 
-output = output.split('\n')
+# python3: the result of command execution is bytes and needs to be converted
+if not isinstance(output, str):
+    output = output.decode("ascii", "ignore")
+output = output.splitlines()
 cur_proc = None
 for line in output:
     m = re.match("^Process '(.*)'.*$", line)
