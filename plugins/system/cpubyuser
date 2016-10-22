@@ -74,17 +74,32 @@ fi
 
 top -b -n 1 | sed '1,/^ *PID /d' | \
 	awk -v USERS="$USERS" '
-		{ CPU_USER[$2]+=$9 }
+		# Store the CPU usage of each process - the mapping to the
+		# user happens later. We cannot use the second column
+		# (username) directly, since it may be abbreviated (ending
+		# with "+").
+		{ CPU_PER_PID[$1]=$9 }
 		END {
-			others_sum = 0
-			for (user in CPU_USER) {
-				m = match(USERS,user)
-				if (m != 0) {
-					_user=user
-					gsub(/[-.]/,"_", _user);
-					print _user".value", CPU_USER[user]
-				} else
-					others_sum += CPU_USER[user]
+			split(USERS, user_array)
+			for (user_index in user_array) {
+				user = user_array[user_index]
+				# retrieve all process IDs belonging to the user
+				"ps -u "user" -o pid --no-headers 2>/dev/null | tr \"\n\" \" \"" | getline pids
+				user_cpu = 0
+				split(pids, pid_array)
+				# summarize the cpu usage of this usage
+				for (pid_index in pid_array) {
+					pid = pid_array[pid_index]
+					user_cpu += CPU_PER_PID[pid]
+					delete CPU_PER_PID[pid]
+				}
+				print user, user_cpu
 			}
-		print "others.value", others_sum;
-	}'
+			# add all remaining cpu usages into "others"
+			others_sum = 0
+			for (other_usage in CPU_PER_PID) others_sum+=CPU_PER_PID[other_usage]
+			print "'"$OTHER_FIELD"'", others_sum;
+		}' | while read -r user count; do
+			# apply fieldname cleanup
+			echo "$(clean_fieldname "$user").value $count"
+		done
