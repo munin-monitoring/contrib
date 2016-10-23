@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 """
 =head1 NAME
@@ -8,23 +8,22 @@ monit_parser -  Monit status parser plugin for munin.
 
 =head1 APPLICABLE SYSTEMS
 
-Any system running monit.
+Any system being able to query monit servers via http.
 
 Monit needs to be configured with the httpd port enabled, e.g.:
 
     set httpd port 2812
 
-The configured port is not important, since this plugin uses "monit status"
-for retrieving data. Thus the monit configuration is parsed implicitly.
+
 
 
 =head1 CONFIGURATION
 
-This plugin requires read access for the monit configuration.
-Thus it needs to run as root:
+By default the monit instance at localhost is queried:
 
   [monit_parser]
-  user root
+  env.port 2812
+  env.host localhost
 
 
 =head1 AUTHOR
@@ -41,9 +40,14 @@ Thus it needs to run as root:
 =cut
 """
 
-import re
-import subprocess
+import xml.dom.minidom
+import os
 import sys
+import urllib.request
+
+MONIT_XML_URL = ("http://{host}:{port}/_status?format=xml"
+                 .format(host=os.getenv("host", "localhost"),
+                         port=os.getenv("port", "2812")))
 
 
 def sanitize(s):
@@ -51,53 +55,31 @@ def sanitize(s):
     return "".join([char for char in s if char in OK_CHARS])
 
 
-def get_monit_status_lines():
-    # retrieve output
+def get_monit_status_xml():
     try:
-        output = subprocess.check_output(["monit", "status"])
-        error_message = None
-    except (OSError, subprocess.CalledProcessError) as exc:
-        error_message = "Error running monit status command: %s" % str(exc)
-    if error_message is not None:
-        raise OSError(error_message)
-    # python3: the result of command execution is bytes and needs to be converted
-    if not isinstance(output, str):
-        output = output.decode("ascii", "ignore")
-    return output.splitlines()
+        conn = urllib.request.urlopen(MONIT_XML_URL)
+    except urllib.error.URLError as exc:
+        conn = None
+    if conn is None:
+        raise RuntimeError("Failed to open monit status URL: {}".format(MONIT_XML_URL))
+    else:
+        return xml.dom.minidom.parse(conn)
 
 
 def parse_processes():
-    cur_proc = None
+    dom = get_monit_status_xml()
     procs = {}
-    for line in get_monit_status_lines():
-        m = re.match("^Process '(.*)'.*$", line)
-        if m:
-            cur_proc = sanitize(m.group(1))
-            try:
-                procs[cur_proc]
-            except KeyError:
-                procs[cur_proc] = {}
-            continue
-        m = re.match("  memory kilobytes total\s+([0-9.]+)(.*)$", line)
-        if m:
-            size, suffix = m.groups()
-            # we store memory consumption as megabytes
-            factor = {
-                "": 1024 ** -1,
-                "KB": 1024 ** -1,
-                "MB": 1024 ** 0,
-                "GB": 1024 ** 1,
-                "TB": 1024 ** 2,
-            }[suffix.strip().upper()]
-            try:
-                procs[cur_proc]["total_memory"] = float(size) * factor
-            except ValueError:
-                procs[cur_proc]["total_memory"] = "U"
-            continue
-        m = re.match("  cpu percent total\s+([.0-9]+)%.*$", line)
-        if m:
-            procs[cur_proc]["total_cpu"] = m.group(1)
-            continue
+    for item in dom.getElementsByTagName("service"):
+        if item.getAttribute("type") == "3":
+            # daemon with memory usage and CPU
+            name = item.getElementsByTagName("name")[0].childNodes[0].data
+            memory_usage = item.getElementsByTagName("memory")[0].getElementsByTagName(
+                "kilobytetotal")[0].childNodes[0].data
+            cpu_usage = item.getElementsByTagName("cpu")[0].getElementsByTagName(
+                "percenttotal")[0].childNodes[0].data
+            procs[name] = {}
+            procs[name]["total_memory"] = memory_usage
+            procs[name]["total_cpu"] = cpu_usage
     return procs
 
 
@@ -105,22 +87,22 @@ action = sys.argv[1] if (len(sys.argv) > 1) else None
 
 if action == 'autoconf':
     try:
-        get_monit_status_lines()
+        get_monit_status_xml()
         print("yes")
-    except OSError:
+    except RuntimeError:
         print("no (failed to request monit status)")
 elif action == 'config':
     procs = parse_processes()
     print('graph_title Per process stats from Monit')
-    print('graph_vlabel usage of memory [MB] or cpu [%]')
+    print('graph_vlabel usage of memory [kB] or cpu [%]')
     print('graph_category monit')
     for process in procs:
         for stat in procs[process]:
-            print("monit_%s_%s.label %s.%s" % (process, stat, process, stat))
+            print("monit_%s_%s.label %s.%s" % (sanitize(process), stat, process, stat))
             if stat == 'total_memory':
                 # the allocated memory may never be zero
-                print("monit_%s_%s.warning 1:" % (process, stat))
+                print("monit_%s_%s.warning 1:" % (sanitize(process), stat))
 else:
     for process, stats in parse_processes().items():
         for stat_key, stat_value in stats.items():
-            print("monit_%s_%s.value %s" % (process, stat_key, stat_value))
+            print("monit_%s_%s.value %s" % (sanitize(process), stat_key, stat_value))
