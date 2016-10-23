@@ -78,9 +78,21 @@ def parse_processes():
             except KeyError:
                 procs[cur_proc] = {}
             continue
-        m = re.match("  memory kilobytes total\s+([0-9]+).*$", line)
+        m = re.match("  memory kilobytes total\s+([0-9.]+)(.*)$", line)
         if m:
-            procs[cur_proc]["total_memory"] = m.group(1)
+            size, suffix = m.groups()
+            # we store memory consumption as megabytes
+            factor = {
+                "": 1024 ** -1,
+                "KB": 1024 ** -1,
+                "MB": 1024 ** 0,
+                "GB": 1024 ** 1,
+                "TB": 1024 ** 2,
+            }[suffix.strip().upper()]
+            try:
+                procs[cur_proc]["total_memory"] = float(size) * factor
+            except ValueError:
+                procs[cur_proc]["total_memory"] = "U"
             continue
         m = re.match("  cpu percent total\s+([.0-9]+)%.*$", line)
         if m:
@@ -100,7 +112,7 @@ if action == 'autoconf':
 elif action == 'config':
     procs = parse_processes()
     print('graph_title Per process stats from Monit')
-    print('graph_vlabel numbers')
+    print('graph_vlabel usage of memory [MB] or cpu [%]')
     print('graph_category monit')
     for process in procs:
         for stat in procs[process]:
