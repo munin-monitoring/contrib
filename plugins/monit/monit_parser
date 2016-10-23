@@ -1,63 +1,126 @@
 #!/usr/bin/python
-# Monit status parser plugin for munin
 
-# This is very raw, but it should work for you out of the box.  You of course
-# need to have monit configured such that the 'monit status' command works.
+"""
+=head1 NAME
 
-# Todd Troxell <ttroxell@debian.org>
+monit_parser -  Monit status parser plugin for munin.
 
-STATUS_CMD = "monit status"
 
-import sys
+=head1 APPLICABLE SYSTEMS
+
+Any system running monit.
+
+Monit needs to be configured with the httpd port enabled, e.g.:
+
+    set httpd port 2812
+
+The configured port is not important, since this plugin uses "monit status"
+for retrieving data. Thus the monit configuration is parsed implicitly.
+
+
+=head1 CONFIGURATION
+
+This plugin requires read access for the monit configuration.
+Thus it needs to run as root:
+
+  [monit_parser]
+  user root
+
+
+=head1 AUTHOR
+
+  Todd Troxell <ttroxell@debian.org>
+  Lars Kruse <devel@sumpfralle.de>
+
+
+=head1 MAGIC MARKERS
+
+  family=auto
+  capabilities=autoconf
+
+=cut
+"""
+
 import re
-from commands import getstatusoutput
+import subprocess
+import sys
+
 
 def sanitize(s):
     OK_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
-    out = str()
-    for char in s:
-        if char.lower() in OK_CHARS:
-	    out += char 
-    return out
+    return "".join([char for char in s if char in OK_CHARS])
 
-procs = dict()
 
-status, output = getstatusoutput(STATUS_CMD)
-if status != 0:
-    print "Errror running status command: %s" % (output)
-    sys.exit(status)
+def get_monit_status_lines():
+    # retrieve output
+    try:
+        output = subprocess.check_output(["monit", "status"])
+        error_message = None
+    except (OSError, subprocess.CalledProcessError) as exc:
+        error_message = "Error running monit status command: %s" % str(exc)
+    if error_message is not None:
+        raise OSError(error_message)
+    # python3: the result of command execution is bytes and needs to be converted
+    if not isinstance(output, str):
+        output = output.decode("ascii", "ignore")
+    return output.splitlines()
 
-output = output.split('\n')
-cur_proc = None
-for line in output:
-    m = re.match("^Process '(.*)'.*$", line)
-    if m:
-        cur_proc = sanitize(m.group(1))
-	try:
-	    procs[cur_proc]
-	except KeyError:
-	    procs[cur_proc] = dict()
-	continue
-    m = re.match("  memory kilobytes total\s+([0-9]+).*$", line)
-    if m:
-        procs[cur_proc]["total_memory"] = m.group(1)
-	continue
-    m = re.match("  cpu percent total\s+([.0-9]+)%.*$", line)
-    if m:
-        procs[cur_proc]["total_cpu"] = m.group(1)
-	continue
-    
-if len(sys.argv) > 1 and sys.argv[1] == 'config':
-    print 'graph_title Per process stats from Monit'
-    print 'graph_vlabel numbers'
-    print 'graph_category monit'
+
+def parse_processes():
+    cur_proc = None
+    procs = {}
+    for line in get_monit_status_lines():
+        m = re.match("^Process '(.*)'.*$", line)
+        if m:
+            cur_proc = sanitize(m.group(1))
+            try:
+                procs[cur_proc]
+            except KeyError:
+                procs[cur_proc] = {}
+            continue
+        m = re.match("  memory kilobytes total\s+([0-9.]+)(.*)$", line)
+        if m:
+            size, suffix = m.groups()
+            # we store memory consumption as megabytes
+            factor = {
+                "": 1024 ** -1,
+                "KB": 1024 ** -1,
+                "MB": 1024 ** 0,
+                "GB": 1024 ** 1,
+                "TB": 1024 ** 2,
+            }[suffix.strip().upper()]
+            try:
+                procs[cur_proc]["total_memory"] = float(size) * factor
+            except ValueError:
+                procs[cur_proc]["total_memory"] = "U"
+            continue
+        m = re.match("  cpu percent total\s+([.0-9]+)%.*$", line)
+        if m:
+            procs[cur_proc]["total_cpu"] = m.group(1)
+            continue
+    return procs
+
+
+action = sys.argv[1] if (len(sys.argv) > 1) else None
+
+if action == 'autoconf':
+    try:
+        get_monit_status_lines()
+        print("yes")
+    except OSError:
+        print("no (failed to request monit status)")
+elif action == 'config':
+    procs = parse_processes()
+    print('graph_title Per process stats from Monit')
+    print('graph_vlabel usage of memory [MB] or cpu [%]')
+    print('graph_category monit')
     for process in procs:
         for stat in procs[process]:
-            print "monit_%s_%s.label %s.%s" % (process, stat, process, stat)
+            print("monit_%s_%s.label %s.%s" % (process, stat, process, stat))
             if stat == 'total_memory':
-            	print "monit_%s_%s.warning 1:" % (process, stat)
-    sys.exit(0)
-
-for process in procs:
-    for stat in procs[process]:
-        print "monit_%s_%s.value %s" % (process, stat, procs[process][stat])
+                # the allocated memory may never be zero
+                print("monit_%s_%s.warning 1:" % (process, stat))
+else:
+    for process, stats in parse_processes().items():
+        for stat_key, stat_value in stats.items():
+            print("monit_%s_%s.value %s" % (process, stat_key, stat_value))
