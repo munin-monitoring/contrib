@@ -41,7 +41,6 @@ Thus it needs to run as root:
 =cut
 """
 
-import os
 import re
 import subprocess
 import sys
@@ -49,44 +48,57 @@ import sys
 
 def sanitize(s):
     OK_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
-    out = str()
-    for char in s:
-        if char.lower() in OK_CHARS:
-            out += char
-    return out
+    return "".join([char for char in s if char in OK_CHARS])
 
-procs = dict()
 
-try:
-    output = subprocess.check_output(STATUS_CMD.split())
-except (OSError, subprocess.CalledProcessError) as exc:
-    sys.stderr.write("Error running monit status command: %s%s" % (exc, os.linesep))
-    sys.exit(1)
+def get_monit_status_lines():
+    # retrieve output
+    try:
+        output = subprocess.check_output(["monit", "status"])
+        error_message = None
+    except (OSError, subprocess.CalledProcessError) as exc:
+        error_message = "Error running monit status command: %s" % str(exc)
+    if error_message is not None:
+        raise OSError(error_message)
+    # python3: the result of command execution is bytes and needs to be converted
+    if not isinstance(output, str):
+        output = output.decode("ascii", "ignore")
+    return output.splitlines()
 
-# python3: the result of command execution is bytes and needs to be converted
-if not isinstance(output, str):
-    output = output.decode("ascii", "ignore")
-output = output.splitlines()
-cur_proc = None
-for line in output:
-    m = re.match("^Process '(.*)'.*$", line)
-    if m:
-        cur_proc = sanitize(m.group(1))
-        try:
-            procs[cur_proc]
-        except KeyError:
-            procs[cur_proc] = dict()
-        continue
-    m = re.match("  memory kilobytes total\s+([0-9]+).*$", line)
-    if m:
-        procs[cur_proc]["total_memory"] = m.group(1)
-        continue
-    m = re.match("  cpu percent total\s+([.0-9]+)%.*$", line)
-    if m:
-        procs[cur_proc]["total_cpu"] = m.group(1)
-        continue
 
-if len(sys.argv) > 1 and sys.argv[1] == 'config':
+def parse_processes():
+    cur_proc = None
+    procs = {}
+    for line in get_monit_status_lines():
+        m = re.match("^Process '(.*)'.*$", line)
+        if m:
+            cur_proc = sanitize(m.group(1))
+            try:
+                procs[cur_proc]
+            except KeyError:
+                procs[cur_proc] = {}
+            continue
+        m = re.match("  memory kilobytes total\s+([0-9]+).*$", line)
+        if m:
+            procs[cur_proc]["total_memory"] = m.group(1)
+            continue
+        m = re.match("  cpu percent total\s+([.0-9]+)%.*$", line)
+        if m:
+            procs[cur_proc]["total_cpu"] = m.group(1)
+            continue
+    return procs
+
+
+action = sys.argv[1] if (len(sys.argv) > 1) else None
+
+if action == 'autoconf':
+    try:
+        get_monit_status_lines()
+        print("yes")
+    except OSError:
+        print("no (failed to request monit status)")
+elif action == 'config':
+    procs = parse_processes()
     print('graph_title Per process stats from Monit')
     print('graph_vlabel numbers')
     print('graph_category monit')
@@ -94,9 +106,9 @@ if len(sys.argv) > 1 and sys.argv[1] == 'config':
         for stat in procs[process]:
             print("monit_%s_%s.label %s.%s" % (process, stat, process, stat))
             if stat == 'total_memory':
-                    print("monit_%s_%s.warning 1:" % (process, stat))
-    sys.exit(0)
-
-for process in procs:
-    for stat in procs[process]:
-        print("monit_%s_%s.value %s" % (process, stat, procs[process][stat]))
+                # the allocated memory may never be zero
+                print("monit_%s_%s.warning 1:" % (process, stat))
+else:
+    for process, stats in parse_processes().items():
+        for stat_key, stat_value in stats.items():
+            print("monit_%s_%s.value %s" % (process, stat_key, stat_value))
