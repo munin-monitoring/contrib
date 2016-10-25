@@ -17,7 +17,7 @@ None needed.
 
 =head1 AUTHOR
 
-Olivier Mehani
+Olivier Mehani <shtrom+munin@ssji.net>
 
 =head1 LICENSE
 
@@ -26,7 +26,7 @@ GPLv2
 =head1 MAGIC MARKERS
 
  #%# family=auto
- #%# capabilities=autoconf suggest
+ #%# capabilities=autoconf
 
 =cut
 
@@ -41,33 +41,22 @@ autoconf() {
 	       systemctl  --state=failed --no-pager --no-legend	>/dev/null 2>&1 && echo yes || echo "no (No systemctl or error running it)"
 }
 
-suggest() {
-	echo "units"
-}
-
 config () {
-	case $1 in
-		"units")
-			cat << EOF
+	cat << EOF
 graph_title Systemd units state
 graph_args -l 0
 graph_category system
 graph_scale no
 graph_vlabel units
 EOF
-for state in $states; do
-	echo "$state.label $state"
-	echo "$state.draw AREASTACK"
-	if [ $state = failed ]; then
-		echo "$state.warning 0"
-		echo "$state.critical 10"
-	fi
-done
-			;;
-		"*")
-			echo "$0: unknown mode '$1'" >&2
-			exit 1
-	esac
+	for state in $states; do
+		echo "$state.label $state"
+		echo "$state.draw AREASTACK"
+		if [ $state = failed ]; then
+			echo "$state.warning 0"
+			echo "$state.critical 10"
+		fi
+	done
 }
 
 fetch () {
@@ -98,9 +87,6 @@ mode=units
 case $1 in
 	"autoconf")
 		autoconf
-		;;
-	"suggest")
-		suggest
 		;;
 	"config")
 		config $mode
