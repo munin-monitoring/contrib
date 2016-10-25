@@ -8,8 +8,24 @@ if [ "$1" = "config" ]; then
 	echo "graph_vlabel Seed ratio %"
 	echo "graph_category torrent"
 	echo "graph_info This plugin shows your transmission ratios per torrent"
-	transmission-remote -n "$user:$pass" -l | gawk -f /usr/share/munin/plugins/tr_ratios_labels | iconv -f utf-8 -t ascii//translit
+	transmission-remote -n "$user:$pass" -l | awk '
+		BEGIN { FIELDWIDTHS = "7 4 13 10 7 9 7 13 40" }
+		NR > 1 {
+			split($1,torrentid," ")
+			if (torrentid[1] != "Sum:") {
+				print "ID" torrentid[1] ".label " $9
+			}
+		}' | iconv -f utf-8 -t ascii//translit
         exit 0
 fi
 
-transmission-remote -n "$user:$pass" -l | gawk -f /usr/share/munin/plugins/tr_ratios_data
+transmission-remote -n "$user:$pass" -l | awk '
+	BEGIN { FIELDWIDTHS = "7 4 13 10 7 9 7 13 40" }
+	NR > 1 {
+		split($1,torrentid," ")
+		if (torrentid[1] != "Sum:") {
+			split($7,ratio," ")
+			ratio[1] = ratio[1] * 100
+			print "ID" torrentid[1] ".value " ratio[1]
+		}
+	}'
