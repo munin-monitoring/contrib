@@ -1,0 +1,84 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+w1_ - Plugin to monitor 1-wire temperature sensors (DS1820)
+
+=head1 CONFIGURATION
+
+The following environment variables are used by this plugin
+
+ sensorid     - Sensor to check. By default taken from command name.
+ t_warn       - Warning limit for nagios notification
+ t_crit       - Critical limit for nagios notification
+
+
+=head1 AUTHOR
+
+Copyright (C) 2016 Roland Steinbach
+
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; version 2 dated June, 1991.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+02110-1301 USA.
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+case $0 in
+    *w1_*)
+        sensor_id=${0##*/w1_}
+        ;;
+esac
+
+if [ "$1" = "suggest" ]; then
+    if [ -r /sys/bus/w1/devices ]; then
+        ls /sys/bus/w1/devices|head -n -1
+    fi
+    exit 0
+fi
+
+if [ "$1" = "autoconf" ]; then
+        if [ -r /sys/bus/w1/devices ]; then
+            echo yes
+            exit 0
+        else
+            echo "no (/sys/bus/w1/devices not found)"
+            exit 0
+        fi
+fi
+
+if [ "$1" = "config" ]; then
+        echo graph_title Temperature Sensor $sensor_id
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_vlabel temperature (°C)'
+        echo 'graph_category temperature'
+        echo 'graph_info This graph shows 1-wire sensor temperature.'
+        echo "w1.label $sensor_id"
+        echo "w1.info Temperature at $sensor_id."
+        print_warning w1
+        print_critical w1
+        exit 0
+fi
+
+
+sed  -n '/t=/ s/.*t=//p' /sys/bus/w1/devices/$sensor_id/w1_slave | perl -e '$l=<STDIN>;print "w1.value ", $l/1000 , "\n";'
