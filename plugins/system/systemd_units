@@ -52,7 +52,7 @@ EOF
 	for state in $states; do
 		echo "$state.label $state"
 		echo "$state.draw AREASTACK"
-		if [ $state = failed ]; then
+		if [ "$state" = "failed" ]; then
 			echo "$state.warning 0"
 			echo "$state.critical 10"
 		fi
@@ -60,38 +60,28 @@ EOF
 }
 
 fetch () {
-	case $1 in
-		"units")
-			tmp=`mktemp -t munin-systemd.XXXXXX`
-			systemctl --no-pager --no-legend --all | awk '{print $1, $3}' > $tmp
-			for state in \
-				$states ; do
-				echo -n "$state.value "
-				grep $state$ $tmp | wc -l
-				extinfo=`grep $state$ $tmp | cut -d " " -f 1`
-				if [ "$extinfo" ]; then
-					echo "$state.extinfo" $extinfo
-				fi
-			done
-			rm $tmp
-			;;
-		"*")
-			echo "$0: unknown mode '$1'" >&2
-			exit 1
-	esac
+	tmp=$(mktemp -t munin-systemd_units.XXXXXX)
+	trap "rm \"$tmp\"" EXIT
+	systemctl --no-pager --no-legend --all | awk '{print $1, $3}' > "$tmp"
+	for state in \
+		$states ; do
+	echo -n "$state.value "
+	grep -c "$state$" "$tmp"
+	extinfo=$(grep "$state$" "$tmp" | cut -d " " -f 1)
+	if [ -n "$extinfo" ]; then
+		echo "$state.extinfo" $extinfo
+	fi
+done
 }
-
-# mode=`echo $0 | sed 's/.*_//'`
-mode=units
 
 case $1 in
 	"autoconf")
 		autoconf
 		;;
 	"config")
-		config $mode
+		config
 		;;
 	*)
-		fetch $mode
+		fetch
 		;;
 esac
