@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 : << =cut
 
@@ -18,25 +18,35 @@ Useful for things such as lists (white, black, user, ...).
 
 =head1 AUTHOR
 
-Olivier Mehani (based on disk/log_sizes)
+Olivier Mehani <shtrom+munin@ssji.net> (based on disk/log_sizes)
 
 =head1 LICENSE
 
 GPLv2
 
+=head1 MAGIC MARKERS
+
+  #%# family=manual
+
 =cut
 
-#NAME=`echo $0 | sed 's/.*_//'`
-NAME=${0#*_}
+# needs shellcheck -x /usr/share/munin/plugins/plugin.sh
+# shellcheck source=/usr/share/munin/plugins/plugin.sh
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+NAME=$(echo "$0" | sed 's/.*_//')
 TITLE=${title:-File lengths for $NAME}
 CATEGORY=${category:-system}
 
 FILES=${files:-/var/log/messages}
-FILES=$(echo $(ls $FILES))
+# we want globbing to happen here
+# shellcheck disable=SC2116 disable=SC2086
+FILES=$(echo $FILES)
 
 
 if [ "$1" = "config" ] ; then
-	if [ ${logarithmic} = 1 ]; then
+	# shellcheck disable=SC2154
+	if [ "${logarithmic}" = "1" ]; then
 		graph_args="-o"
 	else
 		graph_args="-l 0"
@@ -50,16 +60,15 @@ graph_vlabel length (lines)
 EOF
 
 	for F in $FILES; do
-		MF=`echo $F | sed 's/[-\/\.]/_/g'`
-		echo "$MF.label ${F##*/}"
+		MF=$(clean_fieldname "$F")
+		BF=$(basename "$F")
+		echo "$MF.label ${BF}"
 	done
 
 else
 	for F in $FILES; do
-		MF=`echo $F | sed 's/[-\/\.]/_/g'`
-		echo -n "$MF.value "
-		cat $F | wc -l
-		echo -n "$MF.extinfo "
-		stat --printf="%sB\n" $F
+		MF=$(echo "$F" | sed 's/[-\/\.]/_/g')
+		echo "$MF.value $(wc -l < "$F")"
+		echo "$MF.extinfo $(stat --printf="%sB\n" "$F")"
 	done
 fi
