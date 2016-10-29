@@ -1,36 +1,57 @@
 #!/bin/bash
-#
-# Plugin to monitor the number of orphaned packages on the
-# system (using deborphan). Might work on section distib, who knows...
-#
-# Based on the debsecan plugin by Nicolas Bouthors. 2016-09-02
-#
-# Olivie Mehani <shtrom@ssji.net>
-#
-# Licence : GPLv2
-#
-#%# family=auto
-#%# capabilities=autoconf
+
+: << =cut
+
+=head1 NAME
+
+deborphan - Monitor orphaned Debian packages
+
+=head1 APPLICABLE SYSTEMS
+
+Debian-ish systems with deborphan installed.
+
+=head1 CONFIGURATION
+
+None needed.
+
+=head1 AUTHOR
+
+Olivier Mehani <shtrom+munin@ssji.net>
+Based on the debsecan plugin by Nicolas Bouthors. 2016-09-02
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=cut
 
 # Auto enable if we have deborphan only
 if [ "$1" = "autoconf" ] ; then
-  if [ -x /usr/bin/deborphan ]; then
+  if which deborphan >/dev/null; then
     echo yes
   else
-    echo no
+    echo "no (deborphan is missing)"
   fi
   exit 0
 fi
 
 # Fail if we don't have deborphan
-if [ ! -x /usr/bin/deborphan ]; then
+if ! which deborphan >/dev/null; then
+  echo "deborphan is missing" >&2
   exit 1
 fi
 
-OUT=`mktemp -t deborphan.XXXXXX`
-deborphan --show-section --guess-all | sed 's/\//_/' | sort > ${OUT}
+OUT=$(mktemp -t munin-deborphan.XXXXXX)
+TMPFILES=$OUT
+trap 'rm -f $TMPFILES' EXIT
+deborphan --show-section --guess-all | sed 's/\//_/' | sort > "${OUT}"
 
-CATEGORIES="$(sed 's/ .*//' ${OUT} | uniq)"
+CATEGORIES="$(awk '{print $1}' "${OUT}" | uniq)"
 
 if [ "$1" = "config" ]; then
   cat <<EOF
@@ -53,12 +74,12 @@ EOF
 
 else
   for cat in ${CATEGORIES}; do
-    TMP=`mktemp -t deborphan.XXXXXX`
-    sed -n "s/${cat} *//p" ${OUT} > ${TMP}
-    echo "${cat}.value `cat ${TMP} | wc -l`"
-    echo "${cat}.extinfo `echo $(cat ${TMP})`"
-    rm ${TMP}
+    TMP=$(mktemp -t munin-deborphan.XXXXXX)
+    TMPFILES="${TMPFILES} $TMP"
+    sed -n "s/${cat} \+//p" "${OUT}" > "${TMP}"
+    echo "${cat}.value $(wc -l < "${TMP}")"
+    # shellcheck disable=SC2005 disable=SC2046
+    # echo is not useless here: we want everything on one line
+    echo "${cat}.extinfo $(echo $(cat "${TMP}"))"
   done
 fi
-
-rm -f ${OUT}
