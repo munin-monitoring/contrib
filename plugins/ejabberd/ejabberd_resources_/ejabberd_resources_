@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-# ejabberd_resources_ revision 4 (Mar 2015)
-#
 # Tested with ejabberd 2.1.x
 #
 # This plugin is capable to show:
@@ -206,6 +204,20 @@ function ejabberd_report_mnesia_recs() {
 	ejabberd_report_mnesia "$1" recs
 }
 
+function ejabberd_report_process_links() {
+	ejabberd_exec "
+		lists:filtermap(
+			fun(Name) ->
+				case whereis(Name) of
+					Pid when is_pid(Pid) ->
+						{links, Links} = erlang:process_info(Pid, links),
+						{true, {Name, length(Links)}};
+					_ ->
+						false
+			end,
+			registered())"
+}
+
 function open_files_counter_util() {
 	if hash lsof &>/dev/null; then
 		echo lsof
@@ -281,6 +293,7 @@ case $1 in
 memory
 processes
 ports
+process_links
 online_users
 registered_users
 mnesia_recs

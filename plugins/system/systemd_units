@@ -1,0 +1,84 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+systemd - Plugin to monitor systemd units state
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems with systemd installed.
+
+=head1 CONFIGURATION
+
+None needed.
+
+=head1 AUTHOR
+
+Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+states="active \
+	reloading \
+	inactive \
+	failed \
+	activating \
+	deactivating"
+autoconf() {
+	which systemctl >/dev/null && \
+	       systemctl  --state=failed --no-pager --no-legend	>/dev/null 2>&1 && echo yes || echo "no (No systemctl or error running it)"
+}
+
+config () {
+	cat << EOF
+graph_title Systemd units state
+graph_args -l 0
+graph_category system
+graph_scale no
+graph_vlabel units
+EOF
+	for state in $states; do
+		echo "$state.label $state"
+		echo "$state.draw AREASTACK"
+		if [ "$state" = "failed" ]; then
+			echo "$state.warning 0"
+			echo "$state.critical 10"
+		fi
+	done
+}
+
+fetch () {
+	tmp=$(systemctl --no-pager --no-legend --all | awk '{print $1, $3}')
+	for state in $states ; do
+		count=$(echo "$tmp" | grep -c "$state$")
+		echo "$state.value $count"
+		extinfo=$(echo "$tmp" | grep "$state$" | cut -d " " -f 1 | tr '\n' ' ')
+		if [ -n "$extinfo" ]; then
+			echo "$state.extinfo" "$extinfo"
+		fi
+	done
+}
+
+case $1 in
+	"autoconf")
+		autoconf
+		;;
+	"config")
+		config
+		;;
+	*)
+		fetch
+		;;
+esac

@@ -28,7 +28,12 @@ Copyright (C) 2013 Patrick Domack <patrickdk@patrickdk.com>
 
 . $MUNIN_LIBDIR/plugins/plugin.sh
 
-SITE=${0##*ssl_}
+ARGS=${0##*ssl_}
+SITE=${ARGS/_*/}
+PORT=${ARGS##*_}
+if [ "$PORT" = "$SITE" ]; then
+	PORT=443
+fi
 
 case $1 in
     config)
@@ -46,7 +51,7 @@ case $1 in
         ;;
 esac
 
-cert=$(echo "" | openssl s_client -CApath /etc/ssl/certs -servername "${SITE}" -connect "${SITE}:443" 2>/dev/null);
+cert=$(echo "" | openssl s_client -CApath /etc/ssl/certs -servername "${SITE}" -connect "${SITE}:${PORT}" 2>/dev/null);
 
 if [[ "${cert}" = *"-----BEGIN CERTIFICATE-----"* ]]; then
   echo "${cert}" | openssl x509 -noout -enddate | awk -F= 'BEGIN { split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", month, " "); for (i=1; i<=12; i++) mdigit[month[i]] = i; } /notAfter/ { split($0,a,"="); split(a[2],b," "); split(b[3],time,":"); datetime=b[4] " " mdigit[b[1]] " " b[2] " " time[1] " " time[2] " " time[3]; days=(mktime(datetime)-systime())/86400; print "expire.value " days; }'

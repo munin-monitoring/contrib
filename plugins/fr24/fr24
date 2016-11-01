@@ -1,0 +1,49 @@
+#!/bin/bash
+#
+: <<=cut
+
+=head1 NAME
+
+fr24 - Plugin to monitor your flightradar24.com feeder.
+
+=head1 APPLICABLE SYSTEMS
+
+All Linux systems.
+
+=head1 CONFIGURATION
+
+The following is default configuration:
+
+  [fr24]
+        env.MONITOR http://192.168.1.1:8754/monitor.json
+
+Set the right URL according to your FR24 Feeder.
+
+=head1 VERSION
+
+  1
+
+=head1 AUTHOR
+
+Benoît.S « Benpro » <benpro@benpro.fr>
+
+=head1 LICENSE
+
+WTFPL
+
+=cut
+
+MONITOR=${MONITOR:-http://192.168.1.1:8754/monitor.json}
+
+case $1 in
+    config)
+        echo "graph_title Number of planes in sight
+graph_info Number of planes in sight with DVB-T receiver.
+graph_category fr24
+graph_vlabel Number of planes
+planes.label planes"
+        exit 0;;
+esac
+
+planes=$(curl -qs "$MONITOR" | grep -Eo '"d11_map_size":"[0-9]+"' | grep -Eo '[0-9]+' | tail -1)
+echo "planes.value $planes"

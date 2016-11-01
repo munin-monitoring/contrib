@@ -13,13 +13,23 @@
 # $Log$
 #
 #%# family=auto
-#%# capabilities=autoconf
+#%# capabilities=autoconf suggest
 
-ATTRIBUTE=`basename $0 | sed 's/^openvz_//g'`
+ATTRIBUTE=$(basename "$0" | sed 's/^openvz_//g')
 
 
 if [ "$1" = "autoconf" ]; then
-        echo yes
+        if which vzlist >/dev/null; then
+                echo yes
+        else
+                echo "no (missing 'vzlist' executable)"
+        fi
+        exit 0
+fi
+
+if [ "$1" = "suggest" ]; then
+        echo "laverage"
+        echo "status"
         exit 0
 fi
 
@@ -30,9 +40,9 @@ if [ "$1" = "config" ]; then
         echo "graph_vlabel $ATTRIBUTE Value"
         echo "graph_category openvz"
         echo "graph_info This graph shows OpenVZ: $ATTRIBUTE"
-        vzlist -a -H -o hostname | awk '{gsub(/\./,"_",$1)
-        print("'$ATTRIBUTE'"$1".label "$1"\n" \
-        "'$ATTRIBUTE'"$1".info '$ATTRIBUTE' for VE"$1)}'
+        vzlist -a -H --no-trim -o hostname | awk '{gsub(/\./,"_",$1)
+                print("'$ATTRIBUTE'"$1".label "$1"\n" \
+                "'$ATTRIBUTE'"$1".info '$ATTRIBUTE' for VE"$1)}'
         exit 0
 fi
 
@@ -41,8 +51,7 @@ filter() { cat; }
 [ "$ATTRIBUTE" = 'status' ] && filter() { sed -e 's/running/10/g;s/stopped/0/g'; }
 #TODO: filter for uptime
 
-vzlist -a -H -o hostname,$ATTRIBUTE | filter | awk '{gsub(/\./,"_",$1)
+vzlist -a -H --no-trim -o "hostname,$ATTRIBUTE" | filter | awk '{gsub(/\./,"_",$1)
          print("'$ATTRIBUTE'"$1".value "$2)}'
 
 exit 0
-

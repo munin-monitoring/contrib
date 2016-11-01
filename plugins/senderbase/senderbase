@@ -1,0 +1,93 @@
+#!/bin/sh
+
+: << =cut
+
+=head1 NAME
+
+senderbase - Gives the current SenderBase reputation for a mail host.
+
+SenderBase is a mail server reputation service run by Cisco.  It's
+basically a measure of how likely or unlikely they think it is for the
+server in question to be sending spam, rated on a scale of -10 (near-100%
+chance of spam) to 10 (near-0% chance of spam).  The SenderBase score for
+a server is one of several criteria that may be used when doing spam
+filtering; consequently, it's useful for the operator of a mail server to
+track their current reputation score.
+
+=head1 CONFIGURATION
+
+By default, the script will use the first IP address returned by
+C<hostname -I>.  If that's not the right address to use, set the
+C<ip_address> environment variable to the appropriate value.  (Note that
+if a host has multiple IP addresses, there's no guaranteed ordering for
+C<hostname -I>, so you should set the address explicitly in that case.)
+
+ [senderbase]
+   env.ip_address 8.8.8.8
+
+=head1 AUTHOR
+
+Phil! Gold <phil_g@pobox.com>
+
+=head1 LICENSE
+
+This plugin is made available under a CC0 waiver:
+
+  https://creativecommons.org/publicdomain/zero/1.0/
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+if which dig >/dev/null; then
+    query_program=dig
+    do_query () {
+        hostname=$1
+        dig +short $hostname TXT | sed 's/"//g' | head -1
+    }
+elif which host >/dev/null; then
+    query_program=host
+    do_query () {
+        hostname=$1
+        host -t TXT $hostname | grep -m 1 'descriptive text' | cut -d\" -f2
+    }
+else
+    query_program=
+    do_query () {
+        true
+    }
+fi
+
+real_ip_address="${ip_address:-$(hostname -I | awk '{print $1}')}"
+ip_reversed="$(echo $real_ip_address | sed -re 's/^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$/\4.\3.\2.\1/')"
+query_host="${ip_reversed}.rf.senderbase.org"
+
+if [ "$1" = "autoconf" ]; then
+    if [ -z "$query_program" ]; then
+        echo 'no (No "dig" or "host" executable found.)'
+    elif [ -z "$(do_query "$query_host")" ]; then
+        echo "no (No SenderBase reputation for IP address ${ip_address}.)"
+    else
+        echo 'yes'
+    fi
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    cat <<EOF
+graph_category mail
+graph_title SenderBase Reputation for $real_ip_address
+graph_info Current reputation from senderbase.org.  Ranges from -10 (very poor) through 0 (neutral) to 10 (very good).
+graph_args --lower-limit -10 --upper-limit 10
+reputation.label Reputation
+reputation.warning 0:
+reputation.critical -5:
+EOF
+    exit 0
+fi
+
+value="$(do_query "$query_host")"
+echo reputation.value "${value:-U}"
