@@ -1,5 +1,4 @@
-#!/bin/bash
-# -*- sh -*-
+#!/bin/sh
 
 : << =cut
 
@@ -33,16 +32,12 @@ Unknown license
 
 =cut
 
-. $MUNIN_LIBDIR/plugins/plugin.sh
+. /usr/libexec/munin/plugins/plugin.sh
 
-guest_names=`lxc-ls | sort -u`
-for guest in $guest_names; do
- if [ `lxc-info -n $guest 2>&1 | grep RUNNING | wc -l` -ne 0 ] ; then
-  active="$active $guest"
- fi
+#don't use lxc-ls + ls-info + RUNNING: huge performance improvements 8s -> 0.01s
+for guest in `find /sys/fs/cgroup/cpuacct/lxc/ -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | sort -u`; do
+    guest_names="$guest_names $guest"
 done
-guest_names="$active"
-                
 
 f_comm='lxc-cgroup  '
 
@@ -68,7 +63,7 @@ if [ "$1" = "config" ]; then
   do
    guest="$(clean_fieldname $guest_name)"
 
-   echo 'mem_inactive_'$guest'.label '$guest_name': Inactive'
+   echo 'mem_inactive_'$guest'.label '$guest_name
    echo 'mem_inactive_'$guest'.type GAUGE'
 
   done
@@ -80,9 +75,7 @@ fi
  for guest_name in $guest_names;
   do
    guest="$(clean_fieldname $guest_name)"
-
-   tmp_g=`$f_comm -n $guest_name memory.stat | grep total_inactive_anon`
-   tmp_v=`echo $tmp_g | awk '{print($2)}'`
-   echo  'mem_inactive_'$guest'.value '$tmp_v
+  echo -n 'mem_inactive_'$guest'.value '
+  cat /sys/fs/cgroup/memory/lxc/$guest_name/memory.stat | grep total_inactive_anon | awk '{print($2)}'
 
   done

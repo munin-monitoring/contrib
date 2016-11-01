@@ -44,15 +44,12 @@ alpha_one_x86   alpha_one_x86@firt-world.info
 
 =cut
 
-. $MUNIN_LIBDIR/plugins/plugin.sh
+. /usr/libexec/munin/plugins/plugin.sh
 
-guest_names=`lxc-ls | sort -u`
-for guest in $guest_names; do
- if [ `lxc-info -n $guest 2>&1 | grep RUNNING | wc -l` -ne 0 ] ; then
-  active="$active $guest"
- fi
+#don't use lxc-ls + ls-info + RUNNING: huge performance improvements 8s -> 0.01s
+for guest in `find /sys/fs/cgroup/cpuacct/lxc/ -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | sort -u`; do
+    guest_names="$guest_names $guest"
 done
-guest_names="$active"
 
 lxcpath=${lxcpath:-/var/lib/lxc}
 
@@ -78,22 +75,25 @@ if [ "$1" = "config" ]; then
     echo "graph_category lxc"
     echo "graph_info This graph shows the traffic of active LXC containers."
     
-    for guestname in $guest_names; do
-        guest=$(clean_fieldname $guestname)
+for guest in $guest_names; do
+    guestclean=$(clean_fieldname $guest)
         bps="1000000000"
         
-        echo "${guest}_down.label $guestname"
-        echo "${guest}_down.type DERIVE"
-        echo "${guest}_down.graph no"
-        echo "${guest}_down.cdef ${guest}_down,8,*"
-        echo "${guest}_down.min 0"
-        echo "${guest}_down.max $bps"
-        echo "${guest}_up.label $guestname"
-        echo "${guest}_up.type DERIVE"
-        echo "${guest}_up.negative ${guest}_down"
-        echo "${guest}_up.cdef ${guest}_up,8,*"
-        echo "${guest}_up.min 0"
-        echo "${guest}_up.max $bps"
+        if [ `lxc-info -H -S -n ${guest} 2> /dev/null | grep -F 'RX bytes' | wc -l` -ne 0 ]
+        then
+        echo "${guestclean}_down.label ${guest}"
+        echo "${guestclean}_down.type DERIVE"
+        echo "${guestclean}_down.graph no"
+        echo "${guestclean}_down.cdef ${guestclean}_down,8,*"
+        echo "${guestclean}_down.min 0"
+        echo "${guestclean}_down.max ${bps}"
+        echo "${guestclean}_up.label ${guest}"
+        echo "${guestclean}_up.type DERIVE"
+        echo "${guestclean}_up.negative ${guestclean}_down"
+        echo "${guestclean}_up.cdef ${guestclean}_up,8,*"
+        echo "${guestclean}_up.min 0"
+        echo "${guestclean}_up.max ${bps}"
+        fi
    done
    exit 0
 fi
@@ -101,8 +101,11 @@ fi
 
 for guest in $guest_names; do
     guestclean=$(clean_fieldname $guest)
+        if [ `lxc-info -H -S -n ${guest} 2> /dev/null | grep -F 'RX bytes' | wc -l` -ne 0 ]
+        then
     echo -n "${guestclean}_down.value "
-    lxc-info -H -n ${guest} | grep -F 'RX bytes' | grep -oE "[[:digit:]]{1,}"
+    lxc-info -H -S -n ${guest} | grep -F 'RX bytes' | grep -oE "[[:digit:]]{1,}"
     echo -n "${guestclean}_up.value "
-    lxc-info -H -n ${guest} | grep -F 'TX bytes' | grep -oE "[[:digit:]]{1,}"
+    lxc-info -H -S -n ${guest} | grep -F 'TX bytes' | grep -oE "[[:digit:]]{1,}"
+        fi
 done

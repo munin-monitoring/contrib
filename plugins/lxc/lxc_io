@@ -43,15 +43,12 @@ alpha_one_x86   alpha_one_x86@first-world.info
 
 =cut
 
-. $MUNIN_LIBDIR/plugins/plugin.sh
+. /usr/libexec/munin/plugins/plugin.sh
 
-guest_names=`lxc-ls | sort -u`
-for guest in $guest_names; do
- if [ `lxc-info -n $guest 2>&1 | grep RUNNING | wc -l` -ne 0 ] ; then
-  active="$active $guest"
- fi
+#don't use lxc-ls + ls-info + RUNNING: huge performance improvements 8s -> 0.01s
+for guest in `find /sys/fs/cgroup/cpuacct/lxc/ -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | sort -u`; do
+    guest_names="$guest_names $guest"
 done
-guest_names="$active"
 
 lxcpath=${lxcpath:-/var/lib/lxc}
 
@@ -92,5 +89,10 @@ fi
 for guest in $guest_names; do
     guestclean=$(clean_fieldname $guest)
     echo -n "${guestclean}_io.value "
-    lxc-info -H -n ${guest} | grep -F 'BlkIO use' | grep -oE "[[:digit:]]{1,}"
+    blkiotototal=0
+    for diskio in `cat /sys/fs/cgroup/blkio/lxc/$guest/blkio.sectors | cut -d' ' -f2`
+    do
+	blkiotototal=$((blkiotototal+${diskio}))
+    done
+    echo ${blkiotototal}
 done
