@@ -25,6 +25,9 @@ SYS_LOG=${logfile:-/var/log/syslog}
 SYS_LOG2=${logfile2:-/var/log/syslog.0}
 PFLOGSUMM=${pflogsumm:-pflogsumm.pl}
 
+# Fields (Array to avoid code duplication)
+declare -a FIELDS_ARR=("received" "delivered" "forwarded" "deferred" "bounced" "rejected" "held" "discarded")
+
 #
 # Autoconf Section
 #
@@ -57,31 +60,17 @@ if [ "$1" = 'config' ]; then
 	echo 'graph_scale no'
 	echo 'graph_period minute'
 	echo 'graph_total Total'
-	echo 'received.label received'
-	echo 'received.type DERIVE'
-	echo 'received.min 0'
-	echo 'delivered.label delivered'
-	echo 'delivered.type DERIVE'
-	echo 'delivered.min 0'
-	echo 'forwarded.label forwarded'
-	echo 'forwarded.type DERIVE'
-	echo 'forwarded.min 0'
-	echo 'deferred.label deferred'
-	echo 'deferred.type DERIVE'
-	echo 'deferred.min 0'
-	echo 'bounced.label bounced'
-	echo 'bounced.type DERIVE'
-	echo 'bounced.min 0'
-	echo 'rejected.label rejected'
-	echo 'rejected.type DERIVE'
-	echo 'rejected.min 0'
-	echo 'held.label held'
-	echo 'held.type DERIVE'
-	echo 'held.min 0'
-	echo 'discarded.label discarded'
-	echo 'discarded.type DERIVE'
-	echo 'discarded.min 0'
-	exit 0;
+
+	# Generate config for each field
+	for i in "${FIELDS_ARR[@]}"
+	do
+		echo "${i}.label ${i}"
+		echo "${i}.type DERIVE"
+		echo "${i}.min 0"
+		echo "${i}.draw AREA"
+	done
+
+	exit 0
 fi
 
 #
@@ -98,7 +87,7 @@ TMP_RAW=$("${PFLOGSUMM}" -d today --detail 0 --zero-fill "${SYS_LOG}" "${SYS_LOG
 # Return -1 if any error occurs
 #
 parseValue() {
-	TMP_RETURN=$(echo "${TMP_RAW}" | grep -Ei '^[[:space:]]+[[:digit:]]+[[:space:]]+'"${1}"'.*$' | grep -oEi '[[:digit:]]+[[:space:]]+' | sed 's: ::g')
+	TMP_RETURN=$(echo "${TMP_RAW}" | grep -Ei '^[[:space:]]+[[:digit:]]+[[:space:]]+'"${1}"'.*$' | grep -oEi '[[:digit:]]+[[:space:]]+' | head -n 1 | sed 's: ::g')
 	if [[ -z "${TMP_RETURN}" ]]
 		then
 		echo -1
@@ -108,19 +97,8 @@ parseValue() {
 }
 
 # Print results
-printf 'received.value '
-parseValue 'received'
-printf 'delivered.value '
-parseValue 'delivered'
-printf 'forwarded.value '
-parseValue 'forwarded'
-printf 'deferred.value '
-parseValue 'deferred'
-printf 'bounced.value '
-parseValue 'bounced'
-printf 'rejected.value '
-parseValue 'rejected'
-printf 'held.value '
-parseValue 'held'
-printf 'discarded.value '
-parseValue 'discarded'
+for i in "${FIELDS_ARR[@]}"
+do
+	printf "${i}.value "
+	parseValue "${i}"
+done
