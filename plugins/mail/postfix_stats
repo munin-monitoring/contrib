@@ -24,6 +24,31 @@ SYS_LOG=${logfile:-/var/log/syslog}
 SYS_LOG2=${logfile2:-/var/log/syslog.0}
 PFLOGSUMM=${pflogsumm:-pflogsumm.pl}
 
+#
+# Autoconf Section
+#
+if [ "$1" = "autoconf" ]; then
+	# Try to find pflogsumm with default name
+	PFLOG_EXIST=$(command -v pflogsumm.pl)
+
+	# Try to find pflogsumm without any extension
+	if [[ -z "${PFLOG_EXIST}" ]]
+		then
+		PFLOG_EXIST=$(command -v pflogsumm)
+	fi
+
+	if [[ -z "${PFLOG_EXIST}" ]]
+		then
+		echo "no";
+	else
+		echo "yes"
+	fi
+	exit 0;
+fi
+
+#
+# Config Section
+#
 if [ "$1" = "config" ]; then
 	echo "system.type COUNTER"
 	echo "graph_title Postfix statistics"
@@ -41,6 +66,11 @@ if [ "$1" = "config" ]; then
 	exit 0;
 fi
 
+#
+# Plugin Script
+#
+
+# Variable to store the pflogsumm result.
 TMP_RAW=$("${PFLOGSUMM}" -d today --detail 0 --zero-fill "${SYS_LOG}" "${SYS_LOG2}")
 
 # Parse value from Raw result
@@ -59,6 +89,7 @@ parseValue() {
 	fi
 }
 
+# Print results
 printf "received.value "
 parseValue "received"
 printf "delivered.value "
