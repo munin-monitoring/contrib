@@ -3,6 +3,15 @@
 # Plugin to show Postfix statistics - needs pflogsumm
 #
 # Contributed by David Obando (david@cryptix.de) - 16.04.2007
+# Rewrited by Cristian Deluxe (me@cristiandeluxe.com) - 02.11.2016
+#
+#
+# Example config for Ubuntu (You need: apt-get install pflogsumm)
+#
+# [postfix_stats]
+# env.logfile /var/log/syslog
+# env.logfile2 /var/log/syslog.1
+# env.pflogsumm pflogsumm
 #
 #
 # Magic markers - optional - used by installation scripts and
@@ -12,41 +21,89 @@
 #%# capabilities=autoconf
 
 #set -xv
+SYS_LOG=${logfile:-/var/log/syslog}
+SYS_LOG2=${logfile2:-/var/log/syslog.0}
+PFLOGSUMM=${pflogsumm:-pflogsumm.pl}
 
-case $1 in
-    config)
-        cat <<'EOF'
-system.type COUNTER
-graph_title Postfix statistics
-graph_vlabel Postfix statistics
-graph_category Mail
-graph_total Total
-received.label received
-delivered.label delivered
-forwarded.label forwarded
-deferred.label deferred
-bounced.label bounced
-rejected.label rejected
-held.label held
-discarded.label discarded
-EOF
-        exit 0;;
-esac
+#
+# Autoconf Section
+#
+if [ "$1" = "autoconf" ]; then
+	# Try to find pflogsumm with default name
+	PFLOG_EXIST=$(command -v pflogsumm.pl)
 
+	# Try to find pflogsumm without any extension
+	if [[ -z "${PFLOG_EXIST}" ]]
+		then
+		PFLOG_EXIST=$(command -v pflogsumm)
+	fi
 
-TMP=`mktemp /tmp/tmp.XXXXXXXX`
-pflogsumm.pl --smtpd_stats -d today /var/log/syslog /var/log/syslog.0 | head -n 15 > $TMP
+	if [[ -z "${PFLOG_EXIST}" ]]
+		then
+		echo "no";
+	else
+		echo "yes"
+	fi
+	exit 0;
+fi
 
-cat <<EOF
+#
+# Config Section
+#
+if [ "$1" = "config" ]; then
+	echo "system.type COUNTER"
+	echo "graph_title Postfix statistics"
+	echo "graph_vlabel Postfix statistics"
+	echo "graph_category Mail"
+	echo "graph_total Total"
+	echo "received.label received"
+	echo "delivered.label delivered"
+	echo "forwarded.label forwarded"
+	echo "deferred.label deferred"
+	echo "bounced.label bounced"
+	echo "rejected.label rejected"
+	echo "held.label held"
+	echo "discarded.label discarded"
+	exit 0;
+fi
 
-received.value `grep 'received' $TMP | awk '{print $1}'`
-delivered.value `grep 'delivered' $TMP | awk '{print $1}'`
-forwarded.value `grep 'forwarded' $TMP | awk '{print $1}'`
-deferred.value `grep 'deferred' $TMP | awk '{print $1}'`
-bounced.value `grep 'bounced' $TMP | awk '{print $1}'`
-rejected.value `grep 'rejected' $TMP | awk '{print $1}'`
-held.value `grep 'held' $TMP | awk '{print $1}'`
-discarded.value `grep 'discarded' $TMP | awk '{print $1}'`
-EOF
+#
+# Plugin Script
+#
 
-rm $TMP
+# Variable to store the pflogsumm result.
+TMP_RAW=$("${PFLOGSUMM}" -d today --detail 0 --zero-fill "${SYS_LOG}" "${SYS_LOG2}")
+
+# Parse value from Raw result
+# 
+# Return digit if regex are parsed correctly
+#
+# Return -1 if any error occurs
+#
+parseValue() {
+	TMP_RETURN=$(echo "${TMP_RAW}" | grep -Ei '^[[:space:]]+[[:digit:]]+[[:space:]]+'"${1}"'.*$' | grep -oEi '[[:digit:]]+[[:space:]]+')
+	if [[ -z "${TMP_RETURN}" ]]
+		then
+		echo -1
+	else
+		echo "${TMP_RETURN}"
+	fi
+}
+
+# Print results
+printf "received.value "
+parseValue "received"
+printf "delivered.value "
+parseValue "delivered"
+printf "forwarded.value "
+parseValue "forwarded"
+printf "deferred.value "
+parseValue "deferred"
+printf "bounced.value "
+parseValue "bounced"
+printf "rejected.value "
+parseValue "rejected"
+printf "held.value "
+parseValue "held"
+printf "discarded.value "
+parseValue "discarded"
