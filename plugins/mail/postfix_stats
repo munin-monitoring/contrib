@@ -1,52 +1,135 @@
 #!/bin/sh
-#
-# Plugin to show Postfix statistics - needs pflogsumm
-#
-# Contributed by David Obando (david@cryptix.de) - 16.04.2007
-#
-#
-# Magic markers - optional - used by installation scripts and
-# munin-config:
-#
-#%# family=manual
-#%# capabilities=autoconf
+# -*- sh -*-
+
+: <<=cut
+
+=head1 NAME
+
+postfix_stats - Munin plugin to monitor postfix statistics.
+
+=head1 APPLICABLE SYSTEMS
+
+Any system where pflogsumm script can be executed.
+
+=head1 CONFIGURATION
+
+There is no default configuration. This is an example config for Ubuntu:
+
+  [postfix_stats]
+   env.logfiles /var/log/syslog /var/log/syslog.1
+   env.pflogsumm pflogsumm
+
+env.logfiles contains space separated syslog logfiles, usually current log
+and previous log. You can add more log files if you want, but this may 
+increase the time required for analysis.
+
+env.pflogsumm The "pflogsumm" script, can be pflogsumm.pl if it was manually
+downloaded and installed, or "pflogsumm" if it was installed by a package 
+manager (like apt-get).
+
+=head1 INTERPRETATION
+
+This plugin displays the messages: received, delivered, rejected...
+Average per minute is made and it shows the total message count.
+It is useful to know the load and messages being processed.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+  0.2 plugin completely rewritten
+  0.1 first release.
+
+=head1 BUGS
+
+None known
+
+=head1 AUTHOR
+
+Originally: David Obando (david@cryptix.de)
+Modified by: github.com/cristiandeluxe
+Thanks to: sumpfralle
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
 
 #set -xv
+SYS_LOG="${logfiles:-/var/log/syslog /var/log/syslog.0}"
 
-case $1 in
-    config)
-        cat <<'EOF'
-system.type COUNTER
-graph_title Postfix statistics
-graph_vlabel Postfix statistics
-graph_category Mail
-graph_total Total
-received.label received
-delivered.label delivered
-forwarded.label forwarded
-deferred.label deferred
-bounced.label bounced
-rejected.label rejected
-held.label held
-discarded.label discarded
-EOF
-        exit 0;;
-esac
+# shellcheck disable=SC2154
+PFLOGSUMM="${pflogsum}"
+[ -z "$PFLOGSUMM" ] && PFLOGSUMM="$(which pflogsumm pflogsumm.pl | head -1)"
 
+# Fields (Array to avoid code duplication) must be space separated
+FIELDS_ARR="received delivered forwarded deferred bounced rejected held discarded"
 
-TMP=`mktemp /tmp/tmp.XXXXXXXX`
-pflogsumm.pl --smtpd_stats -d today /var/log/syslog /var/log/syslog.0 | head -n 15 > $TMP
+#
+# Autoconf Section
+#
+if [ "$1" = 'autoconf' ]; then
+	# Check if pflogsumm exist
+	if [ -z "${PFLOGSUMM}" ]
+		then
+		echo 'no (pflogsum not found in your system)'
+	else
+		echo 'yes'
+	fi
+	exit 0
+fi
 
-cat <<EOF
+#
+# Config Section
+#
+if [ "$1" = 'config' ]; then
+	echo 'graph_title Postfix statistics'
+	echo 'graph_vlabel Postfix statistics'
+	echo 'graph_category mail'
+	echo 'graph_scale no'
+	echo 'graph_period minute'
+	echo 'graph_total Total'
 
-received.value `grep 'received' $TMP | awk '{print $1}'`
-delivered.value `grep 'delivered' $TMP | awk '{print $1}'`
-forwarded.value `grep 'forwarded' $TMP | awk '{print $1}'`
-deferred.value `grep 'deferred' $TMP | awk '{print $1}'`
-bounced.value `grep 'bounced' $TMP | awk '{print $1}'`
-rejected.value `grep 'rejected' $TMP | awk '{print $1}'`
-held.value `grep 'held' $TMP | awk '{print $1}'`
-discarded.value `grep 'discarded' $TMP | awk '{print $1}'`
-EOF
+	# Generate config for each field
+	for i in $FIELDS_ARR; do
+		echo "${i}.label ${i}"
+		echo "${i}.type DERIVE"
+		echo "${i}.min 0"
+		echo "${i}.draw AREASTACK"
+	done
 
-rm $TMP
+	exit 0
+fi
+
+#
+# Plugin Script
+#
+
+# Variable to store the pflogsumm result.
+# shellcheck disable=SC2086
+TMP_RAW=$("${PFLOGSUMM}" -d today --detail 0 --zero-fill ${SYS_LOG})
+
+# Parse value from Raw result
+# 
+# Return digit if regex are parsed correctly
+#
+# Return U (undefined) if any error occurs
+#
+parseValue() {
+	# shellcheck disable=SC2155
+	local TMP_RETURN=$(echo "${TMP_RAW}" | grep -Ei "^[[:space:]]+[[:digit:]]+[[:space:]]+${1}.*$" | grep -oEi '[[:digit:]]+[[:space:]]+' | head -n 1 | sed 's: ::g')
+	if [ -z "${TMP_RETURN}" ]; then
+		echo 'U'
+	else
+		echo "${TMP_RETURN}"
+	fi
+}
+
+# Print results
+for i in $FIELDS_ARR; do
+	printf "%s.value " "${i}"
+	parseValue "${i}"
+done
