@@ -58,6 +58,8 @@ GPLv2
 
 #set -xv
 SYS_LOG="${logfiles:-/var/log/syslog /var/log/syslog.0}"
+
+# shellcheck disable=SC2154
 PFLOGSUMM="${pflogsum}"
 [ -z "$PFLOGSUMM" ] && PFLOGSUMM="$(which pflogsumm pflogsumm.pl | head -1)"
 
@@ -105,7 +107,8 @@ fi
 #
 
 # Variable to store the pflogsumm result.
-TMP_RAW=$(eval "${PFLOGSUMM} -d today --detail 0 --zero-fill ${SYS_LOG}")
+# shellcheck disable=SC2086
+TMP_RAW=$("${PFLOGSUMM}" -d today --detail 0 --zero-fill ${SYS_LOG})
 
 # Parse value from Raw result
 # 
@@ -114,6 +117,7 @@ TMP_RAW=$(eval "${PFLOGSUMM} -d today --detail 0 --zero-fill ${SYS_LOG}")
 # Return U (undefined) if any error occurs
 #
 parseValue() {
+	# shellcheck disable=SC2155
 	local TMP_RETURN=$(echo "${TMP_RAW}" | grep -Ei "^[[:space:]]+[[:digit:]]+[[:space:]]+${1}.*$" | grep -oEi '[[:digit:]]+[[:space:]]+' | head -n 1 | sed 's: ::g')
 	if [ -z "${TMP_RETURN}" ]; then
 		echo 'U'
