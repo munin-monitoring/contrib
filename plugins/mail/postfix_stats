@@ -1,53 +1,81 @@
 #!/bin/sh
-#
-# Plugin to show Postfix statistics - needs pflogsumm
-#
-# Contributed by David Obando (david@cryptix.de) - 16.04.2007
-# Rewrited by Cristian Deluxe (me@cristiandeluxe.com) - 02.11.2016
-#
-#
-# Example config for Ubuntu (You need: apt-get install pflogsumm)
-#
-# [postfix_stats]
-# env.logfile /var/log/syslog
-# env.logfile2 /var/log/syslog.1
-# env.pflogsumm pflogsumm
-#
-#
-# Magic markers - optional - used by installation scripts and
-# munin-config:
-#
-#%# family=contrib
-#%# capabilities=autoconf
+# -*- sh -*-
+
+: <<=cut
+
+=head1 NAME
+
+postfix_stats - Munin plugin to monitor postfix statistics.
+
+=head1 APPLICABLE SYSTEMS
+
+Any system where pflogsumm script can be executed.
+
+=head1 CONFIGURATION
+
+There is no default configuration.  This is an example config for Ubuntu:
+
+  [postfix_stats]
+   env.logfiles /var/log/syslog /var/log/syslog.1
+   env.pflogsumm pflogsumm
+
+env.logfiles contains space separated syslog logfiles, usually current log
+and previous log. You can add more log files if you want, but this can 
+increase the time required to parse it.
+
+env.pflogsumm The "pflogsumm" script, can be pflogsumm.pl if are manually
+downloaded and installed or pflogsumm if are installed by apt-get.
+
+=head1 INTERPRETATION
+
+This plugin adds up the RSS of all processes matching the
+regex given as the process name, as reported by ps.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+  0.2 plugin completely rewritten
+  0.1 first release.
+
+=head1 BUGS
+
+None known
+
+=head1 AUTHOR
+
+Originally: David Obando (david@cryptix.de)
+Modified by: github.com/cristiandeluxe
+Thanks to: sumpfralle
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
 
 #set -xv
-SYS_LOG=${logfile:-/var/log/syslog}
-SYS_LOG2=${logfile2:-/var/log/syslog.0}
-PFLOGSUMM=${pflogsumm:-pflogsumm.pl}
+SYS_LOG="${logfiles:-/var/log/syslog /var/log/syslog.0}"
+PFLOGSUMM="${pflogsum}"
+[ -z "$PFLOGSUMM" ] && PFLOGSUMM="$(which pflogsumm pflogsumm.pl | head -1)"
 
-# Fields (Array to avoid code duplication)
-declare -a FIELDS_ARR=("received" "delivered" "forwarded" "deferred" "bounced" "rejected" "held" "discarded")
+# Fields (Array to avoid code duplication) must be space separated
+FIELDS_ARR="received delivered forwarded deferred bounced rejected held discarded"
 
 #
 # Autoconf Section
 #
 if [ "$1" = 'autoconf' ]; then
-	# Try to find pflogsumm with default name
-	PFLOG_EXIST=$(command -v pflogsumm.pl)
-
-	# Try to find pflogsumm without any extension
-	if [[ -z "${PFLOG_EXIST}" ]]
+	# Check if pflogsumm exist
+	if [ -z "${PFLOGSUMM}" ]
 		then
-		PFLOG_EXIST=$(command -v pflogsumm)
-	fi
-
-	if [[ -z "${PFLOG_EXIST}" ]]
-		then
-		echo 'no';
+		echo 'no (pflogsum not found in your system)'
 	else
 		echo 'yes'
 	fi
-	exit 0;
+	exit 0
 fi
 
 #
@@ -62,8 +90,7 @@ if [ "$1" = 'config' ]; then
 	echo 'graph_total Total'
 
 	# Generate config for each field
-	for i in "${FIELDS_ARR[@]}"
-	do
+	for i in $FIELDS_ARR; do
 		echo "${i}.label ${i}"
 		echo "${i}.type DERIVE"
 		echo "${i}.min 0"
@@ -78,27 +105,25 @@ fi
 #
 
 # Variable to store the pflogsumm result.
-TMP_RAW=$("${PFLOGSUMM}" -d today --detail 0 --zero-fill "${SYS_LOG}" "${SYS_LOG2}")
+TMP_RAW=$(eval "${PFLOGSUMM} -d today --detail 0 --zero-fill ${SYS_LOG}")
 
 # Parse value from Raw result
 # 
 # Return digit if regex are parsed correctly
 #
-# Return -1 if any error occurs
+# Return U (undefined) if any error occurs
 #
 parseValue() {
-	TMP_RETURN=$(echo "${TMP_RAW}" | grep -Ei '^[[:space:]]+[[:digit:]]+[[:space:]]+'"${1}"'.*$' | grep -oEi '[[:digit:]]+[[:space:]]+' | head -n 1 | sed 's: ::g')
-	if [[ -z "${TMP_RETURN}" ]]
-		then
-		echo -1
+	local TMP_RETURN=$(echo "${TMP_RAW}" | grep -Ei "^[[:space:]]+[[:digit:]]+[[:space:]]+${1}.*$" | grep -oEi '[[:digit:]]+[[:space:]]+' | head -n 1 | sed 's: ::g')
+	if [ -z "${TMP_RETURN}" ]; then
+		echo 'U'
 	else
 		echo "${TMP_RETURN}"
 	fi
 }
 
 # Print results
-for i in "${FIELDS_ARR[@]}"
-do
-	printf "${i}.value "
+for i in $FIELDS_ARR; do
+	printf "%s.value " "${i}"
 	parseValue "${i}"
 done
