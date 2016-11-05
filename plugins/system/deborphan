@@ -30,6 +30,9 @@ GPLv2
 
 =cut
 
+# shellcheck disable=SC1090
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
 # Auto enable if we have deborphan only
 if [ "$1" = "autoconf" ] ; then
   if which deborphan >/dev/null; then
@@ -46,12 +49,9 @@ if ! which deborphan >/dev/null; then
   exit 1
 fi
 
-OUT=$(mktemp -t munin-deborphan.XXXXXX)
-TMPFILES=$OUT
-trap 'rm -f $TMPFILES' EXIT
-deborphan --show-section --guess-all | sed 's/\//_/' | sort > "${OUT}"
+OUT=$(deborphan --show-section --guess-all | sort)
 
-CATEGORIES="$(awk '{print $1}' "${OUT}" | uniq)"
+CATEGORIES="$(echo "${OUT}" | awk '{print $1}' | uniq)"
 
 if [ "$1" = "config" ]; then
   cat <<EOF
@@ -62,24 +62,22 @@ graph_category system
 graph_period second
 graph_info This graph show the number of orphaned packages on your system. Use deborphan to see details.
 EOF
-  for cat in ${CATEGORIES}; do
+  for CAT in ${CATEGORIES}; do
+    CATFIELD=$(clean_fieldname "${CAT}")
     cat <<EOF
-${cat}.label ${cat/_/\/}
-${cat}.type GAUGE
-${cat}.draw AREASTACK
-${cat}.min 0
-${cat}.info The number of orphaned packages in ${cat/_/\/}
+${CATFIELD}.label ${CAT}
+${CATFIELD}.type GAUGE
+${CATFIELD}.draw AREASTACK
+${CATFIELD}.min 0
+${CATFIELD}.info The number of orphaned packages in ${CAT}
 EOF
   done
 
 else
-  for cat in ${CATEGORIES}; do
-    TMP=$(mktemp -t munin-deborphan.XXXXXX)
-    TMPFILES="${TMPFILES} $TMP"
-    sed -n "s/${cat} \+//p" "${OUT}" > "${TMP}"
-    echo "${cat}.value $(wc -l < "${TMP}")"
-    # shellcheck disable=SC2005 disable=SC2046
-    # echo is not useless here: we want everything on one line
-    echo "${cat}.extinfo $(echo $(cat "${TMP}"))"
+  for CAT in ${CATEGORIES}; do
+    CATFIELD=$(clean_fieldname "${CAT}")
+    CATDATA=$(echo "${OUT}" | sed -n "s#${CAT} \+##p")
+    echo "${CATFIELD}.value $(echo "${CATDATA}" | wc -l)"
+    echo "${CATFIELD}.extinfo $(echo "${CATDATA}" | tr '\n' ' ')"
   done
 fi
