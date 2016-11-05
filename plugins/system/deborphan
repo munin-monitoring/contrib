@@ -1,0 +1,83 @@
+#!/bin/sh
+
+: << =cut
+
+=head1 NAME
+
+deborphan - Monitor orphaned Debian packages
+
+=head1 APPLICABLE SYSTEMS
+
+Debian-ish systems with deborphan installed.
+
+=head1 CONFIGURATION
+
+None needed.
+
+=head1 AUTHOR
+
+Olivier Mehani <shtrom+munin@ssji.net>
+Based on the debsecan plugin by Nicolas Bouthors. 2016-09-02
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=cut
+
+# shellcheck disable=SC1090
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+# Auto enable if we have deborphan only
+if [ "$1" = "autoconf" ] ; then
+  if which deborphan >/dev/null; then
+    echo yes
+  else
+    echo "no (deborphan is missing)"
+  fi
+  exit 0
+fi
+
+# Fail if we don't have deborphan
+if ! which deborphan >/dev/null; then
+  echo "deborphan is missing" >&2
+  exit 1
+fi
+
+OUT=$(deborphan --show-section --guess-all | sort)
+
+CATEGORIES="$(echo "${OUT}" | awk '{print $1}' | uniq)"
+
+if [ "$1" = "config" ]; then
+  cat <<EOF
+graph_title Orphaned packages
+graph_args -l 0 --base 1000
+graph_vlabel number of packages
+graph_category system
+graph_period second
+graph_info This graph show the number of orphaned packages on your system. Use deborphan to see details.
+EOF
+  for CAT in ${CATEGORIES}; do
+    CATFIELD=$(clean_fieldname "${CAT}")
+    cat <<EOF
+${CATFIELD}.label ${CAT}
+${CATFIELD}.type GAUGE
+${CATFIELD}.draw AREASTACK
+${CATFIELD}.min 0
+${CATFIELD}.info The number of orphaned packages in ${CAT}
+EOF
+  done
+
+else
+  for CAT in ${CATEGORIES}; do
+    CATFIELD=$(clean_fieldname "${CAT}")
+    CATDATA=$(echo "${OUT}" | sed -n "s#${CAT} \+##p")
+    echo "${CATFIELD}.value $(echo "${CATDATA}" | wc -l)"
+    echo "${CATFIELD}.extinfo $(echo "${CATDATA}" | tr '\n' ' ')"
+  done
+fi

@@ -16,25 +16,50 @@ graph_title UDP Statistics
 graph_args --base 1000 -l 0
 graph_vlabel Packets/\${graph_period}
 graph_category network
-received.label Received
-received.draw AREA
-received.type DERIVE
-received.min 0
-errors.label Errors
-errors.draw LINE1
-errors.type DERIVE
-errors.min 0
 sent.label Sent
 sent.draw LINE1
 sent.type DERIVE
 sent.min 0
+received.label Received
+received.draw AREA
+received.type DERIVE
+received.min 0
+unknown_ports.label In Unknown Port
+unknown_ports.draw LINE1
+unknown_ports.type DERIVE
+unknown_ports.min 0
+receive_buffer_errors.label Receive Buffer Errors
+receive_buffer_errors.draw LINE1
+receive_buffer_errors.type DERIVE
+receive_buffer_errors.min 0
+send_buffer_errors.label Send Buffer Errors
+send_buffer_errors.draw LINE1
+send_buffer_errors.type DERIVE
+send_buffer_errors.min 0
+in_csum_errors.label In CSUM Errors
+in_csum_errors.draw LINE1
+in_csum_errors.type DERIVE
+in_csum_errors.min 0
+ignored_multis.label In Ignored Multis
+ignored_multis.draw LINE1
+ignored_multis.type DERIVE
+ignored_multis.min 0
+receive_errors.label Receive Errors
+receive_errors.draw LINE1
+receive_errors.type DERIVE
+receive_errors.min 0
 EOM
         exit 0;
     }
 }
 
-@netstat = qx{/bin/netstat -us | awk '/packets sent/          \{ print "sent.value " \$1 \}
+@netstat = qx{/bin/netstat -us | grep -A8 '^Udp:' | awk '/packets sent/          \{ print "sent.value " \$1 \}
                                       /packets received/      \{ print "received.value " \$1 \}
-                                      /packet receive errors/ \{ print "errors.value " \$1 \}'};
+                                      /packets to unknown port received/      \{ print "unknown_ports.value " \$1 \}
+                                      /receive buffer errors/      \{ print "receive_buffer_errors.value " \$1 \}
+                                      /send buffer errors/      \{ print "send_buffer_errors.value " \$1 \}
+                                      /InCsumErrors/      \{ print "in_csum_errors.value " \$2 \}
+                                      /IgnoredMulti/      \{ print "ignored_multis.value " \$2 \}
+                                      /packet receive errors/ \{ print "receive_errors.value " \$1 \}'};
 
 print @netstat;
