@@ -1,4 +1,4 @@
-#!/usr/bin/env /usr/local/bin/python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # vim: set sts=4 sw=4 encoding=utf-8
 
@@ -33,11 +33,13 @@
 #%# capabilities=suggest autoconf
 
 
-from pymongo import Connection
+import pymongo
 from operator import itemgetter
 
 settings_host = '127.0.0.1'
 settings_port = 27017
+# mongodb_uri will override host and port
+settings_mongodb_uri = ''
 settings_db = 'mydb'
 settings_user = ''
 settings_password = ''
@@ -50,6 +52,7 @@ typeIndex['collcount']['title'] = 'per collection document count'
 typeIndex['collcount']['yaxis'] = 'documents'
 typeIndex['collcount']['base'] = '1000'
 typeIndex['collcount']['scale'] = '--logarithmic -l1'
+typeIndex['collcount']['category'] = 'MongoDB'
 
 typeIndex['collsize'] = {}
 typeIndex['collsize']['index'] = 'size'
@@ -57,6 +60,7 @@ typeIndex['collsize']['title'] = 'per collection data size'
 typeIndex['collsize']['yaxis'] = 'Byte'
 typeIndex['collsize']['base'] = '1024'
 typeIndex['collsize']['scale'] = '--logarithmic -l1 --units=si'
+typeIndex['collsize']['category'] = 'MongoDB'
 
 typeIndex['avgsize'] = {}
 typeIndex['avgsize']['index'] = 'avgObjSize'
@@ -64,6 +68,7 @@ typeIndex['avgsize']['title'] = 'average object size'
 typeIndex['avgsize']['yaxis'] = 'Byte'
 typeIndex['avgsize']['base'] = '1024'
 typeIndex['avgsize']['scale'] = '--logarithmic --units=si'
+typeIndex['avgsize']['category'] = 'MongoDB'
 
 typeIndex['storage'] = {}
 typeIndex['storage']['index'] = 'storageSize'
@@ -71,6 +76,7 @@ typeIndex['storage']['title'] = 'per collection storage size'
 typeIndex['storage']['yaxis'] = 'Byte'
 typeIndex['storage']['base'] = '1024'
 typeIndex['storage']['scale'] = '--logarithmic -l1 --units=si'
+typeIndex['storage']['category'] = 'MongoDB'
 
 typeIndex['indexsize'] = {}
 typeIndex['indexsize']['index'] = 'totalIndexSize'
@@ -78,11 +84,14 @@ typeIndex['indexsize']['title'] = 'per collection index size'
 typeIndex['indexsize']['yaxis'] = 'Byte'
 typeIndex['indexsize']['base'] = '1024'
 typeIndex['indexsize']['scale'] = '--logarithmic -l 1 --units=si'
-
+typeIndex['indexsize']['category'] = 'MongoDB'
 
 
 def getCollstats(graphtype):
-        con = Connection(settings_host, int(settings_port), slave_okay=True)
+        if settings_mongodb_uri:
+                con = pymongo.MongoClient(settings_mongodb_uri)
+        else:
+                con = pymongo.MongoClient(settings_host, int(settings_port))
 
         if settings_user:
                 db = con['admin']
@@ -106,7 +115,7 @@ def getCollstats(graphtype):
                             stats_tmp[collname]['value'] += long(stats[typeIndex[graphtype]['index']])
 
 
-        con.disconnect()
+        con.close()
 
         for collname, item in sorted(stats_tmp.items()):
                 yield ("%s" % collname, item['value'], item['dbname'])
