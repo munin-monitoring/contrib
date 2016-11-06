@@ -1,0 +1,82 @@
+#!/bin/sh
+
+: << =cut
+
+=head1 NAME
+
+fresh-backups - Plugin to monitor the freshness of backup files
+
+=head1 APPLICABLE SYSTEMS
+
+Any system with some automated backup creating or updating archive files.
+
+This works well with backup-manager.
+
+=head1 CONFIGURATION
+
+The following example checks all tar.bz2 files in /path/to/your/backups/, and
+counts all those that are less than 2 days old, and there should be 4 separate
+daily archives.
+
+	[fresh-backups]
+	user root
+	env.backup_dir /path/to/your/backups/
+	env.lifetime 2
+	env.archive_pattern *.tar.bz2
+	env.backup_number 4
+	
+This will also set the warning and critical values for this plugin to 2*4 and
+4, respectively, meaning that if the number of fresh files goes below those
+limits, the relevant notifications will be triggerred.
+
+An example configuration snippet for backup-manager [0] follows.
+
+	export BM_REPOSITORY_ROOT="/path/to/your/backups"
+	export BM_TARBALL_FILETYPE="tar.bz2"
+	export BM_TARBALL_DIRECTORIES="/etc /home /srv /data"
+
+[0] https://github.com/sukria/Backup-Manager
+
+=head1 AUTHOR
+
+Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+# Configuration directives, edit before first use.
+BACKUP_DIR=${backup_dir:-/data/backup}
+ARCHIVE_PATTERN="${archive_pattern:-*.tar.bz2}"
+# How old backups should be considered as non-yound anymore in [days].
+LIFETIME=${lifetime:-2}
+# Critical states will be issued when the number of fresh backups archives is below `backup_number`,
+# and warnings below `backup_number*lifetime`
+CRIT=${backup_number:-1}
+WARN=$((CRIT*LIFETIME))
+
+# The situation is critical if there are no young files, the backup is down.
+case $1 in
+   config)
+        cat << EOF
+graph_title Fresh (<=${LIFETIME}d) backups archives in ${BACKUP_DIR}
+graph_vlabel number
+graph_args -l 0
+graph_category system
+freshcount.label number
+freshcount.critical ${CRIT}:
+freshcount.warning ${WARN}:
+EOF
+        exit 0;;
+esac
+
+printf "freshcount.value "
+find "${BACKUP_DIR}" -name "${ARCHIVE_PATTERN}" -a -mtime "-${LIFETIME}" | wc  -l
+printf "freshcount.extinfo "
+du -sh "${BACKUP_DIR}"
