@@ -44,8 +44,7 @@ Revision 0.3 2014/02/16 zjttoefs
 
 =cut
 
-# Modify this to fit other chronyc path
-CHRONYC=/usr/bin/chronyc
+CHRONYC="$(which chronyc | head -1)"
 
 # Frequency has extremely higher values than other. Therefore they are fitted by scaling. Adjust the factors here
 fieldfactors="1 1000 1 100 100 1000 1000"
@@ -53,7 +52,7 @@ fields="stratum systime frequency residualfreq skew rootdelay rootdispersion"
 fieldnames="Stratum (=System Time (seconds,x=Frequency (ppm,x=Residual Freq (ppm,x=Skew (ppm,x=Root delay(seconds,x=Root dispersion (seconds,x"
 
 if [ "$1" = "autoconf" ]; then
-	if [ -f "$CHRONYC" ]; then 
+	if [ -n "$CHRONYC" ] && [ -x "$CHRONYC" ]; then
 		echo yes
 		exit 0
 	else
@@ -79,7 +78,7 @@ if [ "$1" = "config" ]; then
 fi
 
 # remove non-needed output lines, remove labels, rescale and label values while detecting slow/fast keywords
-chronyc tracking | sed -e 1d -e 3d -e "s/.*://" | \
+"$CHRONYC" tracking | sed -e 1d -e 3d -e "s/.*://" | \
 	awk -v FAC="$fieldfactors" -v NAM="$fields" \
 	'BEGIN { split(FAC,factors," "); split(NAM,names," "); } 
 	{ /slow/ ? SIGN=-1 : SIGN=1 ; print names[NR]".value ",SIGN*$1*factors[NR]}' 
