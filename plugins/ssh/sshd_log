@@ -1,44 +1,75 @@
 #!/bin/sh
-#
-# Plugin to monitor auth.log or journald for sshd server events.
-#
-# Require read permitions for $LOG or journald
-#  (set in /etc/munin/plugin-conf.d/munin-node on debian)
-#
-# $Log$
-# Revision 2.0  2016/11/11 15:42:00  Thomas Riccardi
-# Revision 1.2  2010/03/19 15:03:00  pmoranga
-# Revision 1.1  2009/04/26 23:28:00  ckujau
-# Revision 1.0  2009/04/22 22:00:00  zlati
-# Initial revision
-#
-# Parameters:
+
+: <<=cut
+
+=head1 NAME
+
+sshd_log - Munin plugin to monitor auth.log or journald for sshd
+           server events.
+
+=head1 CONFIGURATION
+
+This plugin requires read permission for the logfile or journald.
+
+On busy servers you can change value type to COUNTER and set min to 0
+to avoid minus peaks at logrotate.
+
+The following environment variables are used by this plugin:
+
+ logfile  - path to the auth log file, or "journald" to use journald.
+            default: /var/log/secure
+ category - graph category. default: system
+
+ journalctlargs - space separated list of arguments to pass to
+                  journalctl to get the sshd logs.
+                  default: _COMM=sshd
+
+If the "logfile" environment variable is set to "journald" the sshd
+logs are read from journald, filtering on program "sshd". The filtering
+may be changed using "journalctlarg".
+
+
+Config examples for /etc/munin/plugin-conf.d/munin-node:
+
+  [sshd_log]
+      user root
+      group root
+      env.logfile /var/log/messages
+      env.category users
+
+Config example with journald:
+
+  [sshd_log]
+      group systemd-journal
+      env.logfile journald
+
+Config example with journald on the sshd.service unit only:
+
+  [sshd_log]
+      group systemd-journal
+      env.logfile journald
+      env.journalctlarg --unit=sshd.service
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 AUTHOR
+
+Revision 2.0  2016/11/11 15:42:00  Thomas Riccardi
+Revision 1.2  2010/03/19 15:03:00  pmoranga
+Revision 1.1  2009/04/26 23:28:00  ckujau
+Revision 1.0  2009/04/22 22:00:00  zlati
+
+=cut
+
+
+# Script parameters:
 #
 #       config   (required)
 #       autoconf (optional - used by munin-config)
-#
-# Magick markers (optional):
-#%# family=auto
-#%# capabilities=autoconf
 
-# config example for /etc/munin/plugin-conf.d/munin-node
-#[sshd_log]
-#user root
-#group root
-#env.logfile /var/log/messages
-#env.category users
-#
-# config example with journald
-#[sshd_log]
-#group systemd-journal
-#env.logfile journald
-#
-# config example with journald on the sshd.service unit only
-#[sshd_log]
-#group systemd-journal
-#env.logfile journald
-#env.journalctlarg --unit=sshd.service
-#
 
 LOG=${logfile:-/var/log/secure}
 JOURNALCTL_ARG=${journalctlarg:-_COMM=sshd}
