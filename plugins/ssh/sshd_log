@@ -1,12 +1,12 @@
 #!/bin/sh
 #
-# Plugin to monitor auth.log for sshd server events.
+# Plugin to monitor auth.log or journald for sshd server events.
 #
-# Require read permitions for $LOG
+# Require read permitions for $LOG or journald
 #  (set in /etc/munin/plugin-conf.d/munin-node on debian)
-# On busy servers you can change value type to COUNTER and set min to 0 to avoid minus peaks at logrotate
 #
 # $Log$
+# Revision 2.0  2016/11/11 15:42:00  Thomas Riccardi
 # Revision 1.2  2010/03/19 15:03:00  pmoranga
 # Revision 1.1  2009/04/26 23:28:00  ckujau
 # Revision 1.0  2009/04/22 22:00:00  zlati
@@ -28,21 +28,49 @@
 #env.logfile /var/log/messages
 #env.category users
 #
+# config example with journald
+#[sshd_log]
+#group systemd-journal
+#env.logfile journald
+#
+# config example with journald on the sshd.service unit only
+#[sshd_log]
+#group systemd-journal
+#env.logfile journald
+#env.journalctlarg --unit=sshd.service
+#
 
 LOG=${logfile:-/var/log/secure}
+JOURNALCTL_ARG=${journalctlarg:-_COMM=sshd}
 
 
 if [ "$1" = "autoconf" ]; then
-        if [ -r "$LOG" ]; then
-                echo yes
-                exit 0
+        if [ "$LOG" = "journald" ]; then
+                if journalctl --no-pager --quiet --lines=1 "$JOURNALCTL_ARG" | read -r DUMMY; then
+                        echo yes
+                        exit 0
+                else
+                        echo no
+                        exit 1
+                fi
         else
-                echo no
-                exit 1
+                if [ -r "$LOG" ]; then
+                        echo yes
+                        exit 0
+                else
+                        echo no
+                        exit 1
+                fi
         fi
 fi
 
 if [ "$1" = "config" ]; then
+
+        if [ "$LOG" = "journald" ]; then
+                TYPE=ABSOLUTE
+        else
+                TYPE=DERIVE
+        fi
 
         echo 'graph_title SSHD login stats from' $LOG
         echo 'graph_args --base 1000 -l 0'
@@ -50,17 +78,58 @@ if [ "$1" = "config" ]; then
         echo 'graph_category' security
 
         echo 'LogPass.label Successful password logins'
+        echo 'LogPass.min 0'
+        echo 'LogPass.type' "$TYPE"
+
         echo 'LogPassPAM.label Successful login via PAM'
+        echo 'LogPassPAM.min 0'
+        echo 'LogPassPAM.type' "$TYPE"
+
         echo 'LogKey.label Successful PublicKey logins'
+        echo 'LogKey.min 0'
+        echo 'LogKey.type' "$TYPE"
+
         echo 'NoID.label No identification from user'
+        echo 'NoID.min 0'
+        echo 'NoID.type' "$TYPE"
+
         echo 'rootAttempt.label Root login attempts'
+        echo 'rootAttempt.min 0'
+        echo 'rootAttempt.type' "$TYPE"
+
         echo 'InvUsr.label Invalid user login attepmts'
+        echo 'InvUsr.min 0'
+        echo 'InvUsr.type' "$TYPE"
+
         echo 'NoRDNS.label No reverse DNS for peer'
+        echo 'NoRDNS.min 0'
+        echo 'NoRDNS.type' "$TYPE"
+
         echo 'Breakin.label Potential Breakin Attempts'
+        echo 'Breakin.min 0'
+        echo 'Breakin.type' "$TYPE"
+
         exit 0
 fi
 
-awk 'BEGIN{c["LogPass"]=0;c["LogKey"]=0;c["NoID"]=0;c["rootAttempt"]=0;c["InvUsr"]=0;c["LogPassPAM"]=0;c["Breakin"]=0;c["NoRDNS"]=0; }
+if [ "$LOG" = "journald" ]; then
+        CURSOR_FILE="$MUNIN_STATEFILE"
+        # read cursor
+        # format: "journald-cursor <cursor>"
+        CURSOR=
+        if [ -f "$CURSOR_FILE" ]; then
+                CURSOR=$(awk '/^journald-cursor / {print $2}' "$CURSOR_FILE")
+        fi
+else
+        CURSOR_FILE=
+fi
+
+if [ "$LOG" = "journald" ]; then
+        journalctl --no-pager --quiet --show-cursor ${CURSOR:+"--after-cursor=$CURSOR"} "$JOURNALCTL_ARG"
+else
+        cat $LOG
+fi | \
+    awk -v cursor_file="$CURSOR_FILE" 'BEGIN{c["LogPass"]=0;c["LogKey"]=0;c["NoID"]=0;c["rootAttempt"]=0;c["InvUsr"]=0;c["LogPassPAM"]=0;c["Breakin"]=0;c["NoRDNS"]=0; }
      /sshd\[.*Accepted password for/{c["LogPass"]++}
      /sshd\[.*Accepted publickey for/{c["LogKey"]++}
      /sshd\[.*Did not receive identification string/{c["NoID"]++}
@@ -69,4 +138,4 @@ awk 'BEGIN{c["LogPass"]=0;c["LogKey"]=0;c["NoID"]=0;c["rootAttempt"]=0;c["InvUsr
      /sshd\[.*POSSIBLE BREAK-IN ATTEMPT!/{c["Breakin"]++}
      /sshd\[.*keyboard-interactive\/pam/{c["LogPassPAM"]++}
      /sshd\[.*reverse mapping checking getaddrinfo/{c["NoRDNS"]++}a
-     END{for(i in c){print i".value " c[i]} }' < $LOG
+     END{if (cursor_file != "") { print "journald-cursor " $3 > cursor_file };for(i in c){print i".value " c[i]} }'
