@@ -43,7 +43,7 @@
 # 
 # Make a configuration file at /etc/munin/plugin-conf.d/emc_vnx_nfsv3_stats_VNX5300
 # 
-# [emc_vnx_nfsv3_stats_vnx5300]
+# [emc_vnx_nfsv3_stats_VNX5300]
 # user munin							# SSH Client local user
 # env.username operator1					# Remote user with Operator role
 # env.cs_addr 192.168.1.1 192.168.1.2				# Control Stations addresses
@@ -114,8 +114,7 @@ graph_args --base 1000"
 			echo "${server}_$field.label $server $field"
         	done
 
-		echo "
-multigraph vnx_emc_usec_call
+		echo -e "\nmultigraph vnx_emc_usec_call
 graph_title EMC VNX 5300 NFS V3 uSeconds per call
 graph_vlabel uSec / call
 graph_category nfs
@@ -124,10 +123,10 @@ graph_args --base 1000"
                 	field=`echo "$graph" | cut -d '.' -f4 `
 			echo "${server}_$field.label $server $field"
         	done
-		echo "
-multigraph vnx_emc_op_percent
+		echo -e "\nmultigraph vnx_emc_op_percent
 graph_title EMC VNX 5300 NFS V3 Op %
 graph_vlabel %
+graph_scale no
 graph_category nfs"
 		for graph in "${graphs[@]}"; do
                 	field=`echo "$graph" | cut -d '.' -f4 `
@@ -141,8 +140,7 @@ graph_category nfs"
 #                                                      Ops/s    Ops/s    Ops/s    Ops diff    KiB/s    KiB/s    KiB/s   uSec/call
 		member_elements=`$SSH server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p' | cut -d' ' -f1`
 		readarray graphs2 <<< $member_elements
-		echo "
-multigraph vnx_emc_nfs_client_ops_s
+		echo -e "\nmultigraph vnx_emc_nfs_client_ops_s
 graph_title EMC VNX 5300 NFS Client Ops/s
 graph_vlabel Ops/s
 graph_category nfs"
@@ -161,10 +159,9 @@ graph_category nfs"
 			echo "${server}_${field}_s.label $server $field Suspicious Ops diff"
                 done
 
-		echo "
-multigraph vnx_emc_nfs_client_kib_s
-graph_title EMC VNX 5300 NFS Client KiB/s
-graph_vlabel KiB/s
+		echo -e "\nmultigraph vnx_emc_nfs_client_kib_s
+graph_title EMC VNX 5300 NFS Client B/s
+graph_vlabel B/s
 graph_category nfs"
 		echo -n "graph_order "
 		for graph in "${graphs2[@]}"; do
@@ -174,14 +171,16 @@ graph_category nfs"
 		echo " "
 		for graph in "${graphs2[@]}"; do
                         field=`echo "$graph" | sed -ne 's/\./_/pg' `
-                        echo "${server}_${field}_r.label $server $field Read KiB/s"
-                        echo "${server}_${field}_w.label $server $field Write KiB/s"
+                        echo "${server}_${field}_r.label $server $field Read B/s"
+                        echo "${server}_${field}_r.cdef ${server}_${field}_r,1024,*"
+                        echo "${server}_${field}_w.label $server $field Write B/s"
+                        echo "${server}_${field}_w.cdef ${server}_${field}_w,1024,*"
                         echo "${server}_${field}_w.draw STACK"
-                        echo "${server}_${field}_t.label $server $field Total KiB/s"
+                        echo "${server}_${field}_t.label $server $field Total B/s"
+                        echo "${server}_${field}_t.cdef ${server}_${field}_t,1024,*"
                 done
 
-		echo "
-multigraph vnx_emc_nfs_client_avg_usec
+		echo -e "\nmultigraph vnx_emc_nfs_client_avg_usec
 graph_title EMC VNX 5300 NFS Client Avg uSec/call
 graph_vlabel uSec/call
 graph_category nfs"
@@ -214,22 +213,19 @@ for server in $nas_servers; do
 		echo "${server}_${element[i*$NUMCOL]}".value "${element[i*$NUMCOL+1]}"
 	done
 
-	echo "
-multigraph vnx_emc_usec_call"
+	echo -e "\nmultigraph vnx_emc_usec_call"
 	for ((i=0; i<$((LINES)); i++ )); do
 		echo "${server}_${element[i*$NUMCOL]}".value "${element[i*$NUMCOL+3]}"
 	done
 
-	echo "
-multigraph vnx_emc_op_percent"
+	echo -e "\nmultigraph vnx_emc_op_percent"
 	for ((i=0; i<$((LINES)); i++ )); do
 		echo "${server}_${element[i*$NUMCOL]}".value "${element[i*$NUMCOL+4]}"
 	done
 
 	element=()
 #nfs.client data
-	echo "
-multigraph vnx_emc_nfs_client_ops_s"
+	echo -e "\nmultigraph vnx_emc_nfs_client_ops_s"
         member_elements=`$SSH server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p'`
 	NUMCOL=9
         LINES=`wc -l <<< $member_elements`
@@ -243,16 +239,14 @@ multigraph vnx_emc_nfs_client_ops_s"
                echo "${server}_${client}_t".value "${element[$i*$NUMCOL+1]}"
                echo "${server}_${client}_s".value "${element[$i*$NUMCOL+4]}"
         done
-	echo "
-multigraph vnx_emc_nfs_client_kib_s"
+	echo -e "\nmultigraph vnx_emc_nfs_client_kib_s"
 	for (( i=0; i<$((LINES)); i++ )); do
 		client=` echo ${element[i*$NUMCOL]} | sed -ne 's/\./_/pg'`
                echo "${server}_${client}_r".value "${element[$i*$NUMCOL+6]}"
                echo "${server}_${client}_w".value "${element[$i*$NUMCOL+7]}"
                echo "${server}_${client}_t".value "${element[$i*$NUMCOL+5]}"
         done
-	echo "
-multigraph vnx_emc_nfs_client_avg_usec"
+	echo -e "\nmultigraph vnx_emc_nfs_client_avg_usec"
 	for (( i=0; i<$((LINES)); i++ )); do
 		client=` echo ${element[i*$NUMCOL]} | sed -ne 's/\./_/pg'`
 		echo "${server}_${client}".value "${element[$i*$NUMCOL+8]}"
