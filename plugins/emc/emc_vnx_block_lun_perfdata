@@ -229,41 +229,41 @@ ${LUN}_explic_tr.label ${LUN} Explicit Trespasses"
 
 	echo -e "\nmultigraph emc_vnx_block_queue
 graph_category disk
-graph_title EMC VNX 5300 Queue Length
+graph_title EMC VNX 5300 Counted Block Queue Length
 graph_vlabel Length"
 	while read -r LUN ; do
-		echo "${LUN}_busyticks_spa.label ${LUN}"
-		echo "${LUN}_busyticks_spa.graph no"
-		echo "${LUN}_busyticks_spa.type DERIVE"
-		echo "${LUN}_idleticks_spa.label ${LUN}"
-		echo "${LUN}_idleticks_spa.graph no"
-		echo "${LUN}_idleticks_spa.type DERIVE"
-		echo "${LUN}_busyticks_spb.label ${LUN}"
-		echo "${LUN}_busyticks_spb.graph no"
-		echo "${LUN}_busyticks_spb.type DERIVE"
-		echo "${LUN}_idleticks_spb.label ${LUN}"
-		echo "${LUN}_idleticks_spb.graph no"
-		echo "${LUN}_idleticks_spb.type DERIVE"
-		echo "${LUN}_outstandsum.label ${LUN}"
-		echo "${LUN}_outstandsum.graph no"
-		echo "${LUN}_outstandsum.type DERIVE"
-		echo "${LUN}_nonzeroreq.label ${LUN}"
-		echo "${LUN}_nonzeroreq.graph no"
-		echo "${LUN}_nonzeroreq.type DERIVE"
-		echo "${LUN}_readreq.label ${LUN}"
-		echo "${LUN}_readreq.graph no"
-		echo "${LUN}_readreq.type DERIVE"
-		echo "${LUN}_writereq.label ${LUN}"
-		echo "${LUN}_writereq.graph no"
-		echo "${LUN}_writereq.type DERIVE"
-		echo "${LUN}_ql_l_a.label ${LUN} Queue Length SPA"
-		echo "${LUN}_ql_l_a.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spa,*,${LUN}_busyticks_spa,${LUN}_idleticks_spa,+,/"
-		echo "${LUN}_ql_l_b.label ${LUN} Queue Length SPB"
-		echo "${LUN}_ql_l_b.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spb,*,${LUN}_busyticks_spb,${LUN}_idleticks_spb,+,/"
+		echo "${LUN}_busyticks_spa.label ${LUN}
+${LUN}_busyticks_spa.graph no
+${LUN}_busyticks_spa.type DERIVE
+${LUN}_idleticks_spa.label ${LUN}
+${LUN}_idleticks_spa.graph no
+${LUN}_idleticks_spa.type DERIVE
+${LUN}_busyticks_spb.label ${LUN}
+${LUN}_busyticks_spb.graph no
+${LUN}_busyticks_spb.type DERIVE
+${LUN}_idleticks_spb.label ${LUN}
+${LUN}_idleticks_spb.graph no
+${LUN}_idleticks_spb.type DERIVE
+${LUN}_outstandsum.label ${LUN}
+${LUN}_outstandsum.graph no
+${LUN}_outstandsum.type DERIVE
+${LUN}_nonzeroreq.label ${LUN}
+${LUN}_nonzeroreq.graph no
+${LUN}_nonzeroreq.type DERIVE
+${LUN}_readreq.label ${LUN}
+${LUN}_readreq.graph no
+${LUN}_readreq.type DERIVE
+${LUN}_writereq.label ${LUN}
+${LUN}_writereq.graph no
+${LUN}_writereq.type DERIVE"
+# Queue Length SPA = ((Sum of Outstanding Requests SPA - NonZero Request Count Arrivals SPA / 2)/(Host Read Requests SPA + Host Write Requests SPA))*
+# (Busy Ticks SPA/(Busy Ticks SPA + Idle Ticks SPA)
+# We count together SPA and SPB, although it is not fully corrext
+		echo "${LUN}_ql_l_a.label ${LUN} Queue Length SPA
+${LUN}_ql_l_a.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spa,*,${LUN}_busyticks_spa,${LUN}_idleticks_spa,+,/
+${LUN}_ql_l_b.label ${LUN} Queue Length SPB
+${LUN}_ql_l_b.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spb,*,${LUN}_busyticks_spb,${LUN}_idleticks_spb,+,/"
 	done <<< $LUNLIST
-
-
-
 exit 0
 fi
 BIGSSHCMD="$SSH"
@@ -308,28 +308,13 @@ echo "$ANSWER" | grep "implic_tr\.\|explic_tr\."
 
 echo -e "\nmultigraph emc_vnx_block_queue"
 # Queue Length
+	echo "$ANSWER" | grep "busyticks"
+	echo "$ANSWER" | grep "idleticks."
+	echo "$ANSWER" | grep "outstandsum\."
+	echo "$ANSWER" | grep "nonzeroreq\."
+	echo "$ANSWER" | grep "readreq\."
+	echo "$ANSWER" | grep "writereq\."
 while read -r LUN ; do
-# Queue Length SPA = ((Sum of Outstanding Requests SPA - NonZero Request Count Arrivals SPA / 2)/(Host Read Requests SPA + Host Write Requests SPA))*
-# (Busy Ticks SPA/(Busy Ticks SPA + Idle Ticks SPA)
-
-# We count together SPA and SPB, although it is not fully corrext
-
-#	echo "$ANSWER" | sed -ne "s/^${LUN}_busyticks_spa\./${LUN}_btspa\./p"
-	echo "$ANSWER" | grep "${LUN}_busyticks"
-	echo "$ANSWER" | grep "${LUN}_idleticks"
-#	echo "$ANSWER" | sed -ne "s/^${LUN}_idleticks_spa\./${LUN}_idspa\./p"
-#	echo "$ANSWER" | sed -ne "s/^${LUN}_busyticks_spb\./${LUN}_btspb\./p"
-#	echo "$ANSWER" | sed -ne "s/^${LUN}_idleticks_spb\./${LUN}_idspb\./p"
-#	echo "$ANSWER" | grep "${LUN}_busyticks_spa\.\|${LUN}_idleticks_spa\."
-#	echo "$ANSWER" | grep "${LUN}_busyticks_spb\.\|${LUN}_idleticks_spb\."
-#	echo "$ANSWER" | sed -ne "s/^${LUN}_outstandsum\./${LUN}_oss\./p"
-	echo "$ANSWER" | grep "${LUN}_outstandsum"
-#	echo "$ANSWER" | sed -ne "s/^${LUN}_nonzeroreq\./${LUN}_nzr\./p"
-	echo "$ANSWER" | grep "${LUN}_nonzeroreq"
-#	echo "$ANSWER" | sed -ne "s/^${LUN}_readreq\./${LUN}_rr\./p"
-	echo "$ANSWER" | grep "${LUN}_readreq"
-#	echo "$ANSWER" | sed -ne "s/^${LUN}_writereq\./${LUN}_wr\./p"
-	echo "$ANSWER" | grep "${LUN}_writereq"
 	echo "${LUN}_ql_l_a.value 0 "
 	echo "${LUN}_ql_l_b.value 0 "
 done <<< $LUNLIST
