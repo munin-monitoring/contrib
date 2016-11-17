@@ -1,25 +1,54 @@
 #!/bin/sh
 # -*- sh -*-
-#
-# This plugin is based on the if_ plugin.
-#
-# Parameters
-#     None
-#
-# Magic markers (optional - used by munin-config and some installation
-# scripts):
-#
-#%# family=manual
-#%# capabilities=autoconf suggest
 
+: << =cut
+
+=pod
+
+=encoding UTF-8
+
+=head1 NAME
+
+tc_ - Plugin to monitor traffic control queue class bandwidth usage
+
+=head1 CONFIGURATION
+
+None needed.
+
+=head1 INTERPRETATION
+
+Traffic control is the name given to the sets of queuing systems and mechanisms by which packets are received and transmitted on a router. This includes deciding which (and whether) packets to accept at what rate on the input of an interface and determining which packets to transmit in what order at what rate on the output of an interface.
+
+This plugin monitors the bandwidth used by each queue class. The root class will draw as a single line, whereas children will be drawn in a stacked graph. Complex hierarchies which have more than the root and its direct children are not fully supported and may not render correctly.
+
+=head1 SEE ALSO
+
+"man tc" and "tc -s class show dev <interface>" to get more information about tc and to see the format of the statistics being parsed.
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=head1 AUTHORS
+
+Steve Schnepp <steve.schnepp@gmail.com>,
+Samuel Smith <esaym@cpan.org>,
+Nye Liu <nyet@nyet.org>
+
+=head1 LICENSE
+
+GPLv2 or later
+
+=cut
 
 DEVICE=${0##*/tc_}
 
 mytc() {
-	tc -s class show dev $1 | tr "\n" "|" | sed "s/ \+/ /g" | sed "s/ |/|/g" | sed "s/| /|/g" | sed "s/||/\n/g" | sed "s/|/ /g" | tr ":" "_" | grep -v -i sfq | sort -n
+	/sbin/tc -s class show dev "$1" | tr "\n" "|" | sed -e "s/ \+/ /g; s/ |/|/g; s/| /|/g; s/||/\n/g; s/|/ /g" | tr ":" "_" | grep -v -i sfq | sort -n
 }
 
-case $1 in
+case "$1" in
     autoconf)
 	if [ -r /proc/net/dev ]; then
 	    echo yes
@@ -36,29 +65,47 @@ case $1 in
                    split($0, a, /: */);
                    gsub(/^ +/,"",a[1]);
                    if (($2 > 0) || ($10 > 0)) print a[1]; }' /proc/net/dev
-
-# 	    egrep '^ *(eth|tap|bond|wlan|ath|ra|sw)[0-9]+:' /proc/net/dev | cut -f1 -d: | sed 's/ //g'
 	fi
 	exit 0
 	;;
     config)
-		       
-	echo "graph_order `mytc $DEVICE | awk '{ print $2 "_" $3 }' | tr "\n" " "`"
+	echo "graph_order $(mytc "$DEVICE" | awk '{ print $2 "_" $3 }' | tr "\n" " ")"
 	echo "graph_title $DEVICE TC traffic"
-        echo 'graph_args --base 1000'
-        echo 'graph_vlabel bits per ${graph_period}'
+	echo 'graph_args --base 1000'
+	echo 'graph_vlabel bits per ${graph_period}'
 	echo 'graph_category network'
 	echo "graph_info This graph shows the TC classes traffic of the $DEVICE network interface. Please note that the traffic is shown in bits per second, not bytes."
-	
-	mytc $DEVICE | tr "_" " " | awk '{ print $2 "_" $3 "_" $4 ".label " $2 "/" $3 ":" $4 "\n" $2 "_" $3 "_" $4 ".type DERIVE\n" $2 "_" $3 "_" $4 ".min 0\n" $2 "_" $3 "_" $4 ".cdef " $2 "_" $3 "_" $4 ",8,*" }'
+
+	# the root(s)
+	mytc "$DEVICE" | grep -v " parent " | tr "_" " " | awk '{
+	    print $2 "_" $3 "_" $4 ".label " $2 "/" $3 ":" $4;
+	    print $2 "_" $3 "_" $4 ".type DERIVE";
+	    print $2 "_" $3 "_" $4 ".min 0";
+	    print $2 "_" $3 "_" $4 ".cdef " $2 "_" $3 "_" $4 ",8,*";
+	}'
+	# TODO: only AREASTACK things with no children
+	# the child(s)
+	mytc "$DEVICE" | grep " parent " | tr "_" " " | awk '{
+	    print $2 "_" $3 "_" $4 ".label " $2 "/" $3 ":" $4;
+	    print $2 "_" $3 "_" $4 ".type DERIVE";
+	    print $2 "_" $3 "_" $4 ".min 0";
+	    print $2 "_" $3 "_" $4 ".cdef " $2 "_" $3 "_" $4 ",8,*";
+	    print $2 "_" $3 "_" $4 ".draw AREASTACK";
+	 }'
         exit 0
 	;;
 esac
 
 # the root(s)
-mytc $DEVICE | grep -v " parent " | awk "{ print \$2 \"_\" \$3 \".value \" \$14}"
+mytc "$DEVICE" | grep -v " parent " | awk '{
+    split(substr($0, match($0, /[0-9]+ [Bb]ytes/)), a, " ");
+    print $2 "_" $3 ".value " a[1];
+}'
 
 # the child(s)
-mytc $DEVICE | grep " parent " | awk "{ print \$2 \"_\" \$3 \".value \" \$19}"
+mytc "$DEVICE" | grep " parent " | awk '{
+    split(substr($0, match($0, /[0-9]+ [Bb]ytes/)), a, " ");
+    print $2 "_" $3 ".value " a[1];
+}'
 
 exit 0
