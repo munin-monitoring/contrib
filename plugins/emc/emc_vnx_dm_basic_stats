@@ -48,6 +48,12 @@
 # env.nas_servers server_2 server_3				# This is the default value and can be omitted
 
 #####################################
+#            Errata                 #
+#####################################
+
+# Since LUN names can be long, the plugin can be affected by this bug: http://munin-monitoring.org/ticket/1352
+
+#####################################
 #           History                 #
 #####################################
 
@@ -78,7 +84,7 @@ fi
 
 #Choosing Cotrol Station. Code have to be "10"
 for CS in $cs_addr; do
-	if [ "`eval $SSH_CHECK`" -eq "10" ]; then
+	if [ "$(eval $SSH_CHECK)" -eq "10" ]; then
 #		echo "$CS is Primary"
 		PRIMARY_CS=$CS
 		break
@@ -107,6 +113,7 @@ graph_scale no
 graph_args --upper-limit 100 -l 0
 ${server}_cpuutil.min 0
 ${server}_cpuutil.label $server CPU util. in %."
+
 		echo -e "\nmultigraph emc_vnx_network_kib
 graph_title EMC VNX 5300 Datamover Network bytes over all interfaces
 graph_vlabel B/s recv. (-) / sent (+)
@@ -119,6 +126,7 @@ ${server}_net_out.label $server B/s
 ${server}_net_out.cdef ${server}_net_out,1000,*
 ${server}_net_out.negative ${server}_net_in
 ${server}_net_out.draw AREA"
+
 		echo -e "\nmultigraph emc_vnx_storage_kib
 graph_title EMC VNX 5300 Datamover Storage bytes over all interfaces
 graph_vlabel B/s recv. (-) / sent (+)
@@ -131,6 +139,47 @@ ${server}_stor_write.label $server B/s
 ${server}_stor_write.cdef ${server}_stor_write,1000,*
 ${server}_stor_write.negative ${server}_stor_read
 ${server}_stor_write.draw AREA"
+
+		echo -e "\nmultigraph emc_vnx_memory
+graph_title EMC VNX 5300 Datamover Memory
+graph_vlabel MiB
+graph_category memory
+graph_args --base 1024
+graph_order ${server}_used ${server}_free ${server}_total ${server}_freebuffer ${server}_encumbered
+${server}_used.label ${server} Used
+${server}_used.cdef ${server}_used,1024,/
+${server}_free.label ${server} Free
+${server}_free.draw STACK
+${server}_free.cdef ${server}_free,1024,/
+${server}_total.label ${server} Total
+${server}_total.cdef ${server}_total,1024,/
+${server}_freebuffer.label ${server} Free Buffer
+${server}_freebuffer.cdef ${server}_freebuffer,1024,/
+${server}_encumbered.label ${server} Encumbered
+${server}_encumbered.cdef ${server}_encumbered,1024,/"
+
+		echo -e "\nmultigraph emc_vnx_filecache
+graph_title EMC VNX 5300 File Buffer Cache
+graph_vlabel per second
+graph_category memory
+graph_args --base 1000
+graph_order ${server}_highw_hits ${server}_loww_hits ${server}_w_hits ${server}_hits ${server}_lookups
+${server}_highw_hits.label High Watermark Hits
+${server}_loww_hits.label Low Watermark Hits
+${server}_loww_hits.draw STACK
+${server}_w_hits.label Watermark Hits
+${server}_hits.label Hits
+${server}_lookups.label Lookups"
+	
+		echo -e "\nmultigraph emc_vnx_fileresolve
+graph_title EMC VNX 5300 FileResolve
+graph_vlabel Entries
+graph_category memory
+graph_args --base 1000
+${server}_dropped.label Dropped Entries
+${server}_max.label Max Limit
+${server}_used.label Used Entries"
+
 	done
 	if [ -z $nas_server_ok ]; then
 		echo "No active data movers!"
@@ -143,8 +192,8 @@ for server in $nas_servers; do
 	$SSH nas_server -i $server | grep -q 'type *= nas'
 	if [ "$?" != 0 ]  ; then continue; fi
 	nas_server_ok=TRUE
-	member_elements=`$SSH server_stats $server -count 1 -terminationsummary no -titles never `
-	NUMCOL=5
+	member_elements=$($SSH server_stats $server -count 1 -terminationsummary no -titles never )
+#	NUMCOL=5
 	IFS=$' ' read -ra graphs <<< $member_elements
 
 	echo "multigraph emc_vnx_cpu_percent"
@@ -158,6 +207,27 @@ for server in $nas_servers; do
 	echo "${server}_stor_read.value ${graphs[4]}"
 	echo "${server}_stor_write.value ${graphs[5]}"
 
+        member_elements=$($SSH server_stats $server -monitor kernel.memory -count 1 -terminationsummary no -titles never)
+	IFS=$' ' read -ra graphs <<< $member_elements
+
+	echo -e "\nmultigraph emc_vnx_memory"
+	echo "${server}_total.value ${graphs[14]}"
+	echo "${server}_used.value ${graphs[15]}"
+	echo "${server}_free.value ${graphs[12]}"
+	echo "${server}_freebuffer.value ${graphs[1]}"
+	echo "${server}_encumbered.value ${graphs[8]}"
+
+	echo -e "\nmultigraph emc_vnx_filecache"
+	echo "${server}_highw_hits.value ${graphs[2]}"
+	echo "${server}_loww_hits.value ${graphs[6]}"
+	echo "${server}_w_hits.value ${graphs[7]}"
+	echo "${server}_hits.value ${graphs[4]}"
+	echo "${server}_lookups.value ${graphs[5]}"
+	
+	echo -e "\nmultigraph emc_vnx_fileresolve"
+	echo "${server}_dropped.value ${graphs[9]}"
+	echo "${server}_max.value ${graphs[10]}"
+	echo "${server}_used.value ${graphs[11]}"
 done
 if [ -z $nas_server_ok ]; then
 	echo "No active data movers!"
