@@ -1,0 +1,113 @@
+-- -*- snmpv2 -*-
+-- ----------------------------------------------------------------------
+-- MIB file for munin
+-- ----------------------------------------------------------------------
+--
+-- Currenly, only statistics are available.
+
+MUNIN-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+    OBJECT-TYPE, MODULE-IDENTITY, enterprises,
+        Counter64
+    	FROM SNMPv2-SMI
+    OBJECT-GROUP, MODULE-COMPLIANCE
+        FROM SNMPv2-CONF
+    TEXTUAL-CONVENTION
+    	FROM SNMPv2-TC;
+
+munin MODULE-IDENTITY
+    LAST-UPDATED "201101060000Z"
+    ORGANIZATION "BlackMesa"
+    CONTACT-INFO "GordonFreeman@BlackMesa.mil"
+    DESCRIPTION
+       "This MIB module describes information gathered through MUNIN
+       ioctl for each interface available on the monitored
+       system. Currently, only statistics are available. Information
+       may be redundant with what is available in IF-MIB, RMON-MIB,
+       EtherLike-MIB and some other MIB but they are presented here
+       without any abstraction."
+
+    REVISION "201101060000Z"
+    DESCRIPTION "Initial revision."
+
+    ::= { munin2snmp }
+
+-- We are hosted under The IMS Company OID.
+munin2snmp			OBJECT IDENTIFIER ::= { enterprises 123456 }
+
+MuninStatString ::= TEXTUAL-CONVENTION
+        DISPLAY-HINT "32a"
+        STATUS       current
+        DESCRIPTION  "Name of statistic"
+        SYNTAX       OCTET STRING (SIZE (1..32))
+
+
+---
+--- muninStatTable
+---
+
+muninStatTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF MuninStatEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+	"Statistics from munin"
+    ::= { munin 100 }
+
+muninStatEntry OBJECT-TYPE
+    SYNTAX MuninStatEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+	"Statistic for one interface"
+    INDEX { IMPLIED muninStatName }
+    ::= { muninStatTable 1 }
+
+MuninStatEntry ::= SEQUENCE {
+    muninStatName MuninStatString,
+    muninStat     Counter64
+}
+
+muninStatName OBJECT-TYPE
+    SYNTAX MuninStatString
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+	"Name of the statistic as returned by MUNIN ioctl."
+    ::= { muninStatEntry 1 }
+
+muninStat OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"Value of the statistic as returned by MUNIN ioctl."
+    ::= { muninStatEntry 2 }
+
+---
+--- muninConformance
+---
+
+muninConformance OBJECT IDENTIFIER ::= { munin 101 }
+
+muninCompliances MODULE-COMPLIANCE
+    STATUS current
+    DESCRIPTION
+	"munin compliance statement"
+    MODULE -- this module
+    MANDATORY-GROUPS {
+        muninStatGroup
+    }
+    ::= { muninConformance 1 }
+
+muninStatGroup OBJECT-GROUP
+    OBJECTS {
+       muninStat
+    }
+    STATUS current
+    DESCRIPTION
+	"Conformance groupe for munin statistics."
+    ::= { muninConformance 2 }
+
+END
