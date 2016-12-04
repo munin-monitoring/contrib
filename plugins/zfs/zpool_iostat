@@ -1,6 +1,9 @@
 #!/bin/sh
 
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
 ZPOOL_BIN=/sbin/zpool
+
 
 if [ "$1" = "autoconf" ]; then
 	if [ -x "$ZPOOL_BIN" ]; then
@@ -13,9 +16,16 @@ fi
 
 zlines=$("$ZPOOL_BIN" iostat -v | wc -l | sed 's/ //g')
 pool_iostat=$("$ZPOOL_BIN" iostat -v 1 1 | tail "-$zlines")
-zlist=$(echo "$pool_iostat" | gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next}; { if ( $4 >=0 ) print $1}')
-zname=$(echo "$pool_iostat" | gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next}; { if ( $4 >=0 ) print $1}' | gawk '{gsub("[^a-zA-Z0-9_]", "_", $1); print}')
-zorder=$(for o in $zname; do echo "${o}_read "; echo "${o}_write "; done)
+zlist=$(echo "$pool_iostat" | gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next}; { if ( $4 >=0 ) print $1}' | tr ' ' '\n')
+
+# parse the n'th column of the iostat output for a given pool as a number (interpreting K and M suffixes)
+get_pool_iostat() {
+	local pool_label="$1"
+	local stat_column="$2"
+	echo "$pool_iostat" \
+		| gawk '{ if ($1 == "'"$pool_label"'") print $'"$stat_column"'; }' \
+		| gawk '/M/ {print strtonum($1)*1000}; /K/ {print strtonum($1)}; /[0-9]$/ {print int($1)/1000}'
+}
 
 if [ "$1" = "config" ]; then
         echo 'graph_title zpool iostat'
@@ -24,27 +34,28 @@ if [ "$1" = "config" ]; then
         echo 'graph_category fs'
         echo 'graph_scale no'
         echo 'graph_info This graph shows zpool iostat'
-	echo "graph_order $zorder"
-	echo "$zlist" | tr ' ' '\n' | while read -r i; do
-                case "$i" in
-			*) name=$(echo "$i" | gawk '{ gsub("[^a-zA-Z0-9_]", "_", $1); print }') ;;
-                esac
-                echo "${name}_read.label $i"
-		echo "${name}_read.type GAUGE"
-		echo "${name}_read.graph no"
-		echo "${name}_write.label $i"
-		echo "${name}_write.type GAUGE"
-		echo "${name}_write.negative ${name}_read"
+	# assemble the "graph_order" as a sorted list of read/write pairs for each poll
+	printf "graph_order"
+	echo "$zlist" | while read -r pool_id; do
+		fieldname="$(clean_fieldname "pool_$pool_id")"
+		printf " %s_read %s_write" "$fieldname" "$fieldname"
+	done
+	# finalize the 'graph_order'
+	echo
+	# output all fields: write as negative numbers and read as positive
+	echo "$zlist" | while read -r pool_id; do
+		fieldname="$(clean_fieldname "pool_$pool_id")"
+		echo "${fieldname}_read.label $pool_id"
+		echo "${fieldname}_read.type GAUGE"
+		echo "${fieldname}_read.graph no"
+		echo "${fieldname}_write.label $pool_id"
+		echo "${fieldname}_write.type GAUGE"
+		echo "${fieldname}_write.negative ${fieldname}_read"
         done
         exit 0
 fi
-echo "$zlist" | tr ' ' '\n' | while read -r iz; do
-	zlabel=$(echo "$iz" | gawk '{print $1}')
-	case "$iz" in
-		*) name=$(echo "$iz" | gawk '{ gsub("[^a-zA-Z0-9_]", "_", $1); print $1 }') ;;
-	esac
-	echo -n "${name}_read.value "
-	echo "$pool_iostat" | gawk '{ if ($1 == "'"$zlabel"'") print $6; }' | gawk '/M/ {print strtonum($1)*1000}; /K/ {print strtonum($1)}; /[0-9]$/ {print int($1)/1000}'
-	echo -n "${name}_write.value "
-	echo "$pool_iostat" | gawk '{ if ($1 == "'"$zlabel"'") print $7; }' |gawk '/M/ {print strtonum($1)*1000}; /K/ {print strtonum($1)}; /[0-9]$/ {print int($1)/1000}'
+echo "$zlist" | while read -r pool_id; do
+	fieldname="$(clean_fieldname "pool_$pool_id")"
+	echo "${fieldname}_read.value $(get_pool_iostat "$pool_id" 6)"
+	echo "${fieldname}_write.value $(get_pool_iostat "$pool_id" 7)"
 done
