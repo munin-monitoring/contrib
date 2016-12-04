@@ -12,10 +12,9 @@ if [ "$1" = "autoconf" ]; then
 fi
 
 zlines=$("$ZPOOL_BIN" iostat -v | wc -l | sed 's/ //g')
-ztmp=/var/run/munin/zpool_iostat
-"$ZPOOL_BIN" iostat -v 1 1 | tail "-$zlines" > "$ztmp"
-zlist=$(gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next}; { if ( $4 >=0 ) print $1}' "$ztmp")
-zname=$(gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next}; { if ( $4 >=0 ) print $1}' "$ztmp" | gawk '{gsub("[^a-zA-Z0-9_]", "_", $1); print}')
+pool_iostat=$("$ZPOOL_BIN" iostat -v 1 1 | tail "-$zlines")
+zlist=$(echo "$pool_iostat" | gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next}; { if ( $4 >=0 ) print $1}')
+zname=$(echo "$pool_iostat" | gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next}; { if ( $4 >=0 ) print $1}' | gawk '{gsub("[^a-zA-Z0-9_]", "_", $1); print}')
 zorder=$(for o in $zname; do echo "${o}_read "; echo "${o}_write "; done)
 
 if [ "$1" = "config" ]; then
@@ -45,9 +44,7 @@ echo "$zlist" | tr ' ' '\n' | while read -r iz; do
 		*) name=$(echo "$iz" | gawk '{ gsub("[^a-zA-Z0-9_]", "_", $1); print $1 }') ;;
 	esac
 	echo -n "${name}_read.value "
-	gawk '{ if ($1 == "'"$zlabel"'") print $6; }' "$ztmp"|gawk '/M/ {print strtonum($1)*1000}; /K/ {print strtonum($1)}; /[0-9]$/ {print int($1)/1000}'
+	echo "$pool_iostat" | gawk '{ if ($1 == "'"$zlabel"'") print $6; }' | gawk '/M/ {print strtonum($1)*1000}; /K/ {print strtonum($1)}; /[0-9]$/ {print int($1)/1000}'
 	echo -n "${name}_write.value "
-	gawk '{ if ($1 == "'"$zlabel"'") print $7; }' "$ztmp"|gawk '/M/ {print strtonum($1)*1000}; /K/ {print strtonum($1)}; /[0-9]$/ {print int($1)/1000}'
+	echo "$pool_iostat" | gawk '{ if ($1 == "'"$zlabel"'") print $7; }' |gawk '/M/ {print strtonum($1)*1000}; /K/ {print strtonum($1)}; /[0-9]$/ {print int($1)/1000}'
 done
-
-rm "$ztmp"; touch "$ztmp"
