@@ -1,13 +1,19 @@
 #!/bin/sh
 
+ZPOOL_BIN=/sbin/zpool
+
 if [ "$1" = "autoconf" ]; then
-                echo yes
-                exit 0
+	if [ -x "$ZPOOL_BIN" ]; then
+		echo yes
+	else
+		echo "no (missing executable '$ZPOOL_BIN')"
+	fi
+	exit 0
 fi
 
-zlines=$(/sbin/zpool iostat -v | wc -l | sed 's/ //g')
+zlines=$("$ZPOOL_BIN" iostat -v | wc -l | sed 's/ //g')
 ztmp=/var/run/munin/zpool_iostat
-/sbin/zpool iostat -v 1 1 | tail "-$zlines" > "$ztmp"
+"$ZPOOL_BIN" iostat -v 1 1 | tail "-$zlines" > "$ztmp"
 zlist=$(gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next}; { if ( $4 >=0 ) print $1}' "$ztmp")
 zname=$(gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next}; { if ( $4 >=0 ) print $1}' "$ztmp" | gawk '{gsub("[^a-zA-Z0-9_]", "_", $1); print}')
 zorder=$(for o in $zname; do echo "${o}_read "; echo "${o}_write "; done)
