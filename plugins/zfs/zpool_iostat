@@ -70,6 +70,17 @@ get_pool_iostat() {
 		| gawk '/M/ {print strtonum($1)*1000}; /K/ {print strtonum($1)}; /[0-9]$/ {print int($1)/1000}'
 }
 
+get_pool_fieldname() {
+	local pool_id="$1"
+	# backwards compatibility (until 2016):
+	# keep the unprefixed pool name for the fieldname, except for pool names starting with digits
+	if echo "$pool_id" | grep -q "^[0-9]"; then
+		clean_fieldname "_$pool_id"
+	else
+		clean_fieldname "$pool_id"
+	fi
+}
+
 if [ "$ACTION" = "config" ]; then
         echo 'graph_title zpool iostat'
         echo 'graph_args --base 1000 -l 0'
@@ -80,14 +91,14 @@ if [ "$ACTION" = "config" ]; then
 	# assemble the "graph_order" as a sorted list of read/write pairs for each poll
 	printf "graph_order"
 	echo "$zlist" | while read -r pool_id; do
-		fieldname="$(clean_fieldname "pool_$pool_id")"
+		fieldname="$(get_pool_fieldname "pool_$pool_id")"
 		printf " %s_read %s_write" "$fieldname" "$fieldname"
 	done
 	# finalize the 'graph_order'
 	echo
 	# output all fields: write as negative numbers and read as positive
 	echo "$zlist" | while read -r pool_id; do
-		fieldname="$(clean_fieldname "pool_$pool_id")"
+		fieldname="$(get_pool_fieldname "pool_$pool_id")"
 		echo "${fieldname}_read.label $pool_id"
 		echo "${fieldname}_read.type GAUGE"
 		echo "${fieldname}_read.graph no"
@@ -98,7 +109,7 @@ if [ "$ACTION" = "config" ]; then
         exit 0
 fi
 echo "$zlist" | while read -r pool_id; do
-	fieldname="$(clean_fieldname "pool_$pool_id")"
+	fieldname="$(get_pool_fieldname "pool_$pool_id")"
 	echo "${fieldname}_read.value $(get_pool_iostat "$pool_id" 6)"
 	echo "${fieldname}_write.value $(get_pool_iostat "$pool_id" 7)"
 done
