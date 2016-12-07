@@ -1,31 +1,31 @@
 /*
  * Sanitize all tab links
  */
-$( "ul#tabs>li>a" ).each(function( index ) {
-    var eid = $( this ).attr('href').replace(/[^#\w]/gi,'_');
-    $( this ).attr('href', eid);
+$("ul#tabs>li>a").each(function (index) {
+    var eid = $(this).attr('href').replace(/[^#\w]/gi, '_');
+    $(this).attr('href', eid);
 });
 
 /*
  * Sanitize all tab ids
  */
-$( "div#munin_nodeview_tab>div" ).each(function( index ) {
-    var eid = $( this ).attr('id').replace(/[^\w]/gi,'_');
-    $( this ).attr('id', eid);
+$("div#munin_nodeview_tab>div").each(function (index) {
+    var eid = $(this).attr('id').replace(/[^\w]/gi, '_');
+    $(this).attr('id', eid);
 });
 
 /*
  * Update the URL with selected tab and active selected tab on page refresh
  */
-$(document).ready(function() {
-    if(location.hash) {
+$(document).ready(function () {
+    if (location.hash) {
         $('a[href="' + location.hash + '"]').tab('show');
     }
-    $(document.body).on("click", "a[data-toggle=tab]", function(event) {
+    $(document.body).on("click", "a[data-toggle=tab]", function (event) {
         location.hash = this.getAttribute("href");
     });
 });
-$(window).on('popstate', function() {
+$(window).on('popstate', function () {
     var anchor = location.hash || $("a[data-toggle=tab]").first().attr("href");
     $('a[href="' + anchor + '"]').tab('show');
 });
