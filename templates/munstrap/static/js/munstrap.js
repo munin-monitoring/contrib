@@ -2,7 +2,7 @@
  * Sanitize all tab links
  */
 $( "ul#tabs>li>a" ).each(function( index ) {
-    var eid = element_clear($( this ).attr('href')).replace(/[^#\w]/gi,'_');
+    var eid = $( this ).attr('href').replace(/[^#\w]/gi,'_');
     $( this ).attr('href', eid);
 });
 
@@ -10,7 +10,7 @@ $( "ul#tabs>li>a" ).each(function( index ) {
  * Sanitize all tab ids
  */
 $( "div#munin_nodeview_tab>div" ).each(function( index ) {
-    var eid = element_clear($( this ).attr('id')).replace(/[^\w]/gi,'_');
+    var eid = $( this ).attr('id').replace(/[^\w]/gi,'_');
     $( this ).attr('id', eid);
 });
 
@@ -27,5 +27,5 @@ $(document).ready(function() {
 });
 $(window).on('popstate', function() {
     var anchor = location.hash || $("a[data-toggle=tab]").first().attr("href");
-    $('a[href="' + location.hash + '"]').tab('show');
+    $('a[href="' + anchor + '"]').tab('show');
 });
