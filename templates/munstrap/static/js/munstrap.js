@@ -17,15 +17,33 @@ $("div#munin_nodeview_tab>div").each(function (index) {
 /*
  * Update the URL with selected tab and active selected tab on page refresh
  */
-$(document).ready(function () {
-    if (location.hash) {
-        $('a[href="' + location.hash + '"]').tab('show');
-    }
-    $(document.body).on("click", "a[data-toggle=tab]", function (event) {
-        location.hash = this.getAttribute("href");
+(function () {
+    'use strict';
+
+    $('a[data-toggle="tab"]').on('shown.bs.tab', function (e) {
+        var id = $(this).parents('[role="tablist"]').attr('id');
+        var key = 'lastTag';
+        if (id) {
+            key += ':' + id;
+        }
+
+        localStorage.setItem(key, $(e.target).attr('href'));
+        location.hash = $(e.target).attr('href');
     });
-});
-$(window).on('popstate', function () {
-    var anchor = location.hash || $("a[data-toggle=tab]").first().attr("href");
-    $('a[href="' + anchor + '"]').tab('show');
-});
+
+    $('[role="tablist"]').each(function (idx, elem) {
+        var id = $(elem).attr('id');
+        var key = 'lastTag';
+        if (id) {
+            key += ':' + id;
+        }
+
+        var lastTab = localStorage.getItem(key);
+        if (!lastTab) {
+            lastTab = location.hash;
+        }
+        if (lastTab) {
+            $('[href="' + lastTab + '"]').tab('show');
+        }
+    });
+})();
