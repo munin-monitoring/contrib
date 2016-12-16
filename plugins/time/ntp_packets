@@ -13,7 +13,7 @@
 # Symlink this plugin into the node's plugins directory (like
 # /etc/munin/plugins).
 #
-# Copyright © 2013 Kenyon Ralph <kenyon@kenyonralph.com>
+# Copyright © 2016 Kenyon Ralph <kenyon@kenyonralph.com>
 #
 # This program is free software. It comes without any warranty, to the
 # extent permitted by applicable law. You can redistribute it and/or
@@ -34,7 +34,7 @@ import sys
 if len(sys.argv) == 2 and sys.argv[1] == 'config':
     print('graph_title NTP traffic')
     print('graph_vlabel Packets/${graph_period} received(-)/sent(+)')
-    print('graph_info This graph shows the packet rates of this ntpd. Ignored and dropped packets are graphed as positive values.')
+    print('graph_info This graph shows the packet rates of this ntpd. Bad means packets received with bad length or format. Authfailed means packets for which authentication failed.')
     print('graph_category time')
     print('received.label Received')
     print('received.type DERIVE')
@@ -50,6 +50,21 @@ if len(sys.argv) == 2 and sys.argv[1] == 'config':
     print('ignored.label Ignored')
     print('ignored.type DERIVE')
     print('ignored.min 0')
+    print('bad.label Bad')
+    print('bad.type DERIVE')
+    print('bad.min 0')
+    print('authfail.label Authfailed')
+    print('authfail.type DERIVE')
+    print('authfail.min 0')
+    print('declined.label Declined')
+    print('declined.type DERIVE')
+    print('declined.min 0')
+    print('restricted.label Restricted')
+    print('restricted.type DERIVE')
+    print('restricted.min 0')
+    print('kod.label KoD responses')
+    print('kod.type DERIVE')
+    print('kod.min 0')
     sys.exit(0)
 
 os.environ['PATH'] = '/usr/local/sbin:/usr/local/bin:' + os.environ['PATH']
@@ -64,15 +79,20 @@ if int(version) >= 427:
 else:
     cmd = 'ntpdc'
 
-iostats = dict()
+stats = dict()
 
-iostats_output = subprocess.check_output([cmd, '-c', 'iostats'], universal_newlines=True).splitlines()
+stats_output = subprocess.check_output([cmd, '-c', 'iostats', '-c', 'sysstats'], universal_newlines=True).splitlines()
 
-for line in iostats_output: iostats[line.split(':')[0]] = int(line.split(':')[1])
+for line in stats_output: stats[line.split(':')[0]] = int(line.split(':')[1])
 
-print('received.value ' + str(iostats['received packets']))
-print('sent.value ' + str(iostats['packets sent']))
-print('dropped.value ' + str(iostats['dropped packets']))
-print('ignored.value ' + str(iostats['ignored packets']))
+print('received.value ' + str(stats['received packets']))
+print('sent.value ' + str(stats['packets sent']))
+print('dropped.value ' + str(stats['dropped packets']))
+print('ignored.value ' + str(stats['ignored packets']))
+print('bad.value ' + str(stats['bad length or format']))
+print('authfail.value ' + str(stats['authentication failed']))
+print('declined.value ' + str(stats['declined']))
+print('restricted.value ' + str(stats['restricted']))
+print('kod.value ' + str(stats['KoD responses']))
 
 sys.exit(0)
