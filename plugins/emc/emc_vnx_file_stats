@@ -9,21 +9,32 @@
 #         Description               #
 #####################################
 
-# The plugin monitors NFS v3 and v4 statistics of EMC Unified Storage system. Probably it can also be compatible with 
-# other Isilon or Celerra systems. It uses SSH to connect to Control Stations, then remotely executes 
-# /nas/sbin/server_stats and fetches and parses data from it. It supports gathering data both from active/active 
-# and active/passive Datamover configurations, ignoring offline or standby Datamovers. If all Datamovers are 
-# offline or absent, the plugin returns error.
-# This plugin also automatically chooses Primary Control Station from the list by calling /nasmcd/sbin/getreason and 
-# /nasmcd/sbin/t2slot.
+# The plugin monitors basic statistics of EMC Unified Storage system Datamovers and NFS statistics of EMC VNX5300 Unified 
+# Storage system. Probably it can also be compatible with other Isilon or Celerra systems. It uses SSH to connect to Control 
+# Stations, then remotely executes '/nas/sbin/server_stats' and fetches and parses data from it. It supports gathering 
+# data both from active/active and active/passive Datamover configurations, ignoring offline or standby Datamovers. 
+# If all Datamovers are offline or absent, the plugin returns error.
+# This plugin also automatically chooses Primary Control Station from the list by calling '/nasmcd/sbin/getreason' and 
+# '/nasmcd/sbin/t2slot'.
 # 
 # At the moment data is gathered from the following statistics sources:
-# nfs.v3.op - Tons of timings about NFS RPC calls
-# nfs.v4.op - Tons of timings about NFS RPC calls
-# nfs.client - Here new Client addresses are rescanned and added automatically.
+#  * nfs.v3.op - Tons of timings about NFSv3 RPC calls
+#  * nfs.v4.op - Tons of timings about NFSv4 RPC calls
+#  * nfs.client - Here new Client addresses are rescanned and added automatically.
+#  * basic-std Statistics Group - Basic Statistics of Datamovers (eg. CPU, Memory etc.)
 # 
 # It's quite easy to comment out unneeded data to make graphs less overloaded or to add new statistics sources.
  
+#####################################
+#        Compatibility              #
+#####################################
+
+# The plugin has been written for being compatible with EMC VNX5300 Storage system, as this is the only EMC storage which 
+# i have.
+# By the way, i am pretty sure it can also work with other VNX1 storages, like VNX5100 and VNX5500.
+# About VNX2 series, i don't know whether the plugin will be able to work with them. Maybe it would need some corrections
+# in command-line backend. The same situation is in other EMC systems, so i encourage you to try and fix the plugin. 
+
 #####################################
 #        Configuration              #
 #####################################
@@ -37,31 +48,46 @@
 # execute "sudo su munin -s /bin/bash", "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created 
 # user.
 # 
-# Make a link from /usr/share/munin/plugins/emc_vnx_nfs_stats to /etc/munin/plugins/emc_vnx_nfs_stats_<NAME>,
-# where <NAME> is any arbitrary name of your storage system. The plugin will return <NAME> in its answer 
-# as "host_name" field.
-# Assume your storage system is called "VNX5300".
+# Make a link from /usr/share/munin/plugins/emc_vnx_file_stats to /etc/munin/plugins/.
+# If you want to get NFS statistics, name the link as "emc_vnx_file_nfs_stats_<NAME>", otherwise to get Basic Datamover
+# statistics you have to name it "emc_vnx_file_basicdm_stats_<NAME>", where <NAME> is any arbitrary name of your 
+# storage system. The plugin will return <NAME> in its answer as "host_name" field.
+#
+# For example, assume your storage system is called "VNX5300".
+# Make a configuration file at /etc/munin/plugin-conf.d/emc_vnx_file_stats_VNX5300
 # 
-# Make a configuration file at /etc/munin/plugin-conf.d/emc_vnx_nfs_stats_VNX5300
-# 
-# [emc_vnx_nfs_stats_VNX5300]
+# [emc_vnx_file_*]
 # user munin							# SSH Client local user
 # env.username operator1					# Remote user with Operator role
 # env.cs_addr 192.168.1.1 192.168.1.2				# Control Stations addresses
-# env.nas_servers server_2 server_3				# This is the default value and can be omitted
+# env.nas_servers server_2 server_3				# This is the default value and can be omitteda
+
+#####################################
+#            Errata                 #
+#####################################
+
+# Since LUN names can be long, the plugin may be affected by this bug: http://munin-monitoring.org/ticket/1352
+#TODO
 
 #####################################
 #           History                 #
 #####################################
 
 # 08.11.2016 - First Release
-# 17.11.2016 - NFSv4 support
+# 17.11.2016 - NFSv4 support, Memory section
+# 16.12.2016 - Merged "NFS" and "Datamover Stats" plugins
 
 ######################################################################################################################
 
 export LANG=C
 
-TARGET=$(echo "${0##*/}" | cut -d _ -f 5)
+STATSTYPE=$(echo "${0##*/}" | cut -d _ -f 1-5)
+if [ $STATSTYPE = "emc_vnx_file_nfs_stats" ]; then STATSTYPE=NFS; 
+elif [ $STATSTYPE = "emc_vnx_file_basicdm_stats" ]; then STATSTYPE=BASICDM;
+else echo "Do not know what to do. Name the plugin as 'emc_vnx_file_nfs_stats_<HOSTNAME>' or 'emc_vnx_file_basicdm_stats_<HOSTNAME>'"; exit 1; fi
+# echo $STATSTYPE
+
+TARGET=$(echo "${0##*/}" | cut -d _ -f 6)
 : ${nas_servers:="server_2 server_3"}
 SSH_CHECK='ssh -q $username@$CS "/nasmcd/sbin/getreason | grep -w slot_\`/nasmcd/sbin/t2slot\` | cut -d- -f1"'
 
@@ -103,6 +129,84 @@ if [ "$1" = "config" ] ; then
 		$SSH nas_server -i $server | grep -q 'type *= nas'
 		if [ "$?" != 0 ]  ; then continue; fi
 		nas_server_ok=TRUE
+		
+		if [ $STATSTYPE = "BASICDM" ] ; then
+			echo "multigraph emc_vnx_cpu_percent
+graph_title EMC VNX 5300 Datamover CPU Util %
+graph_vlabel %
+graph_category cpu
+graph_scale no
+graph_args --upper-limit 100 -l 0
+${server}_cpuutil.min 0
+${server}_cpuutil.label $server CPU util. in %."
+
+                echo -e "\nmultigraph emc_vnx_network_kib
+graph_title EMC VNX 5300 Datamover Network bytes over all interfaces
+graph_vlabel B/s recv. (-) / sent (+)
+graph_category network
+graph_args --base 1000
+${server}_net_in.graph no
+${server}_net_in.label none
+${server}_net_in.cdef ${server}_net_in,1000,*
+${server}_net_out.label $server B/s
+${server}_net_out.cdef ${server}_net_out,1000,*
+${server}_net_out.negative ${server}_net_in
+${server}_net_out.draw AREA"
+
+                echo -e "\nmultigraph emc_vnx_storage_kib
+graph_title EMC VNX 5300 Datamover Storage bytes over all interfaces
+graph_vlabel B/s recv. (-) / sent (+)
+graph_category network
+graph_args --base 1000
+${server}_stor_read.graph no
+${server}_stor_read.label none
+${server}_stor_read.cdef ${server}_stor_read,1000,*
+${server}_stor_write.label $server B/s
+${server}_stor_write.cdef ${server}_stor_write,1000,*
+${server}_stor_write.negative ${server}_stor_read
+${server}_stor_write.draw AREA"
+
+                echo -e "\nmultigraph emc_vnx_memory
+graph_title EMC VNX 5300 Datamover Memory
+graph_vlabel MiB
+graph_category memory
+graph_args --base 1024
+graph_order ${server}_used ${server}_free ${server}_total ${server}_freebuffer ${server}_encumbered
+${server}_used.label ${server} Used
+${server}_used.cdef ${server}_used,1024,/
+${server}_free.label ${server} Free
+${server}_free.draw STACK
+${server}_free.cdef ${server}_free,1024,/
+${server}_total.label ${server} Total
+${server}_total.cdef ${server}_total,1024,/
+${server}_freebuffer.label ${server} Free Buffer
+${server}_freebuffer.cdef ${server}_freebuffer,1024,/
+${server}_encumbered.label ${server} Encumbered
+${server}_encumbered.cdef ${server}_encumbered,1024,/"
+			
+echo -e "\nmultigraph emc_vnx_filecache
+graph_title EMC VNX 5300 File Buffer Cache
+graph_vlabel per second
+graph_category memory
+graph_args --base 1000
+graph_order ${server}_highw_hits ${server}_loww_hits ${server}_w_hits ${server}_hits ${server}_lookups
+${server}_highw_hits.label High Watermark Hits
+${server}_loww_hits.label Low Watermark Hits
+${server}_loww_hits.draw STACK
+${server}_w_hits.label Watermark Hits
+${server}_hits.label Hits
+${server}_lookups.label Lookups"
+        
+                echo -e "\nmultigraph emc_vnx_fileresolve
+graph_title EMC VNX 5300 FileResolve
+graph_vlabel Entries
+graph_category memory
+graph_args --base 1000
+${server}_dropped.label Dropped Entries
+${server}_max.label Max Limit
+${server}_used.label Used Entries"
+		fi
+		if [ $STATSTYPE = "NFS" ] ; then
 #nfs.v3.op data
 		member_elements=$($SSH server_stats $server -info nfs.v3.op | grep member_elements | sed -ne 's/^.*= //p')
 		IFS=',' read -ra graphs <<< $member_elements
@@ -222,6 +326,7 @@ graph_category nfs"
                         field=$(echo "$graph" | sed -ne 's/\./_/pg' )
                         echo "${server}_${field}.label $server $field Avg uSec/call"
                 done
+		fi
 	done
 	if [ -z $nas_server_ok ]; then
 		echo "No active data movers!"
@@ -234,6 +339,47 @@ for server in $nas_servers; do
 	$SSH nas_server -i $server | grep -q 'type *= nas'
 	if [ "$?" != 0 ]  ; then continue; fi
 	nas_server_ok=TRUE
+	if [ $STATSTYPE = "BASICDM" ] ; then
+member_elements=$($SSH server_stats $server -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
+#       NUMCOL=5
+        IFS=$' ' read -ra graphs <<< $member_elements
+
+        echo "multigraph emc_vnx_cpu_percent"
+        echo "${server}_cpuutil.value ${graphs[1]}"
+
+        echo -e "\nmultigraph emc_vnx_network_kib"
+        echo "${server}_net_in.value ${graphs[2]}"
+        echo "${server}_net_out.value ${graphs[3]}"
+
+        echo -e "\nmultigraph emc_vnx_storage_kib"
+        echo "${server}_stor_read.value ${graphs[4]}"
+        echo "${server}_stor_write.value ${graphs[5]}"
+
+        member_elements=$($SSH server_stats $server -monitor kernel.memory -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
+        IFS=$' ' read -ra graphs <<< $member_elements
+
+        echo -e "\nmultigraph emc_vnx_memory"
+        echo "${server}_total.value ${graphs[14]}"
+        echo "${server}_used.value ${graphs[15]}"
+        echo "${server}_free.value ${graphs[12]}"
+        echo "${server}_freebuffer.value ${graphs[1]}"
+        echo "${server}_encumbered.value ${graphs[8]}"
+
+        echo -e "\nmultigraph emc_vnx_filecache"
+        echo "${server}_highw_hits.value ${graphs[2]}"
+        echo "${server}_loww_hits.value ${graphs[6]}"
+        echo "${server}_w_hits.value ${graphs[7]}"
+        echo "${server}_hits.value ${graphs[4]}"
+	echo "${server}_lookups.value ${graphs[5]}"
+        
+        echo -e "\nmultigraph emc_vnx_fileresolve"
+        echo "${server}_dropped.value ${graphs[9]}"
+        echo "${server}_max.value ${graphs[10]}"
+        echo "${server}_used.value ${graphs[11]}"
+
+
+	fi
+	if [ $STATSTYPE = "NFS" ] ; then
 #nfs.v3.op data
 	member_elements=$($SSH server_stats $server -monitor nfs.v3.op -count 1 -terminationsummary no -titles never | sed -ne 's/^.*v3/v3/p')
 	NUMCOL=5
@@ -311,6 +457,7 @@ for server in $nas_servers; do
 		client=$( echo ${element[i*$NUMCOL]} | sed -ne 's/\./_/pg')
 		echo "${server}_${client}".value "${element[$i*$NUMCOL+8]}"
 	done
+	fi
 done
 if [ -z $nas_server_ok ]; then
 	echo "No active data movers!"
