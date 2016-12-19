@@ -411,7 +411,15 @@ getvalue_func[$key]=getvalue_cputime
 key=cachehit
 # buf_hitratio = 1 - physical_reads / ( db_block_gets + consistent_gets )
 # lib_hitratio = 1 - reloads / pins
-# dic_hitratio = ( gets - misses ) / gets
+# dict_hitratio = ( gets - misses ) / gets
+field_info=$( for field in buf_physical buf_logical lib_pins lib_reloads dict_gets dict_getmisses
+   do
+       echo "${field}.graph no"
+       echo "${field}.type DERIVE"
+       echo "${field}.min 0"
+       echo "${field}.label ${field}"
+   done
+)
 global_attrs[$key]="
     graph_title Oracle Cache Hit Ratio
     graph_category db
@@ -420,23 +428,15 @@ global_attrs[$key]="
     graph_info Oracle Cache Hit Ratio - The graph shows cache hit ratio between munin-update intervals (5 minutes in most cases).
     graph_scale no
 
-    $( for field in buf_physical buf_logical lib_pins lib_reloads dic_gets dic_getmisses
-       do
-           echo "${field}.graph no"
-           echo "${field}.type DERIVE"
-           echo "${field}.min 0"
-           echo "${field}.label ${field}"
-       done
-    )
-
+    ${field_info}
     buf_hitratio.cdef 100,1,buf_physical,buf_logical,/,-,*,FLOOR
     lib_hitratio.cdef 100,1,lib_reloads,lib_pins,/,-,*,FLOOR
-    dic_hitratio.cdef 100,dic_gets,dic_getmisses,-,dic_gets,/,*,FLOOR
+    dict_hitratio.cdef 100,dict_gets,dict_getmisses,-,dict_gets,/,*,FLOOR
 "
 data_attrs[$key]="
     buf_hitratio GAUGE LINE Buffer Cache Hit Ratio
     lib_hitratio GAUGE LINE Library Cache Hit Ratio
-    dic_hitratio GAUGE LINE Dictionary Cache Hit Ratio
+    dict_hitratio GAUGE LINE Dictionary Cache Hit Ratio
 "
 getvalue_func[$key]=getvalue_cachehit
 
@@ -470,7 +470,7 @@ global_attrs[$key]="
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel microseconds
-    graph_info Oracle Wait Events - It may looks wierd that Y-axis indicates 'microseconds per second'. Although number of times of wait event looks easier to understand, in many cases the number of events does not matter, but wait time become more important to analyze bottle necks.
+    graph_info Oracle Wait Events - It may look wierd that Y-axis indicates 'microseconds per second'. Although number of times of wait event looks easier to understand, in many cases the number of events does not matter, but wait time become more important to analyze bottle necks.
 "
 data_attrs[$key]=""
 getfield_func[$key]=getfield_eventwait
@@ -638,10 +638,11 @@ config() {
     # print data source attributes
     # split line into field,type,draw,label 
     local fields field type draw label
+    fields=
     while read -r field type draw label
     do
-        [ -z "${field:-}" ] && continue
-        fields="${fields:-} ${field}"
+        [ -z "$field" ] && continue
+        fields="${fields} ${field}"
 
         echo "${field}.type ${type}"
         echo "${field}.draw ${draw}"
@@ -678,19 +679,18 @@ getvalue_sysstat() {
     do
         [ -z "$field" ] && continue
 
-        cat <<EOF
-${sqlplus_variables}
-VAR vf VARCHAR2(64)
-VAR vl VARCHAR2(64)
-EXEC :vf := '${field}' 
-EXEC :vl := '${label}' 
-SELECT
-  :vf || '.value ' || value
-FROM
-  v\$sysstat
-WHERE
-  name = :vl;
-EOF
+        echo "${sqlplus_variables}
+          VAR vf VARCHAR2(64)
+          VAR vl VARCHAR2(64)
+          EXEC :vf := '${field}' 
+          EXEC :vl := '${label}' 
+          SELECT
+            :vf || '.value ' || value
+          FROM
+            v\$sysstat
+          WHERE
+            name = :vl;
+        "
     done <<< "${data_attrs[$module]}" | ${sqlplus} "${oracle_auth}"
 }
 
@@ -700,19 +700,18 @@ getvalue_sgainfo() {
     do
         [ -z "$field" ] && continue
 
-        cat <<EOF
-${sqlplus_variables}
-VAR vf VARCHAR2(64)
-VAR vl VARCHAR2(64)
-EXEC :vf := '${field}' 
-EXEC :vl := '${label}' 
-SELECT
-  :vf || '.value ' || bytes
-FROM
-  v\$sgainfo
-WHERE
-  name = :vl;
-EOF
+        echo "${sqlplus_variables}
+          VAR vf VARCHAR2(64)
+          VAR vl VARCHAR2(64)
+          EXEC :vf := '${field}' 
+          EXEC :vl := '${label}' 
+          SELECT
+            :vf || '.value ' || bytes
+          FROM
+            v\$sgainfo
+          WHERE
+            name = :vl;
+        "
     done <<< "${data_attrs[$module]}" | ${sqlplus} "${oracle_auth}"
 }
 
@@ -722,19 +721,18 @@ getvalue_pgastat() {
     do
         [ -z "$field" ] && continue
 
-        cat <<EOF
-${sqlplus_variables}
-VAR vf VARCHAR2(64)
-VAR vl VARCHAR2(64)
-EXEC :vf := '${field}' 
-EXEC :vl := '${label}' 
-SELECT
-  :vf || '.value ' || value
-FROM
-  v\$pgastat
-WHERE
-  name = :vl;
-EOF
+        echo "${sqlplus_variables}
+          VAR vf VARCHAR2(64)
+          VAR vl VARCHAR2(64)
+          EXEC :vf := '${field}' 
+          EXEC :vl := '${label}' 
+          SELECT
+            :vf || '.value ' || value
+          FROM
+            v\$pgastat
+          WHERE
+            name = :vl;
+        "
     done <<< "${data_attrs[$module]}" | ${sqlplus} "${oracle_auth}"
 }
 
@@ -744,19 +742,18 @@ getvalue_cputime() {
     do
         [ -z "$field" ] && continue
 
-        cat <<EOF
-${sqlplus_variables}
-VAR vf VARCHAR2(64)
-VAR vl VARCHAR2(64)
-EXEC :vf := '${field}' 
-EXEC :vl := '${label}' 
-SELECT
-  :vf || '.value ' || ROUND( value / 1000000 )
-FROM
-  v\$sys_time_model
-WHERE
-  stat_name = :vl;
-EOF
+        echo "${sqlplus_variables}
+          VAR vf VARCHAR2(64)
+          VAR vl VARCHAR2(64)
+          EXEC :vf := '${field}' 
+          EXEC :vl := '${label}' 
+          SELECT
+            :vf || '.value ' || ROUND( value / 1000000 )
+          FROM
+            v\$sys_time_model
+          WHERE
+            stat_name = :vl;
+        "
     done <<< "${data_attrs[$module]}" | ${sqlplus} "${oracle_auth}"
 }
 
@@ -779,8 +776,8 @@ WHERE
 ;
 SELECT 'lib_pins.value '    || SUM(pins)    FROM v\$librarycache;
 SELECT 'lib_reloads.value ' || SUM(reloads) FROM v\$librarycache;
-SELECT 'dic_gets.value '      || SUM(gets)      FROM v\$rowcache;
-SELECT 'dic_getmisses.value ' || SUM(getmisses) FROM v\$rowcache;
+SELECT 'dict_gets.value '      || SUM(gets)      FROM v\$rowcache;
+SELECT 'dict_getmisses.value ' || SUM(getmisses) FROM v\$rowcache;
 EOF
 }
 
