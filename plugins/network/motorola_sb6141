@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+
+# This plugin graphs the following values of the Motorola SB6141 cable
+# modem:
+#
+# * upstream and downstream power levels
+# * downstream signal to noise ratio
+# * downstream signal statistics (codeword counts)
+#
+# The values are retrieved from the cable modem's status web pages at
+# 192.168.100.1. So, this plugin must be installed on a munin node
+# which can access those pages.
+#
+# To install, place this plugin in the node's plugins directory,
+# /etc/munin/plugins and restart munin-node.
+#
+# Developed and tested with firmware SB_KOMODO-1.0.6.16-SCM00-NOSH
+# (build time Feb 16 2016 11:28:04), hardware version 7.0, boot
+# version PSPU-Boot(25CLK) 1.0.12.18m3.
+#
+# Requires the multigraph and dirtyconfig capabilities available in
+# munin 2.0 and newer.
+#
+# Copyright © 2016 Kenyon Ralph <kenyon@kenyonralph.com>
+#
+# This program is free software. It comes without any warranty, to the
+# extent permitted by applicable law. You can redistribute it and/or
+# modify it under the terms of the Do What The Fuck You Want To Public
+# License, Version 2, as published by Sam Hocevar. See
+# http://www.wtfpl.net/ for more details.
+#
+# The latest version of this plugin can be found in the munin contrib
+# repository at https://github.com/munin-monitoring/contrib. Issues
+# with this plugin may be reported there. Patches accepted through the
+# normal github process of forking the repository and submitting a
+# pull request with your commits.
+
+import html.parser
+import urllib.request
+import sys
+
+class MotorolaHTMLParser(html.parser.HTMLParser):
+    def __init__(self):
+        html.parser.HTMLParser.__init__(self)
+        self.signaldatapage = list()
+        self.downstream_channels = list()
+        self.downstream_SNRs = list()
+        self.downstream_powers = list()
+        self.upstream_channels = list()
+        self.upstream_powers = list()
+        self.unerrored_codewords = list()
+        self.correctable_codewords = list()
+        self.uncorrectable_codewords = list()
+
+    def handle_data(self, data):
+        data = data.strip()
+        if data != '': self.signaldatapage.append(data)
+
+    def process(self):
+        # first and last elements are just javascript
+        del self.signaldatapage[0]
+        del self.signaldatapage[-1]
+
+        di = iter(self.signaldatapage)
+
+        element = next(di)
+        while element != 'Channel ID': element = next(di)
+
+        while element != 'Frequency':
+            element = next(di)
+            if element != 'Frequency': self.downstream_channels.append(element)
+
+        while element != 'Signal to Noise Ratio': element = next(di)
+
+        while element != 'Downstream Modulation':
+            element = next(di)
+            if element != 'Downstream Modulation': self.downstream_SNRs.append(element.split()[0])
+
+        while element != 'The Downstream Power Level reading is a             snapshot taken at the time this page was requested. Please             Reload/Refresh this Page for a new reading': element = next(di)
+
+        while element != 'Upstream':
+            element = next(di)
+            if element != 'Upstream': self.downstream_powers.append(element.split()[0])
+
+        while element != 'Channel ID': element = next(di)
+
+        while element != 'Frequency':
+            element = next(di)
+            if element != 'Frequency': self.upstream_channels.append(element)
+
+        while element != 'Power Level': element = next(di)
+
+        while element != 'Upstream Modulation':
+            element = next(di)
+            if element != 'Upstream Modulation': self.upstream_powers.append(element.split()[0])
+
+        while element != 'Total Unerrored Codewords': element = next(di)
+
+        while element != 'Total Correctable Codewords':
+            element = next(di)
+            if element != 'Total Correctable Codewords': self.unerrored_codewords.append(element)
+
+        while element != 'Total Uncorrectable Codewords':
+            element = next(di)
+            if element != 'Total Uncorrectable Codewords': self.correctable_codewords.append(element)
+
+        while True:
+            try:
+                element = next(di)
+                self.uncorrectable_codewords.append(element)
+            except StopIteration:
+                break
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] != 'config':
+        print('Error: plugin designed for the dirtyconfig protocol, must be run with the config argument')
+        sys.exit(1)
+
+    parser = MotorolaHTMLParser()
+    for line in urllib.request.urlopen("http://192.168.100.1/cmSignalData.htm"):
+        parser.feed(line.decode())
+    parser.process()
+
+    print('multigraph motorola_sb6141_power')
+    print('graph_title Motorola SB6141 Cable Modem Power')
+    print('graph_vlabel Signal Strength (dBmV)')
+    print('graph_info This graph shows the downstream and upstream power reported by a Motorola SB6141 cable modem.')
+    print('graph_category network')
+    for c, p in zip(parser.downstream_channels, parser.downstream_powers):
+        print('ds_power_{0}.label Channel {0} Downstream Power'.format(c))
+        print('ds_power_{0}.type GAUGE'.format(c))
+        print('ds_power_{0}.value {1}'.format(c, p))
+    for c, p in zip(parser.upstream_channels, parser.upstream_powers):
+        print('us_power_{0}.label Channel {0} Upstream Power'.format(c))
+        print('us_power_{0}.type GAUGE'.format(c))
+        print('us_power_{0}.value {1}'.format(c, p))
+
+    print('multigraph motorola_sb6141_snr')
+    print('graph_title Motorola SB6141 Cable Modem SNR')
+    print('graph_vlabel Signal-to-Noise Ratio (dB)')
+    print('graph_info This graph shows the downstream signal-to-noise ratio reported by a Motorola SB6141 cable modem.')
+    print('graph_category network')
+    for c, snr in zip(parser.downstream_channels, parser.downstream_SNRs):
+        print('snr_chan_{0}.label Channel {0} SNR'.format(c))
+        print('snr_chan_{0}.type GAUGE'.format(c))
+        print('snr_chan_{0}.value {1}'.format(c, snr))
+
+    print('multigraph motorola_sb6141_codewords')
+    print('graph_title Motorola SB6141 Cable Modem Codewords')
+    print('graph_vlabel Codewords/${graph_period}')
+    print('graph_info This graph shows the downstream codeword rates reported by a Motorola SB6141 cable modem.')
+    print('graph_category network')
+    for c, unerr in zip(parser.downstream_channels, parser.unerrored_codewords):
+        print('unerr_chan_{0}.label Channel {0} Unerrored Codewords'.format(c))
+        print('unerr_chan_{0}.type DERIVE'.format(c))
+        print('unerr_chan_{0}.min 0'.format(c))
+        print('unerr_chan_{0}.value {1}'.format(c, unerr))
+    for c, corr in zip(parser.downstream_channels, parser.correctable_codewords):
+        print('corr_chan_{0}.label Channel {0} Correctable Codewords'.format(c))
+        print('corr_chan_{0}.type DERIVE'.format(c))
+        print('corr_chan_{0}.min 0'.format(c))
+        print('corr_chan_{0}.value {1}'.format(c, corr))
+    for c, uncorr in zip(parser.downstream_channels, parser.uncorrectable_codewords):
+        print('uncorr_chan_{0}.label Channel {0} Uncorrectable Codewords'.format(c))
+        print('uncorr_chan_{0}.type DERIVE'.format(c))
+        print('uncorr_chan_{0}.min 0'.format(c))
+        print('uncorr_chan_{0}.value {1}'.format(c, uncorr))
+
+if __name__ == "__main__":
+    main()
