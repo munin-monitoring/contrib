@@ -129,8 +129,8 @@ if [ "$1" = "suggest" ]; then
 fi
 
 STATSTYPE=$(echo "${0##*/}" | cut -d _ -f 1-5)
-if [ $STATSTYPE = "emc_vnx_file_nfs_stats" ]; then STATSTYPE=NFS; 
-elif [ $STATSTYPE = "emc_vnx_file_basicdm_stats" ]; then STATSTYPE=BASICDM;
+if [ "$STATSTYPE" = "emc_vnx_file_nfs_stats" ]; then STATSTYPE=NFS; 
+elif [ "$STATSTYPE" = "emc_vnx_file_basicdm_stats" ]; then STATSTYPE=BASICDM;
 else echo "Do not know what to do. Name the plugin as 'emc_vnx_file_nfs_stats_<HOSTNAME>' or 'emc_vnx_file_basicdm_stats_<HOSTNAME>'"; exit 1; fi
 # echo $STATSTYPE
 
@@ -233,7 +233,7 @@ if [ "$1" = "config" ] ; then
 		if [ $STATSTYPE = "NFS" ] ; then
 #nfs.v3.op data
 			member_elements=$($SSH server_stats $server -info nfs.v3.op | grep member_elements | sed -ne 's/^.*= //p')
-			IFS=',' read -ra graphs <<< $member_elements
+			IFS=',' read -ra graphs <<< "$member_elements"
 			cat <<-EOF 
 			multigraph vnx_emc_v3_calls_s
 			graph_title EMC VNX 5300 NFSv3 Calls per second
@@ -274,7 +274,7 @@ if [ "$1" = "config" ] ; then
 			graphs=()
 #nfs.v4.op data
 			member_elements=$($SSH server_stats $server -info nfs.v4.op | grep member_elements | sed -ne 's/^.*= //p')
-			IFS=',' read -ra graphs <<< $member_elements
+			IFS=',' read -ra graphs <<< "$member_elements"
 			cat <<-EOF
 			multigraph vnx_emc_v4_calls_s
 			graph_title EMC VNX 5300 NFSv4 Calls per second
@@ -317,7 +317,7 @@ if [ "$1" = "config" ] ; then
 #							 Total    Read     Write   Suspicious   Total    Read     Write      Avg   
 #                                                      Ops/s    Ops/s    Ops/s    Ops diff    KiB/s    KiB/s    KiB/s   uSec/call
 			member_elements=$($SSH server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p' | cut -d' ' -f1)
-			readarray graphs2 <<< $member_elements
+			readarray graphs2 <<< "$member_elements"
 			cat <<-EOF
 
 			multigraph vnx_emc_nfs_client_ops_s
@@ -391,7 +391,7 @@ for server in $nas_servers; do
 	if [ $STATSTYPE = "BASICDM" ] ; then
 member_elements=$($SSH server_stats $server -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
 #       NUMCOL=5
-        IFS=$' ' read -ra graphs <<< $member_elements
+        IFS=$' ' read -ra graphs <<< "$member_elements"
 
         echo "multigraph emc_vnx_cpu_percent"
         echo "${server}_cpuutil.value ${graphs[1]}"
@@ -405,7 +405,7 @@ member_elements=$($SSH server_stats $server -count 1 -terminationsummary no -tit
         echo "${server}_stor_write.value ${graphs[5]}"
 
         member_elements=$($SSH server_stats $server -monitor kernel.memory -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
-        IFS=$' ' read -ra graphs <<< $member_elements
+        IFS=$' ' read -ra graphs <<< "$member_elements"
 
         echo -e "\nmultigraph emc_vnx_memory"
         echo "${server}_total.value ${graphs[14]}"
@@ -432,10 +432,10 @@ member_elements=$($SSH server_stats $server -count 1 -terminationsummary no -tit
 #nfs.v3.op data
 	member_elements=$($SSH server_stats $server -monitor nfs.v3.op -count 1 -terminationsummary no -titles never | sed -ne 's/^.*v3/v3/p')
 	NUMCOL=5
-	LINES=$(wc -l <<< $member_elements)
+	LINES=$(wc -l <<< "$member_elements")
 	while IFS=$'\n' read -ra graphs ; do
 		element+=( $graphs )
-	done <<< $member_elements
+	done <<< "$member_elements"
 
 	echo "multigraph vnx_emc_v3_calls_s"
 	for ((i=0; i<$((LINES)); i++ )); do
@@ -457,10 +457,10 @@ member_elements=$($SSH server_stats $server -count 1 -terminationsummary no -tit
 #nfs.v4.op data
 	member_elements=$($SSH server_stats $server -monitor nfs.v4.op -count 1 -terminationsummary no -titles never | sed -ne 's/^.*v4/v4/p')
 	NUMCOL=5
-	LINES=$(wc -l <<< $member_elements)
+	LINES=$(wc -l <<< "$member_elements")
 	while IFS=$'\n' read -ra graphs ; do
 		element+=( $graphs )
-	done <<< $member_elements
+	done <<< "$member_elements"
 
 	echo -e "\nmultigraph vnx_emc_v4_calls_s"
 	for ((i=0; i<$((LINES)); i++ )); do
@@ -483,10 +483,10 @@ member_elements=$($SSH server_stats $server -count 1 -terminationsummary no -tit
 	echo -e "\nmultigraph vnx_emc_nfs_client_ops_s"
         member_elements=$($SSH server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p')
 	NUMCOL=9
-        LINES=$(wc -l <<< $member_elements)
+        LINES=$(wc -l <<< "$member_elements")
 	while IFS=$'\n' read -ra graphs; do
 		element+=($graphs)
-	done  <<< $member_elements
+	done  <<< "$member_elements"
 	for (( i=0; i<$((LINES)); i++ )); do
 		client=$( echo ${element[i*$NUMCOL]} | sed -ne 's/\./_/pg')
                echo "${server}_${client}_r".value "${element[$i*$NUMCOL+2]}"
