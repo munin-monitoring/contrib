@@ -1,83 +1,83 @@
 #!/bin/bash
-######################################################################################################################
-#                 Plugin to monitor NFS statistics of EMC VNX 5300 Unified Storage system                            #
-######################################################################################################################
 
-# Author: Evgeny Beysembaev <megabotva@gmail.com>
+: <<=cut
 
-#####################################
-#         Description               #
-#####################################
+=head1 NAME 
 
-# The plugin monitors basic statistics of EMC Unified Storage system Datamovers and NFS statistics of EMC VNX5300 Unified 
-# Storage system. Probably it can also be compatible with other Isilon or Celerra systems. It uses SSH to connect to Control 
-# Stations, then remotely executes '/nas/sbin/server_stats' and fetches and parses data from it. It supports gathering 
-# data both from active/active and active/passive Datamover configurations, ignoring offline or standby Datamovers. 
-# If all Datamovers are offline or absent, the plugin returns error.
-# This plugin also automatically chooses Primary Control Station from the list by calling '/nasmcd/sbin/getreason' and 
-# '/nasmcd/sbin/t2slot'.
-# 
-# At the moment data is gathered from the following statistics sources:
-#  * nfs.v3.op - Tons of timings about NFSv3 RPC calls
-#  * nfs.v4.op - Tons of timings about NFSv4 RPC calls
-#  * nfs.client - Here new Client addresses are rescanned and added automatically.
-#  * basic-std Statistics Group - Basic Statistics of Datamovers (eg. CPU, Memory etc.)
-# 
-# It's quite easy to comment out unneeded data to make graphs less overloaded or to add new statistics sources.
+ emc_vnx_file_stats - Plugin to monitor NFS statistics of EMC VNX 5300 Unified Storage system
+
+=head1 AUTHOR
+
+ Evgeny Beysembaev <megabotva@gmail.com>
+
+=head1 LICENSE
+
+ GPLv2
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 DESCRIPTION
+
+ The plugin monitors basic statistics of EMC Unified Storage system Datamovers and NFS statistics of EMC VNX5300 Unified 
+ Storage system. Probably it can also be compatible with other Isilon or Celerra systems. It uses SSH to connect to Control 
+ Stations, then remotely executes '/nas/sbin/server_stats' and fetches and parses data from it. It supports gathering 
+ data both from active/active and active/passive Datamover configurations, ignoring offline or standby Datamovers. 
+ If all Datamovers are offline or absent, the plugin returns error.
+ This plugin also automatically chooses Primary Control Station from the list by calling '/nasmcd/sbin/getreason' and 
+ '/nasmcd/sbin/t2slot'.
  
-#####################################
-#        Compatibility              #
-#####################################
+ At the moment data is gathered from the following statistics sources:
+  * nfs.v3.op - Tons of timings about NFSv3 RPC calls
+  * nfs.v4.op - Tons of timings about NFSv4 RPC calls
+  * nfs.client - Here new Client addresses are rescanned and added automatically.
+  * basic-std Statistics Group - Basic Statistics of Datamovers (eg. CPU, Memory etc.)
+ 
+ It's quite easy to comment out unneeded data to make graphs less overloaded or to add new statistics sources.
 
-# The plugin has been written for being compatible with EMC VNX5300 Storage system, as this is the only EMC storage which 
-# i have.
-# By the way, i am pretty sure it can also work with other VNX1 storages, like VNX5100 and VNX5500.
-# About VNX2 series, i don't know whether the plugin will be able to work with them. Maybe it would need some corrections
-# in command-line backend. The same situation is in other EMC systems, so i encourage you to try and fix the plugin. 
+=head1 COMPATIBILITY
 
-#####################################
-#        Configuration              #
-#####################################
+ The plugin has been written for being compatible with EMC VNX5300 Storage system, as this is the only EMC storage which 
+ i have.
+ By the way, i am pretty sure it can also work with other VNX1 storages, like VNX5100 and VNX5500.
+ About VNX2 series, i don't know whether the plugin will be able to work with them. Maybe it would need some corrections
+ in command-line backend. The same situation is with other EMC systems, so i encourage you to try and fix the plugin. 
 
-# The plugin uses SSH to connect to Control Stations. It's possible to use 'nasadmin' user, but it would be better
-# if you create read-only global user by Unisphere Client. The user should have only Operator role.
-# I created "operator" user but due to the fact that Control Stations already had one internal "operator" user,
-# the new one was called "operator1". So be careful.
-# 
-# On munin-node side choose a user which will be used to connect through SSH. Generally user "munin" is ok. Then,
-# execute "sudo su munin -s /bin/bash", "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created 
-# user.
-# 
-# Make a link from /usr/share/munin/plugins/emc_vnx_file_stats to /etc/munin/plugins/.
-# If you want to get NFS statistics, name the link as "emc_vnx_file_nfs_stats_<NAME>", otherwise to get Basic Datamover
-# statistics you have to name it "emc_vnx_file_basicdm_stats_<NAME>", where <NAME> is any arbitrary name of your 
-# storage system. The plugin will return <NAME> in its answer as "host_name" field.
-#
-# For example, assume your storage system is called "VNX5300".
-# Make a configuration file at /etc/munin/plugin-conf.d/emc_vnx_file_stats_VNX5300
-# 
-# [emc_vnx_file_*]
-# user munin							# SSH Client local user
-# env.username operator1					# Remote user with Operator role
-# env.cs_addr 192.168.1.1 192.168.1.2				# Control Stations addresses
-# env.nas_servers server_2 server_3				# This is the default value and can be omitteda
+=head1 CONFIGURATION
 
-#####################################
-#            Errata                 #
-#####################################
+ The plugin uses SSH to connect to Control Stations. It's possible to use 'nasadmin' user, but it would be better
+ if you create read-only global user by Unisphere Client. The user should have only Operator role.
+ I created "operator" user but due to the fact that Control Stations already had one internal "operator" user,
+ the new one was called "operator1". So be careful.
+ 
+ On munin-node side choose a user which will be used to connect through SSH. Generally user "munin" is ok. Then,
+ execute "sudo su munin -s /bin/bash", "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created 
+ user.
+ 
+ Make a link from /usr/share/munin/plugins/emc_vnx_file_stats to /etc/munin/plugins/.
+ If you want to get NFS statistics, name the link as "emc_vnx_file_nfs_stats_<NAME>", otherwise to get Basic Datamover
+ statistics you have to name it "emc_vnx_file_basicdm_stats_<NAME>", where <NAME> is any arbitrary name of your 
+ storage system. The plugin will return <NAME> in its answer as "host_name" field.
 
-# Since LUN names can be long, the plugin may be affected by this bug: http://munin-monitoring.org/ticket/1352
-#TODO
+ For example, assume your storage system is called "VNX5300".
+ Make a configuration file at /etc/munin/plugin-conf.d/emc_vnx_file_stats_VNX5300
+ 
+ [emc_vnx_file_*]
+ user munin							# SSH Client local user
+ env.username operator1						# Remote user with Operator role
+ env.cs_addr 192.168.1.1 192.168.1.2				# Control Stations addresses
+ env.nas_servers server_2 server_3				# This is the default value and can be omitteda
 
-#####################################
-#           History                 #
-#####################################
+=head1 HISTORY
 
-# 08.11.2016 - First Release
-# 17.11.2016 - NFSv4 support, Memory section
-# 16.12.2016 - Merged "NFS" and "Datamover Stats" plugins
+ 08.11.2016 - First Release
+ 17.11.2016 - NFSv4 support, Memory section
+ 16.12.2016 - Merged "NFS" and "Datamover Stats" plugins
+ 26.12.2016 - Compatibility with Munin coding style
 
-######################################################################################################################
+=cut
 
 export LANG=C
 
