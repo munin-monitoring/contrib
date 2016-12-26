@@ -158,142 +158,179 @@ LUNLIST="$($SSH $NAVICLI lun -list -drivetype | sed -ne 's/^Name:\ *//p')"
 echo -e "host_name ${TARGET}\n"
 
 if [ "$1" = "config" ] ; then
-	echo "multigraph emc_vnx_block_blocks
-graph_category disk
-graph_title EMC VNX 5300 LUN Blocks
-graph_vlabel Blocks Read (-) / Written (+)
-graph_args --base 1000"
+	cat <<-EOF 
+	multigraph emc_vnx_block_blocks
+	graph_category disk
+	graph_title EMC VNX 5300 LUN Blocks
+	graph_vlabel Blocks Read (-) / Written (+)
+	graph_args --base 1000
+	
+	EOF
+
 	while read -r LUN ; do
-		echo "${LUN}_read.label none
-${LUN}_read.graph no
-${LUN}_read.min 0
-${LUN}_read.draw AREA
-${LUN}_read.type COUNTER
-${LUN}_write.label $LUN Blocks
-${LUN}_write.negative ${LUN}_read
-${LUN}_write.type COUNTER
-${LUN}_write.min 0
-${LUN}_write.draw STACK"
+		cat <<-EOF 
+		${LUN}_read.label none
+		${LUN}_read.graph no
+		${LUN}_read.min 0
+		${LUN}_read.draw AREA
+		${LUN}_read.type COUNTER
+		${LUN}_write.label $LUN Blocks
+		${LUN}_write.negative ${LUN}_read
+		${LUN}_write.type COUNTER
+		${LUN}_write.min 0
+		${LUN}_write.draw STACK
+		EOF
 	done <<< $LUNLIST
 
-	echo -e "\nmultigraph emc_vnx_block_req
-graph_category disk
-graph_title EMC VNX 5300 LUN Requests
-graph_vlabel Requests: Read (-) / Write (+)
-graph_args --base 1000"
+	cat <<-EOF
+
+	multigraph emc_vnx_block_req
+	graph_category disk
+	graph_title EMC VNX 5300 LUN Requests
+	graph_vlabel Requests: Read (-) / Write (+)
+	graph_args --base 1000
+	
+	EOF
 	while read -r LUN ; do
-		echo "${LUN}_readreq.label none
-${LUN}_readreq.graph no
-${LUN}_readreq.min 0
-${LUN}_readreq.type COUNTER
-${LUN}_writereq.label $LUN Requests
-${LUN}_writereq.negative ${LUN}_readreq
-${LUN}_writereq.type COUNTER
-${LUN}_writereq.min 0"
+		cat <<-EOF
+		${LUN}_readreq.label none
+		${LUN}_readreq.graph no
+		${LUN}_readreq.min 0
+		${LUN}_readreq.type COUNTER
+		${LUN}_writereq.label $LUN Requests
+		${LUN}_writereq.negative ${LUN}_readreq
+		${LUN}_writereq.type COUNTER
+		${LUN}_writereq.min 0
+		EOF
 	done <<< $LUNLIST
 
-	echo -e "\nmultigraph emc_vnx_block_ticks
-graph_category disk
-graph_title EMC VNX 5300 Counted Load per LUN
-graph_vlabel Load, % * Number of LUNs 
-graph_args --base 1000 -l 0 -r "
-echo -n "graph_order "
+	cat <<-EOF
+
+	multigraph emc_vnx_block_ticks
+	graph_category disk
+	graph_title EMC VNX 5300 Counted Load per LUN
+	graph_vlabel Load, % * Number of LUNs 
+	graph_args --base 1000 -l 0 -r 
+	EOF
+	echo -n "graph_order "
 	while read -r LUN ; do
                 echo -n "${LUN}_busyticks ${LUN}_idleticks ${LUN}_bta=${LUN}_busyticks_spa ${LUN}_idleticks_spa ${LUN}_btb=${LUN}_busyticks_spb ${LUN}_idleticks_spb "
 	done <<< $LUNLIST
 	echo ""
 	while read -r LUN ; do
-		echo "${LUN}_busyticks_spa.label $LUN Busy Ticks SPA
-${LUN}_busyticks_spa.type COUNTER
-${LUN}_busyticks_spa.graph no
-${LUN}_bta.label $LUN Busy Ticks SPA
-${LUN}_bta.graph no
-${LUN}_idleticks_spa.label $LUN Idle Ticks SPA
-${LUN}_idleticks_spa.type COUNTER
-${LUN}_idleticks_spa.graph no
-${LUN}_busyticks_spb.label $LUN Busy Ticks SPB
-${LUN}_busyticks_spb.type COUNTER
-${LUN}_busyticks_spb.graph no
-${LUN}_btb.label $LUN Busy Ticks SPB
-${LUN}_btb.graph no
-${LUN}_idleticks_spb.label $LUN Idle Ticks SPB
-${LUN}_idleticks_spb.type COUNTER
-${LUN}_idleticks_spb.graph no"
-
-echo "${LUN}_load_spa.label $LUN load SPA 
-${LUN}_load_spa.draw AREASTACK
-${LUN}_load_spb.label $LUN load SPB
-${LUN}_load_spb.draw AREASTACK
-${LUN}_load_spa.cdef 100,${LUN}_bta,${LUN}_busyticks_spa,${LUN}_idleticks_spa,+,/,*
-${LUN}_load_spb.cdef 100,${LUN}_btb,${LUN}_busyticks_spa,${LUN}_idleticks_spa,+,/,*
-"
+		cat <<-EOF
+		${LUN}_busyticks_spa.label $LUN Busy Ticks SPA
+		${LUN}_busyticks_spa.type COUNTER
+		${LUN}_busyticks_spa.graph no
+		${LUN}_bta.label $LUN Busy Ticks SPA
+		${LUN}_bta.graph no
+		${LUN}_idleticks_spa.label $LUN Idle Ticks SPA
+		${LUN}_idleticks_spa.type COUNTER
+		${LUN}_idleticks_spa.graph no
+		${LUN}_busyticks_spb.label $LUN Busy Ticks SPB
+		${LUN}_busyticks_spb.type COUNTER
+		${LUN}_busyticks_spb.graph no
+		${LUN}_btb.label $LUN Busy Ticks SPB
+		${LUN}_btb.graph no
+		${LUN}_idleticks_spb.label $LUN Idle Ticks SPB
+		${LUN}_idleticks_spb.type COUNTER
+		${LUN}_idleticks_spb.graph no
+		${LUN}_load_spa.label $LUN load SPA 
+		${LUN}_load_spa.draw AREASTACK
+		${LUN}_load_spb.label $LUN load SPB
+		${LUN}_load_spb.draw AREASTACK
+		${LUN}_load_spa.cdef 100,${LUN}_bta,${LUN}_busyticks_spa,${LUN}_idleticks_spa,+,/,*
+		${LUN}_load_spb.cdef 100,${LUN}_btb,${LUN}_busyticks_spa,${LUN}_idleticks_spa,+,/,*
+		EOF
 	done <<< $LUNLIST
 
-	echo -e "\nmultigraph emc_vnx_block_outstanding
-graph_category disk
-graph_title EMC VNX 5300 Sum of Outstanding Requests
-graph_vlabel Requests
-graph_args --base 1000"
+	cat <<-EOF
+	
+	multigraph emc_vnx_block_outstanding
+	graph_category disk
+	graph_title EMC VNX 5300 Sum of Outstanding Requests
+	graph_vlabel Requests
+	graph_args --base 1000
+	EOF
 	while read -r LUN ; do
-		echo "${LUN}_outstandsum.label $LUN
-${LUN}_outstandsum.type COUNTER"
+		cat <<-EOF 
+		${LUN}_outstandsum.label $LUN
+		${LUN}_outstandsum.type COUNTER
+	EOF
 	done <<< $LUNLIST
 
-	echo -e "\nmultigraph emc_vnx_block_nonzeroreq
-graph_category disk
-graph_title EMC VNX 5300 Non-Zero Request Count Arrivals
-graph_vlabel Count Arrivals
-graph_args --base 1000"
+	cat <<-EOF
+	
+	multigraph emc_vnx_block_nonzeroreq
+	graph_category disk
+	graph_title EMC VNX 5300 Non-Zero Request Count Arrivals
+	graph_vlabel Count Arrivals
+	graph_args --base 1000
+	EOF
 	while read -r LUN ; do
-		echo "${LUN}_nonzeroreq.label $LUN
-${LUN}_nonzeroreq.type COUNTER"
+		cat <<-EOF
+		${LUN}_nonzeroreq.label $LUN
+		${LUN}_nonzeroreq.type COUNTER
+		EOF
 	done <<< $LUNLIST
 
-	echo -e "\nmultigraph emc_vnx_block_trespasses
-graph_category disk
-graph_title EMC VNX 5300 Trespasses
-graph_vlabel Trespasses"
+	cat <<-EOF
+
+	multigraph emc_vnx_block_trespasses
+	graph_category disk
+	graph_title EMC VNX 5300 Trespasses
+	graph_vlabel Trespasses
+	EOF
 	while read -r LUN ; do
-		echo "${LUN}_implic_tr.label ${LUN} Implicit Trespasses
-${LUN}_explic_tr.label ${LUN} Explicit Trespasses"
+		cat <<-EOF
+		${LUN}_implic_tr.label ${LUN} Implicit Trespasses
+		${LUN}_explic_tr.label ${LUN} Explicit Trespasses
+		EOF
 	done <<< $LUNLIST
 
-	echo -e "\nmultigraph emc_vnx_block_queue
-graph_category disk
-graph_title EMC VNX 5300 Counted Block Queue Length
-graph_vlabel Length"
+	cat <<-EOF
+
+	multigraph emc_vnx_block_queue
+	graph_category disk
+	graph_title EMC VNX 5300 Counted Block Queue Length
+	graph_vlabel Length
+	EOF
 	while read -r LUN ; do
-		echo "${LUN}_busyticks_spa.label ${LUN}
-${LUN}_busyticks_spa.graph no
-${LUN}_busyticks_spa.type COUNTER
-${LUN}_idleticks_spa.label ${LUN}
-${LUN}_idleticks_spa.graph no
-${LUN}_idleticks_spa.type COUNTER
-${LUN}_busyticks_spb.label ${LUN}
-${LUN}_busyticks_spb.graph no
-${LUN}_busyticks_spb.type COUNTER
-${LUN}_idleticks_spb.label ${LUN}
-${LUN}_idleticks_spb.graph no
-${LUN}_idleticks_spb.type COUNTER
-${LUN}_outstandsum.label ${LUN}
-${LUN}_outstandsum.graph no
-${LUN}_outstandsum.type COUNTER
-${LUN}_nonzeroreq.label ${LUN}
-${LUN}_nonzeroreq.graph no
-${LUN}_nonzeroreq.type COUNTER
-${LUN}_readreq.label ${LUN}
-${LUN}_readreq.graph no
-${LUN}_readreq.type COUNTER
-${LUN}_writereq.label ${LUN}
-${LUN}_writereq.graph no
-${LUN}_writereq.type COUNTER"
+		cat <<-EOF
+		${LUN}_busyticks_spa.label ${LUN}
+		${LUN}_busyticks_spa.graph no
+		${LUN}_busyticks_spa.type COUNTER
+		${LUN}_idleticks_spa.label ${LUN}
+		${LUN}_idleticks_spa.graph no
+		${LUN}_idleticks_spa.type COUNTER
+		${LUN}_busyticks_spb.label ${LUN}
+		${LUN}_busyticks_spb.graph no
+		${LUN}_busyticks_spb.type COUNTER
+		${LUN}_idleticks_spb.label ${LUN}
+		${LUN}_idleticks_spb.graph no
+		${LUN}_idleticks_spb.type COUNTER
+		${LUN}_outstandsum.label ${LUN}
+		${LUN}_outstandsum.graph no
+		${LUN}_outstandsum.type COUNTER
+		${LUN}_nonzeroreq.label ${LUN}
+		${LUN}_nonzeroreq.graph no
+		${LUN}_nonzeroreq.type COUNTER
+		${LUN}_readreq.label ${LUN}
+		${LUN}_readreq.graph no
+		${LUN}_readreq.type COUNTER
+		${LUN}_writereq.label ${LUN}
+		${LUN}_writereq.graph no
+		${LUN}_writereq.type COUNTER
+		EOF
 # Queue Length SPA = ((Sum of Outstanding Requests SPA - NonZero Request Count Arrivals SPA / 2)/(Host Read Requests SPA + Host Write Requests SPA))*
 # (Busy Ticks SPA/(Busy Ticks SPA + Idle Ticks SPA)
 # We count together SPA and SPB, although it is not fully corrext
-		echo "${LUN}_ql_l_a.label ${LUN} Queue Length SPA
-${LUN}_ql_l_a.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spa,*,${LUN}_busyticks_spa,${LUN}_idleticks_spa,+,/
-${LUN}_ql_l_b.label ${LUN} Queue Length SPB
-${LUN}_ql_l_b.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spb,*,${LUN}_busyticks_spb,${LUN}_idleticks_spb,+,/"
+		cat <<-EOF
+		${LUN}_ql_l_a.label ${LUN} Queue Length SPA
+		${LUN}_ql_l_a.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spa,*,${LUN}_busyticks_spa,${LUN}_idleticks_spa,+,/
+		${LUN}_ql_l_b.label ${LUN} Queue Length SPB
+		${LUN}_ql_l_b.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spb,*,${LUN}_busyticks_spb,${LUN}_idleticks_spb,+,/
+		EOF
 	done <<< $LUNLIST
 exit 0
 fi
