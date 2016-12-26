@@ -17,7 +17,7 @@
 =head1 MAGIC MARKERS
 
   #%# family=auto
-  #%# capabilities=autoconf
+  #%# capabilities=autoconf suggest
 
 =head1 DESCRIPTION
 
@@ -81,6 +81,53 @@
 
 export LANG=C
 
+ssh_check() {
+	ssh -q $username@$1 "/nasmcd/sbin/getreason | grep -w slot_\`/nasmcd/sbin/t2slot\` | cut -d- -f1"
+}
+
+check_conf () {
+	if [ -z "$username" ]; then
+		echo "No username!"
+		return 1
+	fi
+
+	if [ -z "$cs_addr" ]; then
+		echo "No control station addresses!"
+		return 1
+	fi
+
+	#Choosing Cotrol Station. Code have to be "10"
+	for CS in $cs_addr; do
+		if [[ "10" -eq "$(ssh_check $CS)" ]]; then
+	#		echo "$CS is Primary"
+			PRIMARY_CS=$CS
+			break
+		fi
+	done
+
+	if [ -z "$PRIMARY_CS" ]; then
+		echo "No alive primary Control Station from list \"$cs_addr\"";
+		return 1
+	fi
+	return 0
+}
+
+if [ "$1" = "autoconf" ]; then
+	check_conf_ans=$(check_conf)
+	if [ $? -eq 0 ]; then
+		echo "yes"
+	else
+		echo "no ($check_conf_ans)"
+	fi
+	exit 0
+fi
+
+if [ "$1" = "suggest" ]; then
+	echo "nfs_stats"
+	echo "basicdm_stats"
+	exit 0;
+fi
+
 STATSTYPE=$(echo "${0##*/}" | cut -d _ -f 1-5)
 if [ $STATSTYPE = "emc_vnx_file_nfs_stats" ]; then STATSTYPE=NFS; 
 elif [ $STATSTYPE = "emc_vnx_file_basicdm_stats" ]; then STATSTYPE=BASICDM;
@@ -89,34 +136,9 @@ else echo "Do not know what to do. Name the plugin as 'emc_vnx_file_nfs_stats_<H
 
 TARGET=$(echo "${0##*/}" | cut -d _ -f 6)
 : ${nas_servers:="server_2 server_3"}
-SSH_CHECK='ssh -q $username@$CS "/nasmcd/sbin/getreason | grep -w slot_\`/nasmcd/sbin/t2slot\` | cut -d- -f1"'
 
-if [ "$1" = "autoconf" ]; then
-	echo "yes"
-	exit 0
-fi
-
-if [ -z "$username" ]; then
-	echo "No username!"
-	exit 1
-fi
-
-if [ -z "$cs_addr" ]; then
-	echo "No control station addresses!"
-	exit 1
-fi
-
-#Choosing Cotrol Station. Code have to be "10"
-for CS in $cs_addr; do
-	if [[ "10" -eq "$(eval $SSH_CHECK)" ]]; then
-#		echo "$CS is Primary"
-		PRIMARY_CS=$CS
-		break
-	fi
-done
-
-if [ -z "$PRIMARY_CS" ]; then
-	echo "No alive primary Control Station from list \"$cs_addr\"";
+check_conf
+if [[ $? -eq 1 ]]; then
 	exit 1;
 fi
 
