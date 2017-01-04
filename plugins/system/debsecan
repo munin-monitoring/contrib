@@ -13,6 +13,8 @@ system (using debsecan). Might work on other distib, who knows...
     env.suite jessie
     env.fixed_warn 1
     env.fixed_critical 1000
+    env.remote_warn 1
+    env.remote_critical 10
 
 =head1 AUTHORS
 
@@ -53,6 +55,8 @@ if [ ${SUITE} = ${0} ]; then
 fi
 FIXEDWARN=${fixed_warning:-1}
 FIXEDCRIT=${fixed_critical:-1000}
+REMOTEWARN=${remote_warning:-1}
+REMOTECRIT=${remote_critical:-10}
 
 CVERE="\(\(CVE\|TMP\)[-0-9A-Fa-f]\+\)"
 if [ "$1" = "config" ] ; then
@@ -63,8 +67,16 @@ graph_vlabel number of CVE
 graph_category system
 graph_period second
 graph_info This graph show the number of known vulnerabilities present on your system. Use debsecan to see details.
+remote.label remote
+remote.colour FF0000
+remote.type GAUGE
+remote.draw AREASTACK
+remote.min 0
+remote.info The number of remotely exploitable CVEs with any priority
+remote.warning ${REMOTEWARN}
+remote.critical ${REMOTECRIT}
 high.label high
-high.colour FF0000
+high.colour F70000
 high.type GAUGE
 high.draw AREASTACK
 high.min 0
@@ -101,24 +113,29 @@ fi
 CVECOUNTRE="s/^ *\([0-9]\+\) \+\([^ ]\+\)/\2 (\1)/"
 
 OUT=`mktemp -t debsecan.XXXXXX`
+REMOTE=`mktemp -t debsecan.XXXXXX`
 HIGH=`mktemp -t debsecan.XXXXXX`
 MEDIUM=`mktemp -t debsecan.XXXXXX`
 LOW=`mktemp -t debsecan.XXXXXX`
 OTHER=`mktemp -t debsecan.XXXXXX`
 FIXED=`mktemp -t debsecan.XXXXXX`
 debsecan --suite ${SUITE} 2> /dev/null > ${OUT}
-grep 'high urgency' ${OUT} > ${HIGH}
-grep 'medium urgency' ${OUT} > ${MEDIUM}
-grep 'low urgency)' ${OUT} > ${LOW}
+grep 'remotely' ${OUT} > ${REMOTE}
+grep 'high urgency' ${OUT} | grep -v 'remotely' > ${HIGH}
+grep 'medium urgency' ${OUT} | grep -v 'remotely' > ${MEDIUM}
+grep 'low urgency)' ${OUT} | grep -v 'remotely' > ${LOW}
 grep '(fixed' ${OUT} > ${FIXED}
 
 high=`cat ${HIGH} | wc -l`
+remote=`cat ${REMOTE} | wc -l`
 medium=`cat ${MEDIUM} | wc -l`
 low=`cat ${LOW} | wc -l`
 other=`cat ${OTHER} | wc -l`
 fixed=`cat ${FIXED} | wc -l`
 
 cat <<EOF
+remote.value $remote
+remote.extinfo `echo $(cut -f 2 -d" " ${REMOTE} | uniq -c | sort -nr | sed  "${CVECOUNTRE}")`
 high.value $high
 high.extinfo `echo $(cut -f 2 -d" " ${HIGH} | uniq -c | sort -nr | sed  "${CVECOUNTRE}")`
 medium.value $medium
@@ -130,5 +147,3 @@ other.extinfo `echo $(cut -f 2 -d" " ${OTHER} | uniq -c | sort -nr | sed  "${CVE
 fixed.value $fixed
 fixed.extinfo `echo $(cut -f 2 -d" " ${FIXED} | uniq -c | sort -nr | sed  "${CVECOUNTRE}")`
 EOF
-
-rm -f ${OUT} ${HIGH} ${MEDIUM} ${LOW} ${FIXED} ${OTHER}
