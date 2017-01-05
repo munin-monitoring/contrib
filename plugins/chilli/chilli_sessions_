@@ -1,11 +1,11 @@
-#!/bin/bash
+#!/bin/sh
 # -*- sh -*-
 
 : << =cut
 
 =head1 NAME
 
-chilli_ - Wildcard-plugin to monitor sessions state on Coova Chilli.
+chilli_sessions_ - Wildcard-plugin to monitor sessions state on Coova Chilli.
 
 =head1 CONFIGURATION
 
@@ -13,21 +13,21 @@ This plugin does not normally require configuration.
 
 The plugin may need to run as root. This is configured like this:
 
-  [chilli_*]
+  [chilli_sessions_*]
       user root
 
 This is a wildcard plugin. To monitor an instance, link
-chilli_<instance> to this file. For example :
+chilli_sessions_<instance> to this file. For example :
 
-  ln -s /usr/share/munin/plugins/chilli_ \
-        /etc/munin/plugins/chilli_hotspot1
+  ln -s /usr/share/munin/plugins/chilli_sessions_ \
+        /etc/munin/plugins/chilli_sessions_hotspot1
 
 will monitor hotspot1.
 
 For monitor all instances use :
 
-  ln -s /usr/share/munin/plugins/chilli_ \
-        /etc/munin/plugins/chilli_total
+  ln -s /usr/share/munin/plugins/chilli_sessions_ \
+        /etc/munin/plugins/chilli_sessions_total
 
 =head1 AUTHOR
 
@@ -45,20 +45,20 @@ GPLv2
 =cut
 
 
-INSTANCE=${0##*chilli_}
+INSTANCE="${0##*chilli_}"
 CHILLI_PATH_BIN="/usr/sbin/chilli_query"
 CHILLI_PATH_SOCK="/var/run"
 
 
-case $1 in
+case "$1" in
   autoconf)
-    if [[ -r $CHILLI_PATH_BIN ]]; then
-      if [[ $INSTANCE == "total" ]]; then
+    if [ -r "$CHILLI_PATH_BIN" ]; then
+      if [ "$INSTANCE" = "total" ]; then
         echo "yes"
         exit 0
       else
-        if [[ -r $CHILLI_PATH_SOCK/chilli_$INSTANCE.sock ]]; then
-          echo yes
+        if [ -r "$CHILLI_PATH_SOCK"/chilli_"$INSTANCE".sock ]; then
+          echo "yes"
           exit 0
         else
           echo "no ($CHILLI_PATH_SOCK/chilli_$INSTANCE.sock not found)"
@@ -74,12 +74,12 @@ case $1 in
       INSTANCES_LIST=$(ls /var/run/chilli_*.sock)
 
       for file in $INSTANCES_LIST; do
-        echo $(basename $file .sock | cut -d _ -f 2)
+        basename "$file" .sock | cut -d _ -f 2
       done
 
       echo "total"
-
-      exit 0
+      
+            exit 0
     ;;
   config)
     echo "graph_title Chilli $INSTANCE sessions"
@@ -102,15 +102,14 @@ case $1 in
     ;;
 esac
 
-
-if [[ $INSTANCE == "total" ]]; then
-  STATE_PASS=$($CHILLI_PATH_BIN list | grep "pass" | wc -l)
-  STATE_DNAT=$($CHILLI_PATH_BIN list | grep "dnat" | wc -l)
-  STATE_NONE=$($CHILLI_PATH_BIN list | grep "none" | wc -l)
+if [ "$INSTANCE" = "total" ]; then
+  STATE_PASS=$("$CHILLI_PATH_BIN" list | grep -wc "pass")
+  STATE_DNAT=$("$CHILLI_PATH_BIN" list | grep -wc "dnat")
+  STATE_NONE=$("$CHILLI_PATH_BIN" list | grep -wc "none")
 else
-  STATE_PASS=$($CHILLI_PATH_BIN -s $CHILLI_PATH_SOCK/chilli_$INSTANCE.sock list | grep "pass" | wc -l)
-  STATE_DNAT=$($CHILLI_PATH_BIN -s $CHILLI_PATH_SOCK/chilli_$INSTANCE.sock list | grep "dnat" | wc -l)
-  STATE_NONE=$($CHILLI_PATH_BIN -s $CHILLI_PATH_SOCK/chilli_$INSTANCE.sock list | grep "none" | wc -l)
+  STATE_PASS=$("$CHILLI_PATH_BIN" -s "$CHILLI_PATH_SOCK"/chilli_"$INSTANCE".sock list | grep -wc "pass")
+  STATE_DNAT=$("$CHILLI_PATH_BIN" -s "$CHILLI_PATH_SOCK"/chilli_"$INSTANCE".sock list | grep -wc "dnat")
+  STATE_NONE=$("$CHILLI_PATH_BIN" -s "$CHILLI_PATH_SOCK"/chilli_"$INSTANCE".sock list | grep -wc "none")
 fi
 
 echo "pass.value $STATE_PASS"
