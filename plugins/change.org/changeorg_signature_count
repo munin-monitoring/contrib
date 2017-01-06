@@ -1,0 +1,103 @@
+#!/usr/bin/python3
+'''
+=head1 NAME
+
+Munin Plugin to grab signature count for change.org petition given its ID
+You need a valid API key for this petition
+
+=head2 CONFIGURATION
+
+# Sample:
+[changeorg_signature_count]
+	env.APIkey xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+	env.petitions 1727001 1727053
+
+=head1 AUTHOR
+
+(c) 2017 Raphaël Droz <raphael.droz+floss@gmail.com>
+General Public Licence v3 or later
+
+=head1 LICENSE
+
+GPLv3
+
+=head1 MAGIC MARKERS
+
+#%# family=auto
+#%# capabilities=autoconf
+'''
+
+from sys import argv, exit
+import sys
+import codecs
+from os import environ, path, umask
+import re
+import urllib.request
+import json
+
+if len(argv) > 1 and argv[1] == 'autoconf':
+    ok = True
+    if not environ.get('APIkey') or not re.match('[a-fA-F0-9]{64}$', environ.get('APIkey')):
+        print("no (env.APIkey not defined or bad format)")
+        ok = False
+    for i in environ.get("petitions"):
+        if not re.match("[0-9]+$", i):
+            print("no ($i isn't a valid petition ID")
+            ok = False
+    if ok:
+        print("yes")
+    exit(0)
+
+
+petition_titles = {}
+write_cache = False
+
+if environ.get('MUNIN_PLUGSTATE'):
+    petition_cache_names = path.join(environ['MUNIN_PLUGSTATE'], path.basename(argv[0]) + '-petition_names')
+    try:
+        with open(petition_cache_names, 'r') as f:
+            petition_titles = json.load(f)
+    except FileNotFoundError:
+        pass
+
+for i in environ.get('petitions').split():
+    if i in petition_titles:
+        continue
+    # NB: user-agent's tweak is needed to avoid a 403
+    req = urllib.request.Request("https://api.change.org/v1/petitions/{}?api_key={}&fields=title".format(i, environ.get('APIkey')),
+                                      data=None, 
+                                      headers={ 'User-Agent': 'curl/7.38.0' })
+    response = urllib.request.urlopen(req).read().decode('utf-8')
+    petition_titles[i] = json.loads(response)
+    write_cache = True
+
+if environ.get('MUNIN_PLUGSTATE') and write_cache:
+    umask(0o077)
+    with open(petition_cache_names, 'w') as outfile:
+        json.dump(petition_titles, outfile)
+
+# equivalent of passing PYTHONIOENCODING=utf-8 to munin
+sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+
+if len(argv) > 1 and argv[1] == 'config':
+    print('''graph_title change.org signature count
+graph_args --base 1000 -l 0
+graph_vlabel Signatures
+graph_category other
+graph_info change.org signature count
+graph_period minute
+''')
+
+    for i in petition_titles:
+        print('''signcount_{pid}.label {title}
+signcount_{pid}.info Total signatures for {title}
+signcount_{pid}.draw LINE3
+signcount_{pid}.min 0'''.format(pid=i, title=petition_titles[i]["title"]))
+    exit(0)
+
+for i in environ.get("petitions").split():
+    req = urllib.request.Request("https://api.change.org/v1/petitions/{}?api_key={}&fields=signature_count".format(i, environ.get('APIkey')),
+                                      data=None,
+                                      headers={ 'User-Agent': 'curl/7.38.0' })
+    response = urllib.request.urlopen(req).read().decode('utf-8')
+    print("signcount_%s.value %s" % (i, json.loads(response)["signature_count"]))
