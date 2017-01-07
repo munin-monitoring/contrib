@@ -170,14 +170,23 @@ sub get_cache_file_name{
 	return $file;
 }
 
-# Get fieldname (making sure it is munin "compatible" as a fieldname)
+# Get fieldname (making sure it is munin-1.0 "compatible" as a fieldname)
 # 1. Remove all non-word characters from a string)
 # 2. Make sure it has maximum 19 characters
+#    2.1 If not, truncate the host part, while keeping anything after an underscore (e.g., HTTP response status)
 sub get_fieldname{
 	my $url=$_[0];
 	$url =~ s/\W//g;
 	if(length($url) > 19){
-		$url =  substr($url, 0, 19);
+		$url =~ s/(\S+)_(\S+)/ /g;
+		my $host = $1;
+		my $info = $2;
+		my $suffixlength = length($info) + 1;
+		if ($suffixlength > 1) {
+			$url = substr($host, 0, 19 - $suffixlength) . '_' . $info;
+		} else {
+			$url = substr($url, 0, 19);
+		}
 	}
 	return $url;
 }
