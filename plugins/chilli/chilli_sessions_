@@ -7,6 +7,10 @@
 
 chilli_sessions_ - Wildcard-plugin to monitor sessions state on Coova Chilli.
 
+=head DESCRIPTION
+
+This wildcard plugin is for monitor the number of device with state pass/dnat/none on Coova Chilli instances.
+
 =head1 CONFIGURATION
 
 This plugin does not normally require configuration.
@@ -71,15 +75,13 @@ case "$1" in
     fi
     ;;
   suggest)
-      INSTANCES_LIST=$(ls /var/run/chilli_*.sock)
-
-      for file in $INSTANCES_LIST; do
+      find "$CHILLI_PATH_SOCK/" -name "chilli_*.sock" | while read file; do
         basename "$file" .sock | cut -d _ -f 2
       done
 
       echo "total"
       
-            exit 0
+      exit 0
     ;;
   config)
     echo "graph_title Chilli $INSTANCE sessions"
@@ -107,9 +109,9 @@ if [ "$INSTANCE" = "total" ]; then
   STATE_DNAT=$("$CHILLI_PATH_BIN" list | grep -wc "dnat")
   STATE_NONE=$("$CHILLI_PATH_BIN" list | grep -wc "none")
 else
-  STATE_PASS=$("$CHILLI_PATH_BIN" -s $CHILLI_PATH_SOCK/chilli_"$INSTANCE".sock list | grep -wc "pass")
-  STATE_DNAT=$("$CHILLI_PATH_BIN" -s $CHILLI_PATH_SOCK/chilli_"$INSTANCE".sock list | grep -wc "dnat")
-  STATE_NONE=$("$CHILLI_PATH_BIN" -s $CHILLI_PATH_SOCK/chilli_"$INSTANCE".sock list | grep -wc "none")
+  STATE_PASS=$("$CHILLI_PATH_BIN" -s "$CHILLI_PATH_SOCK/chilli_$INSTANCE.sock" list | grep -wc "pass")
+  STATE_DNAT=$("$CHILLI_PATH_BIN" -s "$CHILLI_PATH_SOCK/chilli_$INSTANCE.sock" list | grep -wc "dnat")
+  STATE_NONE=$("$CHILLI_PATH_BIN" -s "$CHILLI_PATH_SOCK/chilli_$INSTANCE.sock" list | grep -wc "none")
 fi
 
 echo "pass.value $STATE_PASS"
