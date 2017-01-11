@@ -58,58 +58,71 @@ if [ "$ACTION" = "autoconf" ]; then
 fi
 
 zlines=$("$ZPOOL_BIN" iostat -v | wc -l | sed 's/ //g')
-pool_iostat=$("$ZPOOL_BIN" iostat -v 1 1 | tail "-$zlines")
-zlist=$(echo "$pool_iostat" | gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next}; { if ( $4 >=0 ) print $1}' | tr ' ' '\n')
+iostats=$("$ZPOOL_BIN" iostat -v 1 1 | tail "-$zlines")
+zlist=$(echo "$iostats" \
+	| gawk '/alloc/ {next}; /avail/ {next}; /raid/ {next}; /mirror/ {next};
+		{ if ( $4 >=0 ) print $1}' \
+	| tr ' ' '\n')
 
-# parse the n'th column of the iostat output for a given pool as a number (interpreting K and M suffixes)
-get_pool_iostat() {
-	local pool_label="$1"
+# Parse the n'th column of the iostat output for a given pool or disk as a
+# number (interpreting K and M suffixes).
+get_device_iostat_column() {
+	local device_label="$1"
 	local stat_column="$2"
-	echo "$pool_iostat" \
-		| gawk '{ if ($1 == "'"$pool_label"'") print $'"$stat_column"'; }' \
-		| gawk '/M/ {print strtonum($1)*1000}; /K/ {print strtonum($1)}; /[0-9]$/ {print int($1)/1000}'
+	# convert all numeric values into kB
+	echo "$iostats" \
+		| gawk '{ if ($1 == "'"$device_label"'")
+				print $'"$stat_column"'; }' \
+		| gawk '/M/ {print strtonum($1)*1000};
+			/K/ {print strtonum($1)};
+			/[0-9]$/ {print int($1)/1000}'
 }
 
-get_pool_fieldname() {
-	local pool_id="$1"
-	# backwards compatibility (until 2016):
-	# keep the unprefixed pool name for the fieldname, except for pool names starting with digits
-	if echo "$pool_id" | grep -q "^[0-9]"; then
-		clean_fieldname "_$pool_id"
+
+get_device_fieldname() {
+	local device_id="$1"
+	# Backwards compatibility (until 2016): keep the unprefixed pool name
+	# for the fieldname, except for pool names starting with digits.
+	if echo "$device_id" | grep -q "^[0-9]"; then
+		clean_fieldname "_$device_id"
 	else
-		clean_fieldname "$pool_id"
+		clean_fieldname "$device_id"
 	fi
 }
+
 
 if [ "$ACTION" = "config" ]; then
 	echo 'graph_title zpool iostat'
 	echo 'graph_args --base 1000 -l 0'
-	echo 'graph_vlabel write - read KBytes/s'
+	echo 'graph_vlabel write (-) / read (+) KBytes/s'
 	echo 'graph_category disk'
 	echo 'graph_scale no'
 	echo 'graph_info This graph shows zpool iostat'
-	# assemble the "graph_order" as a sorted list of read/write pairs for each poll
+	# Assemble the "graph_order" as a sorted list of read/write pairs for
+	# each device.
 	printf "graph_order"
-	echo "$zlist" | while read -r pool_id; do
-		fieldname="$(get_pool_fieldname "pool_$pool_id")"
+	echo "$zlist" | while read -r device_id; do
+		fieldname="$(get_device_fieldname "pool_$device_id")"
 		printf " %s_read %s_write" "$fieldname" "$fieldname"
 	done
-	# finalize the 'graph_order'
+	# finalize the 'graph_order' with a newline
 	echo
 	# output all fields: write as negative numbers and read as positive
-	echo "$zlist" | while read -r pool_id; do
-		fieldname="$(get_pool_fieldname "pool_$pool_id")"
-		echo "${fieldname}_read.label $pool_id"
+	echo "$zlist" | while read -r device_id; do
+		fieldname="$(get_device_fieldname "pool_$device_id")"
+		echo "${fieldname}_read.label $device_id"
 		echo "${fieldname}_read.type GAUGE"
 		echo "${fieldname}_read.graph no"
-		echo "${fieldname}_write.label $pool_id"
+		echo "${fieldname}_write.label $device_id"
 		echo "${fieldname}_write.type GAUGE"
 		echo "${fieldname}_write.negative ${fieldname}_read"
 	done
 	exit 0
 fi
-echo "$zlist" | while read -r pool_id; do
-	fieldname="$(get_pool_fieldname "pool_$pool_id")"
-	echo "${fieldname}_read.value $(get_pool_iostat "$pool_id" 6)"
-	echo "${fieldname}_write.value $(get_pool_iostat "$pool_id" 7)"
+
+
+echo "$zlist" | while read -r device_id; do
+	fieldname="$(get_device_fieldname "pool_$device_id")"
+	echo "${fieldname}_read.value $(get_device_iostat_column "$device_id" 6)"
+	echo "${fieldname}_write.value $(get_device_iostat_column "$device_id" 7)"
 done
