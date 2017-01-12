@@ -1,40 +1,51 @@
 #!/usr/bin/env sh
 # wordpress-multisite plugin
-# 
+#
+# Version 0.3
+# Date 2017-01-12
+# Some last minor fixes
+#
 # Version 0.2
 # Date 2016-10-24
 # Code improvements
-# 
+#
 # Version 0.1
 # Date 2016-02-07
 # Initial release
 #
 : <<=cut
 =head1 NAME
+
 Wordpress-Multisite Munin Plugin
 
 A Munin plugin to monitor posts, comments and pingbacks from every multisite instance.
 It uses multigraphs and also shows the combined number of posts, comments, pingbacks, instances and users.
 
-Most database requests came from the wordpress-mu-plugin which was written by Andre Darafarin and Chris Bair
+Most database queries came from the wordpress-mu-plugin which was written by Andre Darafarin and Chris Bair
 
 =head1 CONFIGURATION
+
 The plugin need access to the wordpress database
 
 =head2 Config file
+
 Create the config file plugin-conf.d/wordpress with the following values:
 
-=over 4
-=item * [wordpress*]
-=item * env.mysqlopts <ie -uroot -prootpass>
-=item * env.mysqlconnection <defaults to -hlocalhost>
-=item * env.database <ie -Dwordpress>
-=item * env.dbprefix <defaults to wp_>
+  [wordpress*]
+  env.mysqlopts		# i.e. -uroot -prootpass
+  env.mysqlconnection	# defaults to -hlocalhost
+  env.database		# i.e. -Dwordpress
+  env.dbprefix		# defaults to wp_
 
-=back
+=head1 VERSION
 
-=head1 VERSION																														   
-Version 0.2 (2016-02-07)
+Version 0.3 (2017-01-12)
+
+=head2 Some minor fixes:
+
+  * fixed perldoc
+  * fixed some syntax warnings from shellcheck
+  * replaced expr by $(( ))
 
 =head1 AUTHOR
 
@@ -43,7 +54,6 @@ Jonas Palm <jonaspalm . posteo . de>
 =head1 LICENSE
 
 GPLv3 or higher
-
 =cut
 
 # fill vars
@@ -84,10 +94,10 @@ else
 		i=
 		test "$n" -gt "1" && i=${n}_
 
-		POSTS=$(expr $POSTS + $(wp_get posts $i))
-		COMMENTS=$(expr $COMMENTS + $(wp_get comments $i))
-		PINGBACKS=$(expr $PINGBACKS + $(wp_get pingbacks $i))
-		CNT=$(expr $CNT + 1)
+		POSTS=$((POSTS + $(wp_get posts "$i")))
+		COMMENTS=$((COMMENTS + $(wp_get comments "$i")))
+		PINGBACKS=$((PINGBACKS + $(wp_get pingbacks "$i")))
+		CNT=$((CNT + 1))
 	done
 
 	echo "multigraph wordpress"
@@ -106,7 +116,7 @@ for n in $(wp_get ids); do
 
 	if [ "$1" = "config" ]; then
 		echo "multigraph wordpress.site_${n}"
-		echo "graph_title $(wp_get title $i)"
+		echo "graph_title $(wp_get title "$i")"
 		echo "graph_order posts comments pingbacks"
 		echo "graph_vlabel Wordpress ID ${n}"
 		echo "posts.label Posts"
@@ -114,8 +124,8 @@ for n in $(wp_get ids); do
 		echo "pingbacks.label Pingbacks"
 	else
 		echo "multigraph wordpress.site_${n}"
-		echo "posts.value $(wp_get posts $i)"
-		echo "comments.value $(wp_get comments $i)"
-		echo "pingbacks.value $(wp_get pingbacks $i)"
+		echo "posts.value $(wp_get posts "$i")"
+		echo "comments.value $(wp_get comments "$i")"
+		echo "pingbacks.value $(wp_get pingbacks "$i")"
 	fi
 done
