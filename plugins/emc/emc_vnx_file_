@@ -82,6 +82,8 @@
 
 export LANG=C
 
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
 ssh_check() {
 	ssh -q $username@$1 "/nasmcd/sbin/getreason | grep -w slot_\`/nasmcd/sbin/t2slot\` | cut -d- -f1"
 }
@@ -323,12 +325,12 @@ if [ "$1" = "config" ] ; then
 			EOF
 			echo -n "graph_order "
 			for graph in "${graphs_array[@]}"; do
-				field=$(echo "$graph" | sed -ne 's/\./_/pg' )
+				field="$(clean_fieldname "$graph")"
 				echo -n "${server}_${field}_r ${server}_${field}_w ${server}_${field}_t ${server}_${field}_s "
 			done
 			echo " "
 			for graph in "${graphs_array[@]}"; do
-				field=$(echo "$graph" | sed -ne 's/\./_/pg' )
+				field="$(clean_fieldname "$graph")"
 				echo "${server}_${field}_r.label $server $field Read Ops/s"
 				echo "${server}_${field}_w.label $server $field Write Ops/s"
 				echo "${server}_${field}_w.draw STACK"
@@ -345,12 +347,12 @@ if [ "$1" = "config" ] ; then
 			EOF
 			echo -n "graph_order "
 			for graph in "${graphs_array[@]}"; do
-				field=$(echo "$graph" | sed -ne 's/\./_/pg' )
+				field="$(clean_fieldname "$graph")"
 				echo -n "${server}_${field}_r ${server}_${field}_w ${server}_${field}_t "
 			done
 			echo " "
 			for graph in "${graphs_array[@]}"; do
-				field=$(echo "$graph" | sed -ne 's/\./_/pg' )
+				field="$(clean_fieldname "$graph")"
 				echo "${server}_${field}_r.label $server $field Read B/s"
 				echo "${server}_${field}_r.cdef ${server}_${field}_r,1024,*"
 				echo "${server}_${field}_w.label $server $field Write B/s"
@@ -368,7 +370,7 @@ if [ "$1" = "config" ] ; then
 			graph_category nfs
 			EOF
 			for graph in "${graphs_array[@]}"; do
-				field=$(echo "$graph" | sed -ne 's/\./_/pg' )
+				field="$(clean_fieldname "$graph")"
 				echo "${server}_${field}.label $server $field Avg uSec/call"
 			done
 		fi
@@ -484,22 +486,22 @@ member_elements=$(run_remote server_stats "$server" -count 1 -terminationsummary
 		element+=($graphs)
 	done  <<< "$member_elements"
 	for (( i=0; i<$((LINES)); i++ )); do
-		client=$( echo ${element[i*$NUMCOL]} | sed -ne 's/\./_/pg')
-               echo "${server}_${client}_r".value "${element[$i*$NUMCOL+2]}"
-               echo "${server}_${client}_w".value "${element[$i*$NUMCOL+3]}"
-               echo "${server}_${client}_t".value "${element[$i*$NUMCOL+1]}"
-               echo "${server}_${client}_s".value "${element[$i*$NUMCOL+4]}"
+		client="$(clean_fieldname "${element[i*$NUMCOL]}")"
+		echo "${server}_${client}_r".value "${element[$i*$NUMCOL+2]}"
+		echo "${server}_${client}_w".value "${element[$i*$NUMCOL+3]}"
+		echo "${server}_${client}_t".value "${element[$i*$NUMCOL+1]}"
+		echo "${server}_${client}_s".value "${element[$i*$NUMCOL+4]}"
         done
 	echo -e "\nmultigraph vnx_emc_nfs_client_kib_s"
 	for (( i=0; i<$((LINES)); i++ )); do
-		client=$( echo ${element[i*$NUMCOL]} | sed -ne 's/\./_/pg')
-               echo "${server}_${client}_r".value "${element[$i*$NUMCOL+6]}"
-               echo "${server}_${client}_w".value "${element[$i*$NUMCOL+7]}"
-               echo "${server}_${client}_t".value "${element[$i*$NUMCOL+5]}"
+		client="$(clean_fieldname "${element[i*$NUMCOL]}")"
+		echo "${server}_${client}_r".value "${element[$i*$NUMCOL+6]}"
+		echo "${server}_${client}_w".value "${element[$i*$NUMCOL+7]}"
+		echo "${server}_${client}_t".value "${element[$i*$NUMCOL+5]}"
         done
 	echo -e "\nmultigraph vnx_emc_nfs_client_avg_usec"
 	for (( i=0; i<$((LINES)); i++ )); do
-		client=$( echo ${element[i*$NUMCOL]} | sed -ne 's/\./_/pg')
+		client="$(clean_fieldname "${element[i*$NUMCOL]}")"
 		echo "${server}_${client}".value "${element[$i*$NUMCOL+8]}"
 	done
 	fi
