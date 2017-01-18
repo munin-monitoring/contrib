@@ -50,7 +50,8 @@
  The plugin uses SSH to connect to Control Stations. It's possible to use 'nasadmin' user, but it would be better
  if you create read-only global user by Unisphere Client. The user should have only Operator role.
  I created "operator" user but due to the fact that Control Stations already had one internal "operator" user,
- the new one was called "operator1". So be careful.
+ the new one was called "operator1". So be careful. After that, copy .bash_profile from /home/nasadmin to a newly created
+ /home/operator1
  
  On munin-node side choose a user which will be used to connect through SSH. Generally user "munin" is ok. Then,
  execute "sudo su munin -s /bin/bash", "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created 
@@ -137,18 +138,17 @@ else echo "Do not know what to do. Name the plugin as 'emc_vnx_file_nfs_stats_<H
 TARGET=$(echo "${0##*/}" | cut -d _ -f 6)
 : ${nas_servers:="server_2 server_3"}
 
-check_conf
-if [[ $? -eq 1 ]]; then
-	exit 1;
-fi
+check_conf 1>&2 || exit 1
 
-SSH="ssh -q $username@$PRIMARY_CS . /home/operator1/.bash_profile; "
+run_remote () {
+    ssh -q "$username@$PRIMARY_CS" ". /home/""$username""/.bash_profile; $*"
+}
 
 echo "host_name ${TARGET}"
 
 if [ "$1" = "config" ] ; then
 	for server in $nas_servers; do
-		$SSH nas_server -i $server | grep -q 'type *= nas'
+		run_remote nas_server -i $server | grep -q 'type *= nas'
 		if [ "$?" != 0 ]  ; then continue; fi
 		nas_server_ok=TRUE
 		
@@ -232,7 +232,7 @@ if [ "$1" = "config" ] ; then
 			fi
 		if [ $STATSTYPE = "NFS" ] ; then
 #nfs.v3.op data
-			member_elements=$($SSH server_stats $server -info nfs.v3.op | grep member_elements | sed -ne 's/^.*= //p')
+			member_elements=$(run_remote server_stats "$server" -info nfs.v3.op | grep member_elements | sed -ne 's/^.*= //p')
 			IFS=',' read -ra graphs <<< "$member_elements"
 			cat <<-EOF 
 			multigraph vnx_emc_v3_calls_s
@@ -273,7 +273,7 @@ if [ "$1" = "config" ] ; then
 			done
 			graphs=()
 #nfs.v4.op data
-			member_elements=$($SSH server_stats $server -info nfs.v4.op | grep member_elements | sed -ne 's/^.*= //p')
+			member_elements=$(run_remote server_stats "$server" -info nfs.v4.op | grep member_elements | sed -ne 's/^.*= //p')
 			IFS=',' read -ra graphs <<< "$member_elements"
 			cat <<-EOF
 			multigraph vnx_emc_v4_calls_s
@@ -316,7 +316,7 @@ if [ "$1" = "config" ] ; then
 #nfs.client data
 #							 Total    Read     Write   Suspicious   Total    Read     Write      Avg   
 #                                                      Ops/s    Ops/s    Ops/s    Ops diff    KiB/s    KiB/s    KiB/s   uSec/call
-			member_elements=$($SSH server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p' | cut -d' ' -f1)
+			member_elements=$(run_remote server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p' | cut -d' ' -f1)
 			readarray graphs2 <<< "$member_elements"
 			cat <<-EOF
 
@@ -385,11 +385,11 @@ exit 0
 fi
 
 for server in $nas_servers; do
-	$SSH nas_server -i $server | grep -q 'type *= nas'
+	run_remote nas_server -i $server | grep -q 'type *= nas'
 	if [ "$?" != 0 ]  ; then continue; fi
 	nas_server_ok=TRUE
 	if [ $STATSTYPE = "BASICDM" ] ; then
-member_elements=$($SSH server_stats $server -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
+member_elements=$(run_remote server_stats "$server" -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
 #       NUMCOL=5
         IFS=$' ' read -ra graphs <<< "$member_elements"
 
@@ -404,7 +404,7 @@ member_elements=$($SSH server_stats $server -count 1 -terminationsummary no -tit
         echo "${server}_stor_read.value ${graphs[4]}"
         echo "${server}_stor_write.value ${graphs[5]}"
 
-        member_elements=$($SSH server_stats $server -monitor kernel.memory -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
+        member_elements=$(run_remote server_stats "$server" -monitor kernel.memory -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
         IFS=$' ' read -ra graphs <<< "$member_elements"
 
         echo -e "\nmultigraph emc_vnx_memory"
@@ -430,7 +430,7 @@ member_elements=$($SSH server_stats $server -count 1 -terminationsummary no -tit
 	fi
 	if [ $STATSTYPE = "NFS" ] ; then
 #nfs.v3.op data
-	member_elements=$($SSH server_stats $server -monitor nfs.v3.op -count 1 -terminationsummary no -titles never | sed -ne 's/^.*v3/v3/p')
+	member_elements=$(run_remote server_stats "$server" -monitor nfs.v3.op -count 1 -terminationsummary no -titles never | sed -ne 's/^.*v3/v3/p')
 	NUMCOL=5
 	LINES=$(wc -l <<< "$member_elements")
 	while IFS=$'\n' read -ra graphs ; do
@@ -455,7 +455,7 @@ member_elements=$($SSH server_stats $server -count 1 -terminationsummary no -tit
 	element=()
 
 #nfs.v4.op data
-	member_elements=$($SSH server_stats $server -monitor nfs.v4.op -count 1 -terminationsummary no -titles never | sed -ne 's/^.*v4/v4/p')
+	member_elements=$(run_remote server_stats "$server" -monitor nfs.v4.op -count 1 -terminationsummary no -titles never | sed -ne 's/^.*v4/v4/p')
 	NUMCOL=5
 	LINES=$(wc -l <<< "$member_elements")
 	while IFS=$'\n' read -ra graphs ; do
@@ -481,7 +481,7 @@ member_elements=$($SSH server_stats $server -count 1 -terminationsummary no -tit
 
 #nfs.client data
 	echo -e "\nmultigraph vnx_emc_nfs_client_ops_s"
-        member_elements=$($SSH server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p')
+        member_elements=$(run_remote server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p')
 	NUMCOL=9
         LINES=$(wc -l <<< "$member_elements")
 	while IFS=$'\n' read -ra graphs; do
