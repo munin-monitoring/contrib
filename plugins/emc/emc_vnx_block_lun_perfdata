@@ -4,7 +4,8 @@
 
 =head1 NAME 
 
- emc_vnx_block_lun_perfdata - Plugin to monitor Block statistics of EMC VNX 5300 Unified Storage Processors
+ emc_vnx_block_lun_perfdata - Plugin to monitor Block statistics of EMC VNX 5300
+ Unified Storage Processors
 
 =head1 AUTHOR
 
@@ -21,66 +22,83 @@
 
 =head1 DESCRIPTION
 
- The plugin monitors LUN of EMC Unified Storage FLARE SP's. Probably it can also be compatible with 
- other Clariion systems. It uses SSH to connect to Control Stations, then remotely executes 
- /nas/sbin/navicli and fetches and parses data from it. Obviously, it's easy to reconfigure plugin not to use 
- Control Stations' navicli in favor of using locally installed /opt/Navisphere's cli. There is no difference which
- Storage Processor to use to gather data, so this plugin tries both of them and uses the first active one.
- This plugin also automatically chooses Primary Control Station from the list by calling /nasmcd/sbin/getreason and 
- /nasmcd/sbin/t2slot.
+ The plugin monitors LUN of EMC Unified Storage FLARE SP's. Probably it can also
+ be compatible with  other Clariion systems. It uses SSH to connect to Control 
+ Stations, then remotely executes /nas/sbin/navicli and fetches and parses data 
+ from it. Obviously, it's easy to reconfigure plugin not to use Control Stations'
+ navicli in favor of using locally installed /opt/Navisphere's cli. There is no 
+ difference which Storage Processor to use to gather data, so this plugin tries 
+ both of them and uses the first active one. This plugin also automatically 
+ chooses Primary Control Station from the list by calling /nasmcd/sbin/getreason 
+ and /nasmcd/sbin/t2slot.
  
- I left some parts of this plugin as rudimental to make easy to reconfigure it to draw more (or less) data.
+ I left some parts of this plugin as rudimental to make easy to reconfigure it 
+ to draw more (or less) data.
 
 =head1 COMPATIBILITY
 
- The plugin has been written for being compatible with EMC VNX5300 Storage system, as this is the only EMC storage which 
- i have. By the way, i am pretty sure it can also work with other VNX1 storages, like VNX5100 and VNX5500, and old-style 
- Clariion systems.
- About VNX2 series, i don't know whether the plugin will be able to work with them. Maybe it would need some corrections
- in command-line backend. The same situation is with other EMC systems, so i encourage you to try and fix the plugin. 
+ The plugin has been written for being compatible with EMC VNX5300 Storage 
+ system, as this is the only EMC storage which i have. By the way, i am pretty 
+ sure it can also work with other VNX1 storages, like VNX5100 and VNX5500, and 
+ old-style Clariion systems.
+ About VNX2 series, i don't know whether the plugin will be able to work with 
+ them. Maybe it would need some corrections in command-line backend. The same 
+ situation is with other EMC systems, so i encourage you to try and fix the 
+ plugin. 
  
 =head1 CONFIGURATION
 
 =head2 Prerequisites
 
- First of all, be sure that statistics collection is turned on. You can do this by typing:
+ First of all, be sure that statistics collection is turned on. You can do this
+ by typing:
  navicli -h spa setstats -on
  on your Control Station or locally through /opt/Navisphere 
 
- Also, the plugin actively uses buggy "cdef" feature of Munin, and here we can be hit by the following bugs:
- http://munin-monitoring.org/ticket/1017 - Here I have some workarounds in plugin, be sure that they are working.
- http://munin-monitoring.org/ticket/1352 - 
- Metrics in my plugin can be much longer than 15 characters, so you have to edit the following file:
- /usr/share/perl5/Munin/Master/GraphOld.pm
- Find get_field_name() function and change "15" to "255".
+ Also, the plugin actively uses buggy "cdef" feature of Munin 2.0, and here we 
+ can be hit by the following bugs:
+ http://munin-monitoring.org/ticket/1017 - Here I have some workarounds in the 
+ plugin, be sure that they are working.
+ http://munin-monitoring.org/ticket/1352 - Metrics in my plugin can be much 
+ longer than 15 characters.
+ Without these workarounds "Load" and "Queue Length" would not work.
 
 =head2 Installation
 
- The plugin uses SSH to connect to Control Stations. It's possible to use 'nasadmin' user, but it would be better
- if you create read-only global user by Unisphere Client. The user should have only Operator role.
- I created "operator" user but due to the fact that Control Stations already had one internal "operator" user,
- the new one was called "operator1". So be careful.
+ The plugin uses SSH to connect to Control Stations. It's possible to use 
+ 'nasadmin' user, but it would be better if you create read-only global user by
+ Unisphere Client. The user should have only Operator role. I created "operator"
+ user but due to the fact that Control Stations already had one internal 
+ "operator" user, the new one was called "operator1". So be careful.
  
- On munin-node side choose a user which will be used to connect through SSH. Generally user "munin" is ok. Then,
- execute "sudo su munin -s /bin/bash", "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created 
+ On munin-node side choose a user which will be used to connect through SSH. 
+ Generally user "munin" is ok. Then, execute "sudo su munin -s /bin/bash", 
+ "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created 
  user.
  
- Make a link from /usr/share/munin/plugins/emc_vnx_dm_basic_stats to /etc/munin/plugins/emc_vnx_dm_basic_stats_<NAME>,
- where <NAME> is any arbitrary name of your storage system. The plugin will return <NAME> in its answer 
- as "host_name" field.
- Assume your storage system is called "VNX5300".
+ Make a link from /usr/share/munin/plugins/emc_vnx_dm_basic_stats to 
+ /etc/munin/plugins/emc_vnx_dm_basic_stats_<NAME>, where <NAME> is any 
+ arbitrary name of your storage system. The plugin will return <NAME> in its 
+ answer as "host_name" field. Assume your storage system is called "VNX5300".
  
- Make a configuration file at /etc/munin/plugin-conf.d/emc_vnx_block_lun_perfdata_VNX5300
+ Make a configuration file at 
+ /etc/munin/plugin-conf.d/emc_vnx_block_lun_perfdata_VNX5300:
  
  [emc_vnx_block_lun_perfdata_VNX5300]
- user munin							# SSH Client local user
- env.username operator1						# Remote user with Operator role
- env.cs_addr 192.168.1.1 192.168.1.2				# Control Stations addresses
+ user munin					
+ env.username operator1				
+ env.cs_addr 192.168.1.1 192.168.1.2		
+
+ Where: 
+ user - SSH Client local user
+ env.username - Remote user with Operator role
+ env.cs_addr - Control Stations addresses
 
 =head1 ERRATA
 
- It counts Queue Length in not fully correct way. We take parameters totally from both SP's, but after we divide them
- independently by load of SPA and SPB. Anyway, in most AAA / ALUA cases the formula is correct.
+ It counts Queue Length in not fully correct way. We take parameters totally 
+ from both SP's, but after we divide them independently by load of SPA and SPB.
+ Anyway, in most AAA / ALUA cases the formula is correct.
 
 =head1 HISTORY
 
