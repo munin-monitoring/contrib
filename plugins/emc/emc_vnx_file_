@@ -225,7 +225,7 @@ if [ "$1" = "config" ] ; then
 			${server}_max.label Max Limit
 			${server}_used.label Used Entries
 			EOF
-			fi
+		fi
 		if [ $STATSTYPE = "NFS" ] ; then
 #nfs.v3.op data
 			member_elements=$(run_remote server_stats "$server" -info nfs.v3.op | grep member_elements | sed -ne 's/^.*= //p')
@@ -313,7 +313,7 @@ if [ "$1" = "config" ] ; then
 #							 Total    Read     Write   Suspicious   Total    Read     Write      Avg   
 #                                                      Ops/s    Ops/s    Ops/s    Ops diff    KiB/s    KiB/s    KiB/s   uSec/call
 			member_elements=$(run_remote server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p' | cut -d' ' -f1)
-			readarray graphs2 <<< "$member_elements"
+			readarray graphs_array <<< "$member_elements"
 			cat <<-EOF
 
 			multigraph vnx_emc_nfs_client_ops_s
@@ -322,12 +322,12 @@ if [ "$1" = "config" ] ; then
 			graph_category nfs
 			EOF
 			echo -n "graph_order "
-			for graph in "${graphs2[@]}"; do
+			for graph in "${graphs_array[@]}"; do
 				field=$(echo "$graph" | sed -ne 's/\./_/pg' )
 				echo -n "${server}_${field}_r ${server}_${field}_w ${server}_${field}_t ${server}_${field}_s "
 			done
 			echo " "
-			for graph in "${graphs2[@]}"; do
+			for graph in "${graphs_array[@]}"; do
 				field=$(echo "$graph" | sed -ne 's/\./_/pg' )
 				echo "${server}_${field}_r.label $server $field Read Ops/s"
 				echo "${server}_${field}_w.label $server $field Write Ops/s"
@@ -344,12 +344,12 @@ if [ "$1" = "config" ] ; then
 			graph_category nfs
 			EOF
 			echo -n "graph_order "
-			for graph in "${graphs2[@]}"; do
+			for graph in "${graphs_array[@]}"; do
 				field=$(echo "$graph" | sed -ne 's/\./_/pg' )
 				echo -n "${server}_${field}_r ${server}_${field}_w ${server}_${field}_t "
 			done
 			echo " "
-			for graph in "${graphs2[@]}"; do
+			for graph in "${graphs_array[@]}"; do
 				field=$(echo "$graph" | sed -ne 's/\./_/pg' )
 				echo "${server}_${field}_r.label $server $field Read B/s"
 				echo "${server}_${field}_r.cdef ${server}_${field}_r,1024,*"
@@ -367,7 +367,7 @@ if [ "$1" = "config" ] ; then
 			graph_vlabel uSec/call
 			graph_category nfs
 			EOF
-			for graph in "${graphs2[@]}"; do
+			for graph in "${graphs_array[@]}"; do
 				field=$(echo "$graph" | sed -ne 's/\./_/pg' )
 				echo "${server}_${field}.label $server $field Avg uSec/call"
 			done
