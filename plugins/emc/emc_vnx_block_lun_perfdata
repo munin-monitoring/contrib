@@ -359,9 +359,9 @@ if [ "$1" = "config" ] ; then
 			${LUN}_writereq.graph no
 			${LUN}_writereq.type COUNTER
 		EOF
-# Queue Length SPA = ((Sum of Outstanding Requests SPA - NonZero Request Count Arrivals SPA / 2)/(Host Read Requests SPA + Host Write Requests SPA))*
-# (Busy Ticks SPA/(Busy Ticks SPA + Idle Ticks SPA)
-# We count together SPA and SPB, although it is not fully corrext
+		# Queue Length SPA = ((Sum of Outstanding Requests SPA - NonZero Request Count Arrivals SPA / 2)/(Host Read Requests SPA + Host Write Requests SPA))*
+		# (Busy Ticks SPA/(Busy Ticks SPA + Idle Ticks SPA)
+		# We count together SPA and SPB, although it is not fully corrext
 		cat <<-EOF
 			${LUN}_ql_l_a.label ${LUN} Queue Length SPA
 			${LUN}_ql_l_a.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spa,*,${LUN}_busyticks_spa,${LUN}_idleticks_spa,+,/
@@ -369,7 +369,7 @@ if [ "$1" = "config" ] ; then
 			${LUN}_ql_l_b.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spb,*,${LUN}_busyticks_spb,${LUN}_idleticks_spb,+,/
 		EOF
 	done <<< "$LUNLIST"
-exit 0
+	exit 0
 fi
 
 #Preparing big complex command to SP's to have most work done remotely.
@@ -391,11 +391,18 @@ while read -r LUN ; do
 		s/Explicit Trespasses\:\ */${FILTERLUN}_explic_tr.value /p;
 		' ;")
 done <<< "$LUNLIST"
+
+get_answer_field() {
+    echo "$ANSWER" | grep -F "_${1}."
+}
+
 ANSWER="$($BIGSSHCMD)"
 echo "multigraph emc_vnx_block_blocks"
-echo "$ANSWER" | grep "read\.\|write\."
+get_answer_field "read"
+get_answer_field "write"
 echo -e "\nmultigraph emc_vnx_block_req"
-echo "$ANSWER" | grep "readreq\.\|writereq\."
+get_answer_field "readreq"
+get_answer_field "writereq"
 
 echo -e "\nmultigraph emc_vnx_block_ticks"
 while read -r LUN ; do
@@ -403,26 +410,29 @@ while read -r LUN ; do
 	echo "${LUN}_load_spa.value 0"
 	echo "${LUN}_load_spb.value 0"
 done <<< "$LUNLIST"
-echo "$ANSWER" | grep "busyticks_spa\.\|idleticks_spa\."
-echo "$ANSWER" | grep "busyticks_spb\.\|idleticks_spb\."
+get_answer_field "busyticks_spa"
+get_answer_field "idleticks_spa"
+get_answer_field "busyticks_spb"
+get_answer_field "idleticks_spb"
 
 echo -e "\nmultigraph emc_vnx_block_outstanding"
-echo "$ANSWER" | grep "outstandsum\."
+get_answer_field "outstandsum"
 
 echo -e "\nmultigraph emc_vnx_block_nonzeroreq"
-echo "$ANSWER" | grep "nonzeroreq\."
+get_answer_field "nonzeroreq"
 
 echo -e "\nmultigraph emc_vnx_block_trespasses"
-echo "$ANSWER" | grep "implic_tr\.\|explic_tr\."
+get_answer_field "implic_tr"
+get_answer_field "explic_tr"
 
 echo -e "\nmultigraph emc_vnx_block_queue"
 # Queue Length
-	echo "$ANSWER" | grep "busyticks"
-	echo "$ANSWER" | grep "idleticks."
-	echo "$ANSWER" | grep "outstandsum\."
-	echo "$ANSWER" | grep "nonzeroreq\."
-	echo "$ANSWER" | grep "readreq\."
-	echo "$ANSWER" | grep "writereq\."
+	get_answer_field "busyticks"
+	get_answer_field "idleticks"
+	get_answer_field "outstandsum"
+	get_answer_field "nonzeroreq"
+	get_answer_field "readreq"
+	get_answer_field "writereq"
 while read -r LUN ; do
 	LUN="$(clean_fieldname "$LUN")"
 	echo "${LUN}_ql_l_a.value 0 "
