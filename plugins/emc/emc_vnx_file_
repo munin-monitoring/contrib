@@ -210,25 +210,25 @@ if [ "$1" = "config" ] ; then
 			${server}_cpuutil.min 0
 			${server}_cpuutil.label $server CPU util. in %.
 
-			multigraph emc_vnx_network_kib
+			multigraph emc_vnx_network_b
 			graph_title EMC VNX 5300 Datamover Network bytes over all interfaces
 			graph_vlabel B/s recv. (-) / sent (+)
 			graph_category network
 			graph_args --base 1000
 			${server}_net_in.graph no
 			${server}_net_in.label none
-			${server}_net_out.label $server kB/s
+			${server}_net_out.label $server B/s
 			${server}_net_out.negative ${server}_net_in
 			${server}_net_out.draw AREA
 
-			multigraph emc_vnx_storage_kib
+			multigraph emc_vnx_storage_b
 			graph_title EMC VNX 5300 Datamover Storage bytes over all interfaces
 			graph_vlabel B/s recv. (-) / sent (+)
 			graph_category network
 			graph_args --base 1000
 			${server}_stor_read.graph no
 			${server}_stor_read.label none
-			${server}_stor_write.label $server kB/s
+			${server}_stor_write.label $server B/s
 			${server}_stor_write.negative ${server}_stor_read
 			${server}_stor_write.draw AREA
 
@@ -239,16 +239,11 @@ if [ "$1" = "config" ] ; then
 			graph_args --base 1024
 			graph_order ${server}_used ${server}_free ${server}_total ${server}_freebuffer ${server}_encumbered
 			${server}_used.label ${server} Used
-			${server}_used.cdef ${server}_used,1024,/
 			${server}_free.label ${server} Free
 			${server}_free.draw STACK
-			${server}_free.cdef ${server}_free,1024,/
 			${server}_total.label ${server} Total
-			${server}_total.cdef ${server}_total,1024,/
 			${server}_freebuffer.label ${server} Free Buffer
-			${server}_freebuffer.cdef ${server}_freebuffer,1024,/
 			${server}_encumbered.label ${server} Encumbered
-			${server}_encumbered.cdef ${server}_encumbered,1024,/
 						
 			multigraph emc_vnx_filecache
 			graph_title EMC VNX 5300 File Buffer Cache
@@ -385,7 +380,7 @@ if [ "$1" = "config" ] ; then
 
 			cat <<-EOF
 
-			multigraph vnx_emc_nfs_client_kib_s
+			multigraph vnx_emc_nfs_client_b_s
 			graph_title EMC VNX 5300 NFS Client B/s
 			graph_vlabel B/s
 			graph_category nfs
@@ -399,12 +394,9 @@ if [ "$1" = "config" ] ; then
 			for graph in "${graphs_array[@]}"; do
 				field="$(clean_fieldname "$graph")"
 				echo "${server}_${field}_r.label $server $field Read B/s"
-				echo "${server}_${field}_r.cdef ${server}_${field}_r,1024,*"
 				echo "${server}_${field}_w.label $server $field Write B/s"
-				echo "${server}_${field}_w.cdef ${server}_${field}_w,1024,*"
 				echo "${server}_${field}_w.draw STACK"
 				echo "${server}_${field}_t.label $server $field Total B/s"
-				echo "${server}_${field}_t.cdef ${server}_${field}_t,1024,*"
 			done
 
 			cat <<-EOF
@@ -438,23 +430,23 @@ member_elements=$(run_remote server_stats "$server" -count 1 -terminationsummary
         echo "multigraph emc_vnx_cpu_percent"
         echo "${server}_cpuutil.value ${graphs[1]}"
 
-        echo -e "\nmultigraph emc_vnx_network_kib"
-        echo "${server}_net_in.value ${graphs[2]}"
-        echo "${server}_net_out.value ${graphs[3]}"
+        echo -e "\nmultigraph emc_vnx_network_b"
+        echo "${server}_net_in.value $((${graphs[2]} * 1000))"
+        echo "${server}_net_out.value $((${graphs[3]} * 1000))"
 
-        echo -e "\nmultigraph emc_vnx_storage_kib"
-        echo "${server}_stor_read.value ${graphs[4]}"
-        echo "${server}_stor_write.value ${graphs[5]}"
+        echo -e "\nmultigraph emc_vnx_storage_b"
+        echo "${server}_stor_read.value $((${graphs[4]} * 1000))"
+        echo "${server}_stor_write.value $((${graphs[5]} * 1000))"
 
         member_elements=$(run_remote server_stats "$server" -monitor kernel.memory -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
         IFS=$' ' read -ra graphs <<< "$member_elements"
 
         echo -e "\nmultigraph emc_vnx_memory"
-        echo "${server}_total.value ${graphs[14]}"
-        echo "${server}_used.value ${graphs[15]}"
-        echo "${server}_free.value ${graphs[12]}"
-        echo "${server}_freebuffer.value ${graphs[1]}"
-        echo "${server}_encumbered.value ${graphs[8]}"
+        echo "${server}_total.value $((${graphs[14]} / 1024))"
+        echo "${server}_used.value $((${graphs[15]} / 1024))"
+        echo "${server}_free.value $((${graphs[12]} / 1024))"
+        echo "${server}_freebuffer.value $((${graphs[1]} / 1024))"
+        echo "${server}_encumbered.value $((${graphs[8]} / 1024))"
 
         echo -e "\nmultigraph emc_vnx_filecache"
         echo "${server}_highw_hits.value ${graphs[2]}"
@@ -536,12 +528,12 @@ member_elements=$(run_remote server_stats "$server" -count 1 -terminationsummary
 		echo "${server}_${client}_t".value "${element[$i*$NUMCOL+1]}"
 		echo "${server}_${client}_s".value "${element[$i*$NUMCOL+4]}"
         done
-	echo -e "\nmultigraph vnx_emc_nfs_client_kib_s"
+	echo -e "\nmultigraph vnx_emc_nfs_client_b_s"
 	for (( i=0; i<$((LINES)); i++ )); do
 		client="$(clean_fieldname "${element[i*$NUMCOL]}")"
-		echo "${server}_${client}_r".value "${element[$i*$NUMCOL+6]}"
-		echo "${server}_${client}_w".value "${element[$i*$NUMCOL+7]}"
-		echo "${server}_${client}_t".value "${element[$i*$NUMCOL+5]}"
+		echo "${server}_${client}_r".value "$((${element[$i*$NUMCOL+6]} * 1024))"
+		echo "${server}_${client}_w".value "$((${element[$i*$NUMCOL+7]} * 1024))"
+		echo "${server}_${client}_t".value "$((${element[$i*$NUMCOL+5]} * 1024))"
         done
 	echo -e "\nmultigraph vnx_emc_nfs_client_avg_usec"
 	for (( i=0; i<$((LINES)); i++ )); do
