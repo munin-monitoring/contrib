@@ -4,7 +4,8 @@
 
 =head1 NAME 
 
- emc_vnx_file_stats - Plugin to monitor Basic, NFSv3 and NFSv4 statistics of EMC VNX 5300 Unified Storage system's Datamovers
+ emc_vnx_file_stats - Plugin to monitor Basic, NFSv3 and NFSv4 statistics of 
+ EMC VNX 5300 Unified Storage system's Datamovers
 
 =head1 AUTHOR
 
@@ -21,55 +22,100 @@
 
 =head1 DESCRIPTION
 
- The plugin monitors basic statistics of EMC Unified Storage system Datamovers and NFS statistics of EMC VNX5300 Unified 
- Storage system. Probably it can also be compatible with other Isilon or Celerra systems. It uses SSH to connect to Control 
- Stations, then remotely executes '/nas/sbin/server_stats' and fetches and parses data from it. It supports gathering 
- data both from active/active and active/passive Datamover configurations, ignoring offline or standby Datamovers. 
+ The plugin monitors basic statistics of EMC Unified Storage system Datamovers 
+ and NFS statistics of EMC VNX5300 Unified Storage system. Probably it can 
+ also be compatible with other Isilon or Celerra systems. It uses SSH to connect
+ to Control Stations, then remotely executes '/nas/sbin/server_stats' and 
+ fetches and parses data from it. It supports gathering data both from 
+ active/active and active/passive Datamover configurations, ignoring offline or 
+ standby Datamovers. 
  If all Datamovers are offline or absent, the plugin returns error.
- This plugin also automatically chooses Primary Control Station from the list by calling '/nasmcd/sbin/getreason' and 
- '/nasmcd/sbin/t2slot'.
+ This plugin also automatically chooses Primary Control Station from the list by
+  calling '/nasmcd/sbin/getreason' and '/nasmcd/sbin/t2slot'.
  
  At the moment data is gathered from the following statistics sources:
   * nfs.v3.op - Tons of timings about NFSv3 RPC calls
   * nfs.v4.op - Tons of timings about NFSv4 RPC calls
   * nfs.client - Here new Client addresses are rescanned and added automatically.
-  * basic-std Statistics Group - Basic Statistics of Datamovers (eg. CPU, Memory etc.)
+  * basic-std Statistics Group - Basic Statistics of Datamovers (eg. CPU, Memory
+  etc.)
  
- It's quite easy to comment out unneeded data to make graphs less overloaded or to add new statistics sources.
+ It's quite easy to comment out unneeded data to make graphs less overloaded or
+ to add new statistics sources.
+
+=head1 LIST OF GRAPHS
+
+ These are Basic Datamover Graphs.
+ Graph category CPU:
+	EMC VNX 5300 Datamover CPU Util %
+ Graph category Network:
+	EMC VNX 5300 Datamover Network bytes over all interfaces
+	EMC VNX 5300 Datamover Storage bytes over all interfaces
+ Graph category Memory:
+	EMC VNX 5300 Datamover Memory
+	EMC VNX 5300 File Buffer Cache
+	EMC VNX 5300 FileResolve
+
+ These are NFS (v3,v4) Graphs.
+ Graph category NFS:
+	EMC VNX 5300 NFSv3 Calls per second
+	EMC VNX 5300 NFSv3 uSeconds per call
+	EMC VNX 5300 NFSv3 Op %
+	EMC VNX 5300 NFSv4 Calls per second
+	EMC VNX 5300 NFSv4 uSeconds per call
+	EMC VNX 5300 NFSv4 Op %
+	EMC VNX 5300 NFS Client Ops/s
+	EMC VNX 5300 NFS Client B/s
+	EMC VNX 5300 NFS Client Avg uSec/call
 
 =head1 COMPATIBILITY
 
- The plugin has been written for being compatible with EMC VNX5300 Storage system, as this is the only EMC storage which 
- i have.
- By the way, i am pretty sure it can also work with other VNX1 storages, like VNX5100 and VNX5500.
- About VNX2 series, i don't know whether the plugin will be able to work with them. Maybe it would need some corrections
- in command-line backend. The same situation is with other EMC systems, so i encourage you to try and fix the plugin. 
+ The plugin has been written for being compatible with EMC VNX5300 Storage 
+ system, as this is the only EMC storage which i have.
+ By the way, i am pretty sure it can also work with other VNX1 storages, like
+ VNX5100 and VNX5500.
+ About VNX2 series, i don't know whether the plugin will be able to work with 
+ them. Maybe it would need some corrections in command-line backend. The same
+ situation is with other EMC systems, so i encourage you to try and fix the 
+ plugin. 
 
 =head1 CONFIGURATION
 
- The plugin uses SSH to connect to Control Stations. It's possible to use 'nasadmin' user, but it would be better
- if you create read-only global user by Unisphere Client. The user should have only Operator role.
- I created "operator" user but due to the fact that Control Stations already had one internal "operator" user,
- the new one was called "operator1". So be careful. After that, copy .bash_profile from /home/nasadmin to a newly created
+ The plugin uses SSH to connect to Control Stations. It's possible to use 
+ 'nasadmin' user, but it would be better if you create read-only global user by
+ Unisphere Client. The user should have only Operator role.
+ I created "operator" user but due to the fact that Control Stations already
+ had one internal "operator" user, the new one was called "operator1". So be 
+ careful. After that, copy .bash_profile from /home/nasadmin to a newly created
  /home/operator1
  
- On munin-node side choose a user which will be used to connect through SSH. Generally user "munin" is ok. Then,
- execute "sudo su munin -s /bin/bash", "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created 
+ On munin-node side choose a user which will be used to connect through SSH.
+ Generally user "munin" is ok. Then, execute "sudo su munin -s /bin/bash", 
+ "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created 
  user.
  
- Make a link from /usr/share/munin/plugins/emc_vnx_file_stats to /etc/munin/plugins/.
- If you want to get NFS statistics, name the link as "emc_vnx_file_nfs_stats_<NAME>", otherwise to get Basic Datamover
- statistics you have to name it "emc_vnx_file_basicdm_stats_<NAME>", where <NAME> is any arbitrary name of your 
- storage system. The plugin will return <NAME> in its answer as "host_name" field.
+ Make a link from /usr/share/munin/plugins/emc_vnx_file_stats to 
+ /etc/munin/plugins/. If you want to get NFS statistics, name the link as 
+ "emc_vnx_file_nfs_stats_<NAME>", otherwise to get Basic Datamover statistics
+ you have to name it "emc_vnx_file_basicdm_stats_<NAME>", where <NAME> is any
+ arbitrary name of your storage system. The plugin will return <NAME> in its 
+ answer as "host_name" field.
 
  For example, assume your storage system is called "VNX5300".
- Make a configuration file at /etc/munin/plugin-conf.d/emc_vnx_file_stats_VNX5300
+ Make a configuration file at 
+ /etc/munin/plugin-conf.d/emc_vnx_file_stats_VNX5300
  
  [emc_vnx_file_*]
- user munin							# SSH Client local user
- env.username operator1						# Remote user with Operator role
- env.cs_addr 192.168.1.1 192.168.1.2				# Control Stations addresses
- env.nas_servers server_2 server_3				# This is the default value and can be omitteda
+ user munin				
+ env.username operator1				
+ env.cs_addr 192.168.1.1 192.168.1.2		
+ env.nas_servers server_2 server_3		
+
+ Where: 
+ user - SSH Client local user
+ env.username - Remote user with Operator role
+ env.cs_addr - Control Stations addresses
+ env.nas_servers - This is the default value and can be omitted
 
 =head1 HISTORY
 
