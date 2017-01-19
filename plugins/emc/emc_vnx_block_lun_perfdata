@@ -134,7 +134,7 @@ check_conf () {
 
 	#Choosing Cotrol Station. Code have to be "10"
 	for CS in $cs_addr; do
-		if [[ "10" -eq "$(ssh_check_cmd \"$CS\")" ]]; then
+		if [[ "10" -eq "$(ssh_check_cmd $CS)" ]]; then
 			PRIMARY_CS=$CS
 			break
 		fi
@@ -166,7 +166,7 @@ SSH="ssh -q $username@$PRIMARY_CS "
 get_working_sp() {
 	local probe_sp
 	for probe_sp in $SPALL; do
-		if $SSH $NAVICLI -h $PROBESP >/dev/null 2>&1; then
+		if $SSH $NAVICLI -h $probe_sp >/dev/null 2>&1; then
 			echo "$probe_sp"
 			return 0
 		fi
@@ -174,14 +174,20 @@ get_working_sp() {
 }
 
 StorageProcessor=$(get_working_sp)
-[ -z "$StorageProcessor" ] && echo echo "No active Storage Processor found!" >&2 && exit 1
+[ -z "$StorageProcessor" ] && echo "No active Storage Processor found!" >&2 && exit 1
+
+NAVICLI="$NAVICLI -h $StorageProcessor"
 
 run_remote_navicli() {
-    $SSH $NAVICLI -h "$StorageProcessor" "$@"
+	$SSH $NAVICLI "$@"
+}
+
+run_remote_ssh() {
+	$SSH "$@"
 }
 
 # Get Lun List
-LUNLIST=$(run_remote_navicli "lun -list -drivetype | sed -ne 's/^Name:\ *//p')"
+LUNLIST=$(run_remote_navicli "lun -list -drivetype | sed -ne 's/^Name:\ *//p'")
 
 echo "host_name ${TARGET}"
 echo
@@ -193,7 +199,6 @@ if [ "$1" = "config" ] ; then
 		graph_title EMC VNX 5300 LUN Blocks
 		graph_vlabel Blocks Read (-) / Written (+)
 		graph_args --base 1000
-		
 	EOF
 
 	while read -r LUN ; do
@@ -373,10 +378,10 @@ if [ "$1" = "config" ] ; then
 fi
 
 #Preparing big complex command to SP's to have most work done remotely.
-BIGSSHCMD="$SSH"
+#BIGSSHCMD="$SSH"
 while read -r LUN ; do
 		FILTERLUN="$(clean_fieldname "$LUN")"
-	BIGSSHCMD+=$(run_remote_navicli "lun -list -name $LUN -perfData | 
+	BIGSSHCMD+="$NAVICLI lun -list -name $LUN -perfData | 
 		sed -ne 's/^Blocks Read\:\ */${FILTERLUN}_read.value /p; 
 		s/^Blocks Written\:\ */${FILTERLUN}_write.value /p;
 		s/Read Requests\:\ */${FILTERLUN}_readreq.value /p;
@@ -389,14 +394,15 @@ while read -r LUN ; do
 		s/Non-Zero Request Count Arrivals\:\ */${FILTERLUN}_nonzeroreq.value /p;
 		s/Implicit Trespasses\:\ */${FILTERLUN}_implic_tr.value /p;
 		s/Explicit Trespasses\:\ */${FILTERLUN}_explic_tr.value /p;
-		' ;")
+		' ;"
 done <<< "$LUNLIST"
+ANSWER=$(run_remote_ssh "$BIGSSHCMD")
 
 get_answer_field() {
     echo "$ANSWER" | grep -F "_${1}."
 }
 
-ANSWER="$($BIGSSHCMD)"
+#ANSWER=$BIGSSHCMD
 echo "multigraph emc_vnx_block_blocks"
 get_answer_field "read"
 get_answer_field "write"
