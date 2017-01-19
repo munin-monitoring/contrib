@@ -154,27 +154,34 @@ if [ "$1" = "autoconf" ]; then
 		exit 0
 fi
 
-check_conf
+check_conf 1>&2
 if [[ $? -eq 1 ]]; then
 	exit 1;
 fi
 
 SSH="ssh -q $username@$PRIMARY_CS "
-for PROBESP in $SPALL; do
-	$SSH $NAVICLI -h $PROBESP  > /dev/null 2>&1
-	if [ 0 == "$?" ]; then SP="$PROBESP"; break; fi
-done
+get_working_sp() {
+	local probe_sp
+	for probe_sp in $SPALL; do
+		if $SSH $NAVICLI -h $PROBESP >/dev/null 2>&1; then
+			echo "$probe_sp"
+			return 0
+		fi
+	done
+}
 
-if [ -z "$SP" ]; then
-	echo "No active Storage Processor found!";
-	exit 1;
-fi
-NAVICLI="/nas/sbin/navicli -h $SP"
+StorageProcessor=$(get_working_sp)
+[ -z "$StorageProcessor" ] && echo echo "No active Storage Processor found!" >&2 && exit 1
+
+run_remote_navicli() {
+    $SSH $NAVICLI -h "$StorageProcessor" "$@"
+}
 
 # Get Lun List
-LUNLIST="$($SSH $NAVICLI lun -list -drivetype | sed -ne 's/^Name:\ *//p')"
+LUNLIST=$(run_remote_navicli "lun -list -drivetype | sed -ne 's/^Name:\ *//p')"
 
-echo -e "host_name ${TARGET}\n"
+echo "host_name ${TARGET}"
+echo
 
 if [ "$1" = "config" ] ; then
 	cat <<-EOF 
@@ -187,6 +194,7 @@ if [ "$1" = "config" ] ; then
 	EOF
 
 	while read -r LUN ; do
+		LUN="$(clean_fieldname "$LUN")"
 		cat <<-EOF 
 		${LUN}_read.label none
 		${LUN}_read.graph no
@@ -211,6 +219,7 @@ if [ "$1" = "config" ] ; then
 	
 	EOF
 	while read -r LUN ; do
+		LUN="$(clean_fieldname "$LUN")"
 		cat <<-EOF
 		${LUN}_readreq.label none
 		${LUN}_readreq.graph no
@@ -233,10 +242,12 @@ if [ "$1" = "config" ] ; then
 	EOF
 	echo -n "graph_order "
 	while read -r LUN ; do
+		LUN="$(clean_fieldname "$LUN")"
 		echo -n "${LUN}_busyticks ${LUN}_idleticks ${LUN}_bta=${LUN}_busyticks_spa ${LUN}_idleticks_spa ${LUN}_btb=${LUN}_busyticks_spb ${LUN}_idleticks_spb "
 	done <<< "$LUNLIST"
 	echo ""
 	while read -r LUN ; do
+		LUN="$(clean_fieldname "$LUN")"
 		cat <<-EOF
 		${LUN}_busyticks_spa.label $LUN Busy Ticks SPA
 		${LUN}_busyticks_spa.type COUNTER
@@ -272,6 +283,7 @@ if [ "$1" = "config" ] ; then
 	graph_args --base 1000
 	EOF
 	while read -r LUN ; do
+		LUN="$(clean_fieldname "$LUN")"
 		cat <<-EOF 
 		${LUN}_outstandsum.label $LUN
 		${LUN}_outstandsum.type COUNTER
@@ -287,6 +299,7 @@ if [ "$1" = "config" ] ; then
 	graph_args --base 1000
 	EOF
 	while read -r LUN ; do
+		LUN="$(clean_fieldname "$LUN")"
 		cat <<-EOF
 		${LUN}_nonzeroreq.label $LUN
 		${LUN}_nonzeroreq.type COUNTER
@@ -301,6 +314,7 @@ if [ "$1" = "config" ] ; then
 	graph_vlabel Trespasses
 	EOF
 	while read -r LUN ; do
+		LUN="$(clean_fieldname "$LUN")"
 		cat <<-EOF
 		${LUN}_implic_tr.label ${LUN} Implicit Trespasses
 		${LUN}_explic_tr.label ${LUN} Explicit Trespasses
@@ -315,6 +329,7 @@ if [ "$1" = "config" ] ; then
 	graph_vlabel Length
 	EOF
 	while read -r LUN ; do
+		LUN="$(clean_fieldname "$LUN")"
 		cat <<-EOF
 		${LUN}_busyticks_spa.label ${LUN}
 		${LUN}_busyticks_spa.graph no
@@ -357,20 +372,21 @@ fi
 #Preparing big complex command to SP's to have most work done remotely.
 BIGSSHCMD="$SSH"
 while read -r LUN ; do
-	BIGSSHCMD+="$NAVICLI lun -list -name $LUN -perfData | 
-		sed -ne 's/^Blocks Read\:\ */${LUN}_read.value /p; 
-		s/^Blocks Written\:\ */${LUN}_write.value /p;
-		s/Read Requests\:\ */${LUN}_readreq.value /p;
-		s/Write Requests\:\ */${LUN}_writereq.value /p;
-		s/Busy Ticks SP A\:\ */${LUN}_busyticks_spa.value /p;
-		s/Idle Ticks SP A\:\ */${LUN}_idleticks_spa.value /p;
-		s/Busy Ticks SP B\:\ */${LUN}_busyticks_spb.value /p;
-		s/Idle Ticks SP B\:\ */${LUN}_idleticks_spb.value /p;
-		s/Sum of Outstanding Requests\:\ */${LUN}_outstandsum.value /p;
-		s/Non-Zero Request Count Arrivals\:\ */${LUN}_nonzeroreq.value /p;
-		s/Implicit Trespasses\:\ */${LUN}_implic_tr.value /p;
-		s/Explicit Trespasses\:\ */${LUN}_explic_tr.value /p;
-		' ;"
+		FILTERLUN="$(clean_fieldname "$LUN")"
+	BIGSSHCMD+=$(run_remote_navicli "lun -list -name $LUN -perfData | 
+		sed -ne 's/^Blocks Read\:\ */${FILTERLUN}_read.value /p; 
+		s/^Blocks Written\:\ */${FILTERLUN}_write.value /p;
+		s/Read Requests\:\ */${FILTERLUN}_readreq.value /p;
+		s/Write Requests\:\ */${FILTERLUN}_writereq.value /p;
+		s/Busy Ticks SP A\:\ */${FILTERLUN}_busyticks_spa.value /p;
+		s/Idle Ticks SP A\:\ */${FILTERLUN}_idleticks_spa.value /p;
+		s/Busy Ticks SP B\:\ */${FILTERLUN}_busyticks_spb.value /p;
+		s/Idle Ticks SP B\:\ */${FILTERLUN}_idleticks_spb.value /p;
+		s/Sum of Outstanding Requests\:\ */${FILTERLUN}_outstandsum.value /p;
+		s/Non-Zero Request Count Arrivals\:\ */${FILTERLUN}_nonzeroreq.value /p;
+		s/Implicit Trespasses\:\ */${FILTERLUN}_implic_tr.value /p;
+		s/Explicit Trespasses\:\ */${FILTERLUN}_explic_tr.value /p;
+		' ;")
 done <<< "$LUNLIST"
 ANSWER="$($BIGSSHCMD)"
 echo "multigraph emc_vnx_block_blocks"
@@ -380,6 +396,7 @@ echo "$ANSWER" | grep "readreq\.\|writereq\."
 
 echo -e "\nmultigraph emc_vnx_block_ticks"
 while read -r LUN ; do
+	LUN="$(clean_fieldname "$LUN")"
 	echo "${LUN}_load_spa.value 0"
 	echo "${LUN}_load_spb.value 0"
 done <<< "$LUNLIST"
@@ -404,6 +421,7 @@ echo -e "\nmultigraph emc_vnx_block_queue"
 	echo "$ANSWER" | grep "readreq\."
 	echo "$ANSWER" | grep "writereq\."
 while read -r LUN ; do
+	LUN="$(clean_fieldname "$LUN")"
 	echo "${LUN}_ql_l_a.value 0 "
 	echo "${LUN}_ql_l_b.value 0 "
 done <<< "$LUNLIST"
