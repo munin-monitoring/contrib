@@ -14,7 +14,10 @@ Monit needs to be configured with the httpd port enabled, e.g.:
 
     set httpd port 2812
 
+Optionally monit authentication can be configured, e.g.:
 
+    set httpd port 2812
+      allow munin:s3cr3t read-only
 
 
 =head1 CONFIGURATION
@@ -24,6 +27,12 @@ By default the monit instance at localhost is queried:
   [monit_parser]
   env.port 2812
   env.host localhost
+
+Optionally monit authentication can be configured, e.g.:
+
+  [monit_parser]
+  env.username munin
+  env.password s3cr3t
 
 
 =head1 AUTHOR
@@ -44,6 +53,7 @@ import xml.dom.minidom
 import os
 import sys
 import urllib.request
+import base64
 
 MONIT_XML_URL = ("http://{host}:{port}/_status?format=xml"
                  .format(host=os.getenv("host", "localhost"),
@@ -57,7 +67,15 @@ def sanitize(s):
 
 def get_monit_status_xml():
     try:
-        conn = urllib.request.urlopen(MONIT_XML_URL)
+        req = urllib.request.Request(url=MONIT_XML_URL)
+        if os.getenv("password"):
+            auth_str = "%s:%s" % (os.getenv("username"), os.getenv("password"))
+            auth_bytes = bytes(auth_str, "utf-8")
+            auth_base64_bytes = base64.b64encode(auth_bytes)
+            auth_base64_str = str(auth_base64_bytes, "ascii")
+            auth_value = "Basic %s" % auth_base64_str
+            req.add_header("Authorization", auth_value)
+        conn = urllib.request.urlopen(req)
     except urllib.error.URLError as exc:
         conn = None
     if conn is None:
