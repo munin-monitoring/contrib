@@ -39,7 +39,6 @@
   File Version T7.1.76.4
   Block Revision 05.32.000.5.215
 
-
 =head1 COMPATIBILITY
 
  The plugin has been written for being compatible with EMC VNX5300 Storage 
@@ -102,17 +101,32 @@
  
  For example, assume your storage system is called "VNX5300".
  Make a configuration file at 
- /etc/munin/plugin-conf.d/emc_vnx_block_lun_perfdata_VNX5300:
+ /etc/munin/plugin-conf.d/emc_vnx_block_lun_perfdata_VNX5300. For example:
  
  [emc_vnx_block_lun_perfdata_VNX5300]
  user munin					
- env.username operator1				
- env.cs_addr 192.168.1.1 192.168.1.2		
+ env.username operator1
+ env.cs_addr 192.168.1.1 192.168.1.2	
+
+ or:
+
+ [emc_vnx_block_lun_perfdata_VNX5300]
+ user munin                                     
+ env.username operator1
+ env.localcli /opt/Navisphere/bin/naviseccli
+ env.sp_addr 192.168.0.3 192.168.0.4
+ env.blockpw foobar
 
  Where: 
  user - SSH Client local user
- env.username - Remote user with Operator role
- env.cs_addr - Control Stations addresses
+ env.username - Remote user with Operator role for Block or File part
+ env.cs_addr - Control Stations addresses for remote (indirect) access.
+ env.localcli - Optional. Path of localhost 'Naviseccli' binary. If this 
+   variable is set, env.cs_addr is ignored, and local 'navicli' is used.
+   Requires env.blockpw variable.
+ env.sp_addr - Default is "SPA SPB". In case of "direct" connection to 
+   Storage Processors, their addresses/hostnames are written here.
+ env.blockpw - Password for connecting to Storage Processors
 
 =head1 ERRATA
 
@@ -132,43 +146,76 @@ export LANG=C
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
 TARGET=$(echo "${0##*/}" | cut -d _ -f 6)
-# "All SP's we have"
-SPALL="SPA SPB"
-NAVICLI="/nas/sbin/navicli"
+
+# "All Storage Processors we have"
+if [[ -v "sp_addr" ]]; then
+	SPALL=$sp_addr
+else
+	SPALL="SPA SPB"
+fi
+# "navicli" command. Can be local or remote, through Control Stations
+if [[ -v "localcli" ]]; then
+	NAVICLI=$localcli
+else
+	NAVICLI="/nas/sbin/navicli"
+fi
+
 
 ssh_check_cmd() {
 		ssh -q $username@$1 "/nasmcd/sbin/getreason | grep -w slot_\`/nasmcd/sbin/t2slot\` | cut -d- -f1"
 }
 
 
-check_conf () {
+check_conf_and_set_vars () {
 	if [ -z "$username" ]; then
 		echo "No username ('username' environment variable)!"
 		return 1
 	fi
 
-	if [ -z "$cs_addr" ]; then
-		echo "No control station addresses ('cs_addr' environment variable)!"
-		return 1
-	fi
+	if [ -z "$localcli" ]; then
+		if [ -z "$cs_addr" ]; then
+			echo "No control station addresses ('cs_addr' environment variable)!"
+			return 1
+		fi
+		#Choosing Cotrol Station. Code have to be "10"
+		for CS in $cs_addr; do
+			if [[ "10" -eq "$(ssh_check_cmd $CS)" ]]; then
+				PRIMARY_CS=$CS
+				SSH="ssh -q $username@$PRIMARY_CS "
+				break
+			fi
+		done
 
-	#Choosing Cotrol Station. Code have to be "10"
-	for CS in $cs_addr; do
-		if [[ "10" -eq "$(ssh_check_cmd $CS)" ]]; then
-			PRIMARY_CS=$CS
+		if [ -z "$PRIMARY_CS" ]; then
+			echo "No alive primary Control Station from list \"$cs_addr\"";
+			return 1
+		fi
+	else
+		if [ ! -f "$localcli" ]; then
+			echo "Local CLI is set, but no binary found at $localcli!"
+			return 1
+		fi
+		if [ -z "$blockpw" ]; then
+			echo "No Password for Block Access ('blockpw' environment variable)!"
+			return 1
+		fi
+		SSH=""
+		NAVICLI="$localcli -User $username -Password $blockpw -Scope 0 "
+	fi
+	local probe_sp
+	for probe_sp in $SPALL; do
+		if $SSH $NAVICLI -h $probe_sp >/dev/null 2>&1; then
+			StorageProcessor=$probe_sp
 			break
 		fi
 	done
-
-	if [ -z "$PRIMARY_CS" ]; then
-		echo "No alive primary Control Station from list \"$cs_addr\"";
-		return 1
-	fi
+	[ -z "$StorageProcessor" ] && echo "No active Storage Processor found!" && return 1
+	NAVICLI="$NAVICLI -h $StorageProcessor"
 	return 0
 }
 
 if [ "$1" = "autoconf" ]; then
-	check_conf_ans=$(check_conf)
+	check_conf_ans=$(check_conf_and_set_vars)
 		if [ $? -eq 0 ]; then
 			echo "yes"
 		else
@@ -177,37 +224,24 @@ if [ "$1" = "autoconf" ]; then
 		exit 0
 fi
 
-check_conf 1>&2
-if [[ $? -eq 1 ]]; then
-	exit 1;
-fi
+check_conf_and_set_vars 1>&2 || exit 1
 
-SSH="ssh -q $username@$PRIMARY_CS "
-get_working_sp() {
-	local probe_sp
-	for probe_sp in $SPALL; do
-		if $SSH $NAVICLI -h $probe_sp >/dev/null 2>&1; then
-			echo "$probe_sp"
-			return 0
-		fi
-	done
+run_remote() {
+	if [ -z "$SSH" ]; then
+		eval "$@"
+	else
+		eval "$SSH" "\"$@\""
+	fi
 }
 
-StorageProcessor=$(get_working_sp)
-[ -z "$StorageProcessor" ] && echo "No active Storage Processor found!" >&2 && exit 1
-
-NAVICLI="$NAVICLI -h $StorageProcessor"
-
-run_remote_navicli() {
-	$SSH $NAVICLI "$@"
-}
-
-run_remote_ssh() {
-	$SSH "$@"
+run_navicli() {
+	
+	run_remote "$NAVICLI" "$@"
 }
 
 # Get Lun List
-LUNLIST=$(run_remote_navicli "lun -list -drivetype | sed -ne 's/^Name:\ *//p'")
+LUNLIST=$(run_navicli lun -list -drivetype | sed -ne 's/^Name:\ *//p')
+echo "${TARGET}"
 
 echo "host_name ${TARGET}"
 echo
@@ -244,7 +278,6 @@ if [ "$1" = "config" ] ; then
 		graph_title EMC VNX 5300 LUN Requests
 		graph_vlabel Requests: Read (-) / Write (+)
 		graph_args --base 1000
-		
 	EOF
 	while read -r LUN ; do
 		LUN="$(clean_fieldname "$LUN")"
@@ -398,10 +431,10 @@ if [ "$1" = "config" ] ; then
 fi
 
 #Preparing big complex command to SP's to have most work done remotely.
-#BIGSSHCMD="$SSH"
+#BIGCMD="$SSH"
 while read -r LUN ; do
-		FILTERLUN="$(clean_fieldname "$LUN")"
-	BIGSSHCMD+="$NAVICLI lun -list -name $LUN -perfData | 
+	FILTERLUN="$(clean_fieldname "$LUN")"
+	BIGCMD+="$NAVICLI lun -list -name $LUN -perfData | 
 		sed -ne 's/^Blocks Read\:\ */${FILTERLUN}_read.value /p; 
 		s/^Blocks Written\:\ */${FILTERLUN}_write.value /p;
 		s/Read Requests\:\ */${FILTERLUN}_readreq.value /p;
@@ -414,21 +447,24 @@ while read -r LUN ; do
 		s/Non-Zero Request Count Arrivals\:\ */${FILTERLUN}_nonzeroreq.value /p;
 		s/Implicit Trespasses\:\ */${FILTERLUN}_implic_tr.value /p;
 		s/Explicit Trespasses\:\ */${FILTERLUN}_explic_tr.value /p;
-		' ;"
+		' ; "
 done <<< "$LUNLIST"
-ANSWER=$(run_remote_ssh "$BIGSSHCMD")
+ANSWER=$(run_remote "$BIGCMD")
 
-get_answer_field() {
+get_precise_answer_field() {
     echo "$ANSWER" | grep -F "_${1}."
 }
 
+get_similar_answer_field() {
+    echo "$ANSWER" | grep -F "_${1}"
+}
 #ANSWER=$BIGSSHCMD
 echo "multigraph emc_vnx_block_blocks"
-get_answer_field "read"
-get_answer_field "write"
+get_precise_answer_field "read"
+get_precise_answer_field "write"
 echo -e "\nmultigraph emc_vnx_block_req"
-get_answer_field "readreq"
-get_answer_field "writereq"
+get_precise_answer_field "readreq"
+get_precise_answer_field "writereq"
 
 echo -e "\nmultigraph emc_vnx_block_ticks"
 while read -r LUN ; do
@@ -437,29 +473,29 @@ while read -r LUN ; do
 	echo "${LUN}_load_spa.value 0"
 	echo "${LUN}_load_spb.value 0"
 done <<< "$LUNLIST"
-get_answer_field "busyticks_spa"
-get_answer_field "idleticks_spa"
-get_answer_field "busyticks_spb"
-get_answer_field "idleticks_spb"
+get_precise_answer_field "busyticks_spa"
+get_precise_answer_field "idleticks_spa"
+get_precise_answer_field "busyticks_spb"
+get_precise_answer_field "idleticks_spb"
 
 echo -e "\nmultigraph emc_vnx_block_outstanding"
-get_answer_field "outstandsum"
+get_precise_answer_field "outstandsum"
 
 echo -e "\nmultigraph emc_vnx_block_nonzeroreq"
-get_answer_field "nonzeroreq"
+get_precise_answer_field "nonzeroreq"
 
 echo -e "\nmultigraph emc_vnx_block_trespasses"
-get_answer_field "implic_tr"
-get_answer_field "explic_tr"
+get_precise_answer_field "implic_tr"
+get_precise_answer_field "explic_tr"
 
 echo -e "\nmultigraph emc_vnx_block_queue"
 # Queue Length
-	get_answer_field "busyticks"
-	get_answer_field "idleticks"
-	get_answer_field "outstandsum"
-	get_answer_field "nonzeroreq"
-	get_answer_field "readreq"
-	get_answer_field "writereq"
+	get_similar_answer_field "busyticks"
+	get_similar_answer_field "idleticks"
+	get_precise_answer_field "outstandsum"
+	get_precise_answer_field "nonzeroreq"
+	get_precise_answer_field "readreq"
+	get_precise_answer_field "writereq"
 while read -r LUN ; do
 	LUN="$(clean_fieldname "$LUN")"
 	#Will count these values later, using cdef
