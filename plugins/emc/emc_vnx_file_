@@ -238,7 +238,7 @@ if [ "$1" = "config" ] ; then
 
 			multigraph emc_vnx_memory
 			graph_title EMC VNX 5300 Datamover Memory
-			graph_vlabel MiB
+			graph_vlabel KiB
 			graph_category memory
 			graph_args --base 1024
 			graph_order ${server}_used ${server}_free ${server}_total ${server}_freebuffer ${server}_encumbered
@@ -277,6 +277,8 @@ if [ "$1" = "config" ] ; then
 			member_elements_by_line=$(run_remote server_stats "$server" -info nfs.v3.op | grep member_elements | sed -ne 's/^.*= //p')
 			IFS=',' read -ra graphs <<< "$member_elements_by_line"
 			cat <<-EOF 
+			run_remote server_stats "$server" -info nfs.v3.op
+			echo "$member_elements_by_line"
 			multigraph vnx_emc_v3_calls_s
 			graph_title EMC VNX 5300 NFSv3 Calls per second
 			graph_vlabel Calls
@@ -360,6 +362,8 @@ if [ "$1" = "config" ] ; then
 #                                                      Ops/s    Ops/s    Ops/s    Ops diff    KiB/s    KiB/s    KiB/s   uSec/call
 			member_elements_by_line=$(run_remote server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p' | cut -d' ' -f1)
 			readarray graphs_array <<< "$member_elements_by_line"
+			#removing array in case of empty set
+			if [ "${graphs_array[0]}" == $'\n' ]; then graphs_array=(); fi
 			cat <<-EOF
 
 			multigraph vnx_emc_nfs_client_ops_s
@@ -369,17 +373,17 @@ if [ "$1" = "config" ] ; then
 			EOF
 			echo -n "graph_order "
 			for graph in "${graphs_array[@]}"; do
-				field="$(clean_fieldname "$graph")"
-				echo -n "${server}_${field}_r ${server}_${field}_w ${server}_${field}_t ${server}_${field}_s "
+				field="$(clean_fieldname "_$graph")"
+				echo -n "${server}${field}_r ${server}${field}_w ${server}${field}_t ${server}${field}_s "
 			done
 			echo " "
 			for graph in "${graphs_array[@]}"; do
-				field="$(clean_fieldname "$graph")"
-				echo "${server}_${field}_r.label $server $field Read Ops/s"
-				echo "${server}_${field}_w.label $server $field Write Ops/s"
-				echo "${server}_${field}_w.draw STACK"
-				echo "${server}_${field}_t.label $server $field Total Ops/s"
-				echo "${server}_${field}_s.label $server $field Suspicious Ops diff"
+				field="$(clean_fieldname "_$graph")"
+				echo "${server}${field}_r.label $server $graph Read Ops/s"
+				echo "${server}${field}_w.label $server $graph Write Ops/s"
+				echo "${server}${field}_w.draw STACK"
+				echo "${server}${field}_t.label $server $graph Total Ops/s"
+				echo "${server}${field}_s.label $server $graph Suspicious Ops diff"
 			done
 
 			cat <<-EOF
@@ -391,16 +395,17 @@ if [ "$1" = "config" ] ; then
 			EOF
 			echo -n "graph_order "
 			for graph in "${graphs_array[@]}"; do
-				field="$(clean_fieldname "$graph")"
-				echo -n "${server}_${field}_r ${server}_${field}_w ${server}_${field}_t "
+				field="$(clean_fieldname "_$graph")"
+				echo -n "${server}${field}_r ${server}${field}_w ${server}${field}_t "
 			done
 			echo " "
 			for graph in "${graphs_array[@]}"; do
-				field="$(clean_fieldname "$graph")"
-				echo "${server}_${field}_r.label $server $field Read B/s"
-				echo "${server}_${field}_w.label $server $field Write B/s"
-				echo "${server}_${field}_w.draw STACK"
-				echo "${server}_${field}_t.label $server $field Total B/s"
+				echo "Graph is $graph"
+				field="$(clean_fieldname "_$graph")"
+				echo "${server}${field}_r.label $server $graph Read B/s"
+				echo "${server}${field}_w.label $server $graph Write B/s"
+				echo "${server}${field}_w.draw STACK"
+				echo "${server}${field}_t.label $server $graph Total B/s"
 			done
 
 			cat <<-EOF
@@ -411,8 +416,8 @@ if [ "$1" = "config" ] ; then
 			graph_category nfs
 			EOF
 			for graph in "${graphs_array[@]}"; do
-				field="$(clean_fieldname "$graph")"
-				echo "${server}_${field}.label $server $field Avg uSec/call"
+				field="$(clean_fieldname "_$graph")"
+				echo "${server}${field}.label $server $graph Avg uSec/call"
 			done
 		fi
 	done
@@ -427,6 +432,13 @@ for server in $nas_servers; do
 	if [ "$?" != 0 ]  ; then continue; fi
 	nas_server_ok=TRUE
 	if [ $STATSTYPE = "BASICDM" ] ; then
+#basicdm data
+# [nasadmin@mnemonic0 ~]$ server_stats server_2 -count 1 -terminationsummary no 
+# server_2   CPU    Network     Network       dVol        dVol   
+# Timestamp  Util      In         Out         Read       Write   
+#             %      KiB/s       KiB/s       KiB/s       KiB/s   
+# 20:42:26      9       16432        3404        1967       24889
+
 	member_elements_by_line=$(run_remote server_stats "$server" -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
 	IFS=$' ' read -ra graphs <<< "$member_elements_by_line"
 
@@ -434,22 +446,29 @@ for server in $nas_servers; do
 	echo "${server}_cpuutil.value ${graphs[1]}"
 
 	echo -e "\nmultigraph emc_vnx_network_b"
-	echo "${server}_net_in.value $((${graphs[2]} * 1000))"
-	echo "${server}_net_out.value $((${graphs[3]} * 1000))"
+	echo "${server}_net_in.value $((${graphs[2]} * 1024))"
+	echo "${server}_net_out.value $((${graphs[3]} * 1024))"
 
 	echo -e "\nmultigraph emc_vnx_storage_b"
-	echo "${server}_stor_read.value $((${graphs[4]} * 1000))"
-	echo "${server}_stor_write.value $((${graphs[5]} * 1000))"
+	echo "${server}_stor_read.value $((${graphs[4]} * 1024))"
+	echo "${server}_stor_write.value $((${graphs[5]} * 1024))"
+
+# [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor kernel.memory -count 1 -terminationsummary no 
+# server_2       Free           Buffer       Buffer   Buffer    Buffer         Buffer       Buffer Cache  Encumbered  FileResolve  FileResolve  FileResolve  Free KiB   Page     Total    Used KiB     Memory  
+# Timestamp     Buffer        Cache High     Cache    Cache      Cache       Cache Low       Watermark      Memory      Dropped        Max         Used                 Size    Memory                  Util   
+#                KiB       Watermark Hits/s  Hit %    Hits/s   Lookups/s  Watermark Hits/s     Hits/s        KiB        Entries       Limit       Entries                KiB      KiB                    %     
+# 20:44:14        3522944                 0      96     11562      12010                 0             0     3579268            0            0            0    3525848      8    6291456    2765608          44
 
 	member_elements_by_line=$(run_remote server_stats "$server" -monitor kernel.memory -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
 	IFS=$' ' read -ra graphs <<< "$member_elements_by_line"
 
 	echo -e "\nmultigraph emc_vnx_memory"
-	echo "${server}_total.value $((${graphs[14]} / 1024))"
-	echo "${server}_used.value $((${graphs[15]} / 1024))"
-	echo "${server}_free.value $((${graphs[12]} / 1024))"
-	echo "${server}_freebuffer.value $((${graphs[1]} / 1024))"
-	echo "${server}_encumbered.value $((${graphs[8]} / 1024))"
+	#Reserved for math
+	echo "${server}_total.value $((${graphs[14]} / 1))"	
+	echo "${server}_used.value $((${graphs[15]} / 1))"
+	echo "${server}_free.value $((${graphs[12]} / 1))"
+	echo "${server}_freebuffer.value $((${graphs[1]} / 1))"
+	echo "${server}_encumbered.value $((${graphs[8]} / 1))"
 
 	echo -e "\nmultigraph emc_vnx_filecache"
 	echo "${server}_highw_hits.value ${graphs[2]}"
@@ -473,6 +492,8 @@ for server in $nas_servers; do
 	while IFS=$'\n' read -ra graphs ; do
 		elements_array+=( $graphs )
 	done <<< "$member_elements_by_line"
+	
+	if [ "${#elements_array[@]}" -eq "0" ]; then  LINES=0; fi
 
 	echo "multigraph vnx_emc_v3_calls_s"
 	for ((i=0; i<$((LINES)); i++ )); do
@@ -499,6 +520,8 @@ for server in $nas_servers; do
 		elements_array+=( $graphs )
 	done <<< "$member_elements_by_line"
 
+	if [ "${#elements_array[@]}" -eq "0" ]; then  LINES=0; fi
+
 	echo -e "\nmultigraph vnx_emc_v4_calls_s"
 	for ((i=0; i<$((LINES)); i++ )); do
 		echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+1]}"
@@ -517,6 +540,17 @@ for server in $nas_servers; do
 	elements_array=()
 
 #nfs.client data
+# [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no 
+# server_2                    Client                     NFS      NFS      NFS       NFS        NFS      NFS      NFS       NFS   
+# Timestamp                                             Total    Read     Write   Suspicious   Total    Read     Write      Avg   
+#                                                       Ops/s    Ops/s    Ops/s    Ops diff    KiB/s    KiB/s    KiB/s   uSec/call
+# 20:26:38   id=192.168.1.223                           2550       20     2196          13     4673      159     4514       1964
+#            id=192.168.1.2                              691        4        5           1     1113      425      688       2404
+#            id=192.168.1.1                              159        0        0          51        0        0        0       6017
+#            id=192.168.1.6                               37        4        2           0      586      295      291       5980
+#            id=192.168.1.235                             21        1        0           0        0        0        0     155839
+#            id=192.168.1.224                              5        0        5           0       20        0       20     704620
+
 	echo -e "\nmultigraph vnx_emc_nfs_client_ops_s"
  	member_elements_by_line=$(run_remote server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p')
 	NUMCOL=9
@@ -524,24 +558,30 @@ for server in $nas_servers; do
 	while IFS=$'\n' read -ra graphs; do
 		elements_array+=($graphs)
 	done  <<< "$member_elements_by_line"
+
+	echo "$member_elements_by_line"
+
+	#Not drawing elements in case of empty set
+	if [ "${#elements_array[@]}" -eq "0" ]; then  LINES=0; fi
+
 	for (( i=0; i<$((LINES)); i++ )); do
-		client="$(clean_fieldname "${element[i*$NUMCOL]}")"
-		echo "${server}_${client}_r".value "${elements_array[$i*$NUMCOL+2]}"
-		echo "${server}_${client}_w".value "${elements_array[$i*$NUMCOL+3]}"
-		echo "${server}_${client}_t".value "${elements_array[$i*$NUMCOL+1]}"
-		echo "${server}_${client}_s".value "${elements_array[$i*$NUMCOL+4]}"
+		client="$(clean_fieldname "_${elements_array[i*$NUMCOL]}")"
+		echo "${server}${client}_r".value "${elements_array[$i*$NUMCOL+2]}"
+		echo "${server}${client}_w".value "${elements_array[$i*$NUMCOL+3]}"
+		echo "${server}${client}_t".value "${elements_array[$i*$NUMCOL+1]}"
+		echo "${server}${client}_s".value "${elements_array[$i*$NUMCOL+4]}"
         done
 	echo -e "\nmultigraph vnx_emc_nfs_client_b_s"
 	for (( i=0; i<$((LINES)); i++ )); do
-		client="$(clean_fieldname "${element[i*$NUMCOL]}")"
-		echo "${server}_${client}_r".value "$((${elements_array[$i*$NUMCOL+6]} * 1024))"
-		echo "${server}_${client}_w".value "$((${elements_array[$i*$NUMCOL+7]} * 1024))"
-		echo "${server}_${client}_t".value "$((${elements_array[$i*$NUMCOL+5]} * 1024))"
+		client="$(clean_fieldname "_${elements_array[i*$NUMCOL]}")"
+		echo "${server}${client}_r".value "$((${elements_array[$i*$NUMCOL+6]} * 1024))"
+		echo "${server}${client}_w".value "$((${elements_array[$i*$NUMCOL+7]} * 1024))"
+		echo "${server}${client}_t".value "$((${elements_array[$i*$NUMCOL+5]} * 1024))"
         done
 	echo -e "\nmultigraph vnx_emc_nfs_client_avg_usec"
 	for (( i=0; i<$((LINES)); i++ )); do
-		client="$(clean_fieldname "${element[i*$NUMCOL]}")"
-		echo "${server}_${client}".value "${elements_array[$i*$NUMCOL+8]}"
+		client="$(clean_fieldname "_${elements_array[i*$NUMCOL]}")"
+		echo "${server}${client}".value "${elements_array[$i*$NUMCOL+8]}"
 	done
 	fi
 done
