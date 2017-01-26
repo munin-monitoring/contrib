@@ -1,0 +1,191 @@
+#!/bin/bash
+
+# Munin plugin um die aktuellen Werte der Datei fritzbox7490.log auszuwerten. 
+# internet connection by reading the top_status.htm from the 
+# Don't forget zu fill in the following lines into the munin-node
+#
+# - normally at /etc/muni/plugin-conf.d/ - an than restart munin
+#
+#   [fritzbox_]
+#   user root
+#
+# LLOSS: Leitungsdämpfung   = line loss
+# DRATE: Datenrate          = data rate
+# SNR:   Störabstand        = signal-to-noise ratio
+# DATAV: Datenvolumen       = data transfer
+# ES:    Sek. m. Fehlern    = sec. w. errors
+# SES:   Sek. m. v. Fehlern = sec w. m. errors
+# VERB:  Anzahl tägl. Verb. = count of daily connections
+# UPT:   Zt. seit Reboot    = router uptime
+#                                     Jo Hartmann (Version 16.0126)
+#
+
+###################################
+## Personal config Section Begin ##
+################################### 
+
+logfile=/var/log/fritzbox7490.log
+
+###################################
+## Personal config section End   ##
+###################################
+
+function Echo() {
+# Munin hat probleme mit Sonderzeichen ÄÖÜ äöüß
+# Munin has problems with special characters ÄÖÜ ääüß 
+  konvert=`echo $* | sed s/Ã„/Ae/g | sed s/Ã–/Oe/g | sed s/Ãœ/Oe/g | sed s/Ã¤/ae/g | sed s/Ã¶/ue/g | sed s/Ã¼/ue/g | sed s/ÃŸ/ss/g` 
+  echo $konvert
+}
+
+# Wildcard-Text erkennen 
+# Detect wildcard text
+  id=$0
+  id=${id##*_}
+
+# Prüfen ob die Werte-Datei existiert, wenn ja einlesen sonst Abbruch
+# Check if the values ??file exists, if yes read in otherwise abort
+  if [ -f $logfile ]; then
+       werte=$(cat $logfile)
+  else
+       echo Die Datei $logfile wurde nicht gefunden! Abbruch! >&2
+       exit 1
+  fi
+
+
+# Standard Config Section Begin ##
+  if [ "$1" = "autoconf" ]; then
+       echo yes
+       exit 0
+  fi
+
+  if [ "$1" = "config" ]; then
+
+# Standard Konfiguration
+# Default configuration  
+       echo    graph_category DSL
+       echo    graph_args --base 1000 -l 100
+      #echo    graph_printf %7.3lf%S M
+       echo    graph_info Datenstatistik aus der FRITZ!Box 7490
+
+# Wildcard-abhängige Konfiguration überschreibt den obigen Standard
+# Wildcard dependent configuration overwrites the above standards 
+       case $id in
+            LLOSS)
+                 Echo graph_title  Leitungsdämpfung
+                 Echo graph_vlabel Dämpfung in db
+                 echo u.label      upload
+                 echo d.label      download
+            ;;
+            DRATE)
+                 Echo graph_title  Übertragungsgeschwindigkeit
+                 echo graph_vlabel Datenrate in kbit/s
+                 echo u.label      upload
+                 echo d.label      download
+                 ;;
+            SNR)
+                 Echo graph_title  Störabstand
+                 echo graph_vlabel Abstand in db
+                 echo u.label      upload
+                 echo d.label      download
+                 ;;
+           DATAV)
+                 Echo graph_title  tägliches Daten-Volumen
+                 echo graph_vlabel Transfer in MB
+                 echo u.label      upload
+                 echo d.label      download
+                 echo g.label      gesamt
+                 ;; 
+           ES)
+                 echo graph_title  Sekunden mit Fehlern \(ES\)
+                 echo graph_vlabel Sekunden
+                 echo u.label      upload
+                 echo d.label      download
+                 ;; 
+           SES)
+                 echo graph_title  Sekunden mit vielen Fehlern \(SES\)
+                 echo graph_vlabel Sekunden
+                 echo u.label      upload
+                 echo d.label      download
+                 ;; 
+           CRC01)
+                 Echo graph_title  Nicht korrigierbare Fehler \(CRC\)
+                 echo graph_vlabel Anzahl
+                 echo u.label      upload
+                 echo d.label      download
+                 ;; 
+           CRC15)
+                 Echo graph_title  Nicht korrigierbare Fehler in 15 Min. \(CRC\)
+                 echo graph_vlabel Anzahl
+                 echo u.label      upload
+                 echo d.label      download
+                 ;; 
+           VERB)
+                 Echo graph_title  Anzahl der täglichen Wiederverbindung
+                 echo graph_vlabel Anzahl
+                 echo u.label      upload
+                 echo d.label      download
+                 ;; 
+           UPT)
+                 ;; 
+           *)
+                 echo "  ##############################################" >&2
+                 echo "  # Felerhafter Programmaufruf, zulässig sind: #" >&2
+                 echo "  # - fritzbox7490_DRATE                       #" >&2
+                 echo "  # - fritzbox7490_LLOSS                       #" >&2
+                 echo "  # - fritzbox7490_SNR                         #" >&2
+                 echo "  # - fritzbox7490_DATAV                       #" >&2
+                 echo "  # - fritzbox7490_CRC01                       #" >&2
+                 echo "  # - fritzbox7490_CRC15                       #" >&2
+                 echo "  # - fritzbox7490_ES                          #" >&2
+                 echo "  # - fritzbox7490_SES                         #" >&2
+                 echo "  # - fritzbox7490_VERB                        #" >&2
+#                echo "  # - fritzbox7490_UPT                         #" >&2
+                 echo "  ##############################################" >&2
+                 exit 2
+                 ;;
+       esac
+       exit 0
+  fi
+# Standard Config Section End ####
+
+# Wildcard-abhängige Datenauswertung
+# Wildcard-dependent data evaluation 
+  case $id in
+       LLOSS)
+            u_value=$(echo "${werte}" | awk 'match($0,/pfung OUT:.* ([0-9]+) db/,arr){print arr[1]};');               echo u.value $u_value
+            d_value=$(echo "${werte}" | awk 'match($0,/mpfung IN:.* ([0-9]+) db/,arr){print arr[1]};');               echo d.value $d_value
+            ;;
+       DRATE)
+            u_value=$(echo "${werte}" | awk 'match($0,/atenrate OUT:.* ([0-9]+) kbit\/s/,arr){print arr[1]};');       echo u.value `echo "$u_value * 1024" | bc` 
+            d_value=$(echo "${werte}" | awk 'match($0,/Datenrate IN:.* ([0-9]+) kbit\/s/,arr){print arr[1]};');       echo d.value `echo "$d_value * 1024" | bc`
+            ;;
+       SNR)
+            u_value=$(echo "${werte}" | awk 'match($0,/bstandsmarge OUT:.* ([0-9]+) db/,arr){print arr[1]};');        echo u.value $u_value
+            d_value=$(echo "${werte}" | awk 'match($0,/abstandsmarge IN:.* ([0-9]+) db/,arr){print arr[1]};');        echo d.value $d_value
+            ;;
+       DATAV)
+            u_value=$(echo "${werte}" | awk 'match($0,/volumen \(upload\):  .* ([0-9]+) MB/,arr){print arr[1]};');    echo u.value $u_value
+            d_value=$(echo "${werte}" | awk 'match($0,/volumen \(download\):.* ([0-9]+) MB/,arr){print arr[1]};');    echo d.value $d_value
+            g_value=$(echo "${werte}" | awk 'match($0,/volumen \(gesamt\):  .* ([0-9]+) MB/,arr){print arr[1]};');    echo g.value $g_value
+            ;;
+       CRC01)
+            u_value=$(echo "${werte}" | awk 'match($0,/Fehler \(je Min\) IN: .* ([0-9,\.]+)/,arr){print arr[1]};');   echo u.value $u_value
+            d_value=$(echo "${werte}" | awk 'match($0,/Fehler \(je Min\) OUT:.* ([0-9,\.]+)/,arr){print arr[1]};');   echo d.value $d_value
+            ;;
+       CRC15)
+            u_value=$(echo "${werte}" | awk 'match($0,/Fehler \(15 Min\) OUT:.* ([0-9]+)/,arr){print arr[1]};');      echo u.value $u_value
+            d_value=$(echo "${werte}" | awk 'match($0,/Fehler \(15 Min\) IN: .* ([0-9]+)/,arr){print arr[1]};');      echo d.value $d_value
+            ;;
+       ES)
+            u_value=$(echo "${werte}" | awk 'match($0,/Fehlern \(ES\) OUT:.* ([0-9]+)/,arr){print arr[1]};');         echo u.value $u_value
+            d_value=$(echo "${werte}" | awk 'match($0,/Fehlern \(ES\) IN: .* ([0-9]+)/,arr){print arr[1]};');         echo d.value $d_value
+            ;;
+       SES)
+            u_value=$(echo "${werte}" | awk 'match($0,/Fehl. \(SES\) OUT:.* ([0-9]+)/,arr){print arr[1]};');          echo u.value $u_value
+            d_value=$(echo "${werte}" | awk 'match($0,/Fehl. \(SES\) IN: .* ([0-9]+)/,arr){print arr[1]};');          echo d.value $d_value
+            ;;
+       *)
+            u_value=0            
+            d_value=0
+            ;;
+  esac
