@@ -274,11 +274,18 @@ if [ "$1" = "config" ] ; then
 		fi
 		if [ $STATSTYPE = "NFS" ] ; then
 #nfs.v3.op data
+# [nasadmin@mnemonic0 ~]$ server_stats server_2 -info nfs.v3.op
+# server_2 : 
+# 
+# name            = nfs.v3.op
+# description     = NFS V3 per operation statistics
+# type            = Set
+# member_stats    = nfs.v3.op.ALL-ELEMENTS.calls,nfs.v3.op.ALL-ELEMENTS.failures,nfs.v3.op.ALL-ELEMENTS.avgTime,nfs.v3.op.ALL-ELEMENTS.opPct
+# member_elements = nfs.v3.op.v3Null,nfs.v3.op.v3GetAttr,nfs.v3.op.v3SetAttr,nfs.v3.op.v3Lookup,nfs.v3.op.v3Access,nfs.v3.op.v3ReadLink,nfs.v3.op.v3Read,nfs.v3.op.v3Write,nfs.v3.op.v3Create,nfs.v3.op.v3Mkdir,nfs.v3.op.v3Symlink,nfs.v3.op.v3Mknod,nfs.v3.op.v3Remove,nfs.v3.op.v3Rmdir,nfs.v3.op.v3Rename,nfs.v3.op.v3Link,nfs.v3.op.v3ReadDir,nfs.v3.op.v3ReadDirPlus,nfs.v3.op.v3FsStat,nfs.v3.op.v3FsInfo,nfs.v3.op.v3PathConf,nfs.v3.op.v3Commit,nfs.v3.op.VAAI
+# member_of       = nfs.v3
 			member_elements_by_line=$(run_remote server_stats "$server" -info nfs.v3.op | grep member_elements | sed -ne 's/^.*= //p')
 			IFS=',' read -ra graphs <<< "$member_elements_by_line"
 			cat <<-EOF 
-			run_remote server_stats "$server" -info nfs.v3.op
-			echo "$member_elements_by_line"
 			multigraph vnx_emc_v3_calls_s
 			graph_title EMC VNX 5300 NFSv3 Calls per second
 			graph_vlabel Calls
@@ -361,9 +368,8 @@ if [ "$1" = "config" ] ; then
 #							 Total    Read     Write   Suspicious   Total    Read     Write      Avg   
 #                                                      Ops/s    Ops/s    Ops/s    Ops diff    KiB/s    KiB/s    KiB/s   uSec/call
 			member_elements_by_line=$(run_remote server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p' | cut -d' ' -f1)
-			readarray graphs_array <<< "$member_elements_by_line"
-			#removing array in case of empty set
-			if [ "${graphs_array[0]}" == $'\n' ]; then graphs_array=(); fi
+			#Somewhy readarray adds extra \n in the end of each variable. So, we use read() with a workaround
+			IFS=$'\n' read -rd '' -a graphs_array <<< "$member_elements_by_line"
 			cat <<-EOF
 
 			multigraph vnx_emc_nfs_client_ops_s
@@ -400,7 +406,6 @@ if [ "$1" = "config" ] ; then
 			done
 			echo " "
 			for graph in "${graphs_array[@]}"; do
-				echo "Graph is $graph"
 				field="$(clean_fieldname "_$graph")"
 				echo "${server}${field}_r.label $server $graph Read B/s"
 				echo "${server}${field}_w.label $server $graph Write B/s"
