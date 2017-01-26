@@ -145,6 +145,10 @@ export LANG=C
 
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
+cs_addr=""
+username=""
+blockpw=""
+
 TARGET=$(echo "${0##*/}" | cut -d _ -f 6)
 
 # "All Storage Processors we have"
@@ -160,9 +164,9 @@ else
 	NAVICLI="/nas/sbin/navicli"
 fi
 
-
+# Prints "10" on stdout if found Primary Online control station. "11" - for Secondary Online control station. 
 ssh_check_cmd() {
-		ssh -q $username@$1 "/nasmcd/sbin/getreason | grep -w slot_\`/nasmcd/sbin/t2slot\` | cut -d- -f1"
+		ssh -q "$username@$1" '/nasmcd/sbin/getreason | grep -w "slot_$(/nasmcd/sbin/t2slot)" | cut -d- -f1'
 }
 
 
@@ -204,8 +208,8 @@ check_conf_and_set_vars () {
 	fi
 	local probe_sp
 	for probe_sp in $SPALL; do
-		if $SSH $NAVICLI -h $probe_sp >/dev/null 2>&1; then
-			StorageProcessor=$probe_sp
+		if $SSH $NAVICLI -h "$probe_sp" >/dev/null 2>&1; then
+			StorageProcessor="$probe_sp"
 			break
 		fi
 	done
@@ -240,8 +244,7 @@ run_navicli() {
 }
 
 # Get Lun List
-LUNLIST=$(run_navicli lun -list -drivetype | sed -ne 's/^Name:\ *//p')
-echo "${TARGET}"
+LUNLIST=$(run_navicli lun -list -drivetype | sed -ne 's/^Name:\ *//p' | sort)
 
 echo "host_name ${TARGET}"
 echo

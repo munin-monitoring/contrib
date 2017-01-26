@@ -134,8 +134,12 @@ export LANG=C
 
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
+nas_server_ok=""
+cs_addr=""
+username=""
+# Prints "10" on stdout if found Primary Online control station. "11" - for Secondary Online control station. 
 ssh_check_cmd() {
-	ssh -q $username@$1 "/nasmcd/sbin/getreason | grep -w slot_\`/nasmcd/sbin/t2slot\` | cut -d- -f1"
+	ssh -q "$username@$1" '/nasmcd/sbin/getreason | grep -w "slot_$(/nasmcd/sbin/t2slot)" | cut -d- -f1'
 }
 
 check_conf () {
@@ -183,8 +187,7 @@ fi
 STATSTYPE=$(echo "${0##*/}" | cut -d _ -f 1-5)
 if [ "$STATSTYPE" = "emc_vnx_file_nfs_stats" ]; then STATSTYPE=NFS; 
 elif [ "$STATSTYPE" = "emc_vnx_file_basicdm_stats" ]; then STATSTYPE=BASICDM;
-else echo "Do not know what to do. Name the plugin as 'emc_vnx_file_nfs_stats_<HOSTNAME>' or 'emc_vnx_file_basicdm_stats_<HOSTNAME>'"; exit 1; fi
-# echo $STATSTYPE
+else echo "Do not know what to do. Name the plugin as 'emc_vnx_file_nfs_stats_<HOSTNAME>' or 'emc_vnx_file_basicdm_stats_<HOSTNAME>'" >&2; exit 1; fi
 
 TARGET=$(echo "${0##*/}" | cut -d _ -f 6)
 : ${nas_servers:="server_2 server_3"}
@@ -192,18 +195,17 @@ TARGET=$(echo "${0##*/}" | cut -d _ -f 6)
 check_conf 1>&2 || exit 1
 
 run_remote () {
-	ssh -q "$username@$PRIMARY_CS" ". /home/""$username""/.bash_profile; $*"
+	ssh -q "$username@$PRIMARY_CS" ". /home/$username/.bash_profile; $*"
 }
 
 echo "host_name ${TARGET}"
 
 if [ "$1" = "config" ] ; then
 	for server in $nas_servers; do
-		run_remote nas_server -i $server | grep -q 'type *= nas'
-		if [ "$?" != 0 ]  ; then continue; fi
+		run_remote nas_server -i "$server" | grep -q 'type *= nas' || continue
 		nas_server_ok=TRUE
 		
-		if [ $STATSTYPE = "BASICDM" ] ; then
+		if [ "$STATSTYPE" = "BASICDM" ] ; then
 			cat <<-EOF 
 			multigraph emc_vnx_cpu_percent
 			graph_title EMC VNX 5300 Datamover CPU Util %
@@ -272,7 +274,7 @@ if [ "$1" = "config" ] ; then
 			${server}_used.label Used Entries
 			EOF
 		fi
-		if [ $STATSTYPE = "NFS" ] ; then
+		if [ "$STATSTYPE" = "NFS" ] ; then
 #nfs.v3.op data
 # [nasadmin@mnemonic0 ~]$ server_stats server_2 -info nfs.v3.op
 # server_2 : 
@@ -426,17 +428,16 @@ if [ "$1" = "config" ] ; then
 			done
 		fi
 	done
-	if [ -z $nas_server_ok ]; then
+	if [ -z "$nas_server_ok" ]; then
 		echo "No active data movers!" 1>&2
 	fi
 	exit 0
 fi
 
 for server in $nas_servers; do
-	run_remote nas_server -i $server | grep -q 'type *= nas'
-	if [ "$?" != 0 ]  ; then continue; fi
+	run_remote nas_server -i $server | grep -q 'type *= nas' || continue
 	nas_server_ok=TRUE
-	if [ $STATSTYPE = "BASICDM" ] ; then
+	if [ "$STATSTYPE" = "BASICDM" ] ; then
 #basicdm data
 # [nasadmin@mnemonic0 ~]$ server_stats server_2 -count 1 -terminationsummary no 
 # server_2   CPU    Network     Network       dVol        dVol   
@@ -489,7 +490,7 @@ for server in $nas_servers; do
 
 
 	fi
-	if [ $STATSTYPE = "NFS" ] ; then
+	if [ "$STATSTYPE" = "NFS" ] ; then
 #nfs.v3.op data
 # [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor nfs.v3.op -count 1 -terminationsummary no
 # server_2       NFS Op          NFS      NFS Op     NFS       NFS Op % 
@@ -610,14 +611,14 @@ for server in $nas_servers; do
 		echo "${server}${client}_w".value "${elements_array[$i*$NUMCOL+3]}"
 		echo "${server}${client}_t".value "${elements_array[$i*$NUMCOL+1]}"
 		echo "${server}${client}_s".value "${elements_array[$i*$NUMCOL+4]}"
-        done
+	done
 	echo -e "\nmultigraph vnx_emc_nfs_client_b_s"
 	for (( i=0; i<$((LINES)); i++ )); do
 		client="$(clean_fieldname "_${elements_array[i*$NUMCOL]}")"
 		echo "${server}${client}_r".value "$((${elements_array[$i*$NUMCOL+6]} * 1024))"
 		echo "${server}${client}_w".value "$((${elements_array[$i*$NUMCOL+7]} * 1024))"
 		echo "${server}${client}_t".value "$((${elements_array[$i*$NUMCOL+5]} * 1024))"
-        done
+	done
 	echo -e "\nmultigraph vnx_emc_nfs_client_avg_usec"
 	for (( i=0; i<$((LINES)); i++ )); do
 		client="$(clean_fieldname "_${elements_array[i*$NUMCOL]}")"
@@ -625,7 +626,7 @@ for server in $nas_servers; do
 	done
 	fi
 done
-if [ -z $nas_server_ok ]; then
+if [ -z "$nas_server_ok" ]; then
 	echo "No active data movers!" 1>&2
 fi
 exit 0
