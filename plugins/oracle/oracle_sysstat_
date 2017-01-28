@@ -1,0 +1,1043 @@
+#!/bin/bash
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+  oracle_sysstat_* - Munin plugin to monitor Oracle Statistics
+
+    execute                 - To monitor Oracle Sysstat SQL Execute Count
+    parse                   - To monitor Oracle Sysstat SQL Parse Count
+    tablefetch              - To monitor Oracle Sysstat SQL Table Fetch Rows
+    tablescan               - To monitor Oracle Sysstat SQL Table Scans
+    transaction             - To monitor Oracle Sysstat SQL Transactions
+    sort                    - To monitor Oracle Sysstat SQL Sorts
+    logon                   - To monitor Oracle Sysstat User Logons
+    cursor                  - To monitor Oracle Sysstat User Opened Cursors
+    enqueue                 - To monitor Oracle Sysstat Enqueues
+    redolog                 - To monitor Oracle Sysstat Redo Entries
+    redosize                - To monitor Oracle Sysstat Redo Size
+    physicaliops            - To monitor Oracle Sysstat I/O Physical Requests
+    physicalrw              - To monitor Oracle Sysstat I/O Physical Bytes
+    blockrw                 - To monitor Oracle Sysstat I/O Blocks
+    netrw                   - To monitor Oracle Sysstat I/O Network Bytes
+    sgainfo                 - To monitor Oracle Memory SGA
+    pgastat                 - To monitor Oracle Memory PGA
+    cputime                 - To monitor Oracle CPU Time
+    cachehit                - To monitor Oracle Cache Hit Ratio
+    sessionuser             - To monitor Oracle Session Users
+    sessionwait             - To monitor Oracle Session Wait
+    eventwait               - To monitor Oracle Wait Events
+    eventwaitapplication    - To monitor Oracle Wait Events Application
+    eventwaitnetwork        - To monitor Oracle Wait Events Network
+    eventwaitconcurrency    - To monitor Oracle Wait Events Concurrency
+    eventwaituserio         - To monitor Oracle Wait Events User I/O
+    eventwaitsystemio       - To monitor Oracle Wait Events System I/O
+    eventwaitcluster        - To monitor Oracle Wait Events Cluster
+    eventwaitadministrative - To monitor Oracle Wait Events Administrative
+    eventwaitconfiguration  - To monitor Oracle Wait Events Configuration
+    tablespace              - To monitor Oracle Table Space Usage
+    asmusage                - To monitor Oracle ASM Disk Group Usage
+
+=head1 CONFIGURATION
+
+  To get a list of symlinks that can be created, run:   
+
+    ./oracle_sysstat_ suggest
+
+  Make symlinks:
+
+    munin-node-configure --families=contrib --suggest --shell
+    ...
+
+  The following shows example settings for this plugin:
+
+    [oracle_sysstat_*]
+      user  oracle
+      env.oracle_auth  / as SYSDBA
+      env.ORACLE_HOME  /path/to/oracle/product/version
+      env.ORACLE_SID   SOMESID
+
+    [oracle_sysstat_asmusage]
+      user  grid
+      env.oracle_auth  / as SYSASM
+      env.ORACLE_HOME  /path/to/grid/home/version
+      env.ORACLE_SID   SOMESID
+
+=head1 NOTES
+
+  Uses the command "sqlplus".
+  Tested with Oracle Database 12c R1.
+
+=head1 AUTHOR
+
+  K.Cima https://github.com/shakemid
+
+=head1 LICENSE
+
+  GPLv2
+
+=cut
+
+# Magic markers
+#%# family=contrib
+#%# capabilities=autoconf suggest
+
+# Like perl 'use strict;' 
+set -o nounset
+
+# Include plugin.sh
+. "${MUNIN_LIBDIR:-}/plugins/plugin.sh"
+
+# Environments
+: "${ORACLE_HOME:=$( echo /opt/oracle/product/* )}"
+: "${ORACLE_SID:=orcl}"
+: "${oracle_auth:=/ as SYSDBA}"
+
+PATH=$PATH:$ORACLE_HOME/bin
+export PATH ORACLE_HOME ORACLE_SID
+
+# Module name
+module=$( basename "$0" | sed -e 's/^.*_//' )
+
+# Graph settings
+declare -A global_attrs  # required
+declare -A data_attrs    # required (format: field type draw label)
+declare -A getfield_func # optional
+declare -A getvalue_func # required
+
+key=execute
+global_attrs[$key]="
+    graph_title Oracle Sysstat SQL Execute Count
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count per second
+    graph_info Oracle Sysstat SQL Execute Count
+"
+data_attrs[$key]="
+    execute_count   DERIVE LINE execute count
+    user_calls      DERIVE LINE user calls
+    recursive_calls DERIVE LINE recursive calls
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=parse
+global_attrs[$key]="
+    graph_title Oracle Sysstat SQL Parse Count
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count per second
+    graph_info Oracle Sysstat SQL Parse Count
+"
+data_attrs[$key]="
+    parse_count_total    DERIVE LINE parse count (total)
+    parse_count_hard     DERIVE LINE parse count (hard)
+    parse_count_describe DERIVE LINE parse count (describe)
+    parse_count_failures DERIVE LINE parse count (failures)
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=tablefetch
+global_attrs[$key]="
+    graph_title Oracle Sysstat SQL Table Fetch Rows
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count per second
+    graph_info Oracle Sysstat SQL Table Fetch Rows
+"
+data_attrs[$key]="
+    table_fetch_by_rowid      DERIVE LINE table fetch by rowid
+    table_scan_rows_gotten    DERIVE LINE table scan rows gotten
+    table_fetch_continued_row DERIVE LINE table fetch continued row
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=tablescan
+global_attrs[$key]="
+    graph_title Oracle Sysstat SQL Table Scans
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count per second
+    graph_info Oracle Sysstat SQL Table Scans
+"
+data_attrs[$key]="
+    table_scans_short_tables DERIVE LINE table scans (short tables)
+    table_scans_long_tables  DERIVE LINE table scans (long tables)
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=transaction
+global_attrs[$key]="
+    graph_title Oracle Sysstat SQL Transactions
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count per second
+    graph_info Oracle Sysstat SQL Transactions
+"
+data_attrs[$key]="
+    user_commits   DERIVE LINE user commits
+    user_rollbacks DERIVE LINE user rollbacks
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=sort
+global_attrs[$key]="
+    graph_title Oracle Sysstat SQL Sorts
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count per second
+    graph_info Oracle Sysstat SQL Sorts
+"
+data_attrs[$key]="
+    sorts_memory DERIVE LINE sorts (memory)
+    sorts_disk   DERIVE LINE sorts (disk)
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=logon
+global_attrs[$key]="
+    graph_title Oracle Sysstat User Logons
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count per second
+    graph_info Oracle Sysstat User Logons
+"
+data_attrs[$key]="
+    logon DERIVE LINE logons cumulative
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=cursor
+global_attrs[$key]="
+    graph_title Oracle Sysstat User Opened Cursors
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count
+    graph_info Oracle Sysstat User Opened Cursors
+"
+data_attrs[$key]="
+    open_cursor GAUGE LINE opened cursors current
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=enqueue
+global_attrs[$key]="
+    graph_title Oracle Sysstat Enqueues
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count per second
+    graph_info Oracle Sysstat Enqueues
+"
+data_attrs[$key]="
+    enqueue_requests    DERIVE LINE enqueue requests
+    enqueue_releases    DERIVE LINE enqueue releases
+    enqueue_conversions DERIVE LINE enqueue conversions
+    enqueue_waits       DERIVE LINE enqueue waits
+    enqueue_timeouts    DERIVE LINE enqueue timeouts
+    enqueue_deadlocks   DERIVE LINE enqueue deadlocks
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=redolog
+global_attrs[$key]="
+    graph_title Oracle Sysstat Redo Entries
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count per second
+    graph_info Oracle Sysstat Redo Entries
+"
+data_attrs[$key]="
+    redo_entries                   DERIVE LINE redo entries
+    redo_writes                    DERIVE LINE redo writes
+    redo_synch_writes              DERIVE LINE redo synch writes
+    redo_buffer_allocation_retries DERIVE LINE redo buffer allocation retries
+    redo_log_space_requests        DERIVE LINE redo log space requests
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=redosize
+global_attrs[$key]="
+    graph_title Oracle Sysstat Redo Size
+    graph_category db
+    graph_args --base 1024 --lower-limit 0 --rigid
+    graph_vlabel bytes per second
+    graph_info Oracle Sysstat Redo Size
+"
+data_attrs[$key]="
+    redo_size    DERIVE LINE redo size
+    redo_wastage DERIVE LINE redo wastage
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=physicaliops
+global_attrs[$key]="
+    graph_title Oracle Sysstat I/O Physical Requests
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel iops
+    graph_info Oracle Sysstat I/O Physical Requests
+"
+data_attrs[$key]="
+    physical_read_total        DERIVE LINE2 physical read total IO requests
+    physical_read              DERIVE LINE  physical read IO requests
+    physical_read_total_multi  DERIVE LINE  physical read total multi block requests
+    physical_write_total       DERIVE LINE2 physical write total IO requests
+    physical_write             DERIVE LINE  physical write IO requests
+    physical_write_total_multi DERIVE LINE  physical write total multi block requests
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=physicalrw
+global_attrs[$key]="
+    graph_title Oracle Sysstat I/O Physical Bytes
+    graph_category db
+    graph_args --base 1024 --lower-limit 0 --rigid
+    graph_vlabel bytes per second
+    graph_info Oracle Sysstat I/O Physical Bytes
+"
+data_attrs[$key]="
+    physical_read_total  DERIVE LINE2 physical read total bytes
+    physical_read        DERIVE LINE  physical read bytes
+    physical_write_total DERIVE LINE2 physical write total bytes
+    physical_write       DERIVE LINE  physical write bytes
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=blockrw
+global_attrs[$key]="
+    graph_title Oracle Sysstat I/O Blocks
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel blocks per second
+    graph_info Oracle Sysstat I/O Blocks
+"
+data_attrs[$key]="
+    db_block_gets      DERIVE LINE db block gets
+    db_block_changes   DERIVE LINE db block changes
+    consistent_gets    DERIVE LINE consistent gets
+    consistent_changes DERIVE LINE consistent changes
+    physical_reads     DERIVE LINE physical reads
+    physical_writes    DERIVE LINE physical writes
+"
+getvalue_func[$key]=getvalue_sysstat
+
+
+key=netrw
+global_attrs[$key]="
+    graph_title Oracle Sysstat I/O Network Bytes
+    graph_category db
+    graph_args --base 1024 --lower-limit 0 --rigid
+    graph_vlabel bytes per second
+    graph_info Oracle Sysstat I/O Network Bytes
+"
+data_attrs[$key]="
+    bytes_sent_via_sql_net_to_client       DERIVE LINE bytes sent via SQL*Net to client
+    bytes_received_via_sql_net_from_client DERIVE LINE bytes received via SQL*Net from client
+    bytes_sent_via_sql_net_to_dblink       DERIVE LINE bytes sent via SQL*Net to dblink
+    bytes_received_via_sql_net_from_dblink DERIVE LINE bytes received via SQL*Net from dblink
+"
+getvalue_func[$key]=getvalue_sysstat
+
+key=sgainfo
+global_attrs[$key]="
+    graph_title Oracle Memory SGA
+    graph_category db
+    graph_args --base 1024 --lower-limit 0 --rigid
+    graph_vlabel bytes
+    graph_info Oracle Memory SGA
+"
+data_attrs[$key]="
+    maximum_sga_size    GAUGE LINE      Maximum SGA Size
+    fixed_sga_size      GAUGE AREASTACK Fixed SGA Size
+    redo_buffers        GAUGE AREASTACK Redo Buffers
+    shared_pool_size    GAUGE AREASTACK Shared Pool Size
+    large_pool_size     GAUGE AREASTACK Large Pool Size
+    java_pool_size      GAUGE AREASTACK Java Pool Size
+    streams_pool_size   GAUGE AREASTACK Streams Pool Size
+    shared_io_pool_size GAUGE AREASTACK Shared IO Pool Size
+    buffer_cache_size   GAUGE AREASTACK Buffer Cache Size
+    in_memory_area_size GAUGE AREASTACK In-Memory Area Size
+"
+getvalue_func[$key]=getvalue_sgainfo
+
+key=pgastat
+global_attrs[$key]="
+    graph_title Oracle Memory PGA
+    graph_category db
+    graph_args --base 1024 --lower-limit 0 --rigid
+    graph_vlabel bytes
+    graph_info Oracle Memory PGA
+"
+data_attrs[$key]="
+    pga_target       GAUGE LINE aggregate PGA target parameter
+    pga_auto_target  GAUGE LINE aggregate PGA auto target
+    pga_allocated    GAUGE LINE total PGA allocated
+    pga_inuse        GAUGE AREA total PGA inuse
+"
+getvalue_func[$key]=getvalue_pgastat
+
+key=cputime
+global_attrs[$key]="
+    graph_title Oracle CPU Time
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel seconds
+    graph_info Oracle CPU Time
+"
+data_attrs[$key]="
+    db_time                                        DERIVE LINE2 DB time
+    db_cpu                                         DERIVE LINE2 DB CPU
+    background_elapsed_time                        DERIVE LINE2 background elapsed time
+    background_cpu_time                            DERIVE LINE2 background cpu time
+    connection_management_call_elapsed_time        DERIVE LINE  connection management call elapsed time
+    sequence_load_elapsed_time                     DERIVE LINE  sequence load elapsed time
+    sql_execute_elapsed_time                       DERIVE LINE  sql execute elapsed time
+    parse_time_elapsed                             DERIVE LINE  parse time elapsed
+    hard_parse_elapsed_time                        DERIVE LINE  hard parse elapsed time
+    hard_parse_sharing_criteria_elapsed_time       DERIVE LINE  hard parse (sharing criteria) elapsed time
+    hard_parse_bind_mismatch_elapsed_time          DERIVE LINE  hard parse (bind mismatch) elapsed time
+    failed_parse_elapsed_time                      DERIVE LINE  failed parse elapsed time
+    failed_parse_out_of_shared_memory_elapsed_time DERIVE LINE  failed parse (out of shared memory) elapsed time
+    pl_sql_execution_elapsed_time                  DERIVE LINE  PL/SQL execution elapsed time
+    inbound_pl_sql_rpc_elapsed_time                DERIVE LINE  inbound PL/SQL rpc elapsed time
+    pl_sql_compilation_elapsed_time                DERIVE LINE  PL/SQL compilation elapsed time
+    java_execution_elapsed_time                    DERIVE LINE  Java execution elapsed time
+    repeated_bind_elapsed_time                     DERIVE LINE  repeated bind elapsed time
+    rman_cpu_time_backup_restore                   DERIVE LINE  RMAN cpu time (backup/restore)
+"
+getvalue_func[$key]=getvalue_cputime
+
+key=cachehit
+# buf_hitratio = 1 - physical_reads / ( db_block_gets + consistent_gets )
+# lib_hitratio = 1 - reloads / pins
+# dict_hitratio = ( gets - misses ) / gets
+field_info=$( for field in buf_physical buf_logical lib_pins lib_reloads dict_gets dict_getmisses
+   do
+       echo "${field}.graph no"
+       echo "${field}.type DERIVE"
+       echo "${field}.min 0"
+       echo "${field}.label ${field}"
+   done
+)
+global_attrs[$key]="
+    graph_title Oracle Cache Hit Ratio
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --upper-limit 100 --rigid
+    graph_vlabel %
+    graph_info Oracle Cache Hit Ratio - The graph shows cache hit ratio between munin-update intervals (5 minutes in most cases).
+    graph_scale no
+
+    ${field_info}
+    buf_hitratio.cdef 100,1,buf_physical,buf_logical,/,-,*,FLOOR
+    lib_hitratio.cdef 100,1,lib_reloads,lib_pins,/,-,*,FLOOR
+    dict_hitratio.cdef 100,dict_gets,dict_getmisses,-,dict_gets,/,*,FLOOR
+"
+data_attrs[$key]="
+    buf_hitratio GAUGE LINE Buffer Cache Hit Ratio
+    lib_hitratio GAUGE LINE Library Cache Hit Ratio
+    dict_hitratio GAUGE LINE Dictionary Cache Hit Ratio
+"
+getvalue_func[$key]=getvalue_cachehit
+
+key=sessionuser
+global_attrs[$key]="
+    graph_title Oracle Session Users
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count
+    graph_info Oracle Session Users
+"
+data_attrs[$key]=""
+getfield_func[$key]=getfield_sessionuser
+getvalue_func[$key]=getvalue_sessionuser
+
+key=sessionwait
+global_attrs[$key]="
+    graph_title Oracle Session Wait
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count
+    graph_info Oracle Session Wait
+"
+data_attrs[$key]=""
+getfield_func[$key]=getfield_sessionwait
+getvalue_func[$key]=getvalue_sessionwait
+
+key=eventwait
+global_attrs[$key]="
+    graph_title Oracle Wait Events
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel microseconds
+    graph_info Oracle Wait Events - It may look wierd that Y-axis indicates 'microseconds per second'. Although number of times of wait event looks easier to understand, in many cases the number of events does not matter, but wait time become more important to analyze bottle necks.
+"
+data_attrs[$key]=""
+getfield_func[$key]=getfield_eventwait
+getvalue_func[$key]=getvalue_eventwait
+
+key=eventwaitapplication
+global_attrs[$key]="
+    graph_title Oracle Wait Events Application
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel microseconds
+    graph_info Oracle Wait Events Application
+"
+data_attrs[$key]=""
+getfield_func[$key]="getfield_eventwait2 Application"
+getvalue_func[$key]="getvalue_eventwait2 Application"
+
+key=eventwaitnetwork
+global_attrs[$key]="
+    graph_title Oracle Wait Events Network
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel microseconds
+    graph_info Oracle Wait Events Network
+"
+data_attrs[$key]=""
+getfield_func[$key]="getfield_eventwait2 Network"
+getvalue_func[$key]="getvalue_eventwait2 Network"
+
+key=eventwaitconcurrency
+global_attrs[$key]="
+    graph_title Oracle Wait Events Concurrency
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel microseconds
+    graph_info Oracle Wait Events Concurrency
+"
+data_attrs[$key]=" "
+getfield_func[$key]="getfield_eventwait2 Concurrency"
+getvalue_func[$key]="getvalue_eventwait2 Concurrency"
+
+key=eventwaituserio
+global_attrs[$key]="
+    graph_title Oracle Wait Events User I/O
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel microseconds
+    graph_info Oracle Wait Events User I/O
+"
+data_attrs[$key]=""
+getfield_func[$key]="getfield_eventwait2 User I/O"
+getvalue_func[$key]="getvalue_eventwait2 User I/O"
+
+key=eventwaitsystemio
+global_attrs[$key]="
+    graph_title Oracle Wait Events System I/O
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel microseconds
+    graph_info Oracle Wait Events System I/O
+"
+data_attrs[$key]="
+"
+getfield_func[$key]="getfield_eventwait2 System I/O"
+getvalue_func[$key]="getvalue_eventwait2 System I/O"
+
+key=eventwaitcluster
+global_attrs[$key]="
+    graph_title Oracle Wait Events Cluster
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel microseconds
+    graph_info Oracle Wait Events Cluster
+"
+data_attrs[$key]=" "
+getfield_func[$key]="getfield_eventwait2 Cluster"
+getvalue_func[$key]="getvalue_eventwait2 Cluster"
+
+key=eventwaitadministrative
+global_attrs[$key]="
+    graph_title Oracle Wait Events Administrative
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel microseconds
+    graph_info Oracle Wait Events Administrative
+"
+data_attrs[$key]=" "
+getfield_func[$key]="getfield_eventwait2 Administrative"
+getvalue_func[$key]="getvalue_eventwait2 Administrative"
+
+key=eventwaitconfiguration
+global_attrs[$key]="
+    graph_title Oracle Wait Events Configuration
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel microseconds
+    graph_info Oracle Wait Events Configuration
+"
+data_attrs[$key]=" "
+getfield_func[$key]="getfield_eventwait2 Configuration"
+getvalue_func[$key]="getvalue_eventwait2 Configuration"
+
+key=tablespace
+global_attrs[$key]="
+    graph_title Oracle Table Space Usage
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --upper-limit 100 --rigid
+    graph_vlabel %
+    graph_info Oracle Table Space Usage
+    warning ${warning:=92}
+    critical ${critical:=98}
+"
+data_attrs[$key]=""
+getfield_func[$key]=getfield_tablespace
+getvalue_func[$key]=getvalue_tablespace
+
+key=asmusage
+global_attrs[$key]="
+    graph_title Oracle ASM Disk Group Usage
+    graph_category db
+    graph_args --base 1000 --lower-limit 0 --upper-limit 100 --rigid
+    graph_vlabel %
+    graph_info Oracle ASM Disk Group Usage
+    warning ${warning:=92}
+    critical ${critical:=98}
+"
+data_attrs[$key]=""
+getfield_func[$key]=getfield_asmusage
+getvalue_func[$key]=getvalue_asmusage
+
+# End of Graph Settings
+
+# sqlplus options
+: "${sqlplus:=sqlplus -S -L}"
+sqlplus_variables="
+    whenever sqlerror exit sql.sqlcode
+    set pagesize 0
+    set feed off
+    set head off
+    set linesize 256
+    set numwidth 20
+"
+
+# functions 
+
+autoconf() {
+    if [ -x "$( which "${sqlplus}" )" ]; then
+        echo yes
+    else
+        echo "no (failed to find executable 'sqlplus')"
+    fi
+}
+
+suggest() {
+    # print hash keys as available module names
+    echo "${!global_attrs[@]}" | tr ' ' '\n' | sort
+}
+
+config() {
+    local label_max_length=45
+
+    # print global attributes
+    sed -e 's/^  *//' -e '/^$/d' <<< "${global_attrs[$module]}"
+
+    # print data source attributes
+    # split line into field,type,draw,label 
+    local fields field type draw label
+    fields=
+    while read -r field type draw label
+    do
+        [ -z "$field" ] && continue
+        fields="${fields} ${field}"
+
+        echo "${field}.type ${type}"
+        echo "${field}.draw ${draw}"
+        echo "${field}.label ${label:0:${label_max_length}}"
+        if [ "${type}" = DERIVE ]; then
+            echo "${field}.min 0"
+        fi
+    done <<< "${data_attrs[$module]}"
+
+    echo graph_order "$fields"
+}
+
+# wrapper for getfield_*
+getfield() {
+    local func arg
+    if [ -n "${getfield_func[$module]:-}" ]; then
+        # call getfield_* function with argument if necessary
+        read -r func arg <<< "${getfield_func[$module]}"
+        $func "$arg"
+    fi
+}
+
+# wrapper for getvalue_*
+getvalue() {
+    local func arg
+    # call getvalue_* function with argument if necessary
+    read -r func arg <<< "${getvalue_func[$module]}"
+    $func "$arg"
+}
+
+getvalue_sysstat() {
+    local field type draw label
+    while read -r field type draw label
+    do
+        [ -z "$field" ] && continue
+
+        echo "${sqlplus_variables}
+          VAR vf VARCHAR2(64)
+          VAR vl VARCHAR2(64)
+          EXEC :vf := '${field}' 
+          EXEC :vl := '${label}' 
+          SELECT
+            :vf || '.value ' || value
+          FROM
+            v\$sysstat
+          WHERE
+            name = :vl;
+        "
+    done <<< "${data_attrs[$module]}" | ${sqlplus} "${oracle_auth}"
+}
+
+getvalue_sgainfo() {
+    local field type draw label
+    while read -r field type draw label
+    do
+        [ -z "$field" ] && continue
+
+        echo "${sqlplus_variables}
+          VAR vf VARCHAR2(64)
+          VAR vl VARCHAR2(64)
+          EXEC :vf := '${field}' 
+          EXEC :vl := '${label}' 
+          SELECT
+            :vf || '.value ' || bytes
+          FROM
+            v\$sgainfo
+          WHERE
+            name = :vl;
+        "
+    done <<< "${data_attrs[$module]}" | ${sqlplus} "${oracle_auth}"
+}
+
+getvalue_pgastat() {
+    local field type draw label
+    while read -r field type draw label
+    do
+        [ -z "$field" ] && continue
+
+        echo "${sqlplus_variables}
+          VAR vf VARCHAR2(64)
+          VAR vl VARCHAR2(64)
+          EXEC :vf := '${field}' 
+          EXEC :vl := '${label}' 
+          SELECT
+            :vf || '.value ' || value
+          FROM
+            v\$pgastat
+          WHERE
+            name = :vl;
+        "
+    done <<< "${data_attrs[$module]}" | ${sqlplus} "${oracle_auth}"
+}
+
+getvalue_cputime() {
+    local field type draw label
+    while read -r field type draw label
+    do
+        [ -z "$field" ] && continue
+
+        echo "${sqlplus_variables}
+          VAR vf VARCHAR2(64)
+          VAR vl VARCHAR2(64)
+          EXEC :vf := '${field}' 
+          EXEC :vl := '${label}' 
+          SELECT
+            :vf || '.value ' || ROUND( value / 1000000 )
+          FROM
+            v\$sys_time_model
+          WHERE
+            stat_name = :vl;
+        "
+    done <<< "${data_attrs[$module]}" | ${sqlplus} "${oracle_auth}"
+}
+
+getvalue_cachehit() {
+    ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+SELECT
+  'buf_physical.value ' || value
+FROM
+  v\$sysstat
+WHERE
+  name = 'physical reads cache'
+;
+SELECT 
+  'buf_logical.value ' || ( sd.value + sc.value )
+FROM 
+  v\$sysstat sd, v\$sysstat sc 
+WHERE 
+  sd.name = 'db block gets from cache' AND sc.name = 'consistent gets from cache'
+;
+SELECT 'lib_pins.value '    || SUM(pins)    FROM v\$librarycache;
+SELECT 'lib_reloads.value ' || SUM(reloads) FROM v\$librarycache;
+SELECT 'dict_gets.value '      || SUM(gets)      FROM v\$rowcache;
+SELECT 'dict_getmisses.value ' || SUM(getmisses) FROM v\$rowcache;
+EOF
+}
+
+getfield_sessionuser() {
+    data_attrs[$module]=$( ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+SELECT
+  REGEXP_REPLACE( username, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) ||
+  ' GAUGE LINE ' ||  username
+FROM
+  dba_users
+WHERE
+  account_status = 'OPEN'
+ORDER BY
+  username;
+EOF
+)
+}
+
+getvalue_sessionuser() {
+    ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+SELECT
+  REGEXP_REPLACE( du.username, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) || '.value ' ||
+  count(vs.username)
+FROM 
+  ( SELECT
+      username
+    FROM
+      dba_users
+    WHERE
+      account_status = 'OPEN'
+  ) du
+  LEFT JOIN v\$session vs
+ON
+  du.username = vs.username
+GROUP BY
+  du.username;
+EOF
+}
+
+getfield_sessionwait() {
+    data_attrs[$module]=$( ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+SELECT 'CPU GAUGE AREASTACK CPU' from dual;
+SELECT
+  REGEXP_REPLACE( wait_class, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) ||
+  ' GAUGE AREASTACK ' || wait_class
+FROM
+  v\$event_name
+WHERE
+  wait_class NOT IN ( 'Other', 'Idle' )
+GROUP BY
+  wait_class
+ORDER BY
+  wait_class;
+SELECT 'Other GAUGE AREASTACK Other' from dual;
+SELECT 'Idle  GAUGE AREASTACK Idle' from dual;
+EOF
+)
+}
+
+getvalue_sessionwait() {
+    ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+SELECT
+  'CPU.value ' || count(wait_class)
+FROM
+  v\$session
+WHERE
+  wait_time != 0
+;
+SELECT
+  REGEXP_REPLACE( en.wait_class, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) || '.value ' ||
+  count(se.wait_class)
+FROM
+  ( SELECT
+      wait_class
+    FROM
+      v\$event_name
+    GROUP BY
+      wait_class
+  ) en
+  LEFT JOIN v\$session se
+ON
+  en.wait_class = se.wait_class AND 
+  se.username is not null AND
+  se.wait_time = 0
+GROUP BY
+  en.wait_class
+;
+EOF
+}
+
+getfield_eventwait() {
+    data_attrs[$module]=$( ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+SELECT
+  REGEXP_REPLACE( wait_class, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) ||
+  ' DERIVE LINE ' || wait_class
+FROM
+  v\$event_name
+WHERE
+  wait_class NOT IN ( 'Other', 'Idle' )
+GROUP BY
+  wait_class
+ORDER BY
+  wait_class;
+SELECT 'Other DERIVE LINE Other' from dual;
+EOF
+)
+}
+
+getvalue_eventwait() {
+    ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+SELECT
+  REGEXP_REPLACE( en.wait_class, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) || '.value ' ||
+  NVL( SUM(se.time_waited_micro), 0 )
+FROM
+  ( SELECT
+      wait_class
+    FROM
+      v\$event_name
+    WHERE
+      wait_class NOT IN ( 'Idle' )
+    GROUP BY
+      wait_class
+  ) en
+  LEFT JOIN v\$system_event se
+ON
+  en.wait_class = se.wait_class
+GROUP BY
+  en.wait_class;
+EOF
+}
+
+getfield_eventwait2() {
+    local waitclass="$1"
+
+    data_attrs[$module]=$( ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+VAR vl VARCHAR2(64)
+EXEC :vl := '${waitclass}' 
+SELECT
+  REGEXP_REPLACE( name, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) ||
+  ' DERIVE LINE ' || name
+FROM
+  v\$event_name 
+WHERE
+  wait_class = :vl
+ORDER BY
+  name;
+EOF
+)
+}
+
+getvalue_eventwait2() {
+    local waitclass="$1"
+
+    ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+VAR vl VARCHAR2(64)
+EXEC :vl := '${waitclass}' 
+SELECT
+  REGEXP_REPLACE( en.name, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) || '.value ' || 
+  NVL( se.time_waited_micro, 0 )
+FROM
+  v\$event_name en LEFT JOIN v\$system_event se
+ON
+  en.name = se.event
+WHERE
+  en.wait_class = :vl;
+EOF
+}
+
+getfield_tablespace() {
+    data_attrs[$module]=$( ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+SELECT
+  REGEXP_REPLACE( tablespace_name, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) ||
+  ' GAUGE LINE ' || tablespace_name
+FROM
+  dba_data_files
+ORDER BY
+  tablespace_name;
+EOF
+)
+}
+
+getvalue_tablespace() {
+    ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+SELECT
+  REGEXP_REPLACE( tablespace_name, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) || '.value ' ||
+  ROUND( (total_bytes - free_total_bytes) / total_bytes * 100, 0 )
+FROM
+  ( SELECT
+      tablespace_name,
+      SUM(bytes) total_bytes
+    FROM
+      dba_data_files
+    GROUP BY
+      tablespace_name
+  ),
+  ( SELECT
+      tablespace_name free_tablespace_name,
+      SUM(bytes) free_total_bytes
+    FROM
+      dba_free_space
+    GROUP BY
+      tablespace_name
+  )
+WHERE
+  tablespace_name = free_tablespace_name;
+EOF
+}
+
+getfield_asmusage() {
+    data_attrs[$module]=$( ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+SELECT
+  REGEXP_REPLACE( name, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) ||
+  ' GAUGE LINE ' || name
+FROM
+  v\$asm_diskgroup
+ORDER BY
+  name;
+EOF
+)
+}
+
+getvalue_asmusage() {
+    ${sqlplus} "${oracle_auth}" <<EOF
+${sqlplus_variables}
+SELECT
+  REGEXP_REPLACE( name, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) || '.value ' ||
+  ROUND( ( total_mb - free_mb ) / total_mb * 100 )
+FROM
+  v\$asm_diskgroup
+ORDER BY
+  name;
+EOF
+}
+
+# main
+case ${1:-} in
+autoconf)
+    autoconf
+    ;;
+suggest)
+    suggest
+    ;;
+config)
+    getfield
+    config
+    ;;
+*)
+    getvalue
+    ;;
+esac
+
+exit 0

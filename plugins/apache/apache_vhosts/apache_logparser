@@ -27,9 +27,6 @@ $statefile	file to save last log position for tail
 $nsec		tail and write to shared mem every n seconds
 $debug		dump tallied data every n seconds, print every log line parsed
 $scan_interval	rescan for new log files every n minutes
-$type		log file type:
-                common: CLF + vhost + time + (other fields)
-                combined: combined + time + (other fields)
 =cut
 
 # config
@@ -38,14 +35,15 @@ my $files = "*access_log";
 my $site = "(.*)-access_log";
 my $statefile = "/tmp/logstate";
 `touch $statefile` unless (-f $statefile);
-local $type="combined";
 local $nsec=7;
 local $debug=0;
 
 my $scan_interval=5; # minutes
 
 # perl modules
-use File::Tail::Multi;
+# "File:Tail:Multi" disappeared from CPAN (somewhen in 2016) - thus it needs
+# to be imported carefully (for travis checks).
+eval 'use File::Tail::Multi; 1;' or die 'Please install File::Tail::Multi';
 use Storable qw(freeze thaw);
 use List::Util qw(min max);
 use IPC::ShareLite ':lock';
@@ -167,7 +165,7 @@ while (1) {
                 $old{$vpm}{'max_bytes'}=max($old{$vpm}{'max_bytes'},$temp{$vpm}{'max_bytes'}) || 0;
 
                 # reset local counters
-                foreach my $check qw(requests bytes time max_bytes avg_bytes max_time avg_time) {
+                foreach my $check (qw(requests bytes time max_bytes avg_bytes max_time avg_time)) {
                         $temp{$vpm}{$check}=0;
                 }
 

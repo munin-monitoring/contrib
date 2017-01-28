@@ -5,7 +5,7 @@
 #
 # Version: 1.0
 # Author: tobias.geiger@vido.info
-# Please email me bugs/suggestions 
+# Please email me bugs/suggestions
 #
 # Version: 1.1
 # Author: charlie@evilforbeginners.com
@@ -21,8 +21,8 @@
 #
 # Parameters:
 #
-# 	config   (required)
-# 	autoconf (optional - only used by munin-config)
+#     config   (required)
+#     autoconf (optional - only used by munin-config)
 #
 # Magic markers (optional - used by munin-config and some installation
 # scripts):
@@ -32,25 +32,25 @@
 totrace=`basename $0 | sed 's/^mtr100_//g'`
 
 if [ "$1" = "autoconf" ]; then
-	if ( mtr -nrc 1 localhost 2>/dev/null >/dev/null ); then
-		echo yes
-		exit 0
-	else
-		if [ $? -eq 127 ]
-		then
-			echo "no (mtr program not found - install the mtr(-tiny) package)"
-			exit 1
-		else
-			echo no
-			exit 1
-		fi
-	fi
+    if ( mtr -nrc 1 localhost 2>/dev/null >/dev/null ); then
+        echo yes
+        exit 0
+    else
+        if [ $? -eq 127 ]
+        then
+            echo "no (mtr program not found - install the mtr(-tiny) package)"
+            exit 1
+        else
+            echo no
+            exit 1
+        fi
+    fi
 exit 0
 fi
 
 dotrace() {
 
-LC_ALL=C mtr -nrs 1024 -c 5 $totrace | grep -vi -E "^HOST:|^Start:" | LC_ALL=C  awk -v C=$1 ' {
+LC_ALL=C mtr -nrs 1024 -c 5 $totrace | grep -vi -E "^HOST:|^Start:" | LC_ALL=C  awk -v C=$1 -v SRC_HOSTNAME=$(hostname) ' {
 
 label=$2
 x=gsub("\\.","_",label)
@@ -63,27 +63,29 @@ total+=$6
 }
 
 END {
-	for (x=1; x<=count; x++) { 
-		value=(val[x]/total)*100
-		if ( C != "config" ) { printf "%s.value %2.2f\n","hop_" lab[x],value }
-		if ( C == "config" ) { print "hop_" lab[x] ".label " name[x] }
-		if ( C == "config" ) { if ( x == 1 ) { print "hop_" lab[x]".draw AREA" } else { print "hop_" lab[x]".draw STACK" } }
-        }
+    # Hard code the first hop (hop_0) as the local hostname
+    if ( C != "config" ) { print "hop_0.value U" }
+    if ( C == "config" ) { print "hop_0.label " SRC_HOSTNAME }
+    if ( C == "config" ) { print "hop_0.draw AREA" }
+    for (x=1; x<=count; x++) {
+        value=(val[x]/total)*100
+        if ( C != "config" ) { printf "%s.value %2.2f\n","hop_" lab[x],value }
+        if ( C == "config" ) { print "hop_" lab[x] ".label " name[x] }
+        if ( C == "config" ) { print "hop_" lab[x]".draw STACK" }
+    }
 }'
 }
 
 if [ "$1" = "config" ]; then
-
-        echo 'graph_title Traceroute (%) to '$totrace
-        echo 'graph_args --base 1000 -l 0 -u 100 -r'
-        echo 'graph_vlabel ms (percentage)'
-        echo 'graph_category network'
-	echo 'graph_scale no'
-        echo 'graph_period second'
-        echo 'graph_info This graph shows the Percentage needed for each hop on the way to '$totrace
-        dotrace config;
-        exit 0
+    echo 'graph_title Traceroute (%) to '$totrace
+    echo 'graph_args --base 1000 -l 0 -u 100 -r'
+    echo 'graph_vlabel ms (percentage)'
+    echo 'graph_category network'
+    echo 'graph_scale no'
+    echo 'graph_period second'
+    echo 'graph_info This graph shows the Percentage needed for each hop on the way to '$totrace
+    dotrace config;
+    exit 0
 else
-	dotrace;
+    dotrace;
 fi
-
