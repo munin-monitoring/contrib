@@ -1,0 +1,321 @@
+#!/bin/bash
+######################################################################################################################
+#                  Plugin to monitor basic statistics of EMC VNX 5300 Unified Datamovers                             #
+######################################################################################################################
+
+# Author: Evgeny Beysembaev <megabotva@gmail.com>
+
+#####################################
+#         Description               #
+#####################################
+
+# The plugin monitors LUN of EMC Unified Storage FLARE SP's. Probably it can also be compatible with 
+# other Clariion systems. It uses SSH to connect to Control Stations, then remotely executes 
+# /nas/sbin/navicli and fetches and parses data from it. Obviously, it's easy to reconfigure plugin not to use 
+# Control Stations' navicli in favor of using locally installed /opt/Navisphere's cli. There is no difference which
+# Storage Processor to use to gather data, so this plugin tries both of them and uses the first active one.
+# This plugin also automatically chooses Primary Control Station from the list by calling /nasmcd/sbin/getreason and 
+# /nasmcd/sbin/t2slot.
+# 
+# I left some parts of this plugin as rudimental to make easy to reconfigure it to draw more (or less) data.
+ 
+#####################################
+#        Configuration              #
+#####################################
+
+######### Prerequisites #########
+
+# First of all, be sure that statistics collection is turned on. You can do this by typing:
+# navicli -h spa setstats -on
+# on your Control Station or locally through /opt/Navisphere 
+
+# Also, the plugin actively uses buggy "cdef" feature of Munin, and here we can be hit by the following bugs:
+# http://munin-monitoring.org/ticket/1017 - Here I have some workarounds in plugin, be sure that they are working.
+# http://munin-monitoring.org/ticket/1352 - 
+# Metrics in my plugin can be much longer than 15 characters, so you have to edit the following file:
+# /usr/share/perl5/Munin/Master/GraphOld.pm
+# Find get_field_name() function and change "15" to "255".
+
+######### Installation #########
+
+# The plugin uses SSH to connect to Control Stations. It's possible to use 'nasadmin' user, but it would be better
+# if you create read-only global user by Unisphere Client. The user should have only Operator role.
+# I created "operator" user but due to the fact that Control Stations already had one internal "operator" user,
+# the new one was called "operator1". So be careful.
+# 
+# On munin-node side choose a user which will be used to connect through SSH. Generally user "munin" is ok. Then,
+# execute "sudo su munin -s /bin/bash", "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created 
+# user.
+# 
+# Make a link from /usr/share/munin/plugins/emc_vnx_dm_basic_stats to /etc/munin/plugins/emc_vnx_dm_basic_stats_<NAME>,
+# where <NAME> is any arbitrary name of your storage system. The plugin will return <NAME> in its answer 
+# as "host_name" field.
+# Assume your storage system is called "VNX5300".
+# 
+# Make a configuration file at /etc/munin/plugin-conf.d/emc_vnx_block_lun_perfdata_VNX5300
+# 
+# [emc_vnx_block_lun_perfdata_VNX5300]
+# user munin							# SSH Client local user
+# env.username operator1					# Remote user with Operator role
+# env.cs_addr 192.168.1.1 192.168.1.2				# Control Stations addresses
+
+#####################################
+#           Errata                  #
+#####################################
+# It counts Queue Length in not fully correct way. We take parameters totally from both SP's, but after we divide them
+# independently by load of SPA and SPB. Anyway, in most AAA / ALUA cases the formula is correct.
+
+
+#####################################
+#           History                 #
+#####################################
+
+# 09.11.2016 - First Release
+
+######################################################################################################################
+
+export LANG=C
+TARGET=$(echo "${0##*/}" | cut -d _ -f 6)
+SPALL="SPA SPB"
+NAVICLI="/nas/sbin/navicli"
+SSH_CHECK='ssh -q $username@$CS "/nasmcd/sbin/getreason | grep -w slot_\`/nasmcd/sbin/t2slot\` | cut -d- -f1"'
+
+if [ "$1" = "autoconf" ]; then
+	echo "yes"
+	exit 0
+fi
+
+if [ -z "$username" ]; then
+	echo "No username!"
+	exit 1
+fi
+
+if [ -z "$cs_addr" ]; then
+	echo "No control station addresses!"
+	exit 1
+fi
+
+#Choosing Cotrol Station. Code have to be "10"
+for CS in $cs_addr; do
+	if [ "$(eval $SSH_CHECK)" -eq "10" ]; then
+#		echo "$CS is Primary"
+		PRIMARY_CS=$CS
+		break
+	fi
+done
+
+if [ -z "$PRIMARY_CS" ]; then
+	echo "No alive primary Control Station from list \"$cs_addr\"";
+	exit 1;
+fi
+
+SSH="ssh -q $username@$PRIMARY_CS "
+for PROBESP in $SPALL; do
+	$SSH $NAVICLI -h $PROBESP  > /dev/null 2>&1
+	if [ 0 == "$?" ]; then SP="$PROBESP"; break; fi
+done
+
+if [ -z "$SP" ]; then
+	echo "No active Storage Processor found!";
+	exit 1;
+fi
+NAVICLI="/nas/sbin/navicli -h $SP"
+
+# Get Lun List
+LUNLIST="$($SSH $NAVICLI lun -list -drivetype | grep Name | sed -ne 's/^Name:\ *//p')"
+
+echo -e "host_name ${TARGET}\n"
+
+if [ "$1" = "config" ] ; then
+	echo "multigraph emc_vnx_block_blocks
+graph_category disk
+graph_title EMC VNX 5300 LUN Blocks
+graph_vlabel Blocks Read (-) / Written (+)
+graph_args --base 1000"
+	while read -r LUN ; do
+		echo "${LUN}_read.label none
+${LUN}_read.graph no
+${LUN}_read.min 0
+${LUN}_read.draw AREA
+${LUN}_read.type DERIVE
+${LUN}_write.label $LUN Blocks
+${LUN}_write.negative ${LUN}_read
+${LUN}_write.type DERIVE
+${LUN}_write.min 0
+${LUN}_write.draw STACK"
+	done <<< $LUNLIST
+
+	echo -e "\nmultigraph emc_vnx_block_req
+graph_category disk
+graph_title EMC VNX 5300 LUN Requests
+graph_vlabel Requests: Read (-) / Write (+)
+graph_args --base 1000"
+	while read -r LUN ; do
+		echo "${LUN}_readreq.label none
+${LUN}_readreq.graph no
+${LUN}_readreq.min 0
+${LUN}_readreq.type DERIVE
+${LUN}_writereq.label $LUN Requests
+${LUN}_writereq.negative ${LUN}_readreq
+${LUN}_writereq.type DERIVE
+${LUN}_writereq.min 0"
+	done <<< $LUNLIST
+
+	echo -e "\nmultigraph emc_vnx_block_ticks
+graph_category disk
+graph_title EMC VNX 5300 Counted Load per LUN
+graph_vlabel Load, % * Number of LUNs 
+graph_args --base 1000 -l 0 -r "
+echo -n "graph_order "
+	while read -r LUN ; do
+                echo -n "${LUN}_busyticks ${LUN}_idleticks ${LUN}_bta=${LUN}_busyticks_spa ${LUN}_idleticks_spa ${LUN}_btb=${LUN}_busyticks_spb ${LUN}_idleticks_spb "
+	done <<< $LUNLIST
+	echo ""
+	while read -r LUN ; do
+		echo "${LUN}_busyticks_spa.label $LUN Busy Ticks SPA
+${LUN}_busyticks_spa.type DERIVE
+${LUN}_busyticks_spa.graph no
+${LUN}_bta.label $LUN Busy Ticks SPA
+${LUN}_bta.graph no
+${LUN}_idleticks_spa.label $LUN Idle Ticks SPA
+${LUN}_idleticks_spa.type DERIVE
+${LUN}_idleticks_spa.graph no
+${LUN}_busyticks_spb.label $LUN Busy Ticks SPB
+${LUN}_busyticks_spb.type DERIVE
+${LUN}_busyticks_spb.graph no
+${LUN}_btb.label $LUN Busy Ticks SPB
+${LUN}_btb.graph no
+${LUN}_idleticks_spb.label $LUN Idle Ticks SPB
+${LUN}_idleticks_spb.type DERIVE
+${LUN}_idleticks_spb.graph no"
+
+echo "${LUN}_load_spa.label $LUN load SPA 
+${LUN}_load_spa.draw AREASTACK
+${LUN}_load_spb.label $LUN load SPB
+${LUN}_load_spb.draw AREASTACK
+${LUN}_load_spa.cdef 100,${LUN}_bta,${LUN}_busyticks_spa,${LUN}_idleticks_spa,+,/,*
+${LUN}_load_spb.cdef 100,${LUN}_btb,${LUN}_busyticks_spa,${LUN}_idleticks_spa,+,/,*
+"
+	done <<< $LUNLIST
+
+	echo -e "\nmultigraph emc_vnx_block_outstanding
+graph_category disk
+graph_title EMC VNX 5300 Sum of Outstanding Requests
+graph_vlabel Requests
+graph_args --base 1000"
+	while read -r LUN ; do
+		echo "${LUN}_outstandsum.label $LUN
+${LUN}_outstandsum.type DERIVE"
+	done <<< $LUNLIST
+
+	echo -e "\nmultigraph emc_vnx_block_nonzeroreq
+graph_category disk
+graph_title EMC VNX 5300 Non-Zero Request Count Arrivals
+graph_vlabel Count Arrivals
+graph_args --base 1000"
+	while read -r LUN ; do
+		echo "${LUN}_nonzeroreq.label $LUN
+${LUN}_nonzeroreq.type DERIVE"
+	done <<< $LUNLIST
+
+	echo -e "\nmultigraph emc_vnx_block_trespasses
+graph_category disk
+graph_title EMC VNX 5300 Trespasses
+graph_vlabel Trespasses"
+	while read -r LUN ; do
+		echo "${LUN}_implic_tr.label ${LUN} Implicit Trespasses
+${LUN}_explic_tr.label ${LUN} Explicit Trespasses"
+	done <<< $LUNLIST
+
+	echo -e "\nmultigraph emc_vnx_block_queue
+graph_category disk
+graph_title EMC VNX 5300 Counted Block Queue Length
+graph_vlabel Length"
+	while read -r LUN ; do
+		echo "${LUN}_busyticks_spa.label ${LUN}
+${LUN}_busyticks_spa.graph no
+${LUN}_busyticks_spa.type DERIVE
+${LUN}_idleticks_spa.label ${LUN}
+${LUN}_idleticks_spa.graph no
+${LUN}_idleticks_spa.type DERIVE
+${LUN}_busyticks_spb.label ${LUN}
+${LUN}_busyticks_spb.graph no
+${LUN}_busyticks_spb.type DERIVE
+${LUN}_idleticks_spb.label ${LUN}
+${LUN}_idleticks_spb.graph no
+${LUN}_idleticks_spb.type DERIVE
+${LUN}_outstandsum.label ${LUN}
+${LUN}_outstandsum.graph no
+${LUN}_outstandsum.type DERIVE
+${LUN}_nonzeroreq.label ${LUN}
+${LUN}_nonzeroreq.graph no
+${LUN}_nonzeroreq.type DERIVE
+${LUN}_readreq.label ${LUN}
+${LUN}_readreq.graph no
+${LUN}_readreq.type DERIVE
+${LUN}_writereq.label ${LUN}
+${LUN}_writereq.graph no
+${LUN}_writereq.type DERIVE"
+# Queue Length SPA = ((Sum of Outstanding Requests SPA - NonZero Request Count Arrivals SPA / 2)/(Host Read Requests SPA + Host Write Requests SPA))*
+# (Busy Ticks SPA/(Busy Ticks SPA + Idle Ticks SPA)
+# We count together SPA and SPB, although it is not fully corrext
+		echo "${LUN}_ql_l_a.label ${LUN} Queue Length SPA
+${LUN}_ql_l_a.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spa,*,${LUN}_busyticks_spa,${LUN}_idleticks_spa,+,/
+${LUN}_ql_l_b.label ${LUN} Queue Length SPB
+${LUN}_ql_l_b.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spb,*,${LUN}_busyticks_spb,${LUN}_idleticks_spb,+,/"
+	done <<< $LUNLIST
+exit 0
+fi
+BIGSSHCMD="$SSH"
+while read -r LUN ; do
+	BIGSSHCMD+="$NAVICLI lun -list -name $LUN -perfData | 
+		sed -ne 's/^Blocks Read\:\ */${LUN}_read.value /p; 
+		s/^Blocks Written\:\ */${LUN}_write.value /p;
+		s/Read Requests\:\ */${LUN}_readreq.value /p;
+		s/Write Requests\:\ */${LUN}_writereq.value /p;
+		s/Busy Ticks SP A\:\ */${LUN}_busyticks_spa.value /p;
+		s/Idle Ticks SP A\:\ */${LUN}_idleticks_spa.value /p;
+		s/Busy Ticks SP B\:\ */${LUN}_busyticks_spb.value /p;
+		s/Idle Ticks SP B\:\ */${LUN}_idleticks_spb.value /p;
+		s/Sum of Outstanding Requests\:\ */${LUN}_outstandsum.value /p;
+		s/Non-Zero Request Count Arrivals\:\ */${LUN}_nonzeroreq.value /p;
+		s/Implicit Trespasses\:\ */${LUN}_implic_tr.value /p;
+		s/Explicit Trespasses\:\ */${LUN}_explic_tr.value /p;
+		' ;"
+done <<< $LUNLIST
+ANSWER="$($BIGSSHCMD)"
+echo "multigraph emc_vnx_block_blocks"
+echo "$ANSWER" | grep "read\.\|write\."
+echo -e "\nmultigraph emc_vnx_block_req"
+echo "$ANSWER" | grep "readreq\.\|writereq\."
+
+echo -e "\nmultigraph emc_vnx_block_ticks"
+while read -r LUN ; do
+	echo "${LUN}_load_spa.value 0"
+	echo "${LUN}_load_spb.value 0"
+done <<< $LUNLIST
+echo "$ANSWER" | grep "busyticks_spa\.\|idleticks_spa\."
+echo "$ANSWER" | grep "busyticks_spb\.\|idleticks_spb\."
+
+echo -e "\nmultigraph emc_vnx_block_outstanding"
+echo "$ANSWER" | grep "outstandsum\."
+
+echo -e "\nmultigraph emc_vnx_block_nonzeroreq"
+echo "$ANSWER" | grep "nonzeroreq\."
+
+echo -e "\nmultigraph emc_vnx_block_trespasses"
+echo "$ANSWER" | grep "implic_tr\.\|explic_tr\."
+
+echo -e "\nmultigraph emc_vnx_block_queue"
+# Queue Length
+	echo "$ANSWER" | grep "busyticks"
+	echo "$ANSWER" | grep "idleticks."
+	echo "$ANSWER" | grep "outstandsum\."
+	echo "$ANSWER" | grep "nonzeroreq\."
+	echo "$ANSWER" | grep "readreq\."
+	echo "$ANSWER" | grep "writereq\."
+while read -r LUN ; do
+	echo "${LUN}_ql_l_a.value 0 "
+	echo "${LUN}_ql_l_b.value 0 "
+done <<< $LUNLIST
+exit 0

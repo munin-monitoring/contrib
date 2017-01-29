@@ -1,0 +1,169 @@
+#!/bin/bash
+######################################################################################################################
+#                  Plugin to monitor basic statistics of EMC VNX 5300 Unified Datamovers                             #
+######################################################################################################################
+
+# Author: Evgeny Beysembaev <megabotva@gmail.com>
+
+#####################################
+#         Description               #
+#####################################
+
+# The plugin monitors basic statistics of EMC Unified Storage system Datamovers. Probably it can also be compatible with 
+# other Isilon or Celerra systems. It uses SSH to connect to Control Stations, then remotely executes 
+# /nas/sbin/server_stats and fetches and parses data from it. It supports gathering data both from active/active 
+# and active/passive Datamover configurations, ignoring offline or standby Datamovers. If all Datamovers are 
+# offline or absent, the plugin returns error.
+# This plugin also automatically chooses Primary Control Station from the list by calling /nasmcd/sbin/getreason and 
+# /nasmcd/sbin/t2slot.
+# 
+# Data is gathered from basic-std Statistics Group
+# 
+# It's quite easy to comment out unneeded data to make graphs less overloaded or to add new statistics sources.
+ 
+#####################################
+#        Configuration              #
+#####################################
+
+# The plugin uses SSH to connect to Control Stations. It's possible to use 'nasadmin' user, but it would be better
+# if you create read-only global user by Unisphere Client. The user should have only Operator role.
+# I created "operator" user but due to the fact that Control Stations already had one internal "operator" user,
+# the new one was called "operator1". So be careful.
+# 
+# On munin-node side choose a user which will be used to connect through SSH. Generally user "munin" is ok. Then,
+# execute "sudo su munin -s /bin/bash", "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created 
+# user.
+# 
+# Make a link from /usr/share/munin/plugins/emc_vnx_dm_basic_stats to /etc/munin/plugins/emc_vnx_dm_basic_stats_<NAME>,
+# where <NAME> is any arbitrary name of your storage system. The plugin will return <NAME> in its answer 
+# as "host_name" field.
+# Assume your storage system is called "VNX5300".
+# 
+# Make a configuration file at /etc/munin/plugin-conf.d/emc_vnx_dm_basic_stats_VNX5300
+# 
+# [emc_vnx_dm_basic_stats_vnx5300]
+# user munin							# SSH Client local user
+# env.username operator1					# Remote user with Operator role
+# env.cs_addr 192.168.1.1 192.168.1.2				# Control Stations addresses
+# env.nas_servers server_2 server_3				# This is the default value and can be omitted
+
+#####################################
+#           History                 #
+#####################################
+
+# 08.11.2016 - First Release
+
+######################################################################################################################
+
+export LANG=C
+
+TARGET=$(echo "${0##*/}" | cut -d _ -f 6)
+: ${nas_servers:="server_2 server_3"}
+SSH_CHECK='ssh -q $username@$CS "/nasmcd/sbin/getreason | grep -w slot_\`/nasmcd/sbin/t2slot\` | cut -d- -f1"'
+
+if [ "$1" = "autoconf" ]; then
+	echo "yes"
+	exit 0
+fi
+
+if [ -z "$username" ]; then
+	echo "No username!"
+	exit 1
+fi
+
+if [ -z "$cs_addr" ]; then
+	echo "No control station addresses!"
+	exit 1
+fi
+
+#Choosing Cotrol Station. Code have to be "10"
+for CS in $cs_addr; do
+	if [ "`eval $SSH_CHECK`" -eq "10" ]; then
+#		echo "$CS is Primary"
+		PRIMARY_CS=$CS
+		break
+	fi
+done
+
+if [ -z "$PRIMARY_CS" ]; then
+	echo "No alive primary Control Station from list \"$cs_addr\"";
+	exit 1;
+fi
+
+SSH="ssh -q $username@$PRIMARY_CS . /home/operator1/.bash_profile; "
+
+echo "host_name ${TARGET}"
+
+if [ "$1" = "config" ] ; then
+	for server in $nas_servers; do
+		$SSH nas_server -i $server | grep -q 'type *= nas'
+		if [ "$?" != 0 ]  ; then continue; fi
+		nas_server_ok=TRUE
+		echo "multigraph emc_vnx_cpu_percent
+graph_title EMC VNX 5300 Datamover CPU Util %
+graph_vlabel %
+graph_category cpu
+${server}_cpuutil.min 0
+${server}_cpuutil.label $server CPU util. in % in this interval."
+		echo "
+multigraph emc_vnx_network_kib
+graph_title EMC VNX 5300 Datamover Network bytes over all interfaces
+graph_vlabel B/s sent (+)/ recv. (-)
+graph_category network
+graph_args --base 1000
+${server}_net_in.graph no
+${server}_net_in.label none
+${server}_net_in.cdef ${server}_net_in,1000,*
+${server}_net_out.label $server B/s
+${server}_net_out.cdef ${server}_net_out,1000,*
+${server}_net_out.negative ${server}_net_in
+${server}_net_out.draw AREA"
+		echo "
+multigraph emc_vnx_storage_kib
+graph_title EMC VNX 5300 Datamover Storage bytes over all interfaces
+graph_vlabel B/s sent (+)/ recv. (-)
+graph_category network
+graph_args --base 1000
+${server}_stor_read.graph no
+${server}_stor_read.label none
+${server}_stor_read.cdef ${server}_stor_read,1000,*
+${server}_stor_write.label $server B/s
+${server}_stor_write.cdef ${server}_stor_write,1000,*
+${server}_stor_write.negative ${server}_stor_read
+${server}_stor_write.draw AREA"
+	done
+	if [ -z $nas_server_ok ]; then
+		echo "No active data movers!"
+		exit 1
+	fi
+exit 0
+fi
+
+for server in $nas_servers; do
+	$SSH nas_server -i $server | grep -q 'type *= nas'
+	if [ "$?" != 0 ]  ; then continue; fi
+	nas_server_ok=TRUE
+	member_elements=`$SSH server_stats $server -count 1 -terminationsummary no -titles never `
+	NUMCOL=5
+	IFS=$' ' read -ra graphs <<< $member_elements
+
+	echo "multigraph emc_vnx_cpu_percent"
+	echo "${server}_cpuutil.value ${graphs[1]}"
+
+	echo "
+multigraph emc_vnx_network_kib"
+	echo "${server}_net_in.value ${graphs[2]}"
+	echo "${server}_net_out.value ${graphs[3]}"
+
+	echo "
+multigraph emc_vnx_storage_kib"
+	echo "${server}_stor_read.value ${graphs[4]}"
+	echo "${server}_stor_write.value ${graphs[5]}"
+
+done
+if [ -z $nas_server_ok ]; then
+	echo "No active data movers!"
+	exit 1
+fi
+exit 0
+
