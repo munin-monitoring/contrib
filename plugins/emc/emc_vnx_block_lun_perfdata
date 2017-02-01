@@ -145,9 +145,9 @@ export LANG=C
 
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
-: ${cs_addr:=""}
-: ${username:=""}
-: ${blockpw:=""}
+cs_addr="${cs_addr:=""}"
+username="${username:=""}"
+blockpw="${blockpw:=""}"
 
 TARGET=$(echo "${0##*/}" | cut -d _ -f 6)
 
@@ -214,6 +214,7 @@ check_conf_and_set_vars () {
 		fi
 	done
 	[ -z "$StorageProcessor" ] && echo "No active Storage Processor found!" && return 1
+	NAVICLI_NOSP="$NAVICLI -h"
 	NAVICLI="$NAVICLI -h $StorageProcessor"
 	return 0
 }
@@ -241,6 +242,15 @@ run_remote() {
 run_navicli() {
 	
 	run_remote "$NAVICLI" "$@"
+}
+
+run_navicli_both_sp() {
+	for SP in $SPALL; do
+		run_remote "$NAVICLI_NOSP $SP" "$@"
+#		echo "$NAVICLI_NOSP $SP" "$@"
+#		echo "$NAVICLI_NOSP $SP" $@
+		
+	done
 }
 
 # Get Lun List
@@ -389,7 +399,7 @@ if [ "$1" = "config" ] ; then
 
 		multigraph emc_vnx_block_queue
 		graph_category disk
-		graph_title EMC VNX 5300 Counted Block Queue Length
+		graph_title EMC VNX 5300 Counted Block Queue Length 
 		graph_vlabel Length
 	EOF
 	while read -r LUN ; do
@@ -430,6 +440,35 @@ if [ "$1" = "config" ] ; then
 			${LUN}_ql_l_b.cdef ${LUN}_outstandsum,${LUN}_nonzeroreq,2,/,-,${LUN}_readreq,${LUN}_writereq,+,/,${LUN}_busyticks_spb,*,${LUN}_busyticks_spb,${LUN}_idleticks_spb,+,/
 		EOF
 	done <<< "$LUNLIST"
+	cat <<-EOF
+
+		multigraph emc_vnx_block_ticks_total
+		graph_category disk
+		graph_title EMC VNX 5300 Counted Load per SP
+		graph_vlabel Load, %
+	EOF
+	echo -n "graph_order "
+	for SP in $SPALL; do
+		SPclean="$(clean_fieldname "$SP")"
+		echo -n "${SPclean}_total_bt=${SPclean}_total_busyticks "
+	done
+	echo ""
+	for SP in $SPALL; do
+		SPclean="$(clean_fieldname "$SP")"
+		cat <<-EOF
+			${SPclean}_total_busyticks.label ${SP}
+			${SPclean}_total_busyticks.graph no
+			${SPclean}_total_busyticks.type COUNTER 
+			${SPclean}_total_bt.label ${SP}
+			${SPclean}_total_bt.graph no
+			${SPclean}_total_bt.type COUNTER 
+			${SPclean}_total_idleticks.label ${SP}
+			${SPclean}_total_idleticks.graph no
+			${SPclean}_total_idleticks.type COUNTER
+			${SPclean}_total_load.label ${SP} Total Load
+			${SPclean}_total_load.cdef ${SPclean}_total_bt,${SPclean}_total_busyticks,${SPclean}_total_idleticks,+,/,100,*
+		EOF
+	done
 	exit 0
 fi
 
@@ -450,17 +489,29 @@ while read -r LUN ; do
 		s/Non-Zero Request Count Arrivals\:\ */${FILTERLUN}_nonzeroreq.value /p;
 		s/Implicit Trespasses\:\ */${FILTERLUN}_implic_tr.value /p;
 		s/Explicit Trespasses\:\ */${FILTERLUN}_explic_tr.value /p;
-		' ; "
+		' ;  "
 done <<< "$LUNLIST"
 ANSWER=$(run_remote "$BIGCMD")
+#	BIGCMD="getcontrol -cbt | sed -ne '
+#		s/Controller busy ticks\:\ */ spa_busyticks.value /p; 
+#		s/Controller idle ticks\:\ */ spa_idleticks.value /p;'
+
+
+BIGCMD="getcontrol -cbt | sed -ne '
+	s/Controller busy ticks\:\ */\${SP}_total_busyticks.value /p;
+	s/Controller idle ticks\:\ */\${SP}_total_idleticks.value /p;
+	'
+"
+ANSWER+=$'\n'$(run_navicli_both_sp "$BIGCMD")
+run_navicli_both_sp "$BIGCMD"
 
 get_precise_answer_field() {
     echo "$ANSWER" | grep -F "_${1}."
 }
 
-get_similar_answer_field() {
-    echo "$ANSWER" | grep -F "_${1}"
-}
+# get_similar_answer_field() {
+#     echo "$ANSWER" | grep -F "_${1}"
+# }
 #ANSWER=$BIGSSHCMD
 echo "multigraph emc_vnx_block_blocks"
 get_precise_answer_field "read"
@@ -493,16 +544,28 @@ get_precise_answer_field "explic_tr"
 
 echo -e "\nmultigraph emc_vnx_block_queue"
 # Queue Length
-	get_similar_answer_field "busyticks"
-	get_similar_answer_field "idleticks"
-	get_precise_answer_field "outstandsum"
-	get_precise_answer_field "nonzeroreq"
-	get_precise_answer_field "readreq"
-	get_precise_answer_field "writereq"
+get_precise_answer_field "busyticks_spa"
+get_precise_answer_field "idleticks_spa"
+get_precise_answer_field "busyticks_spb"
+get_precise_answer_field "idleticks_spb"
+get_precise_answer_field "outstandsum"
+get_precise_answer_field "nonzeroreq"
+get_precise_answer_field "readreq"
+get_precise_answer_field "writereq"
 while read -r LUN ; do
 	LUN="$(clean_fieldname "$LUN")"
 	#Will count these values later, using cdef
 	echo "${LUN}_ql_l_a.value 0 "
 	echo "${LUN}_ql_l_b.value 0 "
 done <<< "$LUNLIST"
+
+echo -e "\nmultigraph emc_vnx_block_ticks_total"
+get_precise_answer_field "total_busyticks"
+get_precise_answer_field "total_idleticks"
+#Will count them later
+for SP in $SPALL; do
+	SP="$(clean_fieldname "$SP")"
+	echo "${SP}_total_load.value 0"
+done
+
 exit 0
