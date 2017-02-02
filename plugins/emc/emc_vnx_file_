@@ -71,6 +71,10 @@
 	EMC VNX 5300 NFS Client Ops/s
 	EMC VNX 5300 NFS Client B/s
 	EMC VNX 5300 NFS Client Avg uSec/call
+	EMC VNX 5300 Std NFS Ops/s
+	EMC VNX 5300 Std NFS B/s
+	EMC VNX 5300 Std NFS Average Size Bytes
+	EMC VNX 5300 Std NFS Active Threads
 
 =head1 COMPATIBILITY
 
@@ -135,9 +139,9 @@ export LANG=C
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
 nas_server_ok=""
-: ${cs_addr:=""}
-: ${username:=""}
-: ${nas_servers:="server_2 server_3"}
+cs_addr=${cs_addr:=""}
+username=${username:=""}
+nas_servers=${nas_servers:="server_2 server_3"}
 
 # Prints "10" on stdout if found Primary Online control station. "11" - for Secondary Online control station. 
 ssh_check_cmd() {
@@ -202,9 +206,11 @@ run_remote () {
 echo "host_name ${TARGET}"
 
 if [ "$1" = "config" ] ; then
+# TODO: active/active
 	for server in $nas_servers; do
 		run_remote nas_server -i "$server" | grep -q 'type *= nas' || continue
 		nas_server_ok=TRUE
+		filtered_server="$(clean_fieldname "$server")"
 		
 		if [ "$STATSTYPE" = "BASICDM" ] ; then
 			cat <<-EOF 
@@ -427,6 +433,55 @@ if [ "$1" = "config" ] ; then
 				field="$(clean_fieldname "_$graph")"
 				echo "${server}${field}.label $server $graph Avg uSec/call"
 			done
+
+#nfs-std
+# Timestamp     NFS         Read      Read    Read Size     Write      Write   Write Size    Active  
+#              Ops/s       Ops/s      KiB/s     Bytes       Ops/s      KiB/s     Bytes      Threads  
+			cat <<-EOF
+
+			multigraph vnx_emc_nfs_std_nfs_ops
+			graph_title EMC VNX 5300 Std NFS Ops/s
+			graph_vlabel Ops/s
+			graph_category nfs
+			EOF
+			echo "graph_order ${filtered_server}_rops ${filtered_server}_wops ${filtered_server}_tops"
+			echo "${filtered_server}_rops.label $server Read Ops/s"
+			echo "${filtered_server}_wops.label $server Write Ops/s"
+			echo "${filtered_server}_wops.draw STACK"
+			echo "${filtered_server}_tops.label $server Total Ops/s"
+			
+			cat <<-EOF
+
+			multigraph vnx_emc_nfs_std_nfs_b_s
+			graph_title EMC VNX 5300 Std NFS B/s
+			graph_vlabel B/s
+			graph_category nfs
+			EOF
+			echo "graph_order ${filtered_server}_rbs ${filtered_server}_wbs ${filtered_server}_tbs"
+			echo "${filtered_server}_rbs.label $server Read B/s"
+			echo "${filtered_server}_wbs.label $server Write B/s"
+			echo "${filtered_server}_wbs.draw STACK"
+			echo "${filtered_server}_tbs.label $server Total B/s"
+			echo "${filtered_server}_tbs.cdef ${filtered_server}_rbs,${filtered_server}_wbs,+"
+			
+			cat <<-EOF
+
+			multigraph vnx_emc_nfs_std_nfs_avg
+			graph_title EMC VNX 5300 Std NFS Average Size Bytes
+			graph_vlabel Bytes
+			graph_category nfs
+			EOF
+			echo "${filtered_server}_avg_readsize.label $server Average Read Size Bytes"
+			echo "${filtered_server}_avg_writesize.label $server Average Write Size Bytes"
+
+			cat <<-EOF
+
+			multigraph vnx_emc_nfs_std_nfs_threads
+			graph_title EMC VNX 5300 Std NFS Active Threads
+			graph_vlabel Threads
+			graph_category nfs
+			EOF
+			echo "${filtered_server}_threads.label $server Active Threads"
 		fi
 	done
 	if [ -z "$nas_server_ok" ]; then
@@ -438,6 +493,8 @@ fi
 for server in $nas_servers; do
 	run_remote nas_server -i $server | grep -q 'type *= nas' || continue
 	nas_server_ok=TRUE
+	filtered_server="$(clean_fieldname "$server")"
+
 	if [ "$STATSTYPE" = "BASICDM" ] ; then
 #basicdm data
 # [nasadmin@mnemonic0 ~]$ server_stats server_2 -count 1 -terminationsummary no 
@@ -446,19 +503,19 @@ for server in $nas_servers; do
 #             %      KiB/s       KiB/s       KiB/s       KiB/s   
 # 20:42:26      9       16432        3404        1967       24889
 
-	member_elements_by_line=$(run_remote server_stats "$server" -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
-	IFS=$' ' read -ra graphs <<< "$member_elements_by_line"
+		member_elements_by_line=$(run_remote server_stats "$server" -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
+		IFS=$' ' read -ra graphs <<< "$member_elements_by_line"
 
-	echo "multigraph emc_vnx_cpu_percent"
-	echo "${server}_cpuutil.value ${graphs[1]}"
+		echo "multigraph emc_vnx_cpu_percent"
+		echo "${server}_cpuutil.value ${graphs[1]}"
 
-	echo -e "\nmultigraph emc_vnx_network_b"
-	echo "${server}_net_in.value $((${graphs[2]} * 1024))"
-	echo "${server}_net_out.value $((${graphs[3]} * 1024))"
+		echo -e "\nmultigraph emc_vnx_network_b"
+		echo "${server}_net_in.value $((${graphs[2]} * 1024))"
+		echo "${server}_net_out.value $((${graphs[3]} * 1024))"
 
-	echo -e "\nmultigraph emc_vnx_storage_b"
-	echo "${server}_stor_read.value $((${graphs[4]} * 1024))"
-	echo "${server}_stor_write.value $((${graphs[5]} * 1024))"
+		echo -e "\nmultigraph emc_vnx_storage_b"
+		echo "${server}_stor_read.value $((${graphs[4]} * 1024))"
+		echo "${server}_stor_write.value $((${graphs[5]} * 1024))"
 
 # [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor kernel.memory -count 1 -terminationsummary no 
 # server_2       Free           Buffer       Buffer   Buffer    Buffer         Buffer       Buffer Cache  Encumbered  FileResolve  FileResolve  FileResolve  Free KiB   Page     Total    Used KiB     Memory  
@@ -466,28 +523,28 @@ for server in $nas_servers; do
 #                KiB       Watermark Hits/s  Hit %    Hits/s   Lookups/s  Watermark Hits/s     Hits/s        KiB        Entries       Limit       Entries                KiB      KiB                    %     
 # 20:44:14        3522944                 0      96     11562      12010                 0             0     3579268            0            0            0    3525848      8    6291456    2765608          44
 
-	member_elements_by_line=$(run_remote server_stats "$server" -monitor kernel.memory -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
-	IFS=$' ' read -ra graphs <<< "$member_elements_by_line"
+		member_elements_by_line=$(run_remote server_stats "$server" -monitor kernel.memory -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
+		IFS=$' ' read -ra graphs <<< "$member_elements_by_line"
 
-	echo -e "\nmultigraph emc_vnx_memory"
-	#Reserved for math
-	echo "${server}_total.value $((${graphs[14]} / 1))"	
-	echo "${server}_used.value $((${graphs[15]} / 1))"
-	echo "${server}_free.value $((${graphs[12]} / 1))"
-	echo "${server}_freebuffer.value $((${graphs[1]} / 1))"
-	echo "${server}_encumbered.value $((${graphs[8]} / 1))"
+		echo -e "\nmultigraph emc_vnx_memory"
+		#Reserved for math
+		echo "${server}_total.value $((${graphs[14]} / 1))"	
+		echo "${server}_used.value $((${graphs[15]} / 1))"
+		echo "${server}_free.value $((${graphs[12]} / 1))"
+		echo "${server}_freebuffer.value $((${graphs[1]} / 1))"
+		echo "${server}_encumbered.value $((${graphs[8]} / 1))"
 
-	echo -e "\nmultigraph emc_vnx_filecache"
-	echo "${server}_highw_hits.value ${graphs[2]}"
-	echo "${server}_loww_hits.value ${graphs[6]}"
-	echo "${server}_w_hits.value ${graphs[7]}"
-	echo "${server}_hits.value ${graphs[4]}"
-	echo "${server}_lookups.value ${graphs[5]}"
+		echo -e "\nmultigraph emc_vnx_filecache"
+		echo "${server}_highw_hits.value ${graphs[2]}"
+		echo "${server}_loww_hits.value ${graphs[6]}"
+		echo "${server}_w_hits.value ${graphs[7]}"
+		echo "${server}_hits.value ${graphs[4]}"
+		echo "${server}_lookups.value ${graphs[5]}"
 
-	echo -e "\nmultigraph emc_vnx_fileresolve"
-	echo "${server}_dropped.value ${graphs[9]}"
-	echo "${server}_max.value ${graphs[10]}"
-	echo "${server}_used.value ${graphs[11]}"
+		echo -e "\nmultigraph emc_vnx_fileresolve"
+		echo "${server}_dropped.value ${graphs[9]}"
+		echo "${server}_max.value ${graphs[10]}"
+		echo "${server}_used.value ${graphs[11]}"
 
 
 	fi
@@ -506,31 +563,31 @@ for server in $nas_servers; do
 #            v3Mkdir                  13       0         953           9
 #            v3Link                    6       0        1064           4
 
-	member_elements_by_line=$(run_remote server_stats "$server" -monitor nfs.v3.op -count 1 -terminationsummary no -titles never | sed -ne 's/^.*v3/v3/p')
-	NUMCOL=5
-	LINES=$(wc -l <<< "$member_elements_by_line")
-	while IFS=$'\n' read -ra graphs ; do
-		elements_array+=( $graphs )
-	done <<< "$member_elements_by_line"
-	
-	if [ "${#elements_array[@]}" -eq "0" ]; then  LINES=0; fi
+		member_elements_by_line=$(run_remote server_stats "$server" -monitor nfs.v3.op -count 1 -terminationsummary no -titles never | sed -ne 's/^.*v3/v3/p')
+		NUMCOL=5
+		LINES=$(wc -l <<< "$member_elements_by_line")
+		while IFS=$'\n' read -ra graphs ; do
+			elements_array+=( $graphs )
+		done <<< "$member_elements_by_line"
+		
+		if [ "${#elements_array[@]}" -eq "0" ]; then  LINES=0; fi
 
-	echo "multigraph vnx_emc_v3_calls_s"
-	for ((i=0; i<$((LINES)); i++ )); do
-		echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+1]}"
-	done
+		echo "multigraph vnx_emc_v3_calls_s"
+		for ((i=0; i<$((LINES)); i++ )); do
+			echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+1]}"
+		done
 
-	echo -e "\nmultigraph vnx_emc_v3_usec_call"
-	for ((i=0; i<$((LINES)); i++ )); do
-		echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+3]}"
-	done
+		echo -e "\nmultigraph vnx_emc_v3_usec_call"
+		for ((i=0; i<$((LINES)); i++ )); do
+			echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+3]}"
+		done
 
-	echo -e "\nmultigraph vnx_emc_v3_op_percent"
-	for ((i=0; i<$((LINES)); i++ )); do
-		echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+4]}"
-	done
+		echo -e "\nmultigraph vnx_emc_v3_op_percent"
+		for ((i=0; i<$((LINES)); i++ )); do
+			echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+4]}"
+		done
 
-	elements_array=()
+		elements_array=()
 
 #nfs.v4.op data
 # [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor nfs.v4.op -count 1 -terminationsummary no
@@ -557,31 +614,31 @@ for server in $nas_servers; do
 #            v4SetAttr                 9       0         889           0
 #            v4Write                 525       0       16508           7
 
-	member_elements_by_line=$(run_remote server_stats "$server" -monitor nfs.v4.op -count 1 -terminationsummary no -titles never | sed -ne 's/^.*v4/v4/p')
-	NUMCOL=5
-	LINES=$(wc -l <<< "$member_elements_by_line")
-	while IFS=$'\n' read -ra graphs ; do
-		elements_array+=( $graphs )
-	done <<< "$member_elements_by_line"
+		member_elements_by_line=$(run_remote server_stats "$server" -monitor nfs.v4.op -count 1 -terminationsummary no -titles never | sed -ne 's/^.*v4/v4/p')
+		NUMCOL=5
+		LINES=$(wc -l <<< "$member_elements_by_line")
+		while IFS=$'\n' read -ra graphs ; do
+			elements_array+=( $graphs )
+		done <<< "$member_elements_by_line"
 
-	if [ "${#elements_array[@]}" -eq "0" ]; then  LINES=0; fi
+		if [ "${#elements_array[@]}" -eq "0" ]; then  LINES=0; fi
 
-	echo -e "\nmultigraph vnx_emc_v4_calls_s"
-	for ((i=0; i<$((LINES)); i++ )); do
-		echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+1]}"
-	done
+		echo -e "\nmultigraph vnx_emc_v4_calls_s"
+		for ((i=0; i<$((LINES)); i++ )); do
+			echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+1]}"
+		done
 
-	echo -e "\nmultigraph vnx_emc_v4_usec_call"
-	for ((i=0; i<$((LINES)); i++ )); do
-		echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+3]}"
-	done
+		echo -e "\nmultigraph vnx_emc_v4_usec_call"
+		for ((i=0; i<$((LINES)); i++ )); do
+			echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+3]}"
+		done
 
-	echo -e "\nmultigraph vnx_emc_v4_op_percent"
-	for ((i=0; i<$((LINES)); i++ )); do
-		echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+4]}"
-	done
+		echo -e "\nmultigraph vnx_emc_v4_op_percent"
+		for ((i=0; i<$((LINES)); i++ )); do
+			echo "${server}_${elements_array[i*$NUMCOL]}".value "${elements_array[i*$NUMCOL+4]}"
+		done
 
-	elements_array=()
+		elements_array=()
 
 #nfs.client data
 # [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no 
@@ -595,36 +652,66 @@ for server in $nas_servers; do
 #            id=192.168.1.235                             21        1        0           0        0        0        0     155839
 #            id=192.168.1.224                              5        0        5           0       20        0       20     704620
 
-	echo -e "\nmultigraph vnx_emc_nfs_client_ops_s"
- 	member_elements_by_line=$(run_remote server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p')
-	NUMCOL=9
-	LINES=$(wc -l <<< "$member_elements_by_line")
-	while IFS=$'\n' read -ra graphs; do
-		elements_array+=($graphs)
-	done  <<< "$member_elements_by_line"
+		member_elements_by_line=$(run_remote server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p')
+		echo -e "\nmultigraph vnx_emc_nfs_client_ops_s"
+		NUMCOL=9
+		LINES=$(wc -l <<< "$member_elements_by_line")
+		while IFS=$'\n' read -ra graphs; do
+			elements_array+=($graphs)
+		done  <<< "$member_elements_by_line"
 
-	#Not drawing elements in case of empty set
-	if [ "${#elements_array[@]}" -eq "0" ]; then  LINES=0; fi
+		#Not drawing elements in case of empty set
+		if [ "${#elements_array[@]}" -eq "0" ]; then  LINES=0; fi
 
-	for (( i=0; i<$((LINES)); i++ )); do
-		client="$(clean_fieldname "_${elements_array[i*$NUMCOL]}")"
-		echo "${server}${client}_r".value "${elements_array[$i*$NUMCOL+2]}"
-		echo "${server}${client}_w".value "${elements_array[$i*$NUMCOL+3]}"
-		echo "${server}${client}_t".value "${elements_array[$i*$NUMCOL+1]}"
-		echo "${server}${client}_s".value "${elements_array[$i*$NUMCOL+4]}"
-	done
-	echo -e "\nmultigraph vnx_emc_nfs_client_b_s"
-	for (( i=0; i<$((LINES)); i++ )); do
-		client="$(clean_fieldname "_${elements_array[i*$NUMCOL]}")"
-		echo "${server}${client}_r".value "$((${elements_array[$i*$NUMCOL+6]} * 1024))"
-		echo "${server}${client}_w".value "$((${elements_array[$i*$NUMCOL+7]} * 1024))"
-		echo "${server}${client}_t".value "$((${elements_array[$i*$NUMCOL+5]} * 1024))"
-	done
-	echo -e "\nmultigraph vnx_emc_nfs_client_avg_usec"
-	for (( i=0; i<$((LINES)); i++ )); do
-		client="$(clean_fieldname "_${elements_array[i*$NUMCOL]}")"
-		echo "${server}${client}".value "${elements_array[$i*$NUMCOL+8]}"
-	done
+		for (( i=0; i<$((LINES)); i++ )); do
+			client="$(clean_fieldname "_${elements_array[i*$NUMCOL]}")"
+			echo "${server}${client}_r".value "${elements_array[$i*$NUMCOL+2]}"
+			echo "${server}${client}_w".value "${elements_array[$i*$NUMCOL+3]}"
+			echo "${server}${client}_t".value "${elements_array[$i*$NUMCOL+1]}"
+			echo "${server}${client}_s".value "${elements_array[$i*$NUMCOL+4]}"
+		done
+		echo -e "\nmultigraph vnx_emc_nfs_client_b_s"
+		for (( i=0; i<$((LINES)); i++ )); do
+			client="$(clean_fieldname "_${elements_array[i*$NUMCOL]}")"
+			echo "${server}${client}_r".value "$((${elements_array[$i*$NUMCOL+6]} * 1024))"
+			echo "${server}${client}_w".value "$((${elements_array[$i*$NUMCOL+7]} * 1024))"
+			echo "${server}${client}_t".value "$((${elements_array[$i*$NUMCOL+5]} * 1024))"
+		done
+		echo -e "\nmultigraph vnx_emc_nfs_client_avg_usec"
+		for (( i=0; i<$((LINES)); i++ )); do
+			client="$(clean_fieldname "_${elements_array[i*$NUMCOL]}")"
+			echo "${server}${client}".value "${elements_array[$i*$NUMCOL+8]}"
+		done
+
+#nfs-std
+# bash-3.2$  server_stats server_2 -monitor nfs-std
+# server_2     Total        NFS        NFS     NFS Avg       NFS        NFS     NFS Avg       NFS    
+# Timestamp     NFS         Read      Read    Read Size     Write      Write   Write Size    Active  
+#              Ops/s       Ops/s      KiB/s     Bytes       Ops/s      KiB/s     Bytes      Threads  
+# 18:14:52          688         105     6396       62652           1      137      174763           3
+		member_elements_by_line=$(run_remote server_stats "$server" -monitor nfs-std -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
+		IFS=$' ' read -ra graphs <<< "$member_elements_by_line"
+#		echo "$member_elements_by_line"
+#		echo "${graphs[@]}"
+
+		echo -e "\nmultigraph vnx_emc_nfs_std_nfs_ops"
+		echo "${filtered_server}_rops.value ${graphs[2]}"
+		echo "${filtered_server}_wops.value ${graphs[5]}"
+		echo "${filtered_server}_tops.value ${graphs[1]}"
+				
+		echo -e "\nmultigraph vnx_emc_nfs_std_nfs_b_s"
+		echo "${filtered_server}_rbs.value $((${graphs[3]} * 1024))"
+		echo "${filtered_server}_wbs.value $((${graphs[6]} * 1024))"
+		echo "${filtered_server}_tbs.value 0"
+				
+
+		echo -e "\nmultigraph vnx_emc_nfs_std_nfs_avg"
+		echo "${filtered_server}_avg_readsize.value ${graphs[4]}"
+		echo "${filtered_server}_avg_writesize.value ${graphs[7]}"
+
+
+		echo -e "\nmultigraph vnx_emc_nfs_std_nfs_threads"
+		echo "${filtered_server}_threads.value ${graphs[8]}"
 	fi
 done
 if [ -z "$nas_server_ok" ]; then
