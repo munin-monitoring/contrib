@@ -184,6 +184,7 @@ check_conf_and_set_vars () {
 		fi
 		#Choosing Cotrol Station. Code have to be "10"
 		for CS in $cs_addr; do
+			# shellcheck disable=SC2086
 			if [[ "10" = "$(ssh_check_cmd $CS)" ]]; then
 				PRIMARY_CS=$CS
 				SSH="ssh -q $username@$PRIMARY_CS "
@@ -209,6 +210,7 @@ check_conf_and_set_vars () {
 	fi
 	local probe_sp
 	for probe_sp in $SPALL; do
+		# shellcheck disable=SC2086
 		if $SSH $NAVICLI -h "$probe_sp" >/dev/null 2>&1; then
 			StorageProcessor="$probe_sp"
 			break
@@ -234,25 +236,16 @@ check_conf_and_set_vars 1>&2 || exit 1
 
 run_remote() {
 	if [ -z "$SSH" ]; then
-		eval "$@"
+		sh -c "$*"
 	else
-		eval "$SSH" "\"$@\""
+		$SSH "$*"
 	fi
 }
 
 run_navicli() {
-	
-	run_remote "$NAVICLI" "$@"
+	run_remote "$NAVICLI" "$*"
 }
 
-run_navicli_both_sp() {
-	for SP in $SPALL; do
-		run_remote "$NAVICLI_NOSP $SP" "$@"
-#		echo "$NAVICLI_NOSP $SP" "$@"
-#		echo "$NAVICLI_NOSP $SP" $@
-		
-	done
-}
 
 # Get Lun List
 LUNLIST=$(run_navicli lun -list -drivetype | sed -ne 's/^Name:\ *//p' | sort)
@@ -493,27 +486,21 @@ while read -r LUN ; do
 		' ;  "
 done <<< "$LUNLIST"
 ANSWER=$(run_remote "$BIGCMD")
-#	BIGCMD="getcontrol -cbt | sed -ne '
-#		s/Controller busy ticks\:\ */ spa_busyticks.value /p; 
-#		s/Controller idle ticks\:\ */ spa_idleticks.value /p;'
 
-
-BIGCMD="getcontrol -cbt | sed -ne '
-	s/Controller busy ticks\:\ */\${SP}_total_busyticks.value /p;
-	s/Controller idle ticks\:\ */\${SP}_total_idleticks.value /p;
-	'
-"
-ANSWER+=$'\n'$(run_navicli_both_sp "$BIGCMD")
-run_navicli_both_sp "$BIGCMD"
+for SP in $SPALL; do
+	FILTER_SP="$(clean_fieldname "$SP")"
+	BIGCMD="getcontrol -cbt | sed -ne '
+		s/Controller busy ticks\:\ */${FILTER_SP}_total_busyticks.value /p;
+		s/Controller idle ticks\:\ */${FILTER_SP}_total_idleticks.value /p;
+		'
+	"
+	ANSWER+=$'\n'$(run_remote "$NAVICLI_NOSP $SP" "$BIGCMD")
+done
 
 get_precise_answer_field() {
     echo "$ANSWER" | grep -F "_${1}."
 }
 
-# get_similar_answer_field() {
-#     echo "$ANSWER" | grep -F "_${1}"
-# }
-#ANSWER=$BIGSSHCMD
 echo "multigraph emc_vnx_block_blocks"
 get_precise_answer_field "read"
 get_precise_answer_field "write"

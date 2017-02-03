@@ -162,6 +162,7 @@ check_conf () {
 
 	#Choosing Cotrol Station. Code have to be "10"
 	for CS in $cs_addr; do
+		# shellcheck disable=SC2086
 		if [[ "10" = "$(ssh_check_cmd $CS)" ]]; then
 			PRIMARY_CS=$CS
 			break
@@ -201,6 +202,7 @@ TARGET=$(echo "${0##*/}" | cut -d _ -f 6)
 check_conf 1>&2 || exit 1
 
 run_remote () {
+	# shellcheck disable=SC2029
 	ssh -q "$username@$PRIMARY_CS" ". /home/$username/.bash_profile; $*"
 }
 
@@ -492,7 +494,7 @@ if [ "$1" = "config" ] ; then
 fi
 
 for server in $nas_servers; do
-	run_remote nas_server -i $server | grep -q 'type *= nas' || continue
+	run_remote nas_server -i "$server" | grep -q 'type *= nas' || continue
 	nas_server_ok=TRUE
 	filtered_server="$(clean_fieldname "$server")"
 
@@ -511,12 +513,12 @@ for server in $nas_servers; do
 		echo "${server}_cpuutil.value ${graphs[1]}"
 
 		echo -e "\nmultigraph emc_vnx_network_b"
-		echo "${server}_net_in.value $((${graphs[2]} * 1024))"
-		echo "${server}_net_out.value $((${graphs[3]} * 1024))"
+		echo "${server}_net_in.value $((graphs[2] * 1024))"
+		echo "${server}_net_out.value $((graphs[3] * 1024))"
 
 		echo -e "\nmultigraph emc_vnx_storage_b"
-		echo "${server}_stor_read.value $((${graphs[4]} * 1024))"
-		echo "${server}_stor_write.value $((${graphs[5]} * 1024))"
+		echo "${server}_stor_read.value $((graphs[4] * 1024))"
+		echo "${server}_stor_write.value $((graphs[5] * 1024))"
 
 # [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor kernel.memory -count 1 -terminationsummary no 
 # server_2       Free           Buffer       Buffer   Buffer    Buffer         Buffer       Buffer Cache  Encumbered  FileResolve  FileResolve  FileResolve  Free KiB   Page     Total    Used KiB     Memory  
@@ -529,11 +531,11 @@ for server in $nas_servers; do
 
 		echo -e "\nmultigraph emc_vnx_memory"
 		#Reserved for math
-		echo "${server}_total.value $((${graphs[14]} / 1))"	
-		echo "${server}_used.value $((${graphs[15]} / 1))"
-		echo "${server}_free.value $((${graphs[12]} / 1))"
-		echo "${server}_freebuffer.value $((${graphs[1]} / 1))"
-		echo "${server}_encumbered.value $((${graphs[8]} / 1))"
+		echo "${server}_total.value $((graphs[14] / 1))"	
+		echo "${server}_used.value $((graphs[15] / 1))"
+		echo "${server}_free.value $((graphs[12] / 1))"
+		echo "${server}_freebuffer.value $((graphs[1] / 1))"
+		echo "${server}_encumbered.value $((graphs[8] / 1))"
 
 		echo -e "\nmultigraph emc_vnx_filecache"
 		echo "${server}_highw_hits.value ${graphs[2]}"
@@ -701,8 +703,8 @@ for server in $nas_servers; do
 		echo "${filtered_server}_tops.value ${graphs[1]}"
 				
 		echo -e "\nmultigraph vnx_emc_nfs_std_nfs_b_s"
-		echo "${filtered_server}_rbs.value $((${graphs[3]} * 1024))"
-		echo "${filtered_server}_wbs.value $((${graphs[6]} * 1024))"
+		echo "${filtered_server}_rbs.value $((graphs[3] * 1024))"
+		echo "${filtered_server}_wbs.value $((graphs[6] * 1024))"
 		echo "${filtered_server}_tbs.value 0"
 				
 
