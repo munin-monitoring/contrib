@@ -9,6 +9,7 @@ quota2percent - Plugin to show disk usage in percent of quota hard limit.
 =head1 APPLICABLE SYSTEMS
 
 All systems with "bash", "quota", "repquota" and "munin"
+Systems with multiple users and individual storage space limitations administered via 'quota'
 
 =head1 CONFIGURATION
 
@@ -22,7 +23,8 @@ You could define two alert levels and the graph language
   [quota2percent_*]
   env.warning   [value]        (default: 90)
   env.critical  [value]        (default: 95)
-  env.language  [en|de|es]     (default: en)   
+  env.language  [en|de|es]     (default: en)
+  env.humanuid  [value]        (default: 1000, only need if there is an other value define for UID_MIN in /etc/login.defs)
 
 =head1 DESCRIPTION
 
@@ -46,9 +48,14 @@ I<<<  ln -s /<path to file>/quota2percent_  quota2percent_sdb1 >>>
 
 =head1 VERSION
 
-17.0131
+17.0210
 
 =head1 HISTORY
+
+17.0210
+
+  add env.humanid
+  fix same nitpicking details 
 
 V17.0131
 
@@ -72,6 +79,20 @@ GPLv2 (L<http://www.gnu.org/licenses/gpl-2.0.html>)
 =cut
 
 ###################################################
+# Autoconf section                                #
+###################################################
+
+  if [ "$1" = "autoconf" ]; then
+     if repquota -V &> /dev/null ; then
+        echo yes
+        exit 0
+     else
+        echo "no ('requota' executable is missing)"
+        exit 127
+     fi
+  fi
+
+###################################################
 # Preparation section                             #
 ###################################################
 
@@ -82,14 +103,14 @@ GPLv2 (L<http://www.gnu.org/licenses/gpl-2.0.html>)
      Warning=${warning:-90}
      Critical=${critical:-95}
      Language=${language:-en}
+     Min_UID=${humanuid:-1000}
 
 # Ensure that the 'root' path is valid
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Checking if repquota installed and on the path
-  repquota -V &> /dev/null
   if ! repquota -V &> /dev/null ; then
-     echo "The script 'repquota' is not installed or on the path"
+     echo "The script 'repquota' is not installed or on the path" >&2
      # Send the exit code FATAL ERROR happens
      exit 127
   fi
@@ -113,12 +134,6 @@ GPLv2 (L<http://www.gnu.org/licenses/gpl-2.0.html>)
 # Munin Configuration Section                     #
 ###################################################
 
-  if [ "$1" = "autoconf" ]; then
-       echo yes
-       exit 0
-  fi
-
-
   if [ "$1" = "config" ]; then
 
      # Localisation of the graphic texts 
@@ -128,21 +143,21 @@ GPLv2 (L<http://www.gnu.org/licenses/gpl-2.0.html>)
             echo graph_vlabel "Nutzung in % Hardlimit"
             echo graph_info   "Die Grafik zeigt die Belegung des durch Quota reglementierten Speicherplatzes für alle regulären Nutzer (UID >=1000) in Prozent des Hardlimits."
             Total_txt="Su. aller Nutzer"
-            Total_info="Inklusive Systemnutzer (UID < 1000)"
+            Total_info="Inklusive Systemnutzer (UID < $Min_UID)"
             ;;
           es) 
             echo graph_title  "Cuota de límite absoluto de $Id" 
             echo graph_vlabel "el % de uso del límite duro" 
             echo graph_info   "El gráfico muestra la disponibilidad de espacio regulado por cuotas para todos los usuarios regulares (UID> = 1000) como porcentaje de límites duros."
             Total_txt="Suma de todos los usuarios "
-            Total_info="La inclusión de usuario del sistema (UID <1000) "
+            Total_info="La inclusión de usuario del sistema (UID < $Min_UID) "
             ;;
            *)
             echo graph_title  "quota hard limit of $Id"
             echo graph_vlabel "Usage in %"
             echo graph_info   "The graphic shows the allocation of the quota-regulated storage space for all regular users (UID> = 1000) as a percentage of the hard limit ."
             Total_txt="all users"
-            Total_info="system users (UID < 1000) included" 
+            Total_info="system users (UID < $Min_UID) included" 
             ;;
      esac
 
@@ -156,7 +171,6 @@ GPLv2 (L<http://www.gnu.org/licenses/gpl-2.0.html>)
        for((i=0; i<"$Users"; i++));do
          Quota=( ${Quotas[$i]} )
          UserName=${Quota[0]}
-         #Passwd=$(cat /etc/passwd | grep $UserName)
          Passwd=$(grep "$UserName" /etc/passwd)
          OLDIFS=$IFS 
          IFS=':' Infos=($Passwd) 
@@ -168,7 +182,7 @@ GPLv2 (L<http://www.gnu.org/licenses/gpl-2.0.html>)
          UserInfo="$(clean_fieldname "$UserInfo")"
 
          [ ! -n "$UserInfo"  ] && UserInfo="$UserName"
-         [ "$(id -u "${Quota[0]}")" -lt 1000 ] && echo "$UserName.graph no"
+         [ "$(id -u "${Quota[0]}")" -lt $Min_UID ] && echo "$UserName.graph no"
          echo "$UserName.label $UserInfo"
          echo "$UserName.warning  $Warning"
          echo "$UserName.critical $Critical"
@@ -190,12 +204,12 @@ GPLv2 (L<http://www.gnu.org/licenses/gpl-2.0.html>)
   for((i=0; i<"$Users"; i++));do
     Quota=( ${Quotas[$i]} )
     UserName="$(clean_fieldname "${Quota[0]}")"
-    echo "${Quota[2]} ${Quota[4]} $UserName.value" | awk '{printf "%s %.2f\n", $3 ,$1*100/$2}'
+    echo "${Quota[2]} ${Quota[4]} $UserName.value" | awk '{printf "%s %f\n",$3,$1*100/$2}'
   done
 
 # the value for the total line 
   Total=( ${Totals[1]} )
-  echo "${Total[2]} ${Total[1]} total.value" | awk '{printf "%s %.2f\n", $3, $1*100/$2}'
+  echo "${Total[2]} ${Total[1]} total.value" | awk '{printf "%s %f\n",$3,$1*100/$2}'
 
 # send the exit code NO ERROR happens
   exit 0
