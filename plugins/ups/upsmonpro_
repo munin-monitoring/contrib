@@ -18,10 +18,17 @@ Environment variables:
   host - UPSMON PRO server host, default localhost
   port - UPSMON PRO port, default 2601
 
+Example configuration (optional):
+
+  [upsmonpro_*]
+  env.host localhost
+  env.port 2601
+
 =head1 MAGIC MARKERS
 
   #%# family=auto
   #%# capabilities=autoconf
+  #%# capabilities=suggest
 
 =head1 AUTHOR
 
@@ -51,34 +58,36 @@ our %TYPES        = (
   temp    => [q/temp/],
   status  => [qw/power_failure low_battery voltage_status ups_status  battery_test/]
 );
-our @TYPES = keys %TYPES;
+our @TYPES = sort keys %TYPES;
+my %DISPATCH_TABLE = ();
+my $pkg            = __PACKAGE__;
 
-{
-  no strict 'refs';
-  for my $t (@TYPES) {
-    for my $sub (qw/autoconf/) {
-      *{ __PACKAGE__ . "::run_${sub}_$t" } = "run_$sub";
-    }
-    *{ __PACKAGE__ . "::run_default_$t" } = sub {
-      run_default(@{ $TYPES{$t} });
-    };
-  }
+$DISPATCH_TABLE{"${pkg}::run_suggest"}  = \&run_suggest;
+$DISPATCH_TABLE{"${pkg}::run_autoconf"} = \&run_autoconf;
+for my $t (@TYPES) {
+  $DISPATCH_TABLE{"${pkg}::run_config_$t"}   = \&{"run_config_$t"};
+  $DISPATCH_TABLE{"${pkg}::run_autoconf_$t"} = \&run_autoconf;
+  $DISPATCH_TABLE{"${pkg}::run_default_$t"}  = sub {
+    run_default(@{ $TYPES{$t} });
+  };
 }
 
-{
-  no strict 'refs';
-  find_key($ARGV[0])->();
-}
+find_key($ARGV[0])->();
 
 sub find_key {
-  my $p = shift || "";
+  my $argv = shift || '';
   my $type_re = join '|', @TYPES;
-  unless ($Munin::Plugin::me =~ /upsmonpro_{1,}($type_re)$/) {
-    die "Could not determine script type [@TYPES] ? name=" . $Munin::Plugin::me . "\n";
+  my $key;
+  if ($argv =~ /(suggest|autoconf)/i) {
+    $key = 'run_' . lc($1);
+  } elsif ($Munin::Plugin::me =~ /upsmonpro_{1,}($type_re)$/) {
+    my $graph = $1;
+    $key = 'run_' . ((grep { $argv eq $_ } qw/autoconf config/) ? $argv : 'default') . "_$graph";
+  } else {
+    die "Could not determine script type [@TYPES] ? name=$Munin::Plugin::me\n";
   }
-  my $graph = $1;
 
-  return 'run_' . ((grep { $p eq $_ } qw/autoconf config/) ? $ARGV[0] : 'default') . "_$graph";
+  return $DISPATCH_TABLE{"${pkg}::$key"};
 }
 
 sub run_config_voltage {
@@ -86,7 +95,7 @@ sub run_config_voltage {
 graph_title UPS Input/Output Voltage
 graph_vlabel volt
 graph_scale no
-graph_category sensors
+graph_category ups
 input.label input
 input.info Input Voltage
 input.type GAUGE
@@ -102,7 +111,7 @@ sub run_config_temp {
 graph_title UPS Temperature
 graph_vlabel celsius
 graph_scale no
-graph_category sensors
+graph_category ups
 temp.label temperature
 temp.type GAUGE
 END
@@ -114,7 +123,7 @@ sub run_config_load {
 graph_title UPS Battery Load/Capacity
 graph_vlabel precent%
 graph_scale no
-graph_category sensors
+graph_category ups
 battery_load.label battery_load
 battery_load.type GAUGE
 battery_capacity.label battery_capacity
@@ -128,7 +137,7 @@ sub run_config_status {
 graph_title UPS Statuses
 graph_vlabel status
 graph_scale no
-graph_category sensors
+graph_category ups
 power_failure.label power_failure
 power_failure.type GAUGE
 low_battery.label low_battery
@@ -153,6 +162,12 @@ sub run_default {
     die "Wrong value: $_" if not exists $r->{$_};
     say "${_}.value $r->{$_}";
   }
+}
+
+sub run_suggest {
+  local $LIST_SEPARATOR = "\n";
+  say "@TYPES";
+  exit(0);
 }
 
 sub run_autoconf {
