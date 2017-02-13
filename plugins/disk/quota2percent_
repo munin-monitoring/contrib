@@ -9,6 +9,7 @@ quota2percent - Plugin to show disk usage in percent of quota hard limit.
 =head1 APPLICABLE SYSTEMS
 
 All systems with "bash", "quota", "repquota" and "munin"
+
 Systems with multiple users and individual storage space limitations administered via 'quota'
 
 =head1 CONFIGURATION
@@ -25,6 +26,9 @@ You could define two alert levels and the graph language
   env.critical  [value]        (default: 95)
   env.language  [en|de|es]     (default: en)
   env.humanuid  [value]        (default: 1000, only need if there is an other value define for UID_MIN in /etc/login.defs)
+  env.low_uid   [never|no|yes] (default: never)
+                                set to no for producing rrd files for system user, but don't show those graphs (e.g. for later analyses)
+                                if set to yes system user graphs are drawn  
 
 =head1 DESCRIPTION
 
@@ -55,7 +59,8 @@ I<<<  ln -s /<path to file>/quota2percent_  quota2percent_sdb1 >>>
 V17.0213
 
   fix    some slips
-  
+  add    env.low_uid
+
 V17.0210
 
   add    env.humanid
@@ -116,6 +121,7 @@ GPLv2 (L<http://www.gnu.org/licenses/gpl-2.0.html>)
      Critical=${critical:-95}
      Language=${language:-en}
      Min_UID=${humanuid:-1000}
+     Low_UID=${low_uid:-never}
 
 # Ensure that the 'root' path is valid
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -147,6 +153,7 @@ GPLv2 (L<http://www.gnu.org/licenses/gpl-2.0.html>)
      echo "No limitations administered via 'quota' for $Id" >&2
      # If no limitatitons administered: create a dummy
      Quotas[0]="root -- 1 1 1 1 1 1"
+     Low_UID="never"
   fi
 
   readarray Totals < <( df "/dev/$Id" )
@@ -164,65 +171,63 @@ GPLv2 (L<http://www.gnu.org/licenses/gpl-2.0.html>)
      # Localisation of the graphic texts 
      case $Language in
           de)
-            echo graph_title  "Quota-Hard-Limit von $Id"
-            echo graph_vlabel "Nutzung in % Hardlimit"
-            echo graph_info   "Die Grafik zeigt die Belegung des durch Quota reglementierten Speicherplatzes fÃ¼r alle regulÃ¤ren Nutzer (UID >= $Min_UID) in Prozent des Hardlimits."
+            echo "graph_title    Quota-Hard-Limit von $Id"
+            echo "graph_vlabel   Nutzung in % Hardlimit"
+            echo "graph_info     Die Grafik zeigt die Belegung des durch Quota reglementierten Speicherplatzes für alle regulären Nutzer (UID >= $Min_UID) in Prozent des Hardlimits."
             Total_txt="Su. aller Nutzer"
             Total_info="Inklusive Systemnutzer (UID < $Min_UID)"
             ;;
           es) 
-            echo graph_title  "Cuota de lÃ­mite absoluto de $Id" 
-            echo graph_vlabel "el % de uso del lÃ­mite duro" 
-            echo graph_info   "El grÃ¡fico muestra la disponibilidad de espacio regulado por cuotas para todos los usuarios regulares (UID >= $Min_UID) como porcentaje de lÃ­mites duros."
+            echo "graph_title    Cuota de límite absoluto de $Id" 
+            echo "graph_vlabel   el % de uso del límite duro" 
+            echo "graph_info     El gráfico muestra la disponibilidad de espacio regulado por cuotas para todos los usuarios regulares (UID >= $Min_UID) como porcentaje de límites duros."
             Total_txt="Suma de todos los usuarios "
-            Total_info="La inclusiÃ³n de usuario del sistema (UID < $Min_UID) "
+            Total_info="La inclusión de usuario del sistema (UID < $Min_UID) "
             ;;
            *)
-            echo graph_title  "quota hard limit of $Id"
-            echo graph_vlabel "Usage in %"
-            echo graph_info   "The graphic shows the allocation of the quota-regulated storage space for all regular users (UID >= $Min_UID) as a percentage of the hard limit ."
+            echo "graph_title    quota hard limit of $Id"
+            echo "graph_vlabel   Usage in %"
+            echo "graph_info     The graphic shows the allocation of the quota-regulated storage space for all regular users (UID >= $Min_UID) as a percentage of the hard limit ."
             Total_txt="all users"
             Total_info="system users (UID < $Min_UID) included" 
             ;;
      esac
 
      # Defaults configuration 
-       echo    graph_category disk
-       echo    graph_args --lower-limit 0 --upper-limit 100
-       echo    graph_printf %5.2lf %%
-       echo    graph_scale  no
+       echo "graph_category disk"
+       echo "graph_args     --lower-limit 0 --upper-limit 100"
+       echo "graph_printf   %5.2lf %%"
+       echo "graph_scale    no"
 
-     # For each quota user fetch his real name, solve the root problem,  Output the configuration data 
+     # Processing the individual user
        for((i=0; i<"$Users"; i++));do
          Quota=( ${Quotas[$i]} )
-         UserName=${Quota[0]}
-         Passwd=$(grep "$UserName" /etc/passwd)
-         IFS=':' Infos=($Passwd) 
-         UserInfo=${Infos[4]}
-         UserInfo=${UserInfo%%,*}
+         User=${Quota[0]}
+       # solve the root problem
+         Fieldname="$(clean_fieldname "$User")"
 
-         UserName="$(clean_fieldname "$UserName")"
+       # Determine the currently processing UID
+         Cur_UID="$(id -u "$User")"
+
+       # skip if actual user a system user und low_uid ist set to never  
+         if [ ! "$Low_UID" == "never" ] || [ ! "$Cur_UID" -lt "$Min_UID" ]; then
          
-         # I hate the underlines in place of blanks!
-         [ "$(echo "$UserName"|cut -c 1)" = "_" ] && UserInfo="$(clean_fieldname "$UserInfo")"
+          # No graph for none human uid if low_uid ist set to no
+            [ "$Cur_UID" -lt "$Min_UID" ] && echo "$Fieldname.graph    $Low_UID"
 
-         # If no UserInfo found
-         [ ! -n "$UserInfo"  ] && UserInfo="$UserName"
+          # configure the user lines
+            echo "$Fieldname.label    $User"
+            echo "$Fieldname.warning  $Warning"
+            echo "$Fieldname.critical $Critical"
+          fi
 
-         # No graph for none human uid
-         [ "$(id -u "${Quota[0]}")" -lt "$Min_UID" ] && echo "$UserName.graph no"
-
-         # configure the user lines
-         echo "$UserName.label    $UserInfo"
-         echo "$UserName.warning  $Warning"
-         echo "$UserName.critical $Critical"
        done
 
      # configure the total line and send exit code NO ERROR happens
-       echo total.label    "$Total_txt"
-       echo total.warning  "$Warning"
-       echo total.critical "$Critical"
-       echo total.info     "$Total_info"
+       echo "total.label    $Total_txt"
+       echo "total.warning  $Warning"
+       echo "total.critical $Critical"
+       echo "total.info     $Total_info"
        exit 0
   fi
 
@@ -233,8 +238,13 @@ GPLv2 (L<http://www.gnu.org/licenses/gpl-2.0.html>)
 # fetch the needed values (used and hard limit) for each user, work around the root problem, calculate the percent value
   for((i=0; i<"$Users"; i++));do
     Quota=( ${Quotas[$i]} )
-    UserName="$(clean_fieldname "${Quota[0]}")"
-    echo "${Quota[2]} ${Quota[4]} $UserName.value" | awk '{printf "%s %f\n",$3,$1*100/$2}'
+    Fieldname="$(clean_fieldname "${Quota[0]}")"
+
+  # skip if actual user a system user und low_uid ist set to never  
+    if [ ! "$Low_UID" == "never" ] || [ ! "$(id -u "${Quota[0]}")" -lt "$Min_UID" ]; then
+       echo "${Quota[2]} ${Quota[4]} $Fieldname.value" | awk '{printf "%s %f\n",$3,$1*100/$2}'
+    fi
+
   done
 
 # the value for the total line 
