@@ -1,0 +1,258 @@
+#!/bin/bash
+# -*- sh -*-
+: <<=cut
+
+=head1 NAME
+
+quota2percent - Plugin to show disk usage in percent of quota hard limit.
+
+=head1 APPLICABLE SYSTEMS
+
+All systems with "bash", "quota", "repquota" and "munin"
+
+Systems with multiple users and individual storage space limitations administered via 'quota'
+
+=head1 CONFIGURATION
+
+The following is the default configuration
+
+  [quota2percent_*]
+  user root
+
+You could define two alert levels, the graph language, min. human UID and dealing with system users
+
+  [quota2percent_*]
+  env.warning   [value]        (default: 90)
+  env.critical  [value]        (default: 95)
+  env.language  [en|de|es]     (default: en)
+  env.humanuid  [value]        (default: 1000, only need if there is an other value define for UID_MIN in /etc/login.defs)
+  env.low_uid   [never|no|yes] (default: never)
+                                set to no for producing rrd files for system user, but don't show those graphs (e.g. for later analyses)
+                                if set to yes system user graphs are drawn  
+
+=head1 DESCRIPTION
+
+Wild card Plugin for monitoring the utilization of devices with quota rules. 
+A graph is drawn for each user, which shows the usage as a percentage of his hard limit. System accounts (UID <1000) are suppressed. 
+In addition, a graph is displayed which indicates the ratio device size to device coverage. 
+The script repqutoa, usually part of the package quota, is needed. 
+The plugin itself can be stored in any directory. For example, the device sdb1 shell be monitored, a symbolic link must be created
+in the /etc/munin/plugins/ directory as follows: 
+
+=over  
+
+I<<<  ln -s /<path to file>/quota2percent_  quota2percent_sdb1 >>>
+
+=back
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+17.0214
+
+=head1 HISTORY
+
+V17.0214
+
+  fix    hard reading logic operation for skipping by Low_UID=never
+  fix    some slips
+  fix    some nitpicking details
+
+  add    env.low_uid
+  add    env.humanid
+  add    env.language
+  add    check if device exist
+  add    if no limitations administered via 'quota' for the device the total line is shown only
+  add    a few comments
+  add    POD documentation
+  add    example graph for Munin Plugin Gallery
+
+  remove setting a PATH
+  remove German comments  
+
+V17.0124
+
+  not pubish, first version
+
+=head1 AUTHOR
+
+Jo Hartmann
+
+=head1 LICENSE
+ 
+GPLv2 (L<http://www.gnu.org/licenses/gpl-2.0.html>)
+
+=cut
+
+###################################################
+# Autoconf section                                #
+###################################################
+
+  if [ "$1" = "autoconf" ]; then
+     if ! repquota -V &> /dev/null ; then
+        echo "no ('requota' executable is missing)"
+        exit 0
+     fi
+
+     if ! df "/dev/${0##*_}" &> /dev/null; then
+        echo "no (device /dev/${0##*_} does not exist!)"
+        exit 0
+     fi
+
+     echo yes
+     exit 0
+  fi
+
+###################################################
+# Preparation section                             #
+###################################################
+
+# Load munin's shell libary
+  . "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+# if any fetch from munin-node file
+     Warning=${warning:-90}
+     Critical=${critical:-95}
+     Language=${language:-en}
+     Min_UID=${humanuid:-1000}
+     Low_UID=${low_uid:-never}
+
+# Checking if repquota installed and on the path
+  if ! repquota -V &> /dev/null ; then
+     echo "The script 'repquota' is not installed or on the path" >&2
+     # Send the exit code FATAL ERROR happens
+     exit 127
+  fi
+
+# get tehe wild card text
+  Id=${0##*_}
+
+# Check if device exist
+  if ! df "/dev/$Id" &> /dev/null; then
+     echo "The device /dev/$Id does not exist!" >&2
+     exit 128
+  fi
+
+###################################################
+# Data reading sections                           #
+###################################################
+
+# Reading the quotes for the selected device, using repquota
+  if repquota "/dev/$Id" &> /dev/null; then     
+     readarray Quotas < <( repquota "/dev/$Id" | grep " -- " )
+  else
+     echo "No limitations administered via 'quota' for $Id" >&2
+
+   # If no limitatitons administered: create a dummy for regarding
+   # the avoidance of a divide-by-zero error
+     Quotas[0]="root -- 1 1 1 1 1 1"
+
+   # no rrd file need 
+     Low_UID="never"
+  fi
+
+  readarray Totals < <( df "/dev/$Id" )
+
+# Get the count of Users 
+   Users=${#Quotas[@]}
+
+
+###################################################
+# Munin Configuration Section                     #
+###################################################
+
+  if [ "$1" = "config" ]; then
+
+     # Localisation of the graphic texts 
+     case $Language in
+          de)
+            echo "graph_title    Quota-Hard-Limit von $Id"
+            echo "graph_vlabel   Nutzung in % Hardlimit"
+            echo "graph_info     Die Grafik zeigt die Belegung des durch Quota reglementierten Speicherplatzes für alle regulären Nutzer (UID >= $Min_UID) in Prozent des Hardlimits."
+            Total_txt="Su. aller Nutzer"
+            Total_info="Inklusive Systemnutzer (UID < $Min_UID)"
+            ;;
+          es) 
+            echo "graph_title    Cuota de límite absoluto de $Id" 
+            echo "graph_vlabel   el % de uso del límite duro" 
+            echo "graph_info     El gráfico muestra la disponibilidad de espacio regulado por cuotas para todos los usuarios regulares (UID >= $Min_UID) como porcentaje de límites duros."
+            Total_txt="Suma de todos los usuarios "
+            Total_info="La inclusión de usuario del sistema (UID < $Min_UID) "
+            ;;
+           *)
+            echo "graph_title    quota hard limit of $Id"
+            echo "graph_vlabel   Usage in %"
+            echo "graph_info     The graphic shows the allocation of the quota-regulated storage space for all regular users (UID >= $Min_UID) as a percentage of the hard limit ."
+            Total_txt="all users"
+            Total_info="system users (UID < $Min_UID) included" 
+            ;;
+     esac
+
+     # Defaults configuration 
+       echo "graph_category disk"
+       echo "graph_args     --lower-limit 0 --upper-limit 100"
+       echo "graph_printf   %5.2lf %%"
+       echo "graph_scale    no"
+
+     # Processing the individual user
+       for((i=0; i<"$Users"; i++));do
+         Quota=( ${Quotas[$i]} )
+         User=${Quota[0]}
+       # solve the root problem
+         Fieldname="$(clean_fieldname "$User")"
+
+       # Determine the currently processing UID
+         Cur_UID="$(id -u "$User")"
+
+       # skip if actual user a system user und low_uid ist set to never  
+         [ "$Cur_UID" -lt "$Min_UID" ] && [ "$Low_UID" = "never" ] && continue
+         
+       # No graph for none human uid if low_uid ist set to no
+         [ "$Cur_UID" -lt "$Min_UID" ] && echo "$Fieldname.graph    $Low_UID"
+
+       # configure the user lines
+         echo "$Fieldname.label    $User"
+         echo "$Fieldname.warning  $Warning"
+         echo "$Fieldname.critical $Critical"
+ 
+       done
+
+     # configure the total line and send exit code NO ERROR happens
+       echo "total.label    $Total_txt"
+       echo "total.warning  $Warning"
+       echo "total.critical $Critical"
+       echo "total.info     $Total_info"
+       exit 0
+  fi
+
+###################################################
+# Munin value section                             #
+###################################################
+
+# fetch the needed values (used and hard limit) for each user, work around the root problem, calculate the percent value
+  for((i=0; i<"$Users"; i++));do
+    Quota=( ${Quotas[$i]} )
+    Fieldname="$(clean_fieldname "${Quota[0]}")"
+
+  # skip if actual user a system user und low_uid ist set to never  
+    [ "$Cur_UID" -lt "$Min_UID" ] && [ "$Low_UID" = "never" ] && continue
+
+  # write the result zu munin 
+    echo "${Quota[2]} ${Quota[4]} $Fieldname.value" | awk '{printf "%s %f\n",$3,$1*100/$2}'
+
+  done
+
+# the value for the total line 
+  Total=( ${Totals[1]} )
+  echo "${Total[2]} ${Total[1]} total.value" | awk '{printf "%s %f\n",$3,$1*100/$2}'
+
+# send the exit code NO ERROR happens
+  exit 0
+
+###################################################
+# Script end                                      #
+###################################################
