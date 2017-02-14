@@ -1,0 +1,222 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+upsmonpro_ - Munin plugin to monitor Powercom UPS via UPSMON PRO program L<http://www.pcm.ru/support/soft/>
+
+=head1 INSTALLATION
+
+  /etc/munin/plugins/upsmonpro_load -> /usr/share/munin/plugins/upsmonpro_
+  /etc/munin/plugins/upsmonpro_status -> /usr/share/munin/plugins/upsmonpro_
+  /etc/munin/plugins/upsmonpro_temp -> /usr/share/munin/plugins/upsmonpro_
+  /etc/munin/plugins/upsmonpro_voltage -> /usr/share/munin/plugins/upsmonpro_
+
+=head1 CONFIGURATION
+
+Environment variables:
+
+  host - UPSMON PRO server host, default localhost
+  port - UPSMON PRO port, default 2601
+
+Example configuration (optional):
+
+  [upsmonpro_*]
+  env.host localhost
+  env.port 2601
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+  #%# capabilities=suggest
+
+=head1 AUTHOR
+
+Copyright (C) 2017 pru.mike@gmail.com
+
+=head1 LICENSE
+
+GPLv2.
+
+=cut
+
+use strict;
+use warnings;
+use feature qw/say/;
+use Munin::Plugin;
+use IO::Socket::INET;
+use Time::HiRes qw/usleep/;
+use English qw/-no-math-vars/;
+our $VERSION = '0.0.1';
+$OUTPUT_AUTOFLUSH++;
+
+our $DEFAULT_HOST = 'localhost';
+our $DEFAULT_PORT = 2601;
+our %TYPES        = (
+  voltage => [qw/input output/],
+  load    => [qw/battery_load battery_capacity/],
+  temp    => [q/temp/],
+  status  => [qw/power_failure low_battery voltage_status ups_status  battery_test/]
+);
+our @TYPES = sort keys %TYPES;
+my %DISPATCH_TABLE = ();
+my $pkg            = __PACKAGE__;
+
+$DISPATCH_TABLE{"${pkg}::run_suggest"}  = \&run_suggest;
+$DISPATCH_TABLE{"${pkg}::run_autoconf"} = \&run_autoconf;
+for my $t (@TYPES) {
+  $DISPATCH_TABLE{"${pkg}::run_config_$t"}   = \&{"run_config_$t"};
+  $DISPATCH_TABLE{"${pkg}::run_autoconf_$t"} = \&run_autoconf;
+  $DISPATCH_TABLE{"${pkg}::run_default_$t"}  = sub {
+    run_default(@{ $TYPES{$t} });
+  };
+}
+
+find_key($ARGV[0])->();
+
+sub find_key {
+  my $argv = shift || '';
+  my $type_re = join '|', @TYPES;
+  my $key;
+  if ($argv =~ /(suggest|autoconf)/i) {
+    $key = 'run_' . lc($1);
+  } elsif ($Munin::Plugin::me =~ /upsmonpro_{1,}($type_re)$/) {
+    my $graph = $1;
+    $key = 'run_' . ((grep { $argv eq $_ } qw/autoconf config/) ? $argv : 'default') . "_$graph";
+  } else {
+    die "Could not determine script type [@TYPES] ? name=$Munin::Plugin::me\n";
+  }
+
+  return $DISPATCH_TABLE{"${pkg}::$key"};
+}
+
+sub run_config_voltage {
+  print <<'END';
+graph_title UPS Input/Output Voltage
+graph_vlabel volt
+graph_scale no
+graph_category sensors
+input.label input
+input.info Input Voltage
+input.type GAUGE
+output.label output
+output.info Output Voltage
+output.type GAUGE
+END
+  exit(0);
+}
+
+sub run_config_temp {
+  print <<'END';
+graph_title UPS Temperature
+graph_vlabel celsius
+graph_scale no
+graph_category sensors
+temp.label temperature
+temp.type GAUGE
+END
+  exit(0);
+}
+
+sub run_config_load {
+  print <<'END';
+graph_title UPS Battery Load/Capacity
+graph_vlabel precent%
+graph_scale no
+graph_category sensors
+battery_load.label battery_load
+battery_load.type GAUGE
+battery_capacity.label battery_capacity
+battery_capacity.type GAUGE
+END
+  exit(0);
+}
+
+sub run_config_status {
+  print <<'END';
+graph_title UPS Statuses
+graph_vlabel status
+graph_scale no
+graph_category sensors
+power_failure.label power_failure
+power_failure.type GAUGE
+low_battery.label low_battery
+low_battery.type GAUGE
+voltage_status.label voltage_status
+voltage_status.info 0 normal, 1 boost, 2 buck
+voltage_status.type GAUGE
+ups_status.label ups_status
+ups_status.type GAUGE
+battery_test.label battery_test
+battery_test.type GAUGE
+END
+  exit(0);
+}
+
+sub run_default {
+  my $host = $ENV{host} || $DEFAULT_HOST;
+  my $port = $ENV{port} || $DEFAULT_PORT;
+  my @val_list = @_;
+  my $r = gather_data($host, $port);
+  for (@val_list) {
+    die "Wrong value: $_" if not exists $r->{$_};
+    say "${_}.value $r->{$_}";
+  }
+}
+
+sub run_suggest {
+  local $LIST_SEPARATOR = "\n";
+  say "@TYPES";
+  exit(0);
+}
+
+sub run_autoconf {
+  if (gather_data($DEFAULT_HOST, $DEFAULT_PORT)->{response} eq 'ok') {
+    say "yes";
+  } else {
+    say "no ($DEFAULT_HOST:$DEFAULT_PORT not response)";
+  }
+  exit(0);
+}
+
+sub gather_data {
+  my $host = shift;
+  my $port = shift;
+  my %data = map { ($_ => 'U') } map { @{ $TYPES{$_} } } @TYPES;
+  $data{response} = 'failed';
+
+  my $sock = IO::Socket::INET->new(
+    PeerAddr => $host,
+    Proto    => 'udp',
+    PeerPort => $port,
+    Blocking => 0
+  ) or die "Cannot create socket: $@";
+
+  my $pattern = pack 'AAAACAAA', split //, 'PCMG1END';
+  $sock->send($pattern) or die "send to $host: $!";
+  usleep(200);
+  my $data;
+  my $buf;
+  while ($sock->read($buf, 32)) {
+    $data .= $buf;
+  }
+  if (defined $data and $data =~ /^PCMR.*END$/) {
+    my @data = unpack('C*', $data);
+    %data = (
+      response         => 'ok',
+      input            => $data[6] + 256 * $data[5],
+      output           => $data[8] + 256 * $data[7],
+      battery_load     => $data[11],
+      battery_capacity => $data[12],
+      temp             => $data[15],
+      power_failure    => ($data[18] ? 1 : 0),
+      low_battery      => ($data[19] ? 1 : 0),
+
+      #voltage_status: 0 = normal, 3 = buck, 2 = boost
+      voltage_status => ($data[17] == 0 ? 0 : ($data[17] == 3 ? 2 : 1)),
+      ups_status     => ($data[21]      ? 1 : 0),
+      battery_test   => ($data[23]      ? 1 : 0),
+    );
+  }
+  return \%data;
+}
