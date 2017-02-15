@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# DESCRIPTION
+#
+# This plugin monitors the number of pending updates in pacman.
+#
+# WARNINGS
+#
+# This plugin will issue a warning state whenever any package can be updated.
+#
+# ENVIRONMENT
+#
+# env.WARNING The number of updates at which a warning will be issued. If not
+#             set, no warnings are issued.
+#
+# MAGIC MARKERS
+#
+# #%# family=contrib
+# #%# capabilities=autoconf
+
+case $1 in
+	config)
+		cat <<'EOM'
+graph_args --base 1000 -l 0
+graph_title Pending updates
+graph_vlabel updates
+graph_draw no
+updates.label updates
+updates.info Current number of pending updates
+EOM
+		if [[ -n $WARNING ]]; then
+			echo updates.warning $WARNING
+		fi
+		;;
+
+	autoconf)
+		hash checkupdates &> /dev/null && echo yes || echo no
+		;;
+
+	*)
+		echo updates.value $(checkupdates | wc -l)
+		;;
+esac
