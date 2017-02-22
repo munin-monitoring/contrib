@@ -152,7 +152,7 @@ def read_data(savestate=True):
 
 def emit_config():
     print('graph_title Lines in the ZNC-log')
-    print('graph_category znc')
+    print('graph_category chat')
     print('graph_vlabel lines / ${graph_period}')
     print('graph_scale no')
     print('graph_args --base 1000 --lower-limit 0')
