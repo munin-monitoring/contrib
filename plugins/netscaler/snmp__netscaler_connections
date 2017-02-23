@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # -*- perl -*-
 # ---------------------------------------------------- #
-# File : netscaler_cpu
+# File : netscaler_conn
 # Author: Sandro Wefel
 # based on Script by Damien SIAUD
 # Date : 05/05/2011
@@ -29,17 +29,17 @@
 
 =head1 NAME
 
-netscaler_cpu - Munin plugin to monitor CPU usage
+netscaler_conn - Munin plugin to monitor netscaler connections
 
 =head1 CONFIGURATION
 
-Make a symlink from netscaler_cpu_ to /etc/munin/plugins/netscaler_cpu_<nsfqdn>. 
+Make a symlink from netscaler_conn_ to /etc/munin/plugins/netscaler_conn_<nsfqdn>. 
 You can omit <nsfqdn>, then you need the env variable B<host>.
 
 To configure the plugin, use ENV variables.
 
 Add something lile this to /etc/munin/plugin-conf.d/<conf>
- [netscaler_cpu_*]
+ [netscaler_conn_*]
  env.community CommunityName
 
 Variables:
@@ -88,7 +88,7 @@ use strict;
 
 # --------------------------- globals -------------------------- #
 
-$script_name = "netscaler_cpu";
+$script_name = "netscaler_conn";
 $script_version = "0.1";
 
 $o_host = undef;
@@ -96,16 +96,14 @@ $o_community = undef;
 $o_port = 161;
 
 my $return_str = "";
-my @cpu_name = ();	
-
 
 # ---------------------------- snmp ---------------------------- #
 
 my $oid_prefix = "1.3.6.1.4.1.5951";
 my $oid_build_version = $oid_prefix.".4.1.1.1.0";
-my $oid_avgcpu_usage = $oid_prefix.".4.1.1.41.1.0";	# cpu utilization (%)
-my $oid_cpu_name = $oid_prefix.".4.1.1.41.6.1.1";	  # name of cpu in NetScaler
-my $oid_cpu_usage = $oid_prefix.".4.1.1.41.6.1.2"; 	# usage per cpu (%)
+my $oid_ssl_session = $oid_prefix.".4.1.1.47.296.0";	# current ssl sessions
+my $oid_client_conn = $oid_prefix.".4.1.1.46.2.0";	# current client connections
+my $oid_server_conn = $oid_prefix.".4.1.1.46.1.0";	# current server connections
 
 # ---------------------------- main ----------------------------- #
 
@@ -117,62 +115,61 @@ my $o_port      = $ENV{port}      || 161;
 my $o_community = $ENV{community} || "public";
 my $o_timeout   = $ENV{timeout}   || 5;
 
-
 if ($ARGV[0] and $ARGV[0] eq "autoconf") {
 		print "yes\n";
 		exit 0;
 }
 
 if (! defined $o_host ) {
-	$0 =~ /netscaler_cpu_(.+)*$/;
+	$0 =~ /.*onnections?_(.+)*$/;
 	$o_host = $1;
-	die "No host provided" unless defined $o_host;
+	die "No host provided or unabled to extract hostname from $0" unless defined $o_host;
 }
 
-# open session
+if ($ARGV[0] and $ARGV[0] eq "config") {
+    print "graph_args --base 1024 -l 0\n";
+    print "graph_vlabel Connections\n";
+    print "graph_title Netscaler Connections for $o_host\n";
+    print "graph_category loadbalancer\n";
+    print "graph_period second\n";
+    print "graph_info This graph shows the netscaler TCP connections.\n";
+    print "graph_order ",
+	"client ",
+	"server ",
+	"ssl ",
+	"\n";
+    print "client.label client\n";
+    print "client.draw AREA\n";
+    print "client.info Client connections.\n";
+    print "server.label server\n";
+    print "server.draw STACK\n";
+    print "server.info Server connections.\n";
+    print "ssl.label SSL sessions\n";
+    print "ssl.draw LINE2\n";
+    print "ssl.info Currently active SSL sessions.\n";
+
+    for my $field qw(client server ssl) {
+        print_thresholds($field);
+    }
+    exit 0;
+}
+
+
 my $session = &open_session();
 if (!defined($session)) {
 	print "ERROR opening session\n";
 	exit 1;
 }
 
-# CPU names
-if (&get_cpus($session) lt 1) {
-	print "ERROR getting number of CPUs\n";
-	exit 1;
-};
-
-if ($ARGV[0] and $ARGV[0] eq "config") {
-    print "graph_args --base 1024 -l 0 --upper-limit 100\n";
-    print "graph_vlabel %\n";
-    print "graph_scale no\n";
-    print "graph_title CPU usage for $o_host\n";
-    print "graph_category netscaler\n";
-    print "graph_period second\n";
-    print "graph_info This graph shows how CPU time is spent.\n";
-    print "avg.label avg\n";
-    print "avg.draw AREA\n";
-    print "avg.info Average load.\n";
-		foreach my $v (@cpu_name){
-	    print $v.".label ".$v."\n";
-	    print $v.".draw LINE2\n";
-	    print $v.".info CPU usage of ".$v."\n";
-      print_thresholds($v);
-    }
-
-    for my $field qw(avg) {
-        print_thresholds($field);
-    }
-		&close_session($session);
-    exit 0;
-}
-
-
-# Average
-&get_avgcpu_usage($session);
-# per CPU usage
-&get_cpu_usage($session);
-
+my $counter1;
+# TCP
+$counter1 = &get_oid_values($session,$oid_client_conn);
+$return_str .= "client.value $counter1\n";
+$counter1 = &get_oid_values($session,$oid_server_conn);
+$return_str .= "server.value $counter1\n";
+# SSL
+$counter1 = &get_oid_values($session,$oid_ssl_session);
+$return_str .= "ssl.value $counter1\n";
 
 &close_session($session);
 
@@ -220,61 +217,20 @@ sub get_buildversion {
 	}
 }
 
+sub get_oid_values {
+        my ($session,$oid_string) = @_;
+        my $return_value;
 
-sub get_avgcpu_usage {
-	my ($session) = @_;
-	my $cpu_usage;
+        my $result = $session->get_request(
+                -varbindlist => [$oid_string]
+        );
 
-	my $result = $session->get_request(
-		-varbindlist => [$oid_avgcpu_usage]
-	);
-
-	if (!defined($result)) {
-		$return_str = "na";
-	}
-	else {
-		$cpu_usage = $result->{$oid_avgcpu_usage};
-		$return_str .= "avg.value ".$cpu_usage."\n";
-	}
-
+        if (!defined($result)) {
+                return "na";
+        }
+        else {  
+                $return_value = $result->{$oid_string};
+                return $return_value;
+        }
 }
 
-sub get_cpu_usage {
-  my ($session) = @_;
-  my %cpu_usage;
-
-	my $index=0;
-	my $result = $session->get_table(-baseoid => $oid_cpu_usage);
-
-	if (!defined($result)) {
-		return "na";
-	}
-	else {
-		foreach my $v ($session->var_bind_names()){
-    	$cpu_usage{$cpu_name[$index]} = $session->var_bind_list()->{$v};
-  		$return_str .= $cpu_name[$index] . ".value ".$cpu_usage{$cpu_name[$index]}."\n";
-			$index++;
-    }
-	}
-}
-
-sub get_cpus {
-  my ($session) = @_;
-  my %cpu_usage;
-
-	my $result = $session->get_table(-baseoid => $oid_cpu_name);
-
-	if (!defined($result)) {
-		return 0;
-	}
-	else {
-		@cpu_name = ();	
-		foreach my $n ($session->var_bind_names()) {
-		 		push @cpu_name, $session->var_bind_list()->{$n};
-		}
-
-	}
-
-	my $number=@cpu_name;
-	return $number;
-}
