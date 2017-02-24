@@ -66,7 +66,7 @@ int config() {
 			"multigraph if_%s_1sec" "\n"
 			"graph_order down up" "\n"
 			"graph_title %s traffic" "\n"
-			"graph_category system::1sec" "\n"
+			"graph_category 1sec" "\n"
 			"graph_vlabel bits in (-) / out (+) per ${graph_period}" "\n"
 			"graph_data_size custom 1d, 10s for 1w, 1m for 1t, 5m for 1y" "\n"
 			, if_name, if_name
