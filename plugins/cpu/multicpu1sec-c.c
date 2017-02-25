@@ -48,7 +48,7 @@ int config() {
 
 	printf(
 		"graph_title multicpu1sec\n"
-		"graph_category system::1sec\n"
+		"graph_category 1sec\n"
 		"graph_vlabel average cpu use %%\n"
 		"graph_scale no\n"
 		"graph_total All CPUs\n"
