@@ -1,14 +1,14 @@
 #!/bin/bash
 #
-# Plugin for monitor JVM activity - GC Time -
+# Plugin for monitor JVM activity - GC Count -
 #
 # Usage:
 #
 #       Symlink into /etc/munin/plugins/ and add the monitored
 #	alias name like :
 #
-#       ln -s /usr/share/munin/plugins/jstat__gctime \
-#	  /etc/munin/plugins/jstat_<jvm alias>_gctime
+#       ln -s /usr/share/munin/plugins/jstat__gccount \
+#	  /etc/munin/plugins/jstat_<jvm alias>_gccount
 #       This should, however, be given through autoconf and suggest.
 #
 # Requirements:
@@ -81,12 +81,12 @@ chk_version()
 
 config_common()
 {
-        echo 'graph_title GC Time' $graphtitle
-        echo 'graph_args -l 0'
-        echo 'graph_vlabel GC Time(sec)'
-        echo 'graph_total total'
-        echo 'graph_info GC Time'
-        echo 'graph_category java'
+  echo 'graph_title GC Count' $graphtitle
+  echo 'graph_args -l 0'
+  echo 'graph_vlabel GC Count(times)'
+  echo 'graph_total total'
+  echo 'graph_info GC Count'
+  echo 'graph_category virtualization'
 }
 
 config_sun_jdk()
@@ -108,42 +108,36 @@ config_bea_jdk()
   echo 'Young_GC.min 0'
   echo 'Old_GC.label Old_GC'
   echo 'Old_GC.min 0'
-  echo 'Young_Pause.label Young_GC Pause'
-  echo 'Young_Pause.min 0'
-  echo 'Old_Pause.label Old_GC Pause'
-  echo 'Old_Pause.min 0'
-  
 }
 
 print_sun_stats()
 {
 ${JAVA_HOME}/bin/jstat -gc ${PidNum} | tail -1 | awk \
 '{\
-	S0C = $1; \
-	S1C = $2; \
-	S0U = $3; \
-	S1U = $4; \
-	EC  = $5; \
-	EU  = $6; \
-	OC  = $7; \
-	OU  = $8; 
-	PC  = $9; \
-	PU  = $10; \
+        S0C = $1; \
+        S1C = $2; \
+        S0U = $3; \
+        S1U = $4; \
+        EC  = $5; \
+        EU  = $6; \
+        OC  = $7; \
+        OU  = $8; \
+        PC  = $9; \
+        PU  = $10; \
         YGC  = $11; \
         YGCT  = $12; \
         FGC  = $13; \
         FGCT  = $14; \
         GCT  = $15; \
-
-	\
-	S0F = S0C - S0U; \
-	S1F = S1C - S1U; \
-	EF  = EC  - EU;  \
-	OF  = OC  - OU;  \
-	PF  = PC  - PU;  \
-	\
-        print "Young_GC.value " YGCT; \
-        print "Full_GC.value " FGCT; \
+        \
+        S0F = S0C - S0U; \
+        S1F = S1C - S1U; \
+        EF  = EC  - EU;  \
+        OF  = OC  - OU;  \
+        PF  = PC  - PU;  \
+        \
+        print "Young_GC.value " YGC; \
+        print "Full_GC.value " FGC; \
 }'
 }
 
@@ -164,10 +158,8 @@ ${JAVA_HOME}/bin/jstat -gc ${PidNum} | tail -1 | awk \
 	PauseTime = $11; \
 	Finalizers = $12; \
 	\
-	print "Young_GC.value " YCTime; \
-	print "Old_GC.value " OCTime; \
-	print "Young_Pause.value " YCPauseTime; \
-	print "Old_Pause.value " OCPauseTime
+	print "Young_GC.value " YC; \
+	print "Old_GC.value " OC;\
 }'
 }
 
