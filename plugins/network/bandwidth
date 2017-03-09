@@ -1,0 +1,53 @@
+#!/bin/sh
+
+#By Jose Manuel Febrer Cortés with Marco Bertola help.
+
+#bandwidth - plugin to monitor the bandwidth between localhost and another host.
+
+#Requirement: bing installed.
+#You can install bing by using (Ubuntu/Debian):
+#apt-get install bing
+
+
+#Configuration example at munin-node:
+#       [bandwidth]
+#       user root
+#       env.host http://example.org/
+#       env.samples 10
+#       env.small_packet_size 1000
+#       env.big_packet_size 8000
+
+#env.samples explanation: Reset stats after sending samples ECHO_REQUEST packets.
+
+#env.small_packet_size explanation: Specifies the number of data bytes to be sent in the small packets. The default and minimum value is 44.
+
+#env.big_packet_size explanation: Specifies the number of data bytes to be sent in the big packets. The default is 108.
+#                                 The size should be chosen so that big packet roundtrip times are long enough to be accurately measured
+
+
+#Stop after count resets of the stats.
+COUNT=1
+
+
+case $1 in
+   config)
+                echo graph_title Bandwidth
+                echo 'graph_vlabel Mbps'
+                echo 'graph_args --base 1000 -l 0'
+                echo 'graph_scale no'
+                echo 'graph_category network'
+                echo 'graph_info This graph shows the bandwidth between localhost and ' $host
+                echo 'bandwidth.info Bandwidth statistics for ' $host
+                echo 'bandwidth.label ' $host
+        exit 0;;
+esac
+
+
+#Calculating the bandwidth
+printf "bandwidth.value ";
+bing localhost $host -c $COUNT -e $samples -s $small_packet_size -S $big_packet_size 2>/dev/null \
+        | egrep "bit$" \
+        | cut -d " " -f3 \
+        | cut -c -5 \
+        | awk '{a+=$1} END{print a/NR}'
+
