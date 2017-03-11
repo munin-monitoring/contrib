@@ -1,0 +1,118 @@
+#! /bin/ksh
+# Copyright (c) 2010, Wikimedia Deutschland
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of Wikimedia Deutschland nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY WIKIMEDIA DEUTSCHLAND ''AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL WIKIMEDIA DEUTSCHLAND BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+# NOTE: This software is not released as a product. It was written primarily for
+# Wikimedia Deutschland's own use, and is made public as is, in the hope it may
+# be useful. Wikimedia Deutschland may at any time discontinue developing or
+# supporting this software. There is no guarantee any new versions or even fixes
+# for security issues will be released.
+###
+# Munin plugin to report Solaris memory usage via mdb's memstat.
+# Must be run as root.
+#
+# river@tamara.tcx.org.uk 2010-08-28
+
+#%# family=auto
+#%# capabilities=autoconf
+
+if [ "$1" = "autoconf" ]; then
+	if [ -e /usr/bin/mdb ]; then
+		echo yes
+		exit 0
+	else
+		echo /usr/bin/mdb not found
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+	echo '
+graph_args --base 1024 -l 0 --vertical-label Bytes
+graph_title Memory usage
+graph_category memory
+graph_info This graph shows system memory use.
+graph_order kernel anon exec cacheused zfs cachefree free
+
+kernel.label kernel
+kernel.draw AREA
+kernel.info Memory used by kernel
+
+anon.label anon
+anon.draw STACK
+anon.info Memory used by programs
+
+exec.label exec_and_libs
+exec.draw STACK
+exec.info Memory used by executable files and libraries
+
+cacheused.label cacheused
+cacheused.draw STACK
+cacheused.info Memory used by page cache
+
+zfs.label zfs
+zfs.draw STACK
+zfs.info Memory used for ZFS file cache
+
+cachefree.label cachefree
+cachefree.draw STACK
+cachefree.info Free memory in cache list
+
+free.label free
+free.draw STACK
+free.info Free memory
+'
+	exit 0
+fi
+
+echo "::memstat" | mdb -k | nawk '
+BEGIN {
+	pagesize='$(getconf PAGESIZE)'
+	kernel=0
+	zfs=0
+	anon=0
+	exec=0
+	cache=0
+	phys=0
+}
+
+/^Kernel/		{ kernel=$2 } 
+/^ZFS File Data/	{ zfs=$4 }
+/^Anon/			{ anon=$2 } 
+/^Exec and libs/	{ exec=$4 }
+/^Page cache/ 		{ cacheused=$3 } 
+/^Free \(cachelist\)/	{ cachefree=$3 }
+/^Free \(freelist\)/	{ free=$3 }
+
+END {
+	print "kernel.value " (kernel * pagesize)
+	print "zfs.value " (zfs * pagesize)
+	print "anon.value " (anon * pagesize)
+	print "exec.value " (exec * pagesize)
+	print "cacheused.value " (cacheused * pagesize)
+	print "cachefree.value " (cachefree * pagesize)
+	print "free.value " (free * pagesize)
+}
+'

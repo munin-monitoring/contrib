@@ -1,63 +1,126 @@
-#!/usr/bin/python
-# Monit status parser plugin for munin
+#!/usr/bin/python3
 
-# This is very raw, but it should work for you out of the box.  You of course
-# need to have monit configured such that the 'monit status' command works.
+"""
+=head1 NAME
 
-# Todd Troxell <ttroxell@debian.org>
+monit_parser -  Monit status parser plugin for munin.
 
-STATUS_CMD = "monit status"
 
+=head1 APPLICABLE SYSTEMS
+
+Any system being able to query monit servers via http.
+
+Monit needs to be configured with the httpd port enabled, e.g.:
+
+    set httpd port 2812
+
+Optionally monit authentication can be configured, e.g.:
+
+    set httpd port 2812
+      allow munin:s3cr3t read-only
+
+
+=head1 CONFIGURATION
+
+By default the monit instance at localhost is queried:
+
+  [monit_parser]
+  env.port 2812
+  env.host localhost
+
+Optionally monit authentication can be configured, e.g.:
+
+  [monit_parser]
+  env.username munin
+  env.password s3cr3t
+
+
+=head1 AUTHOR
+
+  Todd Troxell <ttroxell@debian.org>
+  Lars Kruse <devel@sumpfralle.de>
+
+
+=head1 MAGIC MARKERS
+
+  family=auto
+  capabilities=autoconf
+
+=cut
+"""
+
+import xml.dom.minidom
+import os
 import sys
-import re
-from commands import getstatusoutput
+import urllib.request
+import base64
+
+MONIT_XML_URL = ("http://{host}:{port}/_status?format=xml"
+                 .format(host=os.getenv("host", "localhost"),
+                         port=os.getenv("port", "2812")))
+
 
 def sanitize(s):
     OK_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
-    out = str()
-    for char in s:
-        if char.lower() in OK_CHARS:
-	    out += char 
-    return out
+    return "".join([char for char in s if char in OK_CHARS])
 
-procs = dict()
 
-status, output = getstatusoutput(STATUS_CMD)
-if status != 0:
-    print "Errror running status command: %s" % (output)
-    sys.exit(status)
+def get_monit_status_xml():
+    try:
+        req = urllib.request.Request(url=MONIT_XML_URL)
+        if os.getenv("password"):
+            auth_str = "%s:%s" % (os.getenv("username"), os.getenv("password"))
+            auth_bytes = bytes(auth_str, "utf-8")
+            auth_base64_bytes = base64.b64encode(auth_bytes)
+            auth_base64_str = str(auth_base64_bytes, "ascii")
+            auth_value = "Basic %s" % auth_base64_str
+            req.add_header("Authorization", auth_value)
+        conn = urllib.request.urlopen(req)
+    except urllib.error.URLError as exc:
+        conn = None
+    if conn is None:
+        raise RuntimeError("Failed to open monit status URL: {}".format(MONIT_XML_URL))
+    else:
+        return xml.dom.minidom.parse(conn)
 
-output = output.split('\n')
-cur_proc = None
-for line in output:
-    m = re.match("^Process '(.*)'.*$", line)
-    if m:
-        cur_proc = sanitize(m.group(1))
-	try:
-	    procs[cur_proc]
-	except KeyError:
-	    procs[cur_proc] = dict()
-	continue
-    m = re.match("  memory kilobytes total\s+([0-9]+).*$", line)
-    if m:
-        procs[cur_proc]["total_memory"] = m.group(1)
-	continue
-    m = re.match("  cpu percent total\s+([.0-9]+)%.*$", line)
-    if m:
-        procs[cur_proc]["total_cpu"] = m.group(1)
-	continue
-    
-if len(sys.argv) > 1 and sys.argv[1] == 'config':
-    print 'graph_title Per process stats from Monit'
-    print 'graph_vlabel numbers'
-    print 'graph_category monit'
+
+def parse_processes():
+    dom = get_monit_status_xml()
+    procs = {}
+    for item in dom.getElementsByTagName("service"):
+        if item.getAttribute("type") == "3":
+            # daemon with memory usage and CPU
+            name = item.getElementsByTagName("name")[0].childNodes[0].data
+            memory_usage = item.getElementsByTagName("memory")[0].getElementsByTagName(
+                "kilobytetotal")[0].childNodes[0].data
+            cpu_usage = item.getElementsByTagName("cpu")[0].getElementsByTagName(
+                "percenttotal")[0].childNodes[0].data
+            procs[name] = {}
+            procs[name]["total_memory"] = memory_usage
+            procs[name]["total_cpu"] = cpu_usage
+    return procs
+
+
+action = sys.argv[1] if (len(sys.argv) > 1) else None
+
+if action == 'autoconf':
+    try:
+        get_monit_status_xml()
+        print("yes")
+    except RuntimeError:
+        print("no (failed to request monit status)")
+elif action == 'config':
+    procs = parse_processes()
+    print('graph_title Per process stats from Monit')
+    print('graph_vlabel usage of memory [kB] or cpu [%]')
+    print('graph_category munin')
     for process in procs:
         for stat in procs[process]:
-            print "monit_%s_%s.label %s.%s" % (process, stat, process, stat)
+            print("monit_%s_%s.label %s.%s" % (sanitize(process), stat, process, stat))
             if stat == 'total_memory':
-            	print "monit_%s_%s.warning 1:" % (process, stat)
-    sys.exit(0)
-
-for process in procs:
-    for stat in procs[process]:
-        print "monit_%s_%s.value %s" % (process, stat, procs[process][stat])
+                # the allocated memory may never be zero
+                print("monit_%s_%s.warning 1:" % (sanitize(process), stat))
+else:
+    for process, stats in parse_processes().items():
+        for stat_key, stat_value in stats.items():
+            print("monit_%s_%s.value %s" % (sanitize(process), stat_key, stat_value))

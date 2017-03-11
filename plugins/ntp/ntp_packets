@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+# -*- python -*-
+
+# This plugin graphs the rate of sent, received, ignored, and dropped
+# NTP packets for an ntpd process. Similarly to the if_ plugins,
+# received packets are graphed as negative values, and sent packets
+# are graphed as positive values. Ignored and dropped packets are
+# graphed as positive values.
+#
+# The values are retrieved using ntpq or ntpdc, depending on the
+# version of the NTP distribution.
+#
+# Symlink this plugin into the node's plugins directory (like
+# /etc/munin/plugins).
+#
+# Copyright © 2016 Kenyon Ralph <kenyon@kenyonralph.com>
+#
+# This program is free software. It comes without any warranty, to the
+# extent permitted by applicable law. You can redistribute it and/or
+# modify it under the terms of the Do What The Fuck You Want To Public
+# License, Version 2, as published by Sam Hocevar. See
+# http://www.wtfpl.net/ for more details.
+#
+# The latest version of this plugin can be found in the munin contrib
+# repository at https://github.com/munin-monitoring/contrib. Issues
+# with this plugin may be reported there. Patches accepted through the
+# normal github process of forking the repository and submitting a
+# pull request with your commits.
+
+import os
+import subprocess
+import sys
+
+if len(sys.argv) == 2 and sys.argv[1] == 'config':
+    print('graph_title NTP traffic')
+    print('graph_vlabel Packets/${graph_period} received(-)/sent(+)')
+    print('graph_info This graph shows the packet rates of this ntpd. Bad means packets received with bad length or format. Authfailed means packets for which authentication failed.')
+    print('graph_category time')
+    print('received.label Received')
+    print('received.type DERIVE')
+    print('received.graph no')
+    print('received.min 0')
+    print('sent.label Rx/Tx')
+    print('sent.type DERIVE')
+    print('sent.negative received')
+    print('sent.min 0')
+    print('dropped.label Dropped')
+    print('dropped.type DERIVE')
+    print('dropped.min 0')
+    print('ignored.label Ignored')
+    print('ignored.type DERIVE')
+    print('ignored.min 0')
+    print('bad.label Bad')
+    print('bad.type DERIVE')
+    print('bad.min 0')
+    print('authfail.label Authfailed')
+    print('authfail.type DERIVE')
+    print('authfail.min 0')
+    print('declined.label Declined')
+    print('declined.type DERIVE')
+    print('declined.min 0')
+    print('restricted.label Restricted')
+    print('restricted.type DERIVE')
+    print('restricted.min 0')
+    print('kod.label KoD responses')
+    print('kod.type DERIVE')
+    print('kod.min 0')
+    sys.exit(0)
+
+os.environ['PATH'] = '/usr/local/sbin:/usr/local/bin:' + os.environ['PATH']
+
+# Assuming that the ntpd version is the same as the ntpq or ntpdc
+# version. This is how a proper install should be.
+
+version = subprocess.check_output(['ntpq', '-c', 'version'], universal_newlines=True).split()[1][0:5].replace('.', '')
+
+if int(version) >= 427:
+    cmd = 'ntpq'
+else:
+    cmd = 'ntpdc'
+
+stats = dict()
+
+stats_output = subprocess.check_output([cmd, '-c', 'iostats', '-c', 'sysstats'], universal_newlines=True).splitlines()
+
+for line in stats_output: stats[line.split(':')[0]] = int(line.split(':')[1])
+
+print('received.value ' + str(stats['received packets']))
+print('sent.value ' + str(stats['packets sent']))
+print('dropped.value ' + str(stats['dropped packets']))
+print('ignored.value ' + str(stats['ignored packets']))
+print('bad.value ' + str(stats['bad length or format']))
+print('authfail.value ' + str(stats['authentication failed']))
+print('declined.value ' + str(stats['declined']))
+print('restricted.value ' + str(stats['restricted']))
+print('kod.value ' + str(stats['KoD responses']))
+
+sys.exit(0)

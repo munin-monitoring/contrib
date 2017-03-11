@@ -1,0 +1,107 @@
+#!/bin/bash
+# wordpress-mu-munin plugin
+# 
+# Author Andre Darafarin
+# Improvements by Chris Bair
+# Modified for Wordpress MU (or Network) by raT rat@espiv.net @ 22-04-2011
+# Version 0.2 15 Feb 2011
+# 
+#
+#
+: <<=cut
+=head1 NAME
+
+Wordpress-Munin plugin
+
+A simple Munin plugin to monitor some data from a running wordpress instance
+
+=head1 CONFIGURATION
+
+The plugin need access to the database of the wordpress instance.
+
+
+=head2 Config file
+
+Add file plugin-conf.d/wordpress and fill like this
+
+
+=over 4
+
+=item * [wordpress]
+# Name of section. Must be wordpress.
+
+=item * env.DB_NAME your_db_name
+# Replace your_db_name
+
+=item * env.DB_USER your_db_username
+# Replace you_db_username
+
+=item * env.DB_PASSWORD your_db_pass
+# Replace your_db_pass
+
+=item * env.DB_HOST host_of_your_db
+# Replace with host of database server. Will be localhost for many users. 
+
+=back
+
+
+
+=head1 VERSION
+
+0.2 15 Feb 2011
+
+=head1 AUTHOR
+
+Andre Darafarin, happypork.com
+=cut
+
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title Wordpress average'
+        echo 'graph_order posts comments pingbacks users'
+        echo 'graph_category cms'
+        echo 'graph_vlabel Wordpress'
+        echo 'graph_info Some Statistics of Wordpress'
+        echo 'posts.label Posts'
+        echo 'posts.draw LINE3'
+        echo 'comments.label Comments'
+        echo 'pingbacks.label Pingbacks'
+        echo 'users.label Users'
+        exit 0
+fi
+
+USERS=0
+POSTS=0
+COMMENTS=0
+PINGBACKS=0
+POSTS_=0
+COMMENTS_=0
+PINGBACKS_=0
+
+
+# DBNAME=${logfile:-/var/log/syslog}
+
+BLOGS=`mysql -h$DB_HOST  -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --column-names=0 -s --execute="select blog_id from wp_blogs
+"`
+for i in $BLOGS
+do
+
+
+POSTS=`mysql -h$DB_HOST  -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --column-names=0 -s --execute="SELECT COUNT(*) FROM wp_${i}_posts WHERE post_status = 'publish' AND post_password = '' AND post_type = 'post';"`
+let POSTS_=POSTS_+POSTS
+
+COMMENTS=`mysql -h$DB_HOST -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --column-names=0 -s --execute="SELECT COUNT(*) FROM wp_${i}_comments WHERE comment_approved = '1' AND comment_type = '';"`
+let COMMENTS_=COMMENTS_+COMMENTS
+
+PINGBACKS=`mysql -h$DB_HOST -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --column-names=0 -s --execute="SELECT COUNT(*) FROM wp_${i}_comments WHERE comment_approved = '1' AND comment_type = 'pingback';"`
+let PINGBACKS_=PINGBACKS_+PINGBACKS
+
+done
+USERS=`mysql -h$DB_HOST -p$DB_PASSWORD -u$DB_USER -D $DB_NAME  --column-names=0 -s --execute="SELECT COUNT(*) FROM wp_users ;"`
+
+
+#AUSGABE BEREICH
+echo "posts.value $POSTS_"
+echo "comments.value $COMMENTS_"
+echo "pingbacks.value $PINGBACKS_"
+echo "users.value $USERS"

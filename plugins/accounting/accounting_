@@ -1,0 +1,203 @@
+#!/bin/bash
+# -*- sh -*-
+: <<=cut
+
+=head1 NAME
+
+accounting_ - Wildcard-plugin for tcp, udp and icmp traffic-accounting (IPv4 or IPv6) through iptables.
+
+=head1 CONFIGURATION
+
+This plugin needs to be run as root for iptables to work.
+  [accounting_*]
+    user root
+
+=head2 ENVIRONMENT VARIABLES
+
+This plugin does not use environment variables.
+
+=head2 WILDCARD PLUGIN
+
+This is a wildcard plugin.  To monitor traffic going through your iptables,link
+accounting_<ipv4|ipv6>_<accountingname> to this file.
+
+For example,
+  ln -s /opt/munin/lib/plugins/accounting_ /etc/opt/munin/plugins/accounting_ipv4_subnet1
+
+will monitor the tcp, udp and icmp traffic for the accounting named subnet1.
+
+
+=head2 IPTABLES
+
+You will need to set up iptables rules to create packet counters for
+incoming and outgoing traffic.  The examples here cover how to create
+the rules. Add these lines at the top of your firewall-script.
+
+=head3 Accounting for single ip
+
+If you want to monitor the traffic from the IP 192.168.0.1, you need to add the following
+lines (replace iptables with ip6tables if needed):
+  iptables -I INPUT -d 192.168.0.1 -p icmp -m comment --comment ACCT-accountingname-icmp-in
+  iptables -I INPUT -d 192.168.0.1 -p udp -m comment --comment ACCT-accountingname-udp-in
+  iptables -I INPUT -d 192.168.0.1 -p tcp -m comment --comment ACCT-accountingname-tcp-in
+  iptables -I OUTPUT -s 192.168.0.1 -p icmp -m comment --comment ACCT-accountingname-icmp-out
+  iptables -I OUTPUT -s 192.168.0.1 -p udp -m comment --comment ACCT-accountingname-udp-out
+  iptables -I OUTPUT -s 192.168.0.1 -p tcp -m comment --comment ACCT-accountingname-tcp-out
+
+Only the IP itself (192.168.0.1) and the accounting-name (accountingname) need to be replaced by your values.
+ iptables -I <INPUT|OUTPUT> -d <yourip> -p <tcp|udp|icmp> -m comment --comment ACCT-<yourname>-<tcp|udp|icmp>-in
+
+Then add the plugin to your munin configuration:
+  ln -s /opt/munin/lib/plugins/accounting_ /etc/opt/munin/plugins/accounting_ipv4_accountingname
+
+
+=head3 Accounting for subnets
+
+If you want to monitor the traffic from the subnet 192.168.0.1/24, you need to add the following
+lines (replace iptables with ip6tables if needed):
+
+  iptables -I INPUT -d 192.168.0.1/24 -p icmp -m comment --comment ACCT-subnet1-icmp-in
+  iptables -I INPUT -d 192.168.0.1/24 -p udp -m comment --comment ACCT-subnet1-udp-in
+  iptables -I INPUT -d 192.168.0.1/24 -p tcp -m comment --comment ACCT-subnet1-tcp-in
+  iptables -I OUTPUT -s 192.168.0.1/24 -p icmp -m comment --comment ACCT-subnet1-icmp-out
+  iptables -I OUTPUT -s 192.168.0.1/24 -p udp -m comment --comment ACCT-subnet1-udp-out
+  iptables -I OUTPUT -s 192.168.0.1/24 -p tcp -m comment --comment ACCT-subnet1-tcp-out
+
+Then add the plugin to your munin configuration:
+  ln -s /opt/munin/lib/plugins/accounting_ /etc/opt/munin/plugins/accounting_ipv4_subnet1
+
+=head1 BUGS
+
+Accounting-names should not contain underline "_" in the name. So instead of "This_Is_A_Cool_Name" use "This-Is-A-Cool-Name".
+
+=head1 NOTES
+
+This plugin is based on the ip_ plugin.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf suggest
+
+=head1 VERSION
+
+1.0
+
+=head1 HISTORY
+
+2013-06-29: initial release
+
+=head1 AUTHOR
+
+Thomas Frey <thomas.frey-munin@hugga.org>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+
+PARAM=${0##*accounting_}
+SUBCHAIN=$(echo $PARAM | cut -d '_' -f 2)
+PROTO=$(echo $PARAM | cut -d '_' -f 1)
+
+if [ $PROTO = "ipv4" ]; then
+  IPTABLES="/sbin/iptables"
+elif [ $PROTO == "ipv6" ]; then
+  IPTABLES="/sbin/ip6tables"
+else
+  echo "Configuration error: invalid protocol name: not ipv4 or ipv6."
+  echo "Use accounting_<ipv4|ipv6>_accountingname."
+	exit 1
+fi
+
+
+if [ "$1" == "autoconf" ]; then
+	if [ -r /proc/net/dev ]; then
+		$IPTABLES -L INPUT -v -n -x >/dev/null 2>/dev/null
+			if [ $? -gt 0 ]; then
+				echo "no (could not run iptables as user `whoami`)"
+				exit 1
+			else
+				echo yes
+			exit 0
+		fi
+	else
+		echo "no (/proc/net/dev not found)"
+		exit 1
+	fi
+fi
+
+if [ "$1" = "suggest" ]; then
+
+	if [ $PROTO = "ipv4" ]; then
+	  $IPTABLES -L INPUT -v -x -n 2>/dev/null | sed -n 's/^.*\/\* ACCT\-\([a-zA-Z\-]*\) \*\/.*$/\ipv4_\1/p'
+  	$IPTABLES -L OUTPUT -v -x -n 2>/dev/null | sed -n 's/^.*\/\* ACCT\-\([a-zA-Z\-]*\) \*\/.*$/\ipv4_\1/p'
+	elif [ $PROTO == "ipv6" ]; then
+	  $IPTABLES -L INPUT -v -x -n 2>/dev/null | sed -n 's/^.*\/\* ACCT\-\([a-zA-Z\-]*\) \*\/.*$/\ipv6_\1/p'
+	  $IPTABLES -L OUTPUT -v -x -n 2>/dev/null | sed -n 's/^.*\/\* ACCT\-\([a-zA-Z\-]*\) \*\/.*$/\ipv6_\1/p'
+	fi
+
+	exit 0
+fi
+
+
+if [ "$1" = "config" ]; then
+
+	echo 'multigraph '${0##*/}'_in'
+	echo 'graph_title '$SUBCHAIN' traffic incoming ('$PROTO')'
+	echo 'graph_args --base 1024 -l 0'
+	echo 'graph_vlabel bytes per ${graph_period}'
+	echo 'graph_order tcpIN udpIN icmpIN'
+	echo 'graph_category network'
+	echo 'tcpIN.label tcp received'
+  echo 'tcpIN.cdef tcpIN,8,*'
+	echo 'tcpIN.type DERIVE'
+  echo 'tcpIN.draw AREA'
+	echo 'tcpIN.min 0'
+  echo 'udpIN.label udp received'
+  echo 'udpIN.cdef udpIN,8,*'
+  echo 'udpIN.type DERIVE'
+  echo 'udpIN.draw STACK'
+  echo 'udpIN.min 0'
+  echo 'icmpIN.label icmp received'
+  echo 'icmpIN.cdef icmpIN,8,*'
+  echo 'icmpIN.type DERIVE'
+  echo 'icmpIN.draw STACK'
+  echo 'icmpIN.min 0'
+
+  echo 'multigraph '${0##*/}'_out'
+  echo 'graph_title '$SUBCHAIN' traffic outgoing ('$PROTO')'
+  echo 'graph_args --base 1024 -l 0'
+  echo 'graph_vlabel bytes per ${graph_period}'
+  echo 'graph_order tcpOUT udpOUT icmpOUT'
+  echo 'graph_category network'
+  echo 'tcpOUT.label tcp sent'
+  echo 'tcpOUT.cdef tcpOUT,8,*'
+  echo 'tcpOUT.type DERIVE'
+  echo 'tcpOUT.draw AREA'
+  echo 'tcpOUT.min 0'
+  echo 'udpOUT.label udp sent'
+  echo 'udpOUT.cdef udpOUT,8,*'
+  echo 'udpOUT.type DERIVE'
+  echo 'udpOUT.draw STACK'
+  echo 'udpOUT.min 0'
+  echo 'icmpOUT.label icmp sent'
+  echo 'icmpOUT.cdef icmpOUT,8,*'
+  echo 'icmpOUT.type DERIVE'
+  echo 'icmpOUT.draw STACK'
+  echo 'icmpOUT.min 0'
+	exit 0
+fi;
+
+echo 'multigraph '${0##*/}'_in'
+$IPTABLES -L INPUT -v -n -x | grep  "\/\* ACCT\-"$SUBCHAIN"\-tcp\-in \*\/" | tr -s '*' '-' | awk "{ print \"tcpIN.value \" \$2 }"
+$IPTABLES -L INPUT -v -n -x | grep  "\/\* ACCT\-"$SUBCHAIN"\-udp\-in \*\/" | tr -s '*' '-' | awk "{ print \"udpIN.value \" \$2 }"
+$IPTABLES -L INPUT -v -n -x | grep  "\/\* ACCT\-"$SUBCHAIN"\-icmp\-in \*\/" | tr -s '*' '-' | awk "{ print \"icmpIN.value \" \$2 }"
+echo
+echo 'multigraph '${0##*/}'_out'
+$IPTABLES -L OUTPUT -v -n -x | grep  "\/\* ACCT\-"$SUBCHAIN"\-tcp\-out \*\/" | tr -s '*' '-' | awk "{ print \"tcpOUT.value \" \$2 }"
+$IPTABLES -L OUTPUT -v -n -x | grep  "\/\* ACCT\-"$SUBCHAIN"\-udp\-out \*\/" | tr -s '*' '-' | awk "{ print \"udpOUT.value \" \$2 }"
+$IPTABLES -L OUTPUT -v -n -x | grep  "\/\* ACCT\-"$SUBCHAIN"\-icmp\-out \*\/" | tr -s '*' '-' | awk "{ print \"icmpOUT.value \" \$2 }"
+

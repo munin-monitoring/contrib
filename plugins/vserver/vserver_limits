@@ -1,0 +1,96 @@
+#!/bin/sh
+#
+# Copyright (C) 2008 Chris Wilson
+# Copyright (C) 2006 Holger Levsen
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+# Configuration variables
+#   vservers - specify the vservers to include in the graph (default: all)
+#   limits - if true, turn on limit graphing (default: false)
+#
+# NOTE: If no configuration variables are set, the defaults will be used
+
+# Example /etc/munin/plugin-conf.d/munin-node 
+#
+# [vserver_limits_RSS]
+# user root
+# env.vservers 7 18 20 42
+#
+# Graph Vserver resource limits. Useful to help you know when and how often
+# you changed the limits of each vserver, e.g. because customer needed more
+# RAM.
+#
+# Changelog
+# version 0.1 - 2006 April xx - Holger Levsen
+#  - initial author
+# version 0.2 - 2006 April 24 - Micah Anderson <micah@riseup.net>
+#  - Add dynamic arch page size determination
+#  - Some cleanup and clarification
+# version 0.3 - 2006 May 3 - Micah Anderson <micah@riseup.net>
+#  - Add ability to group vservers via environment vars
+#  - Fix missing close quotes and standardize indents
+#  - Add limit notification
+#  - Update documentation to include info on groups and limits
+# version 0.4 - 2006 Jun 22 - Micah Anderson <micah@riseup.net>
+#  - Fix error that results if NodeName is set to include a domain name
+# version 0.5 - 2008 Apr 12 - Chris Wilson <chris+munin@qwirx.com>
+#  - Changed to display limits instead of resource usage
+#  - Adapt to latest vserver kernel (lack of some variables in /proc/virtual)
+#    Note that your vserver names may change if the contents of
+#    /etc/vservers/* do not match the nodenames. Also you must specify
+#    the vservers variable with context IDs (XIDs) rather than names.
+
+
+scriptname=`basename $0`
+resource=`echo $scriptname | sed -e 's/.*_//'`
+vservers="$vservers"
+
+if [ -z "$vservers" ]; then
+	vservers=`ls -1 /proc/virtual | grep -v info | grep -v status`
+fi
+
+if [ "$1" = "config" ]; then
+	echo "graph_title Vserver $resource limits"
+	# echo 'graph_args --base 1024k -l 0'
+	echo "graph_vlabel $resource limits"
+	echo 'graph_category virtualization'
+	echo "graph_info Shows current $resource limits for each vserver.'"
+	    
+	for vserver_xid in $vservers ; do
+		longname=`/usr/sbin/vuname --xid $vserver_xid NODENAME | cut -f2`
+		name=`echo $longname | cut -d. -f1`
+		echo "$vserver_xid.label $name"
+		echo "$vserver_xid.info $resource limits for $longname"
+		echo "$vserver_xid.min 0"
+		echo "$vserver_xid.type GAUGE"
+	done
+
+	exit 0
+elif [ "$1" = "suggest" ]; then
+	if [ -z "$vservers" ]; then
+		echo "No vservers running, cannot suggest!" >&2
+		exit 2
+	fi
+	vserver1=`echo $vservers | sed -e 's/ .*//'`
+	tail -n +2 /proc/virtual/$vserver1/limit | sed -e 's/:.*//'
+else
+	for vserver_xid in $vservers; do
+		cat /proc/virtual/$vserver_xid/limit \
+		| awk -v xid="$vserver_xid" -v res="$resource:" \
+			'{ if ( $1 == res )
+			printf "%s.value %d\n", xid, $6 }'
+	done
+fi

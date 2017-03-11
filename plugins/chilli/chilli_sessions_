@@ -1,0 +1,119 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+chilli_sessions_ - Wildcard-plugin to monitor sessions state on Coova Chilli.
+
+=head1 DESCRIPTION
+
+This wildcard plugin is for monitor the number of device with state pass/dnat/none on Coova Chilli instances.
+
+=head1 CONFIGURATION
+
+This plugin does not normally require configuration.
+
+The plugin may need to run as root. This is configured like this:
+
+  [chilli_sessions_*]
+      user root
+
+This is a wildcard plugin. To monitor an instance, link
+chilli_sessions_<instance> to this file. For example :
+
+  ln -s /usr/share/munin/plugins/chilli_sessions_ \
+        /etc/munin/plugins/chilli_sessions_hotspot1
+
+will monitor hotspot1.
+
+For monitor all instances use :
+
+  ln -s /usr/share/munin/plugins/chilli_sessions_ \
+        /etc/munin/plugins/chilli_sessions_total
+
+=head1 AUTHOR
+
+OPENevents - Guillaume Marsay <guillaume.marsay@openevents.fr>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=cut
+
+
+INSTANCE="${0##*chilli_}"
+CHILLI_PATH_BIN="/usr/sbin/chilli_query"
+CHILLI_PATH_SOCK="/var/run"
+
+
+case "$1" in
+  autoconf)
+    if [ -r "$CHILLI_PATH_BIN" ]; then
+      if [ "$INSTANCE" = "total" ]; then
+        echo "yes"
+        exit 0
+      else
+        if [ -r $CHILLI_PATH_SOCK/chilli_"$INSTANCE".sock ]; then
+          echo "yes"
+          exit 0
+        else
+          echo "no ($CHILLI_PATH_SOCK/chilli_$INSTANCE.sock not found)"
+          exit 0
+        fi
+      fi
+    else
+      echo "no ($CHILLI_PATH_BIN not found)"
+      exit 0
+    fi
+    ;;
+  suggest)
+      find "$CHILLI_PATH_SOCK/" -name "chilli_*.sock" | while read file; do
+        basename "$file" .sock | cut -d _ -f 2
+      done
+
+      echo "total"
+      
+      exit 0
+    ;;
+  config)
+    echo "graph_title Chilli $INSTANCE sessions"
+    echo "graph_args --base 1000 -l 0"
+    echo "graph_category wireless"
+    echo "none.label NONE"
+    echo "none.min 0"
+    echo "none.draw AREA"
+    echo "none.colour ff8000"
+    echo "dnat.label DNAT"
+    echo "dnat.min 0"
+    echo "dnat.draw STACK"
+    echo "dnat.colour 0066b3"
+    echo "pass.label PASS"
+    echo "pass.draw STACK"
+    echo "pass.min 0"
+    echo "pass.colour 00cc00"
+
+    exit 0
+    ;;
+esac
+
+if [ "$INSTANCE" = "total" ]; then
+  STATE_PASS=$("$CHILLI_PATH_BIN" list | grep -wc "pass")
+  STATE_DNAT=$("$CHILLI_PATH_BIN" list | grep -wc "dnat")
+  STATE_NONE=$("$CHILLI_PATH_BIN" list | grep -wc "none")
+else
+  STATE_PASS=$("$CHILLI_PATH_BIN" -s "$CHILLI_PATH_SOCK/chilli_$INSTANCE.sock" list | grep -wc "pass")
+  STATE_DNAT=$("$CHILLI_PATH_BIN" -s "$CHILLI_PATH_SOCK/chilli_$INSTANCE.sock" list | grep -wc "dnat")
+  STATE_NONE=$("$CHILLI_PATH_BIN" -s "$CHILLI_PATH_SOCK/chilli_$INSTANCE.sock" list | grep -wc "none")
+fi
+
+echo "pass.value $STATE_PASS"
+echo "dnat.value $STATE_DNAT"
+echo "none.value $STATE_NONE"

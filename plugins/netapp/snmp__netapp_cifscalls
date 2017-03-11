@@ -1,0 +1,140 @@
+#!/usr/bin/perl
+# -*- perl -*-
+# vim: ft=perl
+
+=head1 NAME
+
+snmp__netapp_cifscalls -  Munin plugin to retrieve cifs calls types stats from NetApp storage appliances.
+
+=head1 APPLICABLE SYSTEMS
+
+cifs calls stats should be reported by any NetApp storage appliance
+with SNMP agent daemon activated. See na_snmp(8) for details.
+
+=head1 CONFIGURATION
+
+Unfortunately, SNMPv3 is not fully supported on all NetApp equipments.
+For this reason, this plugin will use SNMPv2 by default, which is
+insecure because it doesn't encrypt the community string.
+
+The following parameters will help you get this plugin working :
+
+[snmp_*]
+env.community MyCommunity
+
+If your community name is 'public', you should really worry about
+security and immediately reconfigure your appliance.
+
+Please see 'perldoc Munin::Plugin::SNMP' for further configuration.
+
+=head1 INTERPRETATION
+
+The plugin reports various cifs calls by type.
+This can help you determine what calls types are killing your appliance under heavy
+loads.
+
+=head1 MIB INFORMATION
+
+This plugin requires support for the NETWORK-APPLIANCE-MIB issued by
+Network Appliance. It reports the content of the cifs OID.
+
+=head1 MAGIC MARKERS
+
+    #%# family=snmpauto
+    #%# capabilities=snmpconf
+
+=head1 BUGS
+
+This plugin wasn't tested on many hardware and only on Ontap 7.3.x.
+
+=head1 AUTHOR
+
+2013, Claudius Herder
+NetApp is a registered trademark and Network Appliance is a trademark
+of Network Appliance, Inc. in the U.S. and other countries.
+
+=head1 LICENSE
+
+GPLv2.
+
+=cut
+
+ use strict;
+ use warnings;
+ use Munin::Plugin::SNMP;
+
+my %oids =
+(
+    cifsBadCalls => 'BadCalls',
+    cifsGetAttrs => 'GetAttrs',
+    cifsReads    => 'Reads',
+    cifsWrites   => 'Writes',
+    cifsLocks    => 'Locks',
+    cifsOpens    => 'Opens',
+    cifsDirOps   => 'DirOps',
+    cifsOthers   => 'Others',
+    cifsSetAttrs => 'SetAttr',
+);
+
+if (defined $ARGV[0] and $ARGV[0] eq 'snmpconf')
+{
+    print "require 1.3.6.1.4.1.789.1.7.3.1.1. [0-9]\n";
+    exit 0;
+}
+
+my $session = Munin::Plugin::SNMP->session();
+
+if (defined $ARGV[0] and $ARGV[0] eq "config")
+{
+    my ($host, undef, undef, undef) = Munin::Plugin::SNMP->config_session();
+    print "host_name $host\n" unless $host eq 'localhost';
+    print "graph_title $host CIFS calls\n";
+    print "graph_args --base 1000 --lower-limit 0 --rigid\n";
+    print "graph_vlabel calls / \${graph_period}\n";
+    print "graph_category fs\n";
+    print "graph_info This graph shows cifs calls for the $host NetApp equipment.\n";
+    print "graph_order ";
+    foreach (sort keys %oids)
+    {
+        print "$_ ";
+    }
+    print "\n";
+    foreach my $k (sort keys %oids)
+    {
+        print "$k.info The number of cifs calls received for the $oids{$k} procedure, since the last time the statistics were cleared.\n";
+        print "$k.type COUNTER\n";
+        print "$k.label $oids{$k}\n";
+        print "$k.min 0\n";
+    }
+    exit 0;
+}
+
+my $values = $session->get_hash
+(
+    -baseoid => '1.3.6.1.4.1.789.1.7.3.1.1',
+    -cols =>
+    {
+         1 => 'cifsTotalOps',
+         2 => 'cifsTotalCalls',
+         3 => 'cifsBadCalls',
+         4 => 'cifsGetAttrs',
+         5 => 'cifsReads',
+         6 => 'cifsWrites',
+         7 => 'cifsLocks',
+         8 => 'cifsOpens',
+         9 => 'cifsDirOps',
+        10 => 'cifsOthers',
+        11 => 'cifsSetAttrs',
+    },
+);
+
+foreach my $k (keys %oids)
+{
+    my $v = 'U';
+    $v = $values->{0}->{$k} if (defined $values);
+    print "$k.value $v\n";
+}
+
+exit 0;
+
+__END__

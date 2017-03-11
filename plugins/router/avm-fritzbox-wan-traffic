@@ -1,0 +1,135 @@
+#!/usr/bin/php
+<?php
+##############################
+#
+# Plugin: AVM Fritz!Box WAN traffic (over UPNP)
+#
+# Author: Andreas Kreisl
+#
+# Licence: Creative Commons - Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0) 
+# http://creativecommons.org/licenses/by-sa/3.0/
+#
+##############################
+#%# family=auto
+#%# capabilities=autoconf
+
+$host = "fritz.box";
+
+if(isset($argv[1]) && $argv[1] == "autoconf") {
+	echo "yes\n";
+} else if(isset($argv[1]) && $argv[1] == "config") {
+	$data_prop = GetCommonLinkProperties();
+	//$data_ip = GetExternalIP(); // $data_ip['NewExternalIPAddress']
+	echo "graph_order down up maxdown maxup\n";
+	echo "graph_title AVM Fritz!Box WAN traffic\n";
+	echo "graph_args --base 1024\n";
+	echo "graph_vlabel bits in (-) / out (+) per \${graph_period}\n";
+	echo "graph_category network\n";
+	echo "graph_info This graph shows the traffic of the AVM Fritz!Box WAN network interface. Please note that the traffic is shown in bits per second, not bytes.\n";
+	echo "down.label received\n";
+	echo "down.type DERIVE\n";
+	echo "down.graph no\n";
+	echo "down.cdef down,8,*\n";
+	echo "down.min 0\n";
+	echo "down.max 1000000000\n";
+	echo "up.label " . $data_prop['NewWANAccessType'] . " (" . $data_prop['NewPhysicalLinkStatus'] . ")\n";
+	echo "up.type DERIVE\n";
+	echo "up.negative down\n";
+	echo "up.draw AREA\n";
+	echo "up.cdef up,8,*\n";
+	echo "up.min 0\n";
+	echo "up.max 1000000000\n";
+	echo "up.info Traffic of the WAN interface.\n";
+	echo "maxdown.label received\n";
+	echo "maxdown.type GAUGE\n";
+	echo "maxdown.graph no\n";
+	echo "maxup.label MAX\n";
+	echo "maxup.type GAUGE\n";
+	echo "maxup.negative maxdown\n";
+	echo "maxup.draw LINE1\n";
+	echo "maxup.info Maximum speed of the WAN interface.\n";
+} else {
+	$data_prop = GetCommonLinkProperties();
+	$data_stats = GetAddonInfos();
+	echo "up.value " . $data_stats['NewTotalBytesSent'] . "\n";
+	echo "down.value " . $data_stats['NewTotalBytesReceived'] . "\n";
+	echo "maxup.value " . $data_prop['NewLayer1UpstreamMaxBitRate'] . "\n";
+	echo "maxdown.value " . $data_prop['NewLayer1DownstreamMaxBitRate'] . "\n";
+}
+
+
+function GetCommonLinkProperties() {
+	$data_url = '/igdupnp/control/WANCommonIFC1';
+	$data_soap = '"urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1#GetCommonLinkProperties"';
+	$data_xml = '<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:GetCommonLinkProperties xmlns:u=urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1 /></s:Body></s:Envelope>';
+	$tmp = DoCurl($data_url,$data_soap,$data_xml);
+	$data_result = Array();
+	$data_result['NewLayer1UpstreamMaxBitRate'] = FindKey($tmp,"NewLayer1UpstreamMaxBitRate");
+	$data_result['NewLayer1DownstreamMaxBitRate'] = FindKey($tmp,"NewLayer1DownstreamMaxBitRate");
+	$data_result['NewWANAccessType'] = FindKey($tmp,"NewWANAccessType");
+	$data_result['NewPhysicalLinkStatus'] = FindKey($tmp,"NewPhysicalLinkStatus");
+	return $data_result;
+}
+
+function GetAddonInfos() {
+	$data_url = '/igdupnp/control/WANCommonIFC1';
+	$data_soap = '"urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1#GetAddonInfos"';
+	$data_xml = '<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:GetAddonInfos xmlns:u=urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1 /></s:Body></s:Envelope>';
+	$tmp = DoCurl($data_url,$data_soap,$data_xml);
+	$data_result = Array();
+	$data_result['NewTotalBytesSent'] = FindKey($tmp,"NewTotalBytesSent");
+	$data_result['NewTotalBytesReceived'] = FindKey($tmp,"NewTotalBytesReceived");
+	return $data_result;
+}
+
+function GetExternalIP() {
+	$data_url = '/igdupnp/control/WANIPConn1';
+	$data_soap = '"urn:schemas-upnp-org:service:WANIPConnection:1#GetExternalIPAddress"';
+	$data_xml = '<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:GetExternalIPAddress xmlns:u=urn:schemas-upnp-org:service:WANIPConnection:1 /></s:Body></s:Envelope>';
+	$tmp = DoCurl($data_url,$data_soap,$data_xml);
+	$data_result = Array();
+	$data_result['NewExternalIPAddress'] = FindKey($tmp,"NewExternalIPAddress");
+	return $data_result;
+}
+
+function DoCurl($url,$soap,$xml) {
+	$ch = curl_init("http://" . $GLOBALS["host"] . ":49000" . $url);
+
+	$headers = array();
+	//$headers[] = 'POST ' . $url . ' HTTP/1.1'; // Will be automatically set.
+	$headers[] = 'Content-Type: text/xml; charset="utf-8"';
+	$headers[] = 'HOST: ' . $GLOBALS["host"] . ':49000';
+	$headers[] = 'Content-Length: ' . strlen($xml);
+	$headers[] = 'SOAPACTION: ' . $soap;
+	curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+	curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
+	curl_setopt($ch, CURLOPT_HEADER, 0);
+	curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+	curl_setopt($ch, CURLOPT_IPRESOLVE, 1); // Force IPv4
+
+	curl_setopt($ch, CURLOPT_POST, 1);
+	curl_setopt($ch, CURLOPT_POSTFIELDS, $xml); // Add XML in POST-Header
+
+	$tmp = curl_exec($ch);
+	curl_close($ch);
+	return $tmp;
+}
+
+function FindKey($text,$key) {
+	$p1 = strpos($text,$key);
+	if($p1 === false) {
+		$tmp = "";
+	} else {
+		$p1 = strpos($text,'>',$p1) +1;
+		$p2 = strpos($text,'<',$p1);
+		if($p2 === false) {
+			$tmp = "";
+		} else {
+			$tmp = substr($text,$p1,$p2-$p1);
+		}
+	}
+	return $tmp;
+}
+
+?>

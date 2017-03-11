@@ -25,7 +25,7 @@ function SplitTwice($content,$first,$second) {
 if ($argv[1]=='config'){
     print "graph_title Rackspace CDN files count\n";
     print "graph_vlabel Files Count\n";
-    print "graph_category rackspace\n";
+    print "graph_category cloud\n";
     print "count.label files count\n";
     print "graph_args --base 1000\n";
 

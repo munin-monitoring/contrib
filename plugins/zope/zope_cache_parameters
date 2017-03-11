@@ -1,0 +1,43 @@
+#!/usr/bin/python
+
+from sys import argv
+import httplib
+conns = []
+
+# this should really go in plugins.conf
+conns.append(httplib.HTTPConnection("localhost",8080))
+conns.append(httplib.HTTPConnection("localhost",8070))
+
+
+url = "/munin_cache_parameters.py"
+
+if len(argv) > 1 and argv[1] == 'config':
+
+    # there is probably a better way to display this cached vs targed graph
+    # as a percentage of target possibly..
+
+    print """graph_title Zope cache parameters
+    graph_category appserver
+    graph_info A grap of the main data on the "Cache Parameters" tab of the main DB in the zope control panel.""".replace("\n    ","\n")
+    for i in range(0,len(conns)):
+        print """obs_in_db%(i)s.label Z%(i)s Obs in DB
+        obs_cached%(i)s.label Z%(i)s obs in all caches
+        obs_target%(i)s.label Z%(i)s cached obs target""".replace("\n        ","\n") % dict(i=i)
+else:
+    for i in range(0,len(conns)):
+        conns[i].request("GET", url)
+
+        r1 = conns[i].getresponse()
+        #print r1.status, r1.reason
+        #200 OK
+        data = r1.read().strip()
+        conns[i].close()
+        (obs_in_db, obs_cached, obs_target) = data.split()
+        id = dict(i=i)
+        print 'obs_in_db%(i)s.value' % id, obs_in_db
+        print 'obs_cached%(i)s.value'% id, obs_cached
+        print 'obs_target%(i)s.value'% id, obs_target
+                    
+
+
+

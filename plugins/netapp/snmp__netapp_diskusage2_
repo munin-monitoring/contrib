@@ -1,0 +1,286 @@
+#!/usr/bin/perl
+# -*- perl -*-
+# vim: ft=perl
+
+=head1 NAME
+
+snmp__netapp_cifs -  Munin plugin to retrieve general cifs information from NetApp storage appliances.
+
+=head1 APPLICABLE SYSTEMS
+
+cifs should be reported by any NetApp storage appliance
+with SNMP agent daemon activated. See na_snmp(8) for details.
+
+=head1 CONFIGURATION
+
+Unfortunately, SNMPv3 is not fully supported on all NetApp equipments.
+For this reason, this plugin will use SNMPv2 by default, which is
+insecure because it doesn't encrypt the community string.
+
+The following parameters will help you get this plugin working :
+
+[snmp_*]
+env.community MyCommunity
+
+If your community name is 'public', you should really worry about
+security and immediately reconfigure your appliance.
+
+Please see 'perldoc Munin::Plugin::SNMP' for further configuration.
+
+=head1 INTERPRETATION
+
+The plugin reports various cifs connections, users and open files.
+
+=head1 MIB INFORMATION
+
+This plugin requires support for the NETWORK-APPLIANCE-MIB issued by
+Network Appliance. It reports the content of the cifs OID.
+
+=head1 MAGIC MARKERS
+
+  #%# family=snmpauto
+  #%# capabilities=snmpconf
+
+=head1 BUGS
+
+This plugin wasn't tested on many hardware and only on Ontap 7.3.x.
+
+=head1 AUTHOR
+
+2013, Claudius Herder
+NetApp is a registered trademark and Network Appliance is a trademark
+of Network Appliance, Inc. in the U.S. and other countries.
+
+=head1 LICENSE
+
+GPLv2.
+
+=cut
+
+use strict;
+use warnings;
+use Munin::Plugin;
+use Munin::Plugin::SNMP;
+need_multigraph();
+
+my %volbytes =
+(
+    df64TotalKBytes    => 'df64TotalKBytes',
+    df64UsedKBytes     => 'df64UsedKBytes',
+    df64SisSavedKBytes => 'df64SisSavedKBytes',
+);
+my %snapbytes =
+(
+    df64TotalKBytes => 'df64SnapShotTotalKBytes',
+    df64UsedKBytes  => 'df64SnapShotUsedKBytes',
+);
+my %config =
+(
+    df64TotalKBytes             => 'VolumeSize',
+    df64UsedKBytes              => 'Used',
+    df64SisSavedKBytes          => 'SisSaved',
+    df64SnapShotTotalKBytes     => 'SnapShotReserve',
+    df64SnapShotUsedKBytes      => 'SnapShotUsed',
+    df64TotalAndSnapTotalKBytes => 'Total',
+);
+
+my $dfinfo;
+my $aggrFlexvollist;
+my $aggr_name;
+my $aggr_id;
+
+sub do_collect
+{
+    my $session = Munin::Plugin::SNMP->session();
+
+    $dfinfo = $session->get_hash
+    (
+        -baseoid => '1.3.6.1.4.1.789.1.5.4.1',
+        -cols =>
+        {
+             1 => 'dfIndex',
+             2 => 'dfFileSys',
+            29 => 'df64TotalKBytes',
+            30 => 'df64UsedKBytes',
+            31 => 'df64AvailKBytes',
+            33 => 'df64SisSavedKBytes',
+        },
+    );
+    $aggrFlexvollist = $session->get_hash
+    (
+        -baseoid => '1.3.6.1.4.1.789.1.5.11.1',
+        -cols =>
+        {
+            2 => 'aggrName',
+            9 => 'aggrFlexvollist',
+        },
+    );
+}
+
+sub do_config_vol
+{
+    my ($host,$aggr_name,$vol) = @_;
+    my $extrainfo = '';
+    if (  $dfinfo->{$vol}->{dfFileSys} eq $aggr_name )
+    {
+        print "multigraph diskusage2_$aggr_name\n";
+        print "graph_title $host disk usage of $aggr_name\n";
+        print "graph_info This graph shows the disk usage on NetApp host $host\n";
+    }
+    else
+    {
+        print "multigraph diskusage2_$aggr_name.$dfinfo->{$vol}->{dfFileSys}\n";
+        print "graph_title $host disk usage of $dfinfo->{$vol}->{dfFileSys} on $aggr_name\n";
+        print "graph_info This graph shows the disk usage for $dfinfo->{$vol}->{dfFileSys} on NetApp host $host\n";
+    }
+    print "graph_args --base 1024 --lower-limit 0\n";
+    print "graph_vlabel bytes\n";
+    # graph_category san # To show plugin in Gallery also in this category
+    print "graph_category disk\n";
+    print "graph_order df64UsedKBytes df64SnapShotUsedKBytes df64SisSavedKBytes df64TotalKBytes df64SnapShotTotalKBytes df64TotalAndSnapTotalKBytes \n";
+
+    foreach my $k (sort keys %config )
+    {
+        print "$k.info $config{$k} of Volume $dfinfo->{$vol}->{dfFileSys}.\n";
+        print "$k.label $config{$k}\n";
+        print "$k.min 0\n";
+
+        if ($k eq "df64TotalKBytes" )
+        {
+            print "$k.draw LINE3\n";
+        }
+        elsif ( $k eq "df64SnapShotTotalKBytes" )
+        {
+            print "$k.draw LINE0\n";
+        }
+        elsif ( $k eq "df64TotalAndSnapTotalKBytes" )
+        {
+            print "$k.draw LINE3\n";
+        }
+        else
+        {
+            print "$k.draw AREASTACK\n";
+        }
+        print "$k.type GAUGE\n";
+        print "$k.cdef $k,1024,*\n"
+    }
+}
+
+sub do_fetch_vol
+{
+    my (undef, $aggr_name,$vol) = @_;
+    my $sum = 0;
+    my $index = 'U';
+    my $v = 'U';
+
+    $index = $dfinfo->{$vol}->{dfIndex};
+    if (  $dfinfo->{$vol}->{dfFileSys} eq $aggr_name )
+    {
+        print "multigraph diskusage2_$aggr_name\n";
+    }
+    else
+    {
+        print "multigraph diskusage2_$aggr_name.$dfinfo->{$vol}->{dfFileSys}\n";
+    }
+    foreach my $k (keys %snapbytes)
+    {
+        if ( $k eq "df64TotalKBytes" )
+        {
+            $sum += $dfinfo->{$index+1}->{$k};
+            $v = $dfinfo->{$index+1}->{$k};
+        }
+        else
+        {
+            $v = $dfinfo->{$index+1}->{$k};
+        }
+        print "$snapbytes{$k}.value $v\n";
+    }
+
+    foreach my $k (keys %volbytes)
+    {
+        if ( $k eq "df64TotalKBytes" )
+        {
+            $sum += $dfinfo->{$vol}->{$k};
+            $v = $dfinfo->{$vol}->{$k};
+            print "df64TotalAndSnapTotalKBytes.value $sum\n";
+        }
+        else
+        {
+            $v = $dfinfo->{$vol}->{$k};
+        }
+        print "$volbytes{$k}.value $v\n";
+    }
+}
+
+sub do_config_fetch
+{
+    my ($func) = @_;
+    my $fcall;
+    my %op = (
+        'config' => \&do_config_vol,
+        'fetch'  => \&do_fetch_vol,
+    );
+
+    my ($host, undef, undef, undef ) = Munin::Plugin::SNMP->config_session();
+    if ( $func eq "config" )
+    {
+        $fcall = $op{config};
+        print "host_name $host\n" unless $host eq 'localhost';
+    }
+    elsif ( $func eq "fetch")
+    {
+        $fcall = $op{fetch};
+    }
+    foreach my $vol (sort {$a <=> $b} keys %{$dfinfo})
+    {
+        $dfinfo->{$vol}->{dfFileSys} =~ s/(\/vol\/)(.*?)\//$2/;
+        if ( $dfinfo->{$vol}->{dfFileSys} ~~ [ split(' ',$aggrFlexvollist->{$aggr_id}->{aggrFlexvollist}), $aggr_name ])
+        {
+            $fcall->($host,$aggr_name,$vol);
+        }
+    }
+}
+
+sub do_setaggr {
+    if ( $0 =~ /netapp_diskusage2_$/)
+    {
+        die ("Can't run without a symlinked name\n")
+    }
+    elsif ($0 =~ /netapp_diskusage2_(.+)*$/)
+    {
+        $aggr_name = $1;
+        foreach my $aggr (keys %{$aggrFlexvollist})
+        {
+            if ( $aggr_name =~  $aggrFlexvollist->{$aggr}->{aggrName} )
+            {
+                $aggr_id = $aggr;
+            }
+        }
+    }
+}
+
+if (defined $ARGV[0])
+{
+    if ($ARGV[0] eq "config")
+    {
+       do_collect();
+       do_setaggr();
+       do_config_fetch("config");
+       exit 0;
+    }
+    elsif ($ARGV[0] eq "snmpconf")
+    {
+        print "index 1.3.6.1.4.1.789.1.5.11.1.2.\n";
+        exit 0;
+    }
+}
+else
+{
+    do_collect();
+    do_setaggr();
+    do_config_fetch("fetch");
+}
+
+exit 0;
+
+__END__

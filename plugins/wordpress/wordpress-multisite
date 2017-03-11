@@ -1,0 +1,122 @@
+#!/bin/sh
+# wordpress-multisite plugin
+: <<=cut
+=head1 NAME
+
+Wordpress-Multisite Munin Plugin
+
+A Munin plugin to monitor posts, comments and pingbacks from every multisite instance.
+It uses multigraphs and also shows the combined number of posts, comments, pingbacks, instances and users.
+
+Most database queries came from the wordpress-mu-plugin which was written by Andre Darafarin and Chris Bair
+
+=head1 CONFIGURATION
+
+The plugin need access to the wordpress database
+
+=head2 Config file
+
+Create the config file plugin-conf.d/wordpress with the following values:
+
+  [wordpress*]
+  env.mysqlopts		# I.e. -uroot -prootpass
+  env.mysqlconnection	# Defaults to -hlocalhost
+  env.database		# I.e. wordpress
+  env.dbprefix		# Defaults to wp_
+  env.networksize	# Blogs are ordered by id in multigraph view. This value should contain the numbers
+  			# of digits that are needed to fit all the blog id's in. This value influences the
+			# designation of data to munin and it will start collecting fresh data if you change
+			# this number. Defaults to 2, (so networks with <= 99 blogs will be sorted correctly)
+
+=head1 VERSION
+
+Version 0.4 (2017-01-13)
+
+=head1 AUTHOR
+
+Jonas Palm <jonaspalm . posteo . de>
+
+=head1 LICENSE
+
+GPLv3 or higher
+=cut
+
+# fill vars
+DB_OPTIONS=${mysqlopts}
+DB_CONNECTION=${mysqlconnection:--hlocalhost}
+DB_NAME=${database}
+DB_PREFIX=${dbprefix:-wp_}
+NETWORK_SIZE=${networksize:-2}
+
+MYSQL_CMD=$(which mysql)
+
+# wp_get dataname [blogid]
+wp_get() {
+	local DB_QUERY=
+	local BLOGID=
+	if [ -n "$2" ] && [ "$2" -gt "1" ]; then
+		# DB prefix for every wordpress instance in the network
+		# Nr 1 is the main network blog and doesn't has a prefix
+		BLOGID=${2}_
+	fi
+
+	case $1 in
+		comments) DB_QUERY="SELECT COUNT(*) FROM ${DB_PREFIX}${BLOGID}comments WHERE comment_approved = '1' AND comment_type = '';" ;;
+		ids) DB_QUERY="SELECT blog_id FROM ${DB_PREFIX}blogs;" ;;
+		pingbacks) DB_QUERY="SELECT COUNT(*) FROM ${DB_PREFIX}${BLOGID}comments WHERE comment_approved = '1' AND comment_type = 'pingback';" ;;
+		posts) DB_QUERY="SELECT COUNT(*) FROM ${DB_PREFIX}${BLOGID}posts WHERE post_status = 'publish' AND post_password = '' AND post_type = 'post';" ;;
+		title) DB_QUERY="SELECT option_value FROM ${DB_PREFIX}${BLOGID}options WHERE option_name = 'siteurl';" ;;
+		users) DB_QUERY="SELECT COUNT(*) FROM ${DB_PREFIX}users;"
+	esac
+
+	"$MYSQL_CMD" $DB_CONNECTION $DB_OPTIONS "$DB_NAME" --column-names=0 -s --execute="$DB_QUERY"
+}
+
+# whole network
+if [ "$1" = "config" ]; then
+	echo "multigraph wordpress"
+	echo "graph_title Wordpress Mulitsite"
+	echo "graph_order instances users posts comments pingbacks"
+	echo "graph_vlabel Wordpress"
+	echo "graph_category cms"
+	echo "graph_info Some Statistics of Wordpress"
+	echo "instances.label Instances"
+	echo "users.label Users"
+	echo "posts.label Posts"
+	echo "comments.label Comments"
+	echo "pingbacks.label Pingbacks"
+else
+	for n in $(wp_get ids); do
+		POSTS=$((POSTS + $(wp_get posts "$n")))
+		COMMENTS=$((COMMENTS + $(wp_get comments "$n")))
+		PINGBACKS=$((PINGBACKS + $(wp_get pingbacks "$n")))
+		CNT=$((CNT + 1))
+	done
+
+	echo "multigraph wordpress"
+	echo "posts.value $POSTS"
+	echo "comments.value $COMMENTS"
+	echo "pingbacks.value $PINGBACKS"
+	echo "instances.value $CNT"
+	echo "users.value $(wp_get users)"
+fi
+
+# single blogs
+for n in $(wp_get ids); do
+	blogid_sortable="$(printf "%0${NETWORK_SIZE}d" "$n")"
+
+	if [ "$1" = "config" ]; then
+		echo "multigraph wordpress.site_${blogid_sortable}"
+		echo "graph_title $(wp_get title "$n")"
+		echo "graph_order posts comments pingbacks"
+		echo "graph_vlabel Wordpress ID ${blogid_sortable}"
+		echo "posts.label Posts"
+		echo "comments.label Comments"
+		echo "pingbacks.label Pingbacks"
+	else
+		echo "multigraph wordpress.site_${blogid_sortable}"
+		echo "posts.value $(wp_get posts "$n")"
+		echo "comments.value $(wp_get comments "$n")"
+		echo "pingbacks.value $(wp_get pingbacks "$n")"
+	fi
+done

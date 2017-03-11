@@ -1,0 +1,116 @@
+#! /usr/bin/perl
+# -*-  perl -*-
+#
+# $Id: uustat,v 1.2 2010-05-12 11:05:00 joey Exp $
+#
+# Plugin to UUCP traffic.
+#
+# Parameters understood:
+#
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+#
+# Environment
+#       exclude: space separated list hosts to exclude.
+#       host.warning: Warning packages threshold, default none.
+#       host.critical: Critical packages threshold, default none.
+#
+# Magic markers (optional - used by munin-config and installation scripts):
+#
+#  Copyright (C) 2010 Joey Schulze <joey@infodrom.org>
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; version 2 dated June, 1991.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program;  if not, write to the Free Software
+#  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111, USA.
+#
+# Source: http://www.infodrom.org/Infodrom/tools/munin.html
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use warnings;
+use Munin::Plugin;
+
+my $uustat = '/usr/bin/uustat';
+
+my @exclude = split(/\s+/, $ENV{'exclude'} || '');
+
+sub hosts
+{
+    my @hosts;
+    my $cmd = $uustat . ' -m |';
+    open my $up, $cmd or exit;
+    while (<$up>) {
+	push @hosts, (split / /)[0];
+    }
+    close $up;
+
+    return @hosts;
+}
+
+sub count_jobs
+{
+    my $host = shift;
+    my $cmd = $uustat . ' -s ' . $host . ' |';
+    my $count = 0;
+    open my $up, $cmd or exit;
+    do $count++ while (<$up>);
+    close $up;
+
+    return $count;
+}
+
+sub host_excluded
+{
+    do {return 1 if $_ eq $_[0]} foreach @exclude;
+    return 0;
+}
+
+if (@ARGV > 0 && $ARGV[0] eq 'autoconf') {
+    if (-x $uustat) {
+	print "yes\n";
+	exit 0;
+    } else {
+        print "no\n";
+        exit 1;
+    }
+}
+
+if (@ARGV > 0 && $ARGV[0] eq 'config') {
+
+    print "graph_title UUCP usage \n";
+    print "graph_args -l 0\n";
+    print "graph_vlabel packages\n";
+    print "graph_scale no\n";
+    print "graph_category mail\n";
+
+    foreach my $host (hosts) {
+	next if host_excluded $host;
+	$host = clean_fieldname $host;
+	my $warning = $ENV{$host.'.warning'} || undef;
+	my $critical = $ENV{$host.'.critical'} || undef;
+
+	printf "%s.label %s\n", $host, $host;
+	printf "%s.warning %d\n", $host, $warning if defined $warning;
+	printf "%s.critical %d\n", $host, $critical if defined $critical;
+    }
+    exit 0;
+}
+
+foreach my $host (hosts) {
+    next if host_excluded $host;
+    my $count = count_jobs $host;
+    $host = clean_fieldname $host;
+
+    printf "%s.value %d\n", $host, $count;
+}

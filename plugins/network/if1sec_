@@ -1,15 +1,11 @@
 #! /bin/sh
-# Currently the plugin does *not* autostart
-#
-# It has to be launched via rc.d :
-# munin-run if1sec_eth0 acquire
 
-pluginfull="$0"                 # full name of plugin
-plugin="${0##*/}"               # name of plugin
+pluginfull="$0"			# full name of plugin
+plugin="${0##*/}"		# name of plugin
 pidfile="$MUNIN_PLUGSTATE/munin.$plugin.pid"
 cache="$MUNIN_PLUGSTATE/munin.$plugin.value"
 
-IFACE="${0##*/if1sec_}"         # interface
+IFACE="${0##*/if1sec_}"		# interface
 
 if [ ! -r "/sys/class/net/$IFACE/statistics/tx_bytes" ]
 then
@@ -19,44 +15,86 @@ fi
 
 if [ "$1" = "acquire" ]
 then
-        (
-                while sleep 1
-                do
-                        echo $(
-                                date +%s
-                                cat /sys/class/net/$IFACE/statistics/tx_bytes
-                                cat /sys/class/net/$IFACE/statistics/rx_bytes
-                        )
-                done | awk "{
-                                print \"${IFACE}_tx.value \" \$1 \":\" \$2;
-                                print \"${IFACE}_rx.value \" \$1 \":\" \$3;
-				system(\"\");
-                        }" >> $cache
-        ) &
-        echo $! > $pidfile
-        exit 0
+	(
+		exec <&- >&- 2>&-
+		while sleep 1
+		do
+			read tx < /sys/class/net/$IFACE/statistics/tx_bytes
+			read rx < /sys/class/net/$IFACE/statistics/rx_bytes
+			echo "$tx $rx"
+		done | awk "{
+				now = systime()
+				print \"${IFACE}_tx.value \" now \":\" \$1
+				print \"${IFACE}_rx.value \" now \":\" \$2
+				system(\"\")
+			}" >> $cache
+	) &
+	echo $! > $pidfile
+	exit 0
 fi
 
 
 if [ "$1" = "config" ]
 then
-        cat <<EOF
+	cat <<EOF
 graph_title Interface 1sec stats for ${IFACE}
-graph_category 1sec::network
-graph_data_size custom 1d, 10s for 1w, 1m for 1t, 5m for 1y
-graph_vlabel Bytes
+graph_category network
+graph_data_size custom 1d, 10s for 1w, 1m for 1t, 5m for 450d
+graph_vlabel bits/sec
 update_rate 1
-${IFACE}_tx.label ${IFACE} TX bytes
+${IFACE}_tx.label ${IFACE} TX bits
+${IFACE}_tx.cdef ${IFACE}_tx,8,*
 ${IFACE}_tx.type DERIVE
 ${IFACE}_tx.min 0
-${IFACE}_rx.label ${IFACE} RX bytes
+${IFACE}_rx.label ${IFACE} RX bits
+${IFACE}_rx.cdef ${IFACE}_rx,8,*
 ${IFACE}_rx.type DERIVE
 ${IFACE}_rx.min 0
 EOF
-        exit 0
+	# If max speed is easily available, report it.	More complex
+	# code could be copied from "if_".
+	if [ -r /sys/class/net/$IFACE/speed ]
+	then
+		SPEED=$(cat /sys/class/net/$IFACE/speed)
+		echo "${IFACE}_rx.max" $((SPEED / 8 * 1000000))
+		echo "${IFACE}_tx.max" $((SPEED / 8 * 1000000))
+		echo "${IFACE}_rx.info Received traffic on the $IFACE interface. Maximum speed is ${SPEED} Mbps."
+		echo "${IFACE}_tx.info Transmitted traffic on the $IFACE interface. Maximum speed ${SPEED} Mbps."
+	fi
+	exit 0
 fi
 
-# values
+# Autorun logic
+running=true
+if [ ! -e ${cache} ]
+then
+	# no cache file
+	running=false
+elif [ ! -s ${cache} ]
+then
+	# empty cache file
+	if [ -s ${pidfile} ]
+	then
+		# kill -0 will return success if this user is allowed to send
+		# a signal to the process.  This means the PID exists and
+		# belongs to the plugin user, which should have few false
+		# positives.
+		if ! kill -0 $(cat ${pidfile})
+		then
+			running=false
+		fi
+	else
+		running=false
+	fi
+fi
+if ! $running
+then
+	$0 acquire &
+	# wait a little so we have some data to report
+	sleep 3
+fi
+
+# Finally: Print collected values, truncate to mark spot.
 cat ${cache}
 > ${cache}
 

@@ -1,0 +1,133 @@
+#!/usr/bin/php
+<?php
+/**
+ * Moodle files
+ * Munin plugin to count users files number and size
+ *
+ * It's required to define a container entry for this plugin in your
+ * /etc/munin/plugin-conf.d/moodle.conf
+ *
+ * @example Example entry for configuration:
+ * [moodle*]
+ * env.type mysql
+ * env.db moodle
+ * env.user mysql_user
+ * env.pass mysql_pass
+ * env.host localhost
+ * env.port 3306
+ * env.table_prefix mdl_
+ *
+ * @author Arnaud Trouvé <ak4t0sh@free.fr>
+ * @version 1.0 2014
+ *
+ */
+$dbh = null;
+$db = getenv('db');
+$type = getenv('type');
+$host = getenv('host');
+$user = getenv('user');
+$pass = getenv('pass');
+$table_prefix = getenv('table_prefix');
+$port = getenv('port');
+if (!$port)
+    $port = 3306;
+
+
+try {
+    $dsn = $type . ':host=' . $host . ';port=' . $port . ';dbname=' . $db;
+    $dbh = new PDO($dsn, $user, $pass);
+} catch (Exception $e) {
+    echo "Connection failed\n";
+    exit(1);
+}
+
+
+$data = array();
+if (($stmt = $dbh->query("SELECT COUNT(id) as nbfiles, mimetype, SUM(filesize) as totalfilesize FROM {$table_prefix}files  WHERE filesize > 0 GROUP BY mimetype")) !== false) {
+    foreach($stmt->fetchAll(PDO::FETCH_OBJ) as $entry) {
+        $mimetype = preg_split('#/#', $entry->mimetype);
+        if (count($mimetype) > 0) {
+            if (!array_key_exists($mimetype[0], $data)) {
+                $data[$mimetype[0]] = new stdClass();
+                $data[$mimetype[0]]->totalfiles = 0;
+                $data[$mimetype[0]]->filesize = 0;
+            }
+            $data[$mimetype[0]]->totalfiles += $entry->nbfiles;
+            $data[$mimetype[0]]->filesize += $entry->totalfilesize;
+        }
+    }
+    ksort($data);
+}
+
+if (count($argv) === 2 && $argv[1] === 'config') {
+    echo "multigraph file_number\n";
+    echo "graph_title Moodle Files Number\n";
+    echo "graph_args --base 1000 --lower-limit 0\n";
+    echo "graph_vlabel files\n";
+    echo "graph_category cms\n";
+    echo "graph_scale no\n";
+    echo "graph_total total\n";
+    echo "graph_info Displays the total number of moodle users files and repartition by type\n";
+
+    $draw = "AREA";
+    foreach (array_keys($data) as $mimetype) {
+        echo $mimetype."_number.label $mimetype\n";
+        echo $mimetype."_number.min 0\n";
+        echo $mimetype."_number.draw $draw\n";
+        $draw = "STACK";
+    }
+    echo "multigraph file_size\n";
+    echo "graph_title Moodle Files Size\n";
+    echo "graph_args --base 1024 --lower-limit 0\n";
+    echo "graph_vlabel size\n";
+    echo "graph_category cms\n";
+    echo "graph_total total\n";
+    echo "graph_info Displays the total size of moodle users files and repartition by type\n";
+
+    $draw = "AREA";
+    foreach (array_keys($data) as $mimetype) {
+        echo $mimetype."_size.label $mimetype\n";
+        echo $mimetype."_size.min 0\n";
+        echo $mimetype."_size.draw $draw\n";
+        $draw = "STACK";
+    }
+    exit(0);
+}
+
+echo "multigraph file_number\n";
+echo "graph_title Moodle Files Number\n";
+echo "graph_args --base 1000 --lower-limit 0\n";
+echo "graph_vlabel files\n";
+echo "graph_category cms\n";
+echo "graph_scale no\n";
+echo "graph_total total\n";
+echo "graph_info Displays the total number of moodle users files and repartition by type\n";
+
+$draw = "AREA";
+foreach (array_keys($data) as $mimetype) {
+    echo $mimetype."_number.label $mimetype\n";
+    echo $mimetype."_number.min 0\n";
+    echo $mimetype."_number.draw $draw\n";
+    $draw = "STACK";
+}
+foreach ($data as $mimetype => $entry) {
+    echo $mimetype."_number.value ".$entry->totalfiles."\n";
+}
+echo "multigraph file_size\n";
+echo "graph_title Moodle Files Size\n";
+echo "graph_args --base 1024 --lower-limit 0\n";
+echo "graph_vlabel size\n";
+echo "graph_category cms\n";
+echo "graph_total total\n";
+echo "graph_info Displays the total size of moodle users files and repartition by type\n";
+
+$draw = "AREA";
+foreach (array_keys($data) as $mimetype) {
+    echo $mimetype."_size.label $mimetype\n";
+    echo $mimetype."_size.min 0\n";
+    echo $mimetype."_size.draw $draw\n";
+    $draw = "STACK";
+}
+foreach ($data as $mimetype => $entry) {
+    echo $mimetype."_size.value ".$entry->filesize."\n";
+}

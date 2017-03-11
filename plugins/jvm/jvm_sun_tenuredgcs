@@ -1,0 +1,92 @@
+#!/usr/bin/perl -w
+
+# Sun JVM tenured GC statistics.  Parses a verbose log of tenured GC
+# stats.  Reads the entire log file and sums time in seconds spent on
+# GC and number of times it is performed.  Thus we obtain counters.
+# The counters are reset when the log is rotated. (note: the minorgcs
+# plugin uses a state file, we did not make it a priority to use a
+# state file in this plugin...)
+
+# The two numbers are graphed in _one_ graph.  Where it has been used
+# until now these two numbers have been in the same order of
+# magnitude.
+
+# Configuration (common with the other sun_jvm_* plugins in this family):
+# [jvm_sun_*]
+#    env.logfile /var/foo/java.log  (default: /var/log/munin/java.log)
+#    env.graphtitle                 (default: "Sun Java")
+
+# You need to configure your Sun JVM with these options:
+# -verbose:gc 
+# -Xloggc:/var/log/app/jvm/gc.log
+# -XX:+PrintGCTimeStamps
+# -XX:+PrintGCDetails
+
+# History: 
+
+# This plugin was developed by various people over some time - no logs
+# of this has been found. - In 2006 significant contributions was
+# financed by NRK (Norwegian Broadcasting Coproration) and performed
+# by Nicolai Langfeldt of Linpro AS in Oslo, Norway.
+
+# $Id: $
+
+use strict;
+use warnings;
+
+# Full path to jvm log file
+my $logfile = $ENV{logfile} || "/var/log/app/jvm/gc.log";
+my $grtitle = $ENV{graphtitle} || 'Sun Java';
+
+# Title that appears on munin graph
+my $title = "$grtitle tenured GCs pr second";
+
+# Extended information that appears below munin graph
+my $info = "Amount is the number of Tenured GC pr. second.\nSeconds spent is the total time spent on those Tenured GCs.";
+
+my $record        = "";
+my %elements;
+
+# Print config information to munin server
+if ( $ARGV[0] and $ARGV[0] eq "config" ) {
+  print "graph_title $grtitle tenured GCs pr minute\n";
+  print "graph_period minute\n";
+  print "graph_category virtualization\n";
+  print "graph_args --lower-limit 0\n";
+  print "graph_info $info\n";
+  print "activity.label Number of GCs\n";
+  print "activity.type DERIVE\n";
+  print "activity.min 0\n";
+  print "time.label Seconds spent on GCs\n";
+  print "time.type DERIVE\n";
+  print "time.min 0\n";
+  exit 0;
+}
+
+# Scan through the log file and keep the last instance of a
+# Tenured record in $record.
+open( FILE, "< $logfile" ) or die "Can't open $logfile : $!";
+my $counter = 0;
+my $record_time_spent;
+my $time_spent;
+while (<FILE>) {
+    chomp;
+    if (m/.+Tenured.+/) {
+	$record = $_;
+    } elsif (m/^:.+/) {
+	$record .= $_;
+    }
+    if ( $record =~ m/(\d+)\..+Tenured.+(\d+\.\d+) secs\]/ ) {
+#	print "Record: $record\n";
+	$record_time_spent = $2;
+#	print "Time spent: ",$record_time_spent,"\n";
+
+	$counter++;
+	$time_spent += $record_time_spent;
+    }
+    $record = "";
+}
+close FILE;
+
+print "activity.value $counter\n";
+print "time.value ",int($time_spent),"\n";

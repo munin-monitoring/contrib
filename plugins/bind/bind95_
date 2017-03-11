@@ -1,0 +1,140 @@
+#!/usr/bin/perl
+#
+# Copyright Jean-Samuel Reynaud <js.reynaud@free.fr>
+# Licenced under GPL v2
+#
+# We use this script to produce graph with munin for dns requests
+# This script must have his name start with bind95_
+# bind95_ : Global bind statistic
+# bind95_test.com : Bind statistic for test.com zone (no view)
+# bind95_test.com@internal : Bind statistic for test.com zone (view internal)
+# This version work with bind 9.5
+#
+# Thanks for Benjamin Pineau for perl cleaning and corrections
+#
+# You should have to add the following lines to you plugin configuration
+# (/etc/munin/plugin-conf.d/munin-node):
+#[bind95_*]
+#user root
+#stat_file /var/cache/bind/named.stats
+#rndc /usr/sbin/rndc
+#
+#
+# Magic markers
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use warnings;
+use Digest::MD5 qw(md5_hex);
+
+# change those to reflect your bind configuration (use plugin configuration)
+# stat file
+my $stat_file = $ENV{'stat_file'} || "/var/cache/bind/named.stats";
+# rndc path
+my $rndc = $ENV{'rndc'} || "/usr/sbin/rndc";
+
+
+my $domain = $0;
+if ($domain =~ m/^.*bind95_[\w\d\._\-]+@[\w\d\._\-]+?$/) {
+    $domain =~ s/^.*bind95_([\w\d\._\-]*)@([\w\d\._\-]+)?$/$1 (view: $2)/;
+} elsif ($domain =~ m/^.*bind95_[\w\d\._\-]+$/) {
+    $domain =~ s/^.*bind95_([\w\d\._\-]+)$/$1/;
+} else {
+    $domain = "View: _bind";
+}
+
+my @counters = (
+'IPv4 requests received',
+'requests with EDNS(0) received',
+'TCP requests received',
+'auth queries rejected',
+'recursive queries rejected',
+'transfer requests rejected',
+'update requests rejected',
+'responses sent',
+'truncated responses sent',
+'responses with EDNS(0) sent',
+'queries resulted in successful answer',
+'queries resulted in authoritative answer',
+'queries resulted in non authoritative answer',
+'queries resulted in referral answer',
+'queries resulted in nxrrset',
+'queries resulted in SERVFAIL',
+'queries resulted in NXDOMAIN',
+'queries caused recursion',
+'duplicate queries received',
+'queries dropped',
+'other query failures',
+'requested transfers completed',
+'transfer requests succeeded',
+'IPv4 notifies sent',
+'IPv4 notifies received',
+'notifies rejected',
+'IPv4 SOA queries sent',
+'IPv4 IXFR requested'
+);
+
+
+# Parse the statistic file
+sub parseFile {
+    my $dom = shift @_;
+    open(IN,"<$stat_file") or die "Can't open $stat_file : $!";
+    my $current_zone = "";
+    while (<IN>) {
+        chomp;
+        my $l = $_;
+
+        if ($l =~ /\[/ ) {
+            $l =~ s/\[//g;
+            $l =~ s/\]//g;
+            $current_zone = $l;
+        } else {
+            $l =~ s/^ *//g;
+            if ($l =~ /^[0-9]/ && $current_zone eq $domain) {
+                my ($val,$desc) = split(' ',$l,2);
+                if (grep { $desc eq $_ } @counters) {
+                    printf "%s.value %u\n",md5_hex($desc),$val;
+                }
+            }
+        }
+    }
+    close(IN);
+}
+
+
+
+# Config mode
+if ( defined($ARGV[0]) && $ARGV[0] eq "config" ) {
+    printf "graph_title Dns requests %s\n",($domain eq "View: _bind" ? " all domains":$domain);
+    printf "graph_vlabel requests/s\n";
+    printf "graph_category dns\n";
+    printf "graph_info This graph display dns requests for %s\n",($domain eq "View: _bind" ? "all domains":$domain);
+
+    foreach(@counters) {
+        my $s = $_;
+        printf "%s.label %s\n",md5_hex($s),$s;
+        printf "%s.type DERIVE\n",md5_hex($s);
+        printf "%s.min 0\n",md5_hex($s);
+    }
+    exit 0;
+}
+
+if ( defined($ARGV[0]) && $ARGV[0] eq "autoconf" ) {
+    if (! -f $stat_file) {
+        printf "Unable to file bind stat file on %s",$stat_file;
+        exit 1;
+    }
+    if (! -f $rndc) {
+        printf "Unable to file rndc tool (configured : %s)",$rndc;
+        exit 1;
+    }
+    exit 0;
+}
+
+# Remove old stat file
+unlink ($stat_file);
+# Ask to bind to build new one
+`$rndc stats`;
+# Parse the stat file and return result
+parseFile($domain);

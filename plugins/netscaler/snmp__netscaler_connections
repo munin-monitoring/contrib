@@ -1,0 +1,236 @@
+#!/usr/bin/perl
+# -*- perl -*-
+# ---------------------------------------------------- #
+# File : netscaler_conn
+# Author: Sandro Wefel
+# based on Script by Damien SIAUD
+# Date : 05/05/2011
+# Modified : 05/05/2011
+# ---------------------------------------------------- #
+# This script require Net::SNMP
+#
+# Netscaler plugin for munin
+#
+# License Information:
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>. 
+#
+# ---------------------------------------------------- # 
+
+=head1 NAME
+
+netscaler_conn - Munin plugin to monitor netscaler connections
+
+=head1 CONFIGURATION
+
+Make a symlink from netscaler_conn_ to /etc/munin/plugins/netscaler_conn_<nsfqdn>. 
+You can omit <nsfqdn>, then you need the env variable B<host>.
+
+To configure the plugin, use ENV variables.
+
+Add something lile this to /etc/munin/plugin-conf.d/<conf>
+ [netscaler_conn_*]
+ env.community CommunityName
+
+Variables:
+
+=over
+
+=item ENV B<host> netscaler host as FQDN or IP I<default is the nsfqdn-suffix from pluginname>
+
+=item ENV B<port> I<default 161>
+
+=item ENV B<community> I<default "public">
+
+=item ENV B<timeout> in seconds I<default 5>
+
+=back
+
+=head1 AUTHORS
+
+=over
+
+=item Sandro Wefel <wefel@unixos.de>
+
+=item based on scripts by Jimmy Olsen, Damien SIAUD
+
+=back
+
+=head1 LICENSE
+
+GNU General Public License
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+use Net::SNMP;
+
+use Munin::Plugin;
+
+use vars qw($script_name $script_version $o_host $o_community $o_port $o_timeout);
+
+use strict;
+
+
+# --------------------------- globals -------------------------- #
+
+$script_name = "netscaler_conn";
+$script_version = "0.1";
+
+$o_host = undef;
+$o_community = undef;
+$o_port = 161;
+
+my $return_str = "";
+
+# ---------------------------- snmp ---------------------------- #
+
+my $oid_prefix = "1.3.6.1.4.1.5951";
+my $oid_build_version = $oid_prefix.".4.1.1.1.0";
+my $oid_ssl_session = $oid_prefix.".4.1.1.47.296.0";	# current ssl sessions
+my $oid_client_conn = $oid_prefix.".4.1.1.46.2.0";	# current client connections
+my $oid_server_conn = $oid_prefix.".4.1.1.46.1.0";	# current server connections
+
+# ---------------------------- main ----------------------------- #
+
+
+my $DEBUG = 0;
+
+my $o_host      = $ENV{host}      || undef;
+my $o_port      = $ENV{port}      || 161;
+my $o_community = $ENV{community} || "public";
+my $o_timeout   = $ENV{timeout}   || 5;
+
+if ($ARGV[0] and $ARGV[0] eq "autoconf") {
+		print "yes\n";
+		exit 0;
+}
+
+if (! defined $o_host ) {
+	$0 =~ /.*onnections?_(.+)*$/;
+	$o_host = $1;
+	die "No host provided or unabled to extract hostname from $0" unless defined $o_host;
+}
+
+if ($ARGV[0] and $ARGV[0] eq "config") {
+    print "graph_args --base 1024 -l 0\n";
+    print "graph_vlabel Connections\n";
+    print "graph_title Netscaler Connections for $o_host\n";
+    print "graph_category loadbalancer\n";
+    print "graph_period second\n";
+    print "graph_info This graph shows the netscaler TCP connections.\n";
+    print "graph_order ",
+	"client ",
+	"server ",
+	"ssl ",
+	"\n";
+    print "client.label client\n";
+    print "client.draw AREA\n";
+    print "client.info Client connections.\n";
+    print "server.label server\n";
+    print "server.draw STACK\n";
+    print "server.info Server connections.\n";
+    print "ssl.label SSL sessions\n";
+    print "ssl.draw LINE2\n";
+    print "ssl.info Currently active SSL sessions.\n";
+
+    for my $field qw(client server ssl) {
+        print_thresholds($field);
+    }
+    exit 0;
+}
+
+
+my $session = &open_session();
+if (!defined($session)) {
+	print "ERROR opening session\n";
+	exit 1;
+}
+
+my $counter1;
+# TCP
+$counter1 = &get_oid_values($session,$oid_client_conn);
+$return_str .= "client.value $counter1\n";
+$counter1 = &get_oid_values($session,$oid_server_conn);
+$return_str .= "server.value $counter1\n";
+# SSL
+$counter1 = &get_oid_values($session,$oid_ssl_session);
+$return_str .= "ssl.value $counter1\n";
+
+&close_session($session);
+
+print "$return_str"; 
+exit 0;
+
+# --------------------------- functions ------------------------- #
+
+sub open_session {
+	my ($sess, $str) = Net::SNMP->session(
+		-hostname	=> $o_host,
+		-community	=> $o_community,
+		-port		=> $o_port,
+		-timeout	=> $o_timeout
+	);
+
+	$return_str = $str;
+
+	return $sess;
+}
+
+
+sub close_session {
+	my ($sess) = @_;
+
+	if(defined($sess)){
+		$session->close;
+	}
+}
+
+sub get_buildversion {
+	my ($session) = @_;
+       	my $build_version;
+	
+	my $result = $session->get_request(
+		      -varbindlist => [$oid_build_version]
+	);
+
+	if (!defined($result)) {
+		return "na";
+	}
+	else {
+		$build_version = $result->{$oid_build_version};
+		return"Build version : ".$build_version;
+	}
+}
+
+sub get_oid_values {
+        my ($session,$oid_string) = @_;
+        my $return_value;
+
+        my $result = $session->get_request(
+                -varbindlist => [$oid_string]
+        );
+
+        if (!defined($result)) {
+                return "na";
+        }
+        else {  
+                $return_value = $result->{$oid_string};
+                return $return_value;
+        }
+}
+

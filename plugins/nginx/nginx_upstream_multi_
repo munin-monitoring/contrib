@@ -25,9 +25,12 @@
 # Use it in your site configuration (/etc/nginx/sites-enabled/anything.conf):
 # access_log /var/log/nginx/upstream.log upstream;
 #
+# Attention! Because munin-node does not have read permission for nginx log files we need to run it as root.
+#
 # And specify some options in /etc/munin/plugin-conf.d/munin-node:
 #
 #     [nginx_upstream_multi_upstream]
+#     user root
 #     env.graphs cache http time request
 #     env.log /var/log/nginx/upstream.log
 #     env.upstream 10.0.0.1:80 10.0.0.2:8080 unix:/tmp/upstream3
@@ -130,7 +133,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "config":
     print "multigraph nginx_upstream_multi_%s" % siteName.replace(".", "_")
     print "graph_title Requests number"
     print "graph_vlabel rps"
-    print "graph_category nginx"
+    print "graph_category webserver"
     for upstream in upstreams.keys():
         print "us%s_requests.label %s" % (sanitize(upstream), upstream)
 
@@ -141,7 +144,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "config":
             print "multigraph nginx_upstream_multi_%s.%s_requests" % (sanitize(siteName), sanitize(upstream))
             print "graph_title Requests number - %s" % upstream
             print "graph_vlabel rps"
-            print "graph_category nginx"
+            print "graph_category webserver"
             print "us%s_requests.label %s" % (sanitize(upstream), upstream)
             print ""
 
@@ -152,7 +155,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "config":
             print "multigraph nginx_upstream_multi_%s.%s_times" % (sanitize(siteName), sanitize(upstream))
             print "graph_title Request time - %s" % upstream
             print "graph_vlabel sec."
-            print "graph_category nginx"
+            print "graph_category webserver"
             print "us%s_times.label average" % (sanitize(upstream))
             for percentile in percentiles:
                 print "us%s_times_percentile_%s.label %s-percentile" % (sanitize(upstream), percentile, percentile)
@@ -165,7 +168,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "config":
             print "multigraph nginx_upstream_multi_%s.%s_statuses" % (sanitize(siteName), sanitize(upstream))
             print "graph_title HTTP - %s" % upstream
             print "graph_vlabel rps"
-            print "graph_category nginx"
+            print "graph_category webserver"
             keylist = httpStatusList.keys()
             keylist.sort()
             for status in keylist:
@@ -179,7 +182,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "config":
             print "multigraph nginx_upstream_multi_%s.%s_cache" % (sanitize(siteName), sanitize(upstream))
             print "graph_title Cache - %s" % upstream
             print "graph_vlabel rps"
-            print "graph_category nginx"
+            print "graph_category webserver"
             for status in cacheStatusList:
                 print "us%s_%s_cache.label %s" % (sanitize(status), sanitize(upstream), status)
             print ""
@@ -199,8 +202,8 @@ else:
 
     try:
         logHandle = open(logPath, "r")
-    except Exception:
-        print "Log file %s not readable" % logPath
+    except Exception as e:
+        print "Log file %s not readable: %s" % (logPath, e.strerror)
         sys.exit(1)
 
     try:
@@ -278,7 +281,8 @@ else:
         lastByteHandle = open(lastBytePath, "w")
         lastByteHandle.write(str(logHandle.tell()))
         lastByteHandle.close()
-    except Exception:
+    except Exception as e:
+        print e.strerror
         sys.exit(1)
 
     logHandle.close()

@@ -1,0 +1,80 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+openvpn_as_users -Indicate the number of users and the license limit
+
+=head1 CONFIGURATION
+
+[openvpn_*]
+user root
+
+=head1 AUTHOR
+
+Ricardo Fraile <rfrail3@yahoo.es>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGICK MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+
+
+
+if [ "$1" = "autoconf" ]; then
+	echo yes 
+	exit 0
+fi
+
+# Script folder
+D_BIN="/usr/local/openvpn_as/scripts"
+# Number of clients
+VAL1=`$D_BIN/sacli VPNSummary | grep clients | awk '{print $2}'`
+# Limit of clients by license
+VAL2=`$D_BIN/liman info | grep -o  "[0-9]*"`
+# Warn value
+WARN=80
+
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title OpenVPN Users'
+	echo 'graph_args --base 1000 -l 0 '
+	echo 'graph_vlabel Users'
+	echo 'graph_scale no'
+	echo 'graph_category network'
+	echo 'graph_info Indicate the number of vpn users and the license limit.'
+
+        echo "users.label Users"
+        echo "users.type GAUGE"
+        echo "users.draw AREA"
+        echo "users.min 0"
+	
+        echo "users.warning $((VAL2 * $WARN / 100))"	
+        echo "users.critical $VAL2"	
+
+
+        echo "limit.label Limit"
+        echo "limit.type GAUGE"
+        echo "limit.min 0"
+
+
+	exit 0
+fi
+
+
+
+echo "users.value $VAL1"
+echo "limit.value $VAL2"
+	
+

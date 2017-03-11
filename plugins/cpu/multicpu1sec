@@ -1,0 +1,92 @@
+#!/bin/bash
+# (c) 2012  - Bushmills
+# License : GPLv2
+
+#%# family=auto
+#%# capabilities=autoconf
+
+
+interval=1			# mpstat sampling interval
+timeout=1200			# 20 minutes daemon watchdog timeout
+watchdog=60			# test for timeout every $watchdog seconds
+pluginfull="$0"                 # full name of plugin
+plugin="${0##*/}"	        # name of plugin
+pidfile="$MUNIN_PLUGSTATE/munin.$plugin.pid"
+cache="$MUNIN_PLUGSTATE/munin.$plugin.value"
+graph="$plugin"
+section="system:cpu"
+style="AREA"
+cpus=$(grep -c ^processor /proc/cpuinfo)
+
+run_watchdog()  {                 # should also trap kill and term signals 
+   kill -0 $(cat $pidfile) 2> /dev/null || rm -f $pidfile
+}
+
+
+run_acquire()  {
+   echo "$$" > $pidfile
+   LANG=C mpstat -P ALL $interval |
+   awk -v cpus=$cpus '$2>=0&&$2<99 {print $2, systime(), (100-$11)/cpus; system("");}' >> $cache
+   rm -f $pidfile $cache
+}
+
+run_daemon()  {
+   run_watchdog
+   if [ -f $pidfile ]; then
+      touch $pidfile
+   else   
+      $pluginfull acquire &
+   fi
+}
+
+
+# --------------------------------------------------------------------------
+
+run_autoconf() {
+   run=(yes no)
+   type -t mpstat > /dev/null
+   echo "${run[$?]}"
+}
+
+run_config() {
+run_daemon
+cat << EOF
+graph_title $graph
+graph_category $section
+graph_vlabel average cpu use %
+graph_scale no
+graph_total All CPUs 
+update_rate 1
+graph_data_size custom 1d, 10s for 1w, 1m for 1t, 5m for 1y 
+EOF
+cpun=0
+for ((i=0; i<$cpus; i++)); do
+cat << EOF
+cpu${cpun}.label CPU $cpun
+cpu${cpun}.draw $style
+cpu${cpun}.min 0
+EOF
+style=STACK
+((cpun++))
+done
+}
+
+run_fetch()  {
+   run_daemon
+   awk 'NF==3 {print "cpu" $1 ".value " $2 ":" $3}' $cache
+   > $cache
+}
+
+
+run_${1:-fetch}
+exit 0
+
+# export -f functionname     export functionname to subshell, avoiding the need
+#    for locating plugin for subshell calling, when process needs a different
+#    pid. Instead, $SHELL -c functionname  can be used. useful for calling
+#    acquire which needs a different pid than watchdog, otherwise watchdog
+#    could/will kill itself when expiring before the watched process is killed.
+# not a POSIX feature.
+
+# for Munin Plugin Gallery
+# graph_category 1sec

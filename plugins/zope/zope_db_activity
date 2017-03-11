@@ -1,0 +1,41 @@
+#!/usr/bin/python
+
+from sys import argv
+import httplib
+conns = []
+
+# this should really go in plugins.conf
+conns.append(httplib.HTTPConnection("localhost",8080))
+conns.append(httplib.HTTPConnection("localhost",8070))
+
+
+url = "/munin_db_activity.py"
+
+if len(argv) > 1 and argv[1] == 'config':
+
+    print """graph_title Zope Database Activity
+    graph_vlabel Count / 5 min.
+    graph_category appserver
+    graph_info The number of Reads, Stores, and Connections that happens in the ZODB backend. The data comes from the same source as that in the "Recent Database Activity" tab in the zope control panel.""".replace("\n    ","\n")
+    for i in range(0,len(conns)):
+        print """load_count%(i)s.label Z%(i)s Loads
+        store_count%(i)s.label Z%(i)s Stores
+        connections%(i)s.label Z%(i)s Connections""".replace("\n        ","\n") % dict(i=i)
+else:
+    for i in range(0,len(conns)):
+        conns[i].request("GET", url)
+
+        r1 = conns[i].getresponse()
+        #print r1.status, r1.reason
+        #200 OK
+        data = r1.read().strip()
+        conns[i].close()
+        (total_load_count, total_store_count, total_connections) = data.split()
+        id = dict(i=i)
+        print 'load_count%(i)s.value' % id, total_load_count
+        print 'store_count%(i)s.value'% id, total_store_count
+        print 'connections%(i)s.value'% id, total_connections
+                    
+
+
+

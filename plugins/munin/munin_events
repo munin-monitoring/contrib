@@ -1,0 +1,142 @@
+#!/bin/sh
+# -*- sh -*-
+: <<=cut
+
+=head1 NAME
+
+munin_events - Plugin to monitor munin updates
+
+=head1 APPLICABLE SYSTEMS
+
+All systems with "bash", "logtail" and "munin"
+
+=head1 CONFIGURATION
+
+The following is the default configuration
+
+  [munin_events]
+  user munin
+  env.muninupdate /var/log/munin/munin-update.log
+  env.logtail2 /usr/sbin/logtail2
+
+You could trigger alerts on update failures
+
+  [munin_events]
+  env.munin_fatal_critical 0
+  env.munin_error_critical 0
+  env.munin_warning_warning 0
+  env.munin_warning_critical 5
+
+=head1 INTERPRETATION
+
+This plugin shows a graph with one line per munin state:
+INFO, WARNING, ERROR, FATAL.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+  1.2.20160514
+
+=head1 AUTHOR
+
+Viktor Szépe <viktor@szepe.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+
+##############################
+# Includes
+
+# shellcheck disable=SC1090
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+##############################
+# Configurable variables
+muninupdate=${muninupdate:-/var/log/munin/munin-update.log}
+logtail_bin=${logtail_bin:-/usr/sbin/logtail2}
+
+##############################
+# Functions
+
+# Print one value
+do_value() {
+    FIELD="$1"
+    EVENT_LABEL="$2"
+
+    EVENT_COUNT="$("$logtail_bin" -t "$muninupdate" 2> /dev/null | grep -c "^[0-9/: ]\{19\} \[${EVENT_LABEL}\]")"
+    if echo "$EVENT_COUNT" | grep -q "[^0-9]"; then
+        echo "Cannot determine event count" 1>&2
+        exit 10
+    fi
+
+    echo "${FIELD}.value ${EVENT_COUNT}"
+}
+
+# Print the munin values
+values() {
+    do_value 'munin_info' 'INFO'
+    do_value 'munin_warning' 'WARNING'
+    do_value 'munin_error' 'ERROR'
+    do_value 'munin_fatal' 'FATAL'
+    # Set offset
+    "$logtail_bin" "$muninupdate" > /dev/null 1>&2
+    chmod 640 "${muninupdate}.offset"
+}
+
+# Print the munin config
+config() {
+    echo 'graph_title Munin update events groupped by log levels'
+    echo 'graph_info This graph shows INFO, WARNING, ERROR and FATAL events'
+    echo 'graph_category munin'
+    echo 'graph_vlabel Number of events'
+
+    echo 'graph_args --base 1000 -l 0'
+    echo 'graph_total total'
+    echo 'graph_printf %6.0lf'
+
+    echo 'munin_info.label INFO'
+    print_warning munin_info
+    print_critical munin_info
+    echo 'munin_warning.label WARNING'
+    print_warning munin_warning
+    print_critical munin_warning
+    echo 'munin_error.label ERROR'
+    print_warning munin_error
+    print_critical munin_error
+    echo 'munin_fatal.label FATAL'
+    print_warning munin_fatal
+    print_critical munin_fatal
+}
+
+# Print autoconfiguration hint
+autoconf() {
+    if [ -r "${muninupdate}" ] && [ -x "$logtail_bin" ]; then
+        echo "yes"
+    else
+        echo "missing (${muninupdate} or (${logtail_bin})"
+    fi
+    exit
+}
+
+##############################
+# Main
+
+case "$1" in
+    config)
+        config
+        ;;
+    autoconf)
+        autoconf
+        ;;
+    *)
+        values
+        ;;
+esac

@@ -1,0 +1,280 @@
+#!/usr/bin/perl
+# -*- perl -*-
+# ---------------------------------------------------- #
+# File : netscaler_cpu
+# Author: Sandro Wefel
+# based on Script by Damien SIAUD
+# Date : 05/05/2011
+# Modified : 05/05/2011
+# ---------------------------------------------------- #
+# This script require Net::SNMP
+#
+# Netscaler plugin for munin
+#
+# License Information:
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>. 
+#
+# ---------------------------------------------------- # 
+
+=head1 NAME
+
+netscaler_cpu - Munin plugin to monitor CPU usage
+
+=head1 CONFIGURATION
+
+Make a symlink from netscaler_cpu_ to /etc/munin/plugins/netscaler_cpu_<nsfqdn>. 
+You can omit <nsfqdn>, then you need the env variable B<host>.
+
+To configure the plugin, use ENV variables.
+
+Add something lile this to /etc/munin/plugin-conf.d/<conf>
+ [netscaler_cpu_*]
+ env.community CommunityName
+
+Variables:
+
+=over
+
+=item ENV B<host> netscaler host as FQDN or IP I<default is the nsfqdn-suffix from pluginname>
+
+=item ENV B<port> I<default 161>
+
+=item ENV B<community> I<default "public">
+
+=item ENV B<timeout> in seconds I<default 5>
+
+=back
+
+=head1 AUTHORS
+
+=over
+
+=item Sandro Wefel <wefel@unixos.de>
+
+=item based on scripts by Jimmy Olsen, Damien SIAUD
+
+=back
+
+=head1 LICENSE
+
+GNU General Public License
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+use Net::SNMP;
+
+use Munin::Plugin;
+
+use vars qw($script_name $script_version $o_host $o_community $o_port $o_timeout);
+
+use strict;
+
+
+# --------------------------- globals -------------------------- #
+
+$script_name = "netscaler_cpu";
+$script_version = "0.1";
+
+$o_host = undef;
+$o_community = undef;
+$o_port = 161;
+
+my $return_str = "";
+my @cpu_name = ();	
+
+
+# ---------------------------- snmp ---------------------------- #
+
+my $oid_prefix = "1.3.6.1.4.1.5951";
+my $oid_build_version = $oid_prefix.".4.1.1.1.0";
+my $oid_avgcpu_usage = $oid_prefix.".4.1.1.41.1.0";	# cpu utilization (%)
+my $oid_cpu_name = $oid_prefix.".4.1.1.41.6.1.1";	  # name of cpu in NetScaler
+my $oid_cpu_usage = $oid_prefix.".4.1.1.41.6.1.2"; 	# usage per cpu (%)
+
+# ---------------------------- main ----------------------------- #
+
+
+my $DEBUG = 0;
+
+my $o_host      = $ENV{host}      || undef;
+my $o_port      = $ENV{port}      || 161;
+my $o_community = $ENV{community} || "public";
+my $o_timeout   = $ENV{timeout}   || 5;
+
+
+if ($ARGV[0] and $ARGV[0] eq "autoconf") {
+		print "yes\n";
+		exit 0;
+}
+
+if (! defined $o_host ) {
+	$0 =~ /netscaler_cpu_(.+)*$/;
+	$o_host = $1;
+	die "No host provided" unless defined $o_host;
+}
+
+# open session
+my $session = &open_session();
+if (!defined($session)) {
+	print "ERROR opening session\n";
+	exit 1;
+}
+
+# CPU names
+if (&get_cpus($session) lt 1) {
+	print "ERROR getting number of CPUs\n";
+	exit 1;
+};
+
+if ($ARGV[0] and $ARGV[0] eq "config") {
+    print "graph_args --base 1024 -l 0 --upper-limit 100\n";
+    print "graph_vlabel %\n";
+    print "graph_scale no\n";
+    print "graph_title CPU usage for $o_host\n";
+    print "graph_category loadbalancer\n";
+    print "graph_period second\n";
+    print "graph_info This graph shows how CPU time is spent.\n";
+    print "avg.label avg\n";
+    print "avg.draw AREA\n";
+    print "avg.info Average load.\n";
+		foreach my $v (@cpu_name){
+	    print $v.".label ".$v."\n";
+	    print $v.".draw LINE2\n";
+	    print $v.".info CPU usage of ".$v."\n";
+      print_thresholds($v);
+    }
+
+    for my $field qw(avg) {
+        print_thresholds($field);
+    }
+		&close_session($session);
+    exit 0;
+}
+
+
+# Average
+&get_avgcpu_usage($session);
+# per CPU usage
+&get_cpu_usage($session);
+
+
+&close_session($session);
+
+print "$return_str"; 
+exit 0;
+
+# --------------------------- functions ------------------------- #
+
+sub open_session {
+	my ($sess, $str) = Net::SNMP->session(
+		-hostname	=> $o_host,
+		-community	=> $o_community,
+		-port		=> $o_port,
+		-timeout	=> $o_timeout
+	);
+
+	$return_str = $str;
+
+	return $sess;
+}
+
+
+sub close_session {
+	my ($sess) = @_;
+
+	if(defined($sess)){
+		$session->close;
+	}
+}
+
+sub get_buildversion {
+	my ($session) = @_;
+       	my $build_version;
+	
+	my $result = $session->get_request(
+		      -varbindlist => [$oid_build_version]
+	);
+
+	if (!defined($result)) {
+		return "na";
+	}
+	else {
+		$build_version = $result->{$oid_build_version};
+		return"Build version : ".$build_version;
+	}
+}
+
+
+sub get_avgcpu_usage {
+	my ($session) = @_;
+	my $cpu_usage;
+
+	my $result = $session->get_request(
+		-varbindlist => [$oid_avgcpu_usage]
+	);
+
+	if (!defined($result)) {
+		$return_str = "na";
+	}
+	else {
+		$cpu_usage = $result->{$oid_avgcpu_usage};
+		$return_str .= "avg.value ".$cpu_usage."\n";
+	}
+
+}
+
+sub get_cpu_usage {
+  my ($session) = @_;
+  my %cpu_usage;
+
+	my $index=0;
+	my $result = $session->get_table(-baseoid => $oid_cpu_usage);
+
+	if (!defined($result)) {
+		return "na";
+	}
+	else {
+		foreach my $v ($session->var_bind_names()){
+    	$cpu_usage{$cpu_name[$index]} = $session->var_bind_list()->{$v};
+  		$return_str .= $cpu_name[$index] . ".value ".$cpu_usage{$cpu_name[$index]}."\n";
+			$index++;
+    }
+	}
+}
+
+sub get_cpus {
+  my ($session) = @_;
+  my %cpu_usage;
+
+	my $result = $session->get_table(-baseoid => $oid_cpu_name);
+
+	if (!defined($result)) {
+		return 0;
+	}
+	else {
+		@cpu_name = ();	
+		foreach my $n ($session->var_bind_names()) {
+		 		push @cpu_name, $session->var_bind_list()->{$n};
+		}
+
+	}
+
+	my $number=@cpu_name;
+	return $number;
+}

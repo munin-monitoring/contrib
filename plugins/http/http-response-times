@@ -1,0 +1,99 @@
+#!/usr/bin/perl
+use strict;
+
+# HTTP response times for either entire page views 
+# or just the index, depending on configuration.
+# Full or index resource pulling is determined by the suffix of the 
+# script name.  ie. http_response_full or http_response_index
+#
+
+# Parameters:
+# 	
+# 	config
+#
+# Configuration variables:
+#
+#	domain - domain of the server to measure (default takelessons.com)
+#   url[1..n] - url to measure against
+
+my $domain = $ENV{'domain'} || 'http://takelessons.com';
+
+# determine the intended "action" of the script
+# this is determined by the end of the script name
+# http_response_full or http_response_index
+my ($action) = ($0 =~ m/http_response_(\S+)$/);
+$ENV{'action'} = $action;
+if (! $ENV{'action'} =~ m/(full|index)/) {
+    die "invalid action (determined by script suffix)";
+}
+
+my @urls;
+
+#debug mode
+#build urls manually
+if ($ARGV[0] eq "debug") {
+    push(@urls, ( "/",
+               "/san-diego-ca-92106/piano-lessons",
+               "/category/browse",
+               "/cities-music-lessons",
+               "/new-york-music-lessons",
+               "/category/singing-lessons"));
+}
+
+#get the urls - build from configuration variables
+my $i = 1;
+while (defined ($ENV{"url$i"})) {
+    push(@urls, $ENV{"url$i"});
+    $i++;
+}
+if (! @urls) {
+    die "No urls defined\n";
+}
+
+#output configuration and exit - required by Munin
+if (exists $ARGV[0] and $ARGV[0] eq "config") {
+    print "graph_title $domain Site Response Times - $ENV{'action'}\n"; 
+    print "graph_category webserver\n";
+    print "graph_vlabel request time (seconds)\n";
+    print "graph_info Response times for public areas of $domain.\n";
+
+    foreach my $url (@urls) {
+        my $label = $url; 
+        #fix up our label name to be a valid variable name
+        $label =~ s@[^A-Za-z0-9_]@_@g;
+        print "$label.label $url\n";
+        print "$label.type GAUGE\n";
+    }
+
+    exit 0;
+
+}
+
+
+
+#function to make the request and get the response time
+sub req_time {
+    my $url = shift; 
+    my $time;
+    my $outdir = '/tmp/munin/' . int(rand(32000));
+    system("mkdir -p $outdir");
+    if ($ENV{'action'} eq "full") {
+        $time = `/usr/bin/time -f "%e" wget -pq -P $outdir --header "Accept-Encoding: gzip,deflate" "$url" 2>&1`;
+    } elsif ($ENV{'action'} eq "index") {
+        $time = `/usr/bin/time -f "%e" wget -q -P $outdir --header "Accept-Encoding: gzip,deflate" "$url" 2>&1`;
+    }
+    system("rm -rf $outdir");
+    return $time;
+}
+
+#loop over every url and output the responses
+foreach my $url (@urls) {
+    my $label = $url; 
+    #fix up our label name to be a valid name
+    $label =~ s@[^A-Za-z0-9_]@_@g;
+    print "$label.value " . req_time($domain.$url);
+}
+
+exit 0;
+
+

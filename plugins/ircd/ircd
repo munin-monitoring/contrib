@@ -1,0 +1,103 @@
+#!/usr/bin/php
+<?php
+#
+# IRCd Monitoring for Munin
+# 
+# by Martin Weinelt
+#
+# $Log$
+#  Revision 1.0	2009/09/16 05:03:31 UTC	hexa-
+#  Initial Release featuring 
+# 	autoconf-support,
+#	reading user/channels/operators count
+#
+#
+#%# capabilities=autoconf
+
+$_nick = "munin-ircd";
+$_host = "tcp://localhost"; // change to ssl:// or tls:// for ssl-tunneled-connection, tcp:// for tcp-socket
+$_port = 6667;
+
+if (isset($argv['1']) && $argv['1'] == "config") {
+
+	print "host_name ".php_uname('n')."\n";
+
+	print "graph_title IRCd Status\n";
+	print "graph_category chat\n";
+	print "graph_order clients channels operators\n";
+	print "graph_args --base 1000 -l 0\n";
+
+	print "clients.label Clients\n";
+	print "clients.draw LINE2\n";
+
+	print "channels.label Channels\n";
+	print "channels.draw LINE2\n";
+
+	print "operators.label Operators\n";
+	print "operators.draw LINE2\n";
+
+	exit;
+
+} elseif (isset($argv['1']) && $argv['1'] == "autoconf") {
+
+	$sock = fsockopen($_host, $_port);
+
+	if (!$sock) echo "no\n";
+	else echo "yes\n";
+
+	fclose($sock);
+
+	exit;
+
+}
+
+
+$sock = fsockopen($_host, $_port);
+
+if ($sock) {
+
+	fputs($sock, "NICK ".$_nick."\n");
+	fputs($sock, "USER munin munin localhost :munin-ircd\n");
+
+	while ($buffer = @fgets($sock, 1024)) {
+
+		$bits = explode(" ", trim($buffer));
+
+		if ($bits['0'] == "PING") { fputs($sock, "PONG ".$bits['1']."\n"); }
+
+		if (isset($argv['1']) && $argv['1'] == "debug") echo $buffer."\n";
+
+		// RAW
+		//  End of MOTD / MOTD missing
+		if ($bits['1'] == "422" || $bits['1'] == "376")  {
+
+			fputs($sock, "LUSERS\n");
+
+		} elseif ($bits['1'] == "252") {
+
+			// :irc.linuxlounge.net 252 munin-ircd 1 :operator(s) online
+			print "operators.value ".$bits['3']."\n";
+
+		} elseif ($bits['1'] == "254") {
+
+			// :irc.linuxlounge.net 252 munin-ircd 2 :channels formed
+			print "channels.value ".$bits['3']."\n";
+
+		} elseif ($bits['1'] == "266") {
+
+			// :irc.linuxlounge.net 252 munin-ircd :Current Global Users: 4  Max: 8
+			print "clients.value ".$bits['6']."\n";
+
+			// and disconnect
+			fputs($sock, "QUIT :munin-ircd-monitoring\n");
+
+		}
+
+
+	}
+
+}
+
+fclose($sock);
+
+?>

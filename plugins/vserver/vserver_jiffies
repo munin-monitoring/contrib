@@ -1,0 +1,90 @@
+#!/bin/zsh
+#
+# Created by Jan Rękorajski <baggins@pld-linux.org> based on vserver_cpu_ plugin.
+#
+# Obtained from https://github.com/munin-monitoring/contrib.git
+#
+# Changes by Andras Korn, 2015:
+#
+#  * Convert to zsh
+#  * Fix to remove dots from vserver names (replace them with _)
+#  * Drop support for old (pre 2.6.19) kernels
+#  * Replace cat | grep | cut pipelines with a single sed
+#  * Add env.stripdomain (a domain name to strip from the
+#    end of vserver names when generating labels; be sure
+#    to include the leading dot)
+#
+# Graph Vserver cumulative cpu usage stats
+#
+# Configuration variables
+#   vservers - specify the vservers to include in the graph (default: all)
+#
+# NOTE: If no configuration variable is set, the default will be used
+#
+# see vserver_resources for example uses of configuration files
+
+VSERVERS=(${=vservers})
+STRIPDOMAIN="$stripdomain"
+
+INFO=($(sed 's/.*:\t//' /proc/virtual/info 2>/dev/null || echo '<none>'))
+KCIN="$[ 16#${INFO[2]} ]";
+
+NAMELOC="nsproxy"
+
+if [[ -z "$VSERVERS" ]] ; then
+    cd /proc/virtual
+    XIDS=($(echo *(/)))
+else
+    # it's really more performant to specify vservers by ids or by linking but not in the configuration-file by name
+    XIDS=""
+    for i in $VSERVERS[@] ; do
+	if [[ -d /proc/virtual/$i ]] ; then
+	    XIDS=($XIDS[@] $i)
+	else
+	    for j in /proc/virtual/*(/) -type d; do
+	    	if [[ "$i" = $(sed -n '/NodeName/s/^NodeName:[[:space:]]*//p' $j/$NAMELOC) ]]; then
+		    XIDS=($XIDS[@] ${j:t})
+		fi
+	    done
+	fi
+    done
+fi
+
+if [[ "$1" = "config" ]]; then
+	echo 'graph_category virtualization'
+	echo 'graph_args --base 1000'
+	echo 'graph_title Vserver cpu usage'
+	echo 'graph_vlabel jiffies used per ${graph_period}'
+	echo 'graph_info Shows jiffies used on each vserver.'
+
+	for i in $XIDS[@]; do 
+		LABEL=$(sed -n '/NodeName/s/^NodeName:[[:space:]]*//p' /proc/virtual/$i/$NAMELOC)
+		LABEL=${LABEL%$STRIPDOMAIN}
+		NAME=${LABEL//./_}
+		NAME=${NAME//-/_}
+		echo "${NAME}_hold.label on hold for cpu on $LABEL"
+		echo "${NAME}_hold.info on hold for cpu on $LABEL."
+		echo "${NAME}_hold.type COUNTER"
+		echo "${NAME}_scpu.label system cpu usage for $LABEL"
+		echo "${NAME}_scpu.info system cpu usage for $LABEL."
+		echo "${NAME}_scpu.type COUNTER"
+		echo "${NAME}_ucpu.label user cpu usage for $LABEL"
+		echo "${NAME}_ucpu.info user cpu usage for $LABEL."
+		echo "${NAME}_ucpu.type COUNTER"
+	done
+	exit 0
+fi
+
+for i in $XIDS[@]; do 
+	LABEL=$(sed -n '/NodeName/s/^NodeName:[[:space:]]*//p' /proc/virtual/$i/$NAMELOC)
+	LABEL=${LABEL%$STRIPDOMAIN}
+	NAME=${LABEL//./_}
+	NAME=${NAME//-/_}
+	awk -v name=$NAME -v u=0 -v s=0 -v h=0 '
+		/^cpu [0-9]+:/ { u+=$3; s+=$4; h+=$5}
+		END {
+			print name "_hold.value " h
+			print name "_scpu.value " s
+			print name "_ucpu.value " u
+		}' /proc/virtual/$i/sched
+done

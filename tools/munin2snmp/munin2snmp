@@ -1,0 +1,284 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+use NetSNMP::OID;
+use NetSNMP::ASN (':all');
+use NetSNMP::agent (':all');
+use IO::Socket;
+use Getopt::Long;
+use Pod::Usage;
+
+my %cache = ();         # Cache
+my @cache_oids = ();    # Keys, sorted
+my $cache_updated = 0;
+my $delimiter = ' = ';
+my $conf = '/etc/munin2snmp.conf';
+my %config;
+my $pidfile = '/var/run/munin2snmp.pid';
+
+my $usage = "Usage: $0 [options] \
+Options:
+--help                      : print help message\
+--host [host]               : munin-node host, default localhost\
+--port [port]               : munin-node port, default 4949\
+--base_oid [OID]            : base oid, default .1.3.6.1.4.1.123456.100.1.1\
+                              Don't forget to update MUNIN-MIB  OBJECT IDENTIFIER if you modify base_oid\
+--plugins  [load,cpu,..]    : comma separated list of munin-node plugins, default cpu,load,df\
+--pidfile  [file path]      : pidfile, default /var/run/munin2snmp.pid\
+";
+
+sub read_conf {
+    return if ( ! -e $conf );
+    open my $conf_fh,'<',$conf or die "Can't open the $conf, $!\n";
+    while (<$conf_fh>) {
+        chomp;
+        my ($param, $val) = split(/\s*=\s*/);
+        $config{"$param"} = $val;
+    }
+}
+
+# initialize
+my %Munin;
+if ( ! scalar @ARGV ) {
+    read_conf;
+}
+GetOptions (
+    "help"          => sub{pod2usage($usage)},
+    "host=s"        => \$config{munin_host},
+    "port=s"        => \$config{munin_port},
+    "base_oid=s"    => \$config{'base_oid'},
+    "plugins=s"     => \$config{'munin_plugins'},
+    "pidfile=s"     => \$pidfile,
+);
+$Munin{PORT} = $config{'munin_port'} || '4949';
+$Munin{HOST} = $config{'munin_host'} || 'localhost';
+my $oidbase  = $config{'base_oid'}   || '.1.3.6.1.4.1.123456.100.1.1';
+# See munin plugins dir for more plugins
+my @munin_plugins = qw (cpu load df);
+@munin_plugins = split(',',$config{'munin_plugins'}) if ( $config{'munin_plugins'});
+
+open my $pidfd,'>',$pidfile or die "Can't open $pidfile, $!\n";
+print $pidfd $$;
+close $pidfd;
+
+# Update cache
+sub update_stats {
+    return if time() - $cache_updated < 30;
+    %cache = ();
+
+    foreach my $plugin (@munin_plugins) {
+        $plugin =~ s/^.*\///;
+        my $DATA  = munin_fetch($plugin);
+        foreach my $line (@$DATA) {
+            # Extract name and value
+            next if $line !~ m/^(.*)\s=\s(.*)$/xms;
+            my ($name,$value) = ($1,$2);
+            # Compute OID
+            my $oid = "$oidbase";
+            foreach my $char (split //, $name) {
+                $oid .= ".";
+                $oid .= ord($char);
+            }
+            # Put in the cache
+            $cache{$oid} = $value;
+        }
+    }
+    @cache_oids = sort { new NetSNMP::OID($a) <=> new NetSNMP::OID($b) } (keys %cache);
+    $cache_updated = time();
+}
+
+# Handle request
+sub handle_stats {
+    my ($handler, $registration_info, $request_info, $requests) = @_;
+    update_stats;       # Maybe we should do this in a thread...
+    for (my $request = $requests; $request; $request = $request->next()) {
+        $SNMP::use_numeric = 1;
+        my $oid = $request->getOID();
+        my $noid=SNMP::translateObj($oid);
+        if ($request_info->getMode() == MODE_GET) {
+            # For a GET request, we just check the cache
+            if (exists $cache{$noid}) {
+                $request->setValue(ASN_OCTET_STR, "$cache{$noid}");
+            }
+        }
+        elsif ($request_info->getMode() == MODE_GETNEXT) {
+            # For a GETNEXT, we need to find a best match. This is the
+            # first match strictly superior to the requested OID.
+            my $bestoid = undef;
+            foreach my $currentoid (@cache_oids) {
+                $currentoid = new NetSNMP::OID($currentoid);
+                next if $currentoid <= $oid;
+                $bestoid = $currentoid;
+                last;
+            }
+            if (defined $bestoid) {
+                $SNMP::use_numeric = 1;
+                my $noid=SNMP::translateObj($bestoid);
+                $request->setOID($bestoid);
+                $request->setValue(ASN_OCTET_STR, "$cache{$noid}");
+            }
+        }
+    }
+}
+
+my $agent = new NetSNMP::agent(
+    'Name' => "munin",
+    'AgentX' => 1);
+
+# Register MIB
+$agent->register("munin-stats", $oidbase,
+    \&handle_stats) or die "registration of handler failed!\n";
+
+# Main loop
+$SIG{'INT'} = \&shutdown;
+$SIG{'QUIT'} = \&shutdown;
+my $running = 1;
+while ($running) {
+    $agent->agent_check_and_process(1);
+}
+$agent->shutdown();
+
+sub shutdown {
+    # Shutdown requested
+    $running = 0;
+    unlink $pidfile if -e $pidfile;
+}
+
+#muninwalk
+my @collect;
+sub munin_fetch {
+    my $SOCKET = IO::Socket::INET -> new (  PeerAddr => $Munin{HOST},
+        PeerPort => $Munin{PORT},
+        Proto   => 'tcp',
+        Timeout => '10',
+        Type    => SOCK_STREAM,
+    ) or die "Cannot create socket - $@\n";
+    my $tmp = <$SOCKET>;
+    while (my $fetch = shift(@_)) {
+        my $obj = '';
+        if ($fetch =~ /^(\w+)(\.)(\w+)$/ ) {
+            ($fetch,$obj) = ($1,$3);
+        }
+        $SOCKET->print("fetch $fetch\n");
+        select($SOCKET);
+        select(STDOUT);
+        while (<$SOCKET> ) {
+            chomp;
+            $_ =~ s/(.value)//;
+            if ($_ =~ /^(.*)(\s)(.+)$/) {
+                if (($1 eq '# Unknown') or ($1 eq '# Bad')) {
+                    push (@collect,$fetch.$delimiter.'NULL');
+                } else {
+                    if (!$obj or ($1 eq $obj)) {
+                        push (@collect,$fetch.".".$1.$delimiter.$3);
+                    }
+                }
+            } else {
+                last;
+            }
+        }
+    }
+    $SOCKET->print("quit\n");
+    $SOCKET->close();
+    return \@collect if @collect;
+}
+
+=head1 NAME
+
+munin2snmp - SNMP Agent to query munin-node over snmp
+
+=head1 REQUIREMENTS
+
+Net::SNMP, Getopt::Long, Pod::Usage perl modules, munin-node with some plugins
+
+=head2 Example configuration
+
+/etc/snmp/snmpd.conf
+
+  master       agentx
+  agentAddress udp:127.0.0.1:161
+  rocommunity  public 127.0.0.1
+
+On a newer system it is enough to define "master" option only
+
+MUNIN-MIB should be installed on the client,
+it goes to /usr/local/share/snmp/mibs or /usr/share/munin/mibs
+or another place where snmpd expects to find the MIB files.
+
+See also http://www.net-snmp.org/wiki/index.php/FAQ:MIBs_03
+
+It is possible to start munin2snmp as non-root user, for example
+run munin2snmp as Debian-snmp user on Debian Stretch:
+
+fix the /var/agentx permissions:
+
+  chmod  g+rx /var/agentx
+  chgrp Debian-snmp /var/agentx
+
+add to /etc/snmp/snmpd.conf: 
+
+  master          agentx
+  agentXperms 0640 0550 Debian-snmp Debian-snmp
+
+restart snmpd and start the agent as Debian-snmp:
+
+  su -l Debian-snmp -s /bin/bash -c "/tmp/munin2snmp.pl --pidfile /tmp/munin2snmp.pid --plugins iostat,vmstat"
+
+=head2 Usage
+
+After setting up snmpd, start the agent:
+
+  ./munin2snmp
+
+Now one can query the agent
+
+  snmpwalk -v 2c -mMUNIN-MIB  -c public localhost .1.3.6.1.4.1.123456.100.1.1
+
+where "1.3.6.1.4.1.123456.100.1.1" is example OID selected as the base
+tree for the agent.
+
+Change  OBJECT IDENTIFIER in the MUNIN-MIB file if you plan to use a different OID.
+
+You might need to change the host, port, oidbase and munin_plugins you want to use.
+
+The defaults:
+
+  $Munin{PORT} = '4949';
+  $Munin{HOST} = 'localhost'
+  $oidbase = ".1.3.6.1.4.1.123456.100.1.1"
+  @munin_plugins = qw ( load cpu df );
+
+One can override the defaults by creating /etc/munin2snmp.conf file with the following
+configuration options:
+
+  munin_port    = [port]
+  munin_host    = [host]
+  base_oid      = [oid]
+  munin_plugins = [comma separated list of munin-node plugins]
+
+Or by specifying the parameters, see munin2snmp --help for the usage
+
+=head1 ACKNOWLEDGEMENTS
+
+Heavily inspired by
+Vincent Bernat: https://github.com/vincentbernat/extend-netsnmp
+and Masahito Zembutsu: https://github.com/zembutsu/muninwalk
+
+=head1 LICENSE
+
+ISC License (ISC)
+
+Copyright (c) 2016, Alex Mestiashvili <mailatgoogl@gmail.com>
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.

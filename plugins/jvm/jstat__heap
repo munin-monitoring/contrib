@@ -1,0 +1,238 @@
+#!/bin/bash
+#
+# Plugin for monitor JVM activity - Heap Usage -
+#
+# Usage:
+#
+#       Symlink into /etc/munin/plugins/ and add the monitored
+#	alias name like :
+#
+#       ln -s /usr/share/munin/plugins/jstat__heap \
+#	  /etc/munin/plugins/jstat_<jvm alias>_heap
+#       This should, however, be given through autoconf and suggest.
+#
+# Requirements:
+#
+#	You need to execute your Java program under jsvc provided by
+#	  http://jakarta.apache.org/commons/daemon/
+#	which enables you to run your Java program with specified
+#	pid file with -pidfile option.
+#       A Brief setup documentation is also available at
+#         http://tomcat.apache.org/tomcat-5.5-doc/setup.html
+#
+# Target:
+#
+#	Target Java Virtual Machine to monitor are:
+#	  Sun JDK 5.0 (http://java.sun.com/javase/) (default)
+#	  BEA JRockit 5.0 (http://dev2dev.bea.com/jrockit/)
+#
+# Parameters:
+#
+#       config   (required)
+#
+# Config variables:
+#
+#       pidfilepath  - Which file path use. Defaults to '/var/run/jsvc.pid'
+#       javahome     - Defaults to '/usr/local/java/jdk'
+#
+DefaultPidFile="/var/run/jsvc.pid"
+DefaultJavaHome="/usr/local/java/jdk"
+
+#
+# Environment Variables
+#
+if [ -z "${pidfilepath}" ]; then
+  pidfilepath="${DefaultPidFile}"
+fi
+
+if [ -z "${graphtitle}" ]; then
+  graphtitle="${pidfilepath}"
+fi
+
+if [ -z "${javahome}" ]; then
+  JAVA_HOME="${DefaultJavaHome}"
+else
+  JAVA_HOME="${javahome}"
+fi
+export JAVA_HOME
+
+#
+# Functions
+#
+chk_jdk()
+{
+  isJRockit=`${JAVA_HOME}/bin/java -version 2>&1 | egrep -i 'jrockit'`
+  if [ -n "${isJRockit}" ]; then
+    JDK_TYPE="bea"
+  else
+    JDK_TYPE="sun"
+  fi
+}
+
+chk_version()
+{
+  Version=`${JAVA_HOME}/bin/java -version 2>&1 | egrep '^java version' | awk '{print $3}' | sed -e 's/\"//g' | cut -d'_' -f 1`
+  if [ "${Version}" != "1.5.0" ]; then
+    return 1
+  else
+    return 0
+  fi
+}
+
+config_common()
+{
+  echo "graph_title Heap Usage" $graphtitle
+  echo "graph_args --base 1024 -l 0"
+  echo "graph_vlabel Heap Usage(Bytes)"
+  echo "graph_info Heap Usage"
+  echo "graph_category virtualization"
+}
+
+config_sun_jdk()
+{
+  config_common
+
+  echo "Eden_Used.label Eden_Used"
+  echo "Eden_Free.label Eden_Free"
+  echo "Survivor0_Used.label Survivor0_Used"
+  echo "Survivor0_Free.label Survivor0_Free"
+  echo "Survivor1_Used.label Survivor1_Used"
+  echo "Survivor1_Free.label Survivor1_Free"
+  echo "Old_Used.label Old_Used"
+  echo "Old_Free.label Old_Free"
+  echo "Permanent_Used.label Permanent_Used"
+  echo "Permanent_Free.label Permanent_Free"
+  echo "Eden_Used.draw AREA"
+  echo "Eden_Free.draw STACK"
+  echo "Survivor0_Used.draw STACK"
+  echo "Survivor0_Free.draw STACK"
+  echo "Survivor1_Used.draw STACK"
+  echo "Survivor1_Free.draw STACK"
+  echo "Old_Used.draw STACK"
+  echo "Old_Free.draw STACK"
+  echo "Permanent_Used.draw STACK"
+  echo "Permanent_Free.draw STACK"
+}
+
+config_bea_jdk()
+{
+  config_common
+  
+  echo "NurserySize.label NurserySize"
+  echo "HeapSize.label HeapSize"
+  echo "UsedHeapSize.label UsedHeapSize"
+  echo "NurserySize.draw AREA"
+  echo "HeapSize.draw STACK"
+  echo "UsedHeapSize.draw STACK"
+}
+
+print_sun_stats()
+{
+${JAVA_HOME}/bin/jstat -gc ${PidNum} | tail -1 | awk \
+'{\
+	S0C = $1; \
+	S1C = $2; \
+	S0U = $3; \
+	S1U = $4; \
+	EC  = $5; \
+	EU  = $6; \
+	OC  = $7; \
+	OU  = $8; 
+	PC  = $9; \
+	PU  = $10; \
+	\
+	S0F = S0C - S0U; \
+	S1F = S1C - S1U; \
+	EF  = EC  - EU;  \
+	OF  = OC  - OU;  \
+	PF  = PC  - PU;  \
+	\
+	print "Eden_Used.value " EU * 1024; \
+	print "Eden_Free.value " EF * 1024; \
+	print "Survivor0_Used.value " S0U * 1024; \
+	print "Survivor0_Free.value " S0F * 1024; \
+	print "Survivor1_Used.value " S1U * 1024; \
+	print "Survivor1_Free.value " S1F * 1024; \
+	print "Old_Used.value " OU * 1024; \
+	print "Old_Free.value " OF * 1024; \
+	print "Permanent_Used.value " PU * 1024; \
+	print "Permanent_Free.value " PF * 1024; \
+}'
+}
+
+print_bea_stats()
+{
+${JAVA_HOME}/bin/jstat -gc ${PidNum} | tail -1 | awk \
+'{\
+	HeapSize = $1; \
+	NurserySize = $2; \
+	UsedHeapSize = $3; \
+	YC = $4; \
+	OC = $5; \
+	YCTime = $6; \
+	OCTime = $7; \
+	GCTime = $8; \
+	YCPauseTime = $9; \
+	OCPauseTime = $10; \
+	PauseTime = $11; \
+	Finalizers = $12; \
+	\
+	print "NurserySize.value " NurserySize * 1024; \
+	print "HeapSize.value " UsedHeapSize * 1024; \
+	print "UsedHeapSize.value " UsedHeapSize * 1024; \
+}'
+}
+
+#
+# common for all argument
+#
+chk_jdk
+
+#
+# autoconf
+#
+if [ "$1" = "autoconf" ]; then
+
+  if [ ! -x "${JAVA_HOME}/bin/jstat" ]; then
+    echo "no (No jstat found in ${JAVA_HOME}/bin)"
+    exit 1
+  fi
+
+  chk_version
+  if [ $? != 0 ]; then
+    echo "no (Java version is invalid)"
+    exit 1
+  fi
+
+  if [ ! -f "${pidfilepath}" -o ! -r "${pidfilepath}" ]; then
+    echo "no (No such file ${pidfilepath} or cannot read ${pidfilepath}"
+    exit 1
+  fi
+
+  echo "yes"
+  exit 0
+fi
+
+
+#
+# config
+#
+if [ "$1" = "config" ]; then
+  if [ "${JDK_TYPE}" == "bea" ]; then
+    config_bea_jdk
+  else
+    config_sun_jdk
+  fi
+  exit 0
+fi
+
+#
+# Main
+#
+PidNum=`cat ${pidfilepath}`
+
+if [ "${JDK_TYPE}" == "bea" ]; then
+  print_bea_stats
+else
+  print_sun_stats
+fi

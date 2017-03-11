@@ -66,6 +66,14 @@ if ( !eval "require zenus;" ) {
     $ret .= "(BTW, \@INC is: " . join( ', ', @INC ) . ")\n";
 }
 
+my $CAN_LOG = 1;
+if ( !eval "require Log::Log4perl;" ) {
+    $CAN_LOG = 0;
+}
+elsif ( !eval "require Log::Dispatch::FileRotate;" ) {
+    $CAN_LOG = 0;
+}
+
 my $USER = $ENV{user};
 my $PASS = $ENV{pass};
 my $ACCT = $ENV{account} || "";
@@ -85,15 +93,33 @@ if ( scalar @name_fields == 3 ) {
 # If there are more or less than 3 components to the filename,
 # we just carry on with the default account
 
+if ($CAN_LOG) {
+    my $loggerconf = q(
+		log4perl.rootLogger 				= DEBUG, LOG1
+		log4perl.appender.LOG1 				= Log::Dispatch::FileRotate
+		log4perl.appender.LOG1.filename		= /var/log/munin/zenus.log
+		log4perl.appender.LOG1.mode			= append
+		log4perl.appender.LOG1.DatePattern	= yyyy-ww
+		log4perl.appender.LOG1.layout		= Log::Log4perl::Layout::PatternLayout
+		log4perl.appender.LOG1.layout.ConversionPattern = %d %p %c: %m%n
+	);
+    Log::Log4perl::init( \$loggerconf );
+    our $logger = Log::Log4perl->get_logger($ACCT);
+} else {
+	our $logger = "";
+}
+
 my $lastread;
 
 sub save_data {
     my $hashref = shift;
+    my $update_lastread = shift || 1;
 
     # Do we need to save this info
-    if ( time > $lastread + ( $TICK * 60 ) ) {
+    if ( !defined $lastread or time > $lastread + ( $TICK * 60 ) ) {
 
-        $lastread = time;
+        $lastread = time if $update_lastread;
+        print "# Updating LastRead to " . localtime($lastread) . "\n";
 
         my @save_vector;
         push @save_vector, $lastread;
@@ -102,6 +128,10 @@ sub save_data {
         foreach ( keys %$hashref ) {
             push @save_vector, $_ . '¬' . $hashref->{$_};
         }
+
+        $::logger->info(
+            "Saving Data (LastRead is " . localtime($lastread) . "\n" )
+          if $CAN_LOG;
 
         #Go!
         save_state(@save_vector);
@@ -121,11 +151,50 @@ sub load_data {
         my ( $key, $value ) = split /¬/;
         $hashref->{$key} = $value;
     }
+    my $force_save = 0;
     if ( !defined $lastread or time >= ( $lastread + ( $TICK * 60 ) ) ) {
 
         # Data is stale
+        print "# Data is " . ( time - $lastread ) . " seconds old\n";
+        $::logger->info( "Data is " . ( time - $lastread ) . " seconds old\n" )
+          if $CAN_LOG;
 
-        #print STDERR "REFRESHING DATA\n";
+        if ( exists $hashref->{backoff} ) {
+            if ( time <= $hashref->{backoff} ) {
+
+                # We're in a back-off period
+                print "# Back-off in effect\n";
+                $::logger->info("Back-off in effect\n") if $CAN_LOG;
+                exit 0;
+            }
+            else {
+                # We've just come out of a back-off period
+                print "# Back-off ends\n";
+                $::logger->info("Back-off ends\n") if $CAN_LOG;
+                delete $hashref->{backoff};
+            }
+        }
+        elsif ( !defined $lastread ) {
+
+            # Initial run. Carry on
+            print "# Initial Run\n";
+            my $force_save = 1;
+        }
+        elsif ( time >= ( $lastread + ( 120 * 60 ) ) ) {
+
+            # Data is VERY Stale. Assume a login issue and
+            # back-off for 24 hours.
+            print "# Starting Back-Off\n";
+            $hashref->{backoff} = time + ( 24 * 60 * 60 );
+            $::logger->info(
+                "Backing off until " . localtime( $hashref->{backoff} ) . "\n" )
+              if $CAN_LOG;
+            save_data( $hashref, 0 );
+            exit 1;
+        }
+
+        print "# REFRESHING DATA\n";
+        $::logger->info("Refreshing Data\n") if $CAN_LOG;
         my $temphash;
         eval {
             zenus::login( $USER, $PASS );
@@ -144,11 +213,19 @@ sub load_data {
               = zenus::estimateRemaining( $temphash->{used},
                 $temphash->{avail} );
             $hashref = $temphash;
+            1;
 
             # If zenus threw an error we won't copy the data over,
             #  so we still use the cached data.
+        } or do {
+            print "# Zenus Error $@\n";
         };
     }
+    else {
+        print "# Using existing data\n";
+        $::logger->info("Using existing data\n") if $CAN_LOG;
+    }
+    save_data( $hashref, 1 ) if $force_save;
     return $hashref;
 
 }
@@ -181,15 +258,12 @@ if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
         exit 1;
     }
     my $data    = load_data();
-    my $cap     = sprintf( "%.3f", $data->{avail} );
-    my $warn    = sprintf( "%.3f", $cap * 0.25 );
-    my $crit    = sprintf( "%.3f", $cap * 0.1 );
     my $datestr = scalar( localtime($lastread) );
     print <<EOF;
 graph_args --base 1000
 graph_vlabel GBytes out (-) / in (+)
 graph_category Network
-graph_title Zen Broadband Usage
+graph_title Zen Broadband Usage ($ACCT)
 graph_info Usage of your Zen Broadband account: $data->{name}
 upload.label Uploaded
 upload.type GAUGE
@@ -199,11 +273,17 @@ upload.graph no
 upload.colour 00CC00EE
 download.label Transfer
 download.type GAUGE
-download.info Amount of data downloaded (Limit is $cap GB)
 download.draw AREA
 download.extinfo Last Read was $datestr
 download.negative upload
 download.colour 00CC00EE
+EOF
+    if ( defined $data->{avail} and $data->{avail} != 0 ) {
+        my $cap  = sprintf( "%.3f", $data->{avail} );
+        my $warn = sprintf( "%.3f", $cap * 0.25 );
+        my $crit = sprintf( "%.3f", $cap * 0.1 );
+        print <<EOF;
+download.info Amount of data downloaded (Limit is $cap GB)
 allowance.label Allowance
 allowance.type GAUGE
 allowance.info Amount of data you are allowed to download this month
@@ -222,8 +302,12 @@ overrate.info Rate at which you're downloading beyond the sustainable rate
 overrate.draw LINE1
 overrate.min 0
 overrate.warning 0:
-#graph_order download upload allowance remaining overrate
 EOF
+    }
+    else {
+        # Probably an unlimited contract
+        print "download.info Amount of data downloaded\n";
+    }
 
     save_data($data);
     exit 0;
@@ -232,12 +316,14 @@ EOF
 my $data = load_data();
 print "upload.value " . $data->{uploadAmount} . "\n";
 print "download.value " . $data->{used} . "\n";
-print "allowance.value " . $data->{avail} . "\n";
-my $remain = $data->{avail} - $data->{estusage};
-$remain = 0 if $remain < 0;
-print "remaining.value " . $remain . "\n";
-my $overrate = $data->{avedaily} - $data->{maxdaily};
-$overrate = 0 if $overrate < 0;
-print "overrate.value " . $overrate . "\n";
+if ( defined $data->{avail} and $data->{avail} != 0 ) {
+    print "allowance.value " . $data->{avail} . "\n";
+    my $remain = $data->{avail} - $data->{estusage};
+    $remain = 0 if $remain < 0;
+    print "remaining.value " . $remain . "\n";
+    my $overrate = $data->{avedaily} - $data->{maxdaily};
+    $overrate = 0 if $overrate < 0;
+    print "overrate.value " . $overrate . "\n";
+}
 save_data($data);
 exit 0;

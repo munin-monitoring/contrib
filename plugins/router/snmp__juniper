@@ -1,0 +1,190 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+# Copyright (C) 2014 Johann Schmitz <johann@j-schmitz.net>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Library General Public License as published by
+# the Free Software Foundation; version 2 only
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Library General Public License for more details.
+#
+# You should have received a copy of the GNU Library General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
+
+"""
+=head1 NAME
+
+snmp__juniper - Health monitoring plugin for Juniper firewalls.
+
+=head1 CONFIGURATION
+
+Make sure your Juniper device is accessible via SNMP (e.g. via snmpwalk) and the munin-node
+has been configured correctly.
+
+=head1 MAGIC MARKERS
+
+	#%# family=snmpauto
+	#%# capabilities=snmpconf
+
+=head1 VERSION
+
+0.0.1
+
+=head1 BUGS
+
+Open a ticket at https://github.com/ercpe/contrib if you find one.
+
+=head1 AUTHOR
+
+Johann Schmitz <johann@j-schmitz.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+"""
+
+import re
+import sys
+import os
+import logging
+
+from pysnmp.entity.rfc3413.oneliner import cmdgen
+
+host = None
+port = os.getenv('port', 161)
+community = os.getenv('community', None)
+
+debug = bool(os.getenv('MUNIN_DEBUG', os.getenv('DEBUG', 0)))
+
+if debug:
+	logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)-7s %(message)s')
+
+try:
+	match = re.search("^(?:|.*\/)snmp_([^_]+)_juniper$", sys.argv[0])
+	host = match.group(1)
+	request = match.group(2)
+	match = re.search("^([^:]+):(\d+)$", host)
+	if match is not None:
+		host = match.group(1)
+		port = match.group(2)
+except:
+	pass
+
+jnxOperatingTable = '1.3.6.1.4.1.2636.3.1.13.1.5'
+
+jnxOperatingTemp = '1.3.6.1.4.1.2636.3.1.13.1.7'
+jnxOperatingCPU = '1.3.6.1.4.1.2636.3.1.13.1.8'
+jnxOperatingBuffer = '1.3.6.1.4.1.2636.3.1.13.1.11'
+
+class JunOSSnmpClient(object):
+	def __init__(self, host, port, community):
+		self.hostname = host
+		self.transport = cmdgen.UdpTransportTarget((host, int(port)))
+		self.auth = cmdgen.CommunityData('test-agent', community)
+		self.gen = cmdgen.CommandGenerator()
+
+	def get_devices(self):
+		errorIndication, errorStatus, errorIndex, varBindTable = self.gen.bulkCmd(
+			self.auth,
+			self.transport,
+			0, 20,
+			jnxOperatingTable)
+#			ignoreNonIncreasingOids=True) # only available with pysnmp >= 4.2.4 (?)
+
+		if errorIndication:
+			logging.error("SNMP bulkCmd for devices failed: %s, %s, %s" % (errorIndication, errorStatus, errorIndex))
+			return {}
+
+		devices = {}
+		for row in varBindTable:
+			for name, value in row:
+				if not str(name).startswith(jnxOperatingTable):
+					continue
+
+				if 'Routing Engine' in str(value):
+					devices[str(name)[len(jnxOperatingTable):]] = re.sub("[^\w]", '_', str(value).replace(' Routing Engine', ''))
+		return devices
+
+	def get_one(self, prefix_oid, suffix):
+		oid = prefix_oid + suffix
+		errorIndication, errorStatus, errorIndex, varBindTable = self.gen.getCmd(
+			self.auth,
+			self.transport,
+			oid)
+
+		if errorIndication:
+			logging.error("SNMP getCmd for %s failed: %s, %s, %s" % (oid, errorIndication, errorStatus, errorIndex))
+			return None
+
+		return int(varBindTable[0][1])
+
+		
+
+	def get_data(self):
+		devs = self.get_devices()
+
+		return {
+			'temp': dict([(name, self.get_one(jnxOperatingTemp, suffix)) for suffix, name in devs.iteritems()]),
+			'cpu': dict([(name, self.get_one(jnxOperatingCPU, suffix)) for suffix, name in devs.iteritems()]),
+			'buffer': dict([(name, self.get_one(jnxOperatingBuffer, suffix)) for suffix, name in devs.iteritems()]),
+		}
+
+	def print_config(self):
+		devices = self.get_devices()
+
+		data_def = [
+			('temp', self.hostname, 'System temperature', '--base 1000', 'System temperature in C', 'system'),
+			('cpu', self.hostname, 'CPU usage', '--base 1000 -l 0 --upper-limit 100', 'CPU usage in %', 'system'),
+			('buffer', self.hostname, 'Buffer usage', '--base 1000 -l 0 --upper-limit 100', 'Buffer usage in %', 'system'),
+		]
+
+		for datarow, hostname, title, args, vlabel, category in data_def:
+			print """multigraph juniper_{datarow}
+host_name {hostname}
+graph_title {title}
+graph_vlabel {vlabel}
+graph_args {args}
+graph_category {category}
+graph_info {title}""".format(datarow=datarow, hostname=hostname, title=title, args=args, vlabel=vlabel, category=category)
+
+			for suffix, node in devices.iteritems():
+				ident = "%s_%s" % (datarow, node)
+				print """{label}.info {title} on {node}
+{label}.label {node}
+{label}.type GAUGE
+{label}.min 0""".format(title=title, label=ident, node=node)
+
+	def execute(self):
+		data = self.get_data()
+
+		for pre, values in data.iteritems():
+			print "multigraph juniper_%s" % pre
+			for node, value in values.iteritems():
+				print "%s_%s.value %s" % (pre, node, value)
+
+c = JunOSSnmpClient(host, port, community)
+
+if "snmpconf" in sys.argv[1:]:
+	print "require 1.3.6.1.4.1.2636.3.1.13.1.5"
+	sys.exit(0)
+else:
+	if not (host and port and community):
+		print "# Bad configuration. Cannot run with Host=%s, port=%s and community=%s" % (host, port, community)
+		sys.exit(1)
+	
+	if "config" in sys.argv[1:]:
+		c.print_config()
+	else:
+		c.execute()
+
+# for Munin Plugin Gallery
+# graph_category network
+
