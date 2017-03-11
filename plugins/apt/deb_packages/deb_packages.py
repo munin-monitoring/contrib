@@ -24,7 +24,7 @@ TODO: update only if system was updated (aptitutde update has been run)
 TODO: shorten ext_info with getShortestConfigOfOptions 
 TODO: check whether cachefile matches the config 
       • i have no clever idea to do this without 100 lines of code
-BUG: If a package will be upgraded, and brings in new dependancies, 
+BUG: If a package will be upgraded, and brings in new dependencies, 
      these new deps will not be counted. WONTFIX
 """
 import sys
@@ -257,7 +257,7 @@ def getShortestConfigOfOptions(optionList = ['label', 'archive', 'site']):
           'architecture' 
         Architecture values are usually the same and can be ignored.
 
-        tells you wich representation of a tree as line is shortest.
+        tells you which representation of a tree as line is shortest.
         Is needed to say which ext.info line would be the shortest
         to write the shortest readable output.
     """
