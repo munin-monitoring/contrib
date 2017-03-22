@@ -8,7 +8,7 @@ multibandwidth - Plugin to monitor the bandwidth between localhost and serveral 
 
 =head1 APPLICABLE SYSTEMS
 
-This plugin is useful when you want to monitor the bandwidth between localhost and multiple hosts in a single graph or in several graphs making different soft links.
+All systems with “bash”, and “munin”
 
 =head1 REQUIREMENTS
 
@@ -31,9 +31,12 @@ env.big_packet_size 8000
 
 - env.samples explanation: Reset stats after sending samples ECHO_REQUEST packets.
 
-- env.small_packet_size explanation: Specifies the number of data bytes to be sent in the small packets. The default and minimum value is 44.
+- env.small_packet_size explanation: Specifies the number of data bytes to be sent in the small
+        packets. The default and minimum value is 44.
 
-- env.big_packet_size explanation: Specifies the number of data bytes to be sent in the big packets. The default is 108. The size should be chosen so that big packet roundtrip times are long enough to be accurately measured.
+- env.big_packet_size explanation: Specifies the number of data bytes to be sent in the big
+        packets. The default is 108. The size should be chosen so that big packet roundtrip times
+        are long enough to be accurately measured.
 
 
 =head1 MAGIC MARKERS
@@ -47,7 +50,7 @@ env.big_packet_size 8000
 =head1 AUTHOR
 
 Jose Manuel Febrer Cortés <https://www.linkedin.com/in/jfebrer/>
-Marco Bertola's help <https://www.linkedin.com/in/bertolamarco/>
+Marco Bertola’s help <https://www.linkedin.com/in/bertolamarco/>
 
 =head1 LICENSE
 
@@ -61,8 +64,8 @@ case $1 in
    config)
                 echo graph_title MultiBandwidth
                 echo 'graph_vlabel Mbps'
-                echo 'graph_args --base 1000 -l 0'
-                echo 'graph_scale no'
+                echo 'graph_args --base 1024 -l 0'
+                echo 'graph_scale yes'
                 echo 'graph_category network'
                 echo 'graph_info This graph shows the bandwidth between localhost and serveral hosts'
                 for host in $hosts; do
@@ -86,12 +89,22 @@ esac
 
 #Calculating the bandwidth
 for host in $hosts; do
-  bandwidth=$((bandwidth+1))
-  printf "%s""bandwidth""$bandwidth"".value ";
-  #bing output example: host:  4.592Mbps 0.223ms 0.217773us/bit
-  bing localhost "$host" -n -c 1 -e "$samples" -s "$small_packet_size" -S "$big_packet_size" 2>/dev/null \
-          | grep -E "bit$" \
-          | awk -F" +" '{ print $2}' | cut -c -5 \
-          | cut -c -5 \
-          | awk '{a+=$1} END{print a/NR}'
+        bandwidth=$((bandwidth+1))
+        printf "%s""bandwidth""$bandwidth"".value ";
+
+        SPEED=$(timeout 6 bing localhost "$host" -n -c 1 -e "$samples" -s "$small_packet_size" -S "$big_packet_size" 2>/dev/null \
+                |grep "estimated link" -A 2 \
+                | grep bps \
+                | awk '{print $2}' \
+                | cut -d "b" -f1)
+
+        if (echo "$SPEED" | grep -q "M"); then
+                echo "$SPEED" | awk '{a+=$1} END{print a}'
+        elif (echo "$SPEED" | grep -q "K"); then
+                echo "$SPEED" | awk '{a+=$1} END{print a/1000}'
+        elif(echo "$SPEED" | grep -q "G"); then
+                echo "$SPEED" | awk '{a+=$1} END{print a*1000}'
+        else
+                echo "Error: no data"
+        fi
 done
