@@ -1,0 +1,112 @@
+#!/bin/sh
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+: <<=cut
+
+=head1 NAME
+
+multibandwidth - Plugin to monitor the bandwidth between localhost and serveral hosts.
+
+=head1 APPLICABLE SYSTEMS
+
+All systems with “bash”, and “munin”
+
+=head1 REQUIREMENTS
+
+bing installed.
+
+You can install bing by using (Ubuntu/Debian): apt-get install bing
+
+=head1 CONFIGURATION
+
+The following is the default configuration
+
+[multibandwidth]
+user root
+env.hosts example.org example2.org example3.org
+env.samples 10
+env.small_packet_size 44
+env.big_packet_size 108
+
+- env.hosts explanation: hostname or IP of the hosts to calculate the bandwidth.
+
+- env.samples explanation: Reset stats after sending samples ECHO_REQUEST packets.
+
+- env.small_packet_size explanation: Specifies the number of data bytes to be sent in the small
+        packets. The default and minimum value is 44.
+
+- env.big_packet_size explanation: Specifies the number of data bytes to be sent in the big
+        packets. The default is 108. The size should be chosen so that big packet roundtrip times
+        are long enough to be accurately measured.
+
+
+=head1 MAGIC MARKERS
+
+#%# capabilities=autoconf
+
+=head1 VERSION
+
+1.1.17
+
+=head1 AUTHOR
+
+Jose Manuel Febrer Cortés <https://www.linkedin.com/in/jfebrer/>
+Marco Bertola’s help <https://www.linkedin.com/in/bertolamarco/>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+
+
+case $1 in
+   config)
+                echo graph_title MultiBandwidth
+                echo 'graph_vlabel bps'
+                echo 'graph_args --base 1024 -l 0'
+                echo 'graph_scale yes'
+                echo 'graph_category network'
+                echo 'graph_info This graph shows the bandwidth between localhost and serveral hosts'
+                for host in $hosts; do
+                        fieldname="host_$(clean_fieldname "$host")"
+                        echo "$fieldname.label $host"
+                        echo "$fieldname.draw LINE2"
+                        echo "$fieldname.info Bandwidth statistics for $host"
+                done
+        exit 0;;
+    autoconf)
+                if hash bing 2>/dev/null; then
+                        echo 'yes'
+                        exit 0;
+                else
+                        echo 'no (bing not installed)'
+                        exit 0;
+                fi
+
+esac
+
+
+#Calculating the bandwidth
+for host in $hosts; do
+        fieldname="host_$(clean_fieldname "$host")"
+        printf "$fieldname.value ";
+
+        SPEED=$(timeout 6 bing localhost "$host" -n -c 1 -e "$samples" -s "$small_packet_size" -S "$big_packet_size" 2>/dev/null \
+                |grep "estimated link" -A 2 \
+                | grep bps \
+                | awk '{print $2}' \
+                | cut -d "b" -f1)
+
+        if (echo "$SPEED" | grep -q "M"); then
+                echo "$SPEED" | awk '{a+=$1} END{print a*1000000}'
+        elif (echo "$SPEED" | grep -q "K"); then
+                echo "$SPEED" | awk '{a+=$1} END{print a*1000}'
+        elif (echo "$SPEED" | grep -q "G"); then
+                echo "$SPEED" | awk '{a+=$1} END{print a*1000000000}'
+        else
+                echo "Error: no data (timeout)" >&2
+        fi
+done
