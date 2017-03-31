@@ -1,37 +1,38 @@
-#!/bin/sh
-
-. "$MUNIN_LIBDIR/plugins/plugin.sh"
-
-: <<=cut
-
-=head1 NAME
-
-multibandwidth - Plugin to monitor the bandwidth between localhost and serveral hosts.
-
-=head1 APPLICABLE SYSTEMS
-
-All systems with “bash”, and “munin”
-
-=head1 REQUIREMENTS
-
-bing installed.
-
-You can install bing by using (Ubuntu/Debian): apt-get install bing
-
-=head1 CONFIGURATION
-
-The following is the default configuration
-
-[multibandwidth]
-user root
-env.hosts example.org example2.org example3.org
-env.samples 10
-env.small_packet_size 44
-env.big_packet_size 108
-
-- env.hosts explanation: hostname or IP of the hosts to calculate the bandwidth.
-
-- env.samples explanation: Reset stats after sending samples ECHO_REQUEST packets.
+#!/bin/sh                                                                                                                                                                                                         
+                                                                                                                                                                                                                  
+. "$MUNIN_LIBDIR/plugins/plugin.sh"                                                                                                                                                                               
+                                                                                                                                                                                                                  
+: <<=cut                                                                                                                                                                                                          
+                                                                                                                                                                                                                  
+=head1 NAME                                                                                                                                                                                                       
+                                                                                                                                                                                                                  
+multibandwidth - Plugin to monitor the bandwidth between localhost and serveral hosts.                                                                                                                            
+                                                                                                                                                                                                                  
+=head1 APPLICABLE SYSTEMS                                                                                                                                                                                         
+                                                                                                                                                                                                                  
+All systems with “bash”, and “munin”                                                                                                                                                                              
+                                                                                                                                                                                                                  
+=head1 REQUIREMENTS                                                                                                                                                                                               
+                                                                                                                                                                                                                  
+bing installed.                                                                                                                                                                                                   
+                                                                                                                                                                                                                  
+You can install bing by using (Ubuntu/Debian): apt-get install bing                                                                                                                                               
+                                                                                                                                                                                                                  
+=head1 CONFIGURATION                                                                                                                                                                                              
+                                                                                                                                                                                                                  
+The following is the default configuration                                                                                                                                                                        
+                                                                                                                                                                                                                  
+[multibandwidth]                                                                                                                                                                                                  
+user root                                                                                                                                                                                                         
+env.hosts example.org example2.org example3.org                                                                                                                                                                   
+env.samples 15                                                                                                                                                                                                    
+env.small_packet_size 44                                                                                                                                                                                          
+env.big_packet_size 108                                                                                                                                                                                           
+env.max_mbps 15728640                                                                                                                                                                                             
+                                                                                                                                                                                                                  
+- env.hosts explanation: hostname or IP of the hosts to calculate the bandwidth.                                                                                                                                  
+                                                                                                                                                                                                                  
+- env.samples explanation: Reset stats after sending samples ECHO_REQUEST packets.                                                                                                                                
 
 - env.small_packet_size explanation: Specifies the number of data bytes to be sent in the small
         packets. The default and minimum value is 44.
@@ -40,6 +41,8 @@ env.big_packet_size 108
         packets. The default is 108. The size should be chosen so that big packet roundtrip times
         are long enough to be accurately measured.
 
+- env.max_mbps explanation: bing have some random spikes. This variable is used to indicate
+        the maximum value of mbps that can be recorded (in bps).
 
 =head1 MAGIC MARKERS
 
@@ -101,11 +104,20 @@ for host in $hosts; do
                 | cut -d "b" -f1)
 
         if (echo "$SPEED" | grep -q "M"); then
-                echo "$SPEED" | awk '{a+=$1} END{print a*1000000}'
+                VALUE=`echo "$SPEED" | sed 's/.$//'`
+                RATE=`echo "$VALUE * 1048576" | bc -l`
+
+                if [ $(echo "$RATE" >= "$max_mbps" | bc >/dev/null && echo "no" || echo "yes") = "yes" ]; then
+                        echo "$max_mbps"
+                else
+                        echo "$RATE"
+                fi
         elif (echo "$SPEED" | grep -q "K"); then
-                echo "$SPEED" | awk '{a+=$1} END{print a*1000}'
+                VALUE=`echo "$SPEED" | sed 's/.$//'`
+                echo "$VALUE * 1024" | bc -l
         elif (echo "$SPEED" | grep -q "G"); then
-                echo "$SPEED" | awk '{a+=$1} END{print a*1000000000}'
+                VALUE=`echo "$SPEED" | sed 's/.$//'`
+                echo "$VALUE * 1073742000" | bc -l
         else
                 echo "Error: no data (timeout)" >&2
         fi
