@@ -234,23 +234,22 @@ update_statefile() {
 
 	debug starting $dspam_stats -t -S
 	local t_start=$(date +%s)
-	$dspam_stats -t -S | while read a b c d e f g h i j k l m x; do
-
+	$dspam_stats -t -S | while IFS=' :' read a b c d e f g h i j k l m x; do
 		# example of output format (3.9.1 rc1) for each user:
 		#username@example.org
 		#    TP:     0 TN:  2147 FP:     0 FN:    53 SC:     0 NC:     0
 		#    SHR:    0.00%       HSR:    0.00%       OCA:   97.59%
 
 		# or for short user names:
-		#vmail    TP:  1141 TN:   459 FP:     0 FN:     5 SC:     0 NC:     0
+		#vmail    TP:80312082 TN:198342928 FP: 82941 FN: 57326 SC: 0 NC: 3498
 		#         SHR:   99.56%       HSR:    0.00%       OCA:   99.69%
 
 		case $a in
-			TP:)
+			TP)
 				# the 2nd line
 				local tp=$b tn=$d fp=$f fn=$h sc=$j nc=$l
 				;;
-			SHR:)
+			SHR)
 				# the 3rd line
 				local shr=$(echo $b | sed 's/%$//g')
 				local hsr=$(echo $d | sed 's/%$//g')
@@ -267,7 +266,7 @@ update_statefile() {
 				# the 1st line
 				local uid=$a
 				# data from 2nd line is also here
-                                [ "$b" = "TP:" ] && local tp=$c tn=$e fp=$g fn=$i sc=$k nc=$m
+                                [ "$b" = "TP" ] && local tp=$c tn=$e fp=$g fn=$i sc=$k nc=$m
 				;;
 		esac
 	done
