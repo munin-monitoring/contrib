@@ -211,7 +211,16 @@ file_is_locked() {
 	local file=$1
 	local lock=$1.lock
 
-	[ -f $lock ] && debug file $file is locked && return 0 # EX_OK
+	if [ -f "$lock" ];then
+		debug file $file is locked
+		local pid=$(cat "$lock")
+		if ps h -p "$pid" -o comm=|grep -q dspam_; then
+			return 0 # EX_OK
+		else
+			debug lock for file $file is no longer valid
+			file_remove_lock $file
+		fi
+	fi
 	debug file $file is not locked
 	return 69 # EX_UNAVAILABLE
 }
