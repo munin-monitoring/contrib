@@ -61,6 +61,8 @@ GPLv2
 #set -xv
 SYS_LOG="${logfiles:-/var/log/syslog /var/log/syslog.0}"
 
+GREP_HOSTNAME=${0##*postfix_stats_}
+
 # shellcheck disable=SC2154
 PFLOGSUMM="${pflogsum}"
 [ -z "$PFLOGSUMM" ] && PFLOGSUMM="$(which pflogsumm pflogsumm.pl | head -1)"
@@ -86,7 +88,11 @@ fi
 # Config Section
 #
 if [ "$1" = 'config' ]; then
-	echo 'graph_title Postfix statistics'
+	if [ -n "${GREP_HOSTNAME}" ]; then
+		echo "graph_title Postfix statistics for ${GREP_HOSTNAME}"
+	else
+		echo 'graph_title Postfix statistics'
+	fi
 	echo 'graph_vlabel Postfix statistics'
 	echo 'graph_category mail'
 	echo 'graph_scale no'
@@ -110,7 +116,11 @@ fi
 
 # Variable to store the pflogsumm result.
 # shellcheck disable=SC2086
-TMP_RAW=$("${PFLOGSUMM}" -d today --detail 0 --zero-fill ${SYS_LOG})
+if [ -n "${GREP_HOSTNAME}" ]; then
+	TMP_RAW=$(grep -h " ${GREP_HOSTNAME} postfix/" ${SYS_LOG} | "${PFLOGSUMM}" -d today --detail 0 --zero-fill)
+else
+	TMP_RAW=$("${PFLOGSUMM}" -d today --detail 0 --zero-fill "${SYS_LOG}")
+fi
 
 # Parse value from Raw result
 # 
