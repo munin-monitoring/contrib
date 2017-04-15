@@ -15,8 +15,9 @@ Any system where pflogsumm script can be executed.
 
 There is no default configuration. This is an example config for Ubuntu:
 
-  [postfix_stats]
-   env.logfiles /var/log/syslog /var/log/syslog.1
+  [postfix_stats*]
+   group adm
+   env.logfiles /var/log/mail.log /var/log/mail.log.1
    env.pflogsumm pflogsumm
 
 env.logfiles contains space separated syslog logfiles, usually current log
@@ -26,6 +27,15 @@ increase the time required for analysis.
 env.pflogsumm The "pflogsumm" script, can be pflogsumm.pl if it was manually
 downloaded and installed, or "pflogsumm" if it was installed by a package 
 manager (like apt-get).
+
+Use the last part of the symlink name for filtering by hostname from logfile,
+which contains logs from multiple hosts (e.g. received via rsyslog from remote
+hosts).
+
+For example:
+
+  cd /etc/munin/plugins
+  ln -s /path/to/postfix_stats postfix_stats_HOSTNAME
 
 =head1 INTERPRETATION
 
@@ -39,6 +49,7 @@ It is useful to know the load and messages being processed.
   #%# capabilities=autoconf
 
 =head1 VERSION
+  0.3 support for hostname grep (useful when multiple hosts in one log)
   0.2 plugin completely rewritten
   0.1 first release.
 
@@ -50,6 +61,7 @@ None known
 
 Originally: David Obando (david@cryptix.de)
 Modified by: github.com/cristiandeluxe
+Modified by: github.com/4nd3r
 Thanks to: sumpfralle
 
 =head1 LICENSE
@@ -59,7 +71,9 @@ GPLv2
 =cut
 
 #set -xv
-SYS_LOG="${logfiles:-/var/log/syslog /var/log/syslog.0}"
+MAIL_LOG="${logfiles:-/var/log/mail.log /var/log/mail.log.1}"
+
+FILTER_HOSTNAME=$(basename "$0" | sed -r 's/postfix_stats_?//')
 
 # shellcheck disable=SC2154
 PFLOGSUMM="${pflogsum}"
@@ -86,7 +100,11 @@ fi
 # Config Section
 #
 if [ "$1" = 'config' ]; then
-	echo 'graph_title Postfix statistics'
+	if [ -n "${FILTER_HOSTNAME}" ]; then
+		echo "graph_title Postfix statistics for ${FILTER_HOSTNAME}"
+	else
+		echo 'graph_title Postfix statistics'
+	fi
 	echo 'graph_vlabel Postfix statistics'
 	echo 'graph_category mail'
 	echo 'graph_scale no'
@@ -109,8 +127,13 @@ fi
 #
 
 # Variable to store the pflogsumm result.
-# shellcheck disable=SC2086
-TMP_RAW=$("${PFLOGSUMM}" -d today --detail 0 --zero-fill ${SYS_LOG})
+if [ -n "${FILTER_HOSTNAME}" ]; then
+	# shellcheck disable=SC2086
+	TMP_RAW=$(grep -Fh " ${FILTER_HOSTNAME} postfix/" ${MAIL_LOG} | "${PFLOGSUMM}" -d today --detail 0 --zero-fill)
+else
+	# shellcheck disable=SC2086
+	TMP_RAW=$("${PFLOGSUMM}" -d today --detail 0 --zero-fill ${MAIL_LOG})
+fi
 
 # Parse value from Raw result
 # 
