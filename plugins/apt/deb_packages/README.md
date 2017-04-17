@@ -22,7 +22,7 @@ version.
 
 This plugin has checked on Debian - Wheezy and squeeze. If you want to use it
 on older installations, tell me whether it works or which errors you had. It
-shoud run past python-apt 0.7 and python 2.5.
+should run past python-apt 0.7 and python 2.5.
 
 check out this git repository from 
    
