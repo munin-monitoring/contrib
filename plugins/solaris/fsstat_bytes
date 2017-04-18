@@ -1,0 +1,170 @@
+#!/bin/bash
+
+: << =cut
+
+=head1 NAME
+
+  fsstat_bytes - Munin plugin to monitor Solaris file system statistics
+
+  Tested with Solaris 10 and 11.
+
+  Note:
+    In Solaris 11, fsstat command can get stats for each non-global zones in 
+    global zone. (see man fsstat)
+    In global zone, this plugin gets stats of only global zone.    
+    In non-global zones, this plugin reports stats of the non-global zones.
+
+=head1 CONFIGURATION
+
+  Make symlink:
+    cd /path/to/munin/etc/plugins
+    ln -s /path/to/munin/lib/plugins/fsstat_bytes .
+
+=head1 ENVIRONMENT VARIABLES
+
+  env.exclude - file system(s) to exclude seperated by white-space.
+    example:  env.exclude  autofs
+    default:  none
+
+=head1 AUTHOR
+
+  K.Cima https://github.com/shakemid
+
+=head1 LICENSE
+
+  GPLv2
+
+=head1 Magic markers
+
+  #%# family=contrib
+  #%# capabilities=autoconf
+
+=cut
+
+# Include plugin.sh
+. "${MUNIN_LIBDIR:-}/plugins/plugin.sh"
+
+# Shell options
+set -o nounset  # Like perl use strict;
+
+# Set environment variables
+name_regexp='/^vopstats_(?![0-9a-f]{7})[a-z]/'  # data source of fsstat
+: "${exclude:=}"
+
+# Set graph settings
+global_attr="
+    graph_title File system statictics - I/O throughput
+    graph_category disk
+    graph_args --base 1024
+    graph_vlabel Bytes per second write (-) / read (+)
+    graph_info File system statictics - I/O throughput
+"
+data_in=read_bytes
+data_out=write_bytes
+
+
+# Functions
+
+is_excluded() {
+    local arg i
+    arg=$1
+
+    for i in ${exclude}
+    do
+        if [ "$arg" = "$i" ]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+get_zone_id() {
+    local osver zonename zoneid
+
+    # Note: Solaris 11 fsstat supports statistics per zone. Solaris 10 does not.
+
+    zoneid=0
+    osver=$( uname -r | cut -d. -f2 )
+    
+    if [ "$osver" -ge 11 ]; then
+        zonename=$( zonename )
+        zoneid=$( /usr/sbin/zoneadm list -p | awk -F: '$2 == "'"$zonename"'" { print $1 }' )
+    fi
+
+    echo "$zoneid"
+}
+
+autoconf() {
+    if which kstat >/dev/null ; then
+        echo yes
+    else
+        echo "no (failed to find executable 'kstat')"
+    fi
+}
+
+config() {
+    local fs
+
+    # Print global attributes
+    echo "$global_attr" | sed -e 's/^  *//' -e '/^$/d'
+
+    # Get fs names by kstat
+    kstat -p "unix:${zone_id}:${name_regexp}:${data_in}" \
+    | sed -e 's/vopstats_//' -e 's/:/ /g' | awk '{ print $3 }' | sort \
+    | while read -r fs
+    do
+        is_excluded "$fs" && continue
+
+        # Print data attributes
+        echo "${fs}_${data_out}.label dummy"
+        echo "${fs}_${data_out}.graph no"
+        echo "${fs}_${data_out}.type DERIVE"
+        echo "${fs}_${data_out}.min 0"
+
+        echo "${fs}_${data_in}.label ${fs}"
+        echo "${fs}_${data_in}.negative ${fs}_${data_out}"
+        echo "${fs}_${data_in}.type DERIVE"
+        echo "${fs}_${data_in}.min 0"
+    done
+}
+
+fetch() {
+    local fs stat value
+
+    # Get fs names, stat names and values by kstat
+
+    # kstat output example:
+    #  $ kstat -p 'unix::/^vopstats_[a-z]/:nread'
+    #  unix:0:vopstats_autofs:nread    2
+    #  unix:0:vopstats_hsfs:nread      407790
+    #  ...
+
+    kstat -p "unix:${zone_id}:${name_regexp}:/^(${data_in}|${data_out})\$/" \
+    | sed -e 's/vopstats_//' -e 's/:/ /g' | awk '{ print $3,$4,$5 }' \
+    | while read -r fs stat value
+    do
+        is_excluded "$fs" && continue
+
+        echo "${fs}_${stat}.value ${value}"
+    done
+}
+
+# Main
+
+zone_id=$( get_zone_id )
+
+case ${1:-} in
+autoconf)
+    autoconf
+    ;;
+config)
+    config
+    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && fetch
+    ;;
+*)
+    fetch
+    ;;
+esac
+
+exit 0

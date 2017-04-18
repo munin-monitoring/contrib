@@ -1,0 +1,173 @@
+#!/bin/bash
+
+: << =cut
+
+=head1 NAME
+
+  fsstat_act_ - Munin wildcard plugin to monitor Solaris file system statistics
+
+  This plugin monitors full activity of file system like fsstat -f .
+  See man fsstat for more details.
+
+  Tested with Solaris 10 and 11. And should work with Solaris 10 11/06 or above.
+
+  Note:
+    In Solaris 11, fsstat command can get stats for each non-global zones in 
+    global zone. (see man fsstat)
+    In global zone, this plugin gets stats of only global zone.    
+    In non-global zones, this plugin reports stats of the non-global zones.
+
+=head1 CONFIGURATION
+
+  This plugin monitors statistics per file system type. Available file system
+  can be shown by fsstat command.
+
+  Make symlink:
+    cd /path/to/munin/etc/plugins
+    ln -s /path/to/munin/lib/plugins/fsstat_act_ fsstat_act_zfs
+    ln -s /path/to/munin/lib/plugins/fsstat_act_ fsstat_act_nfs3
+    ln -s /path/to/munin/lib/plugins/fsstat_act_ fsstat_act_nfs4
+    ...
+
+=head1 ENVIRONMENT VARIABLES
+
+  None
+
+=head1 AUTHOR
+
+  K.Cima https://github.com/shakemid
+
+=head1 LICENSE
+
+  GPLv2
+
+=head1 Magic markers
+
+  #%# family=contrib
+  #%# capabilities=autoconf suggest
+
+=cut
+
+# Include plugin.sh
+. "${MUNIN_LIBDIR:-}/plugins/plugin.sh"
+
+# Shell options
+set -o nounset  # Like perl use strict;
+
+# Set environment variables
+plugin_name=${0##*/}
+fs_type=${plugin_name##*_}
+name_regexp='/^vopstats_(?![0-9a-f]{7})[a-z]/'  # data source of fsstat
+stat_regexp='/^(?!(class|crtime|snaptime|.*_bytes))/'
+
+# Graph settings
+global_attr="
+    graph_title File system statictics - Activities of $( echo "$fs_type" | tr '[:lower:]' '[:upper:]' )
+    graph_category disk 
+    graph_args --base 1000
+    graph_vlabel Counts per second
+    graph_info File system statictics - Activities of $( echo "$fs_type" | tr '[:lower:]' '[:upper:]' )
+"
+
+# Functions
+
+get_zone_id() {
+    local osver zonename zoneid
+
+    # Note: Solaris 11 fsstat supports statistics per zone. Solaris 10 does not.
+
+    zoneid=0
+    osver=$( uname -r | cut -d. -f2 )
+    
+    if [ "$osver" -ge 11 ]; then
+        zonename=$( zonename )
+        zoneid=$( /usr/sbin/zoneadm list -p | awk -F: '$2 == "'"$zonename"'" { print $1 }' )
+    fi
+
+    echo "$zoneid"
+}
+
+autoconf() {
+    if which kstat >/dev/null ; then
+        echo yes
+    else
+        echo "no (failed to find executable 'kstat')"
+    fi
+}
+
+suggest() {
+    # Print file systems which look active
+
+    kstat -p "unix:${zone_id}:${name_regexp}:/^(read_bytes|write_bytes)\$/" \
+    | sed -e 's/vopstats_//' -e 's/:/ /g' \
+    | awk '{
+        sum[ $3 ] += $5 
+    }
+    END {
+        for ( i in sum ) {
+            if ( sum[i] != 0 ) {
+                print i
+            }
+        }
+    }' | sort
+}
+
+config() {
+    local stat
+
+    # Print global attributes
+    echo "$global_attr" | sed -e 's/^  *//' -e '/^$/d'
+
+    # Get stat names by kstat
+    kstat -p "unix:${zone_id}:vopstats_${fs_type}:${stat_regexp}" \
+    | sed -e 's/vopstats_//' -e 's/:/ /g' | awk '{ print $4 }' | sort \
+    | while read -r stat
+    do
+        # Print data attributes
+        echo "${stat}.label ${stat#n}"
+        echo "${stat}.graph line"
+        echo "${stat}.type DERIVE"
+        echo "${stat}.min 0"
+    done
+}
+
+fetch() {
+    local stat value
+
+    # Get fs names, stat names and values by kstat
+
+    # kstat output example:
+    #  $ kstat -p 'unix::/^vopstats_[a-z]/:nread'
+    #  unix:0:vopstats_autofs:nread    2
+    #  unix:0:vopstats_hsfs:nread      407790
+    #  ...
+
+    kstat -p "unix:${zone_id}:vopstats_${fs_type}:${stat_regexp}" \
+    | sed -e 's/vopstats_//' -e 's/:/ /g' | awk '{ print $4,$5 }' \
+    | while read -r stat value
+    do
+        echo "${stat}.value ${value}"
+    done
+}
+
+# Main
+
+zone_id=$( get_zone_id )
+
+case ${1:-} in
+autoconf)
+    autoconf
+    ;;
+suggest)
+    suggest
+    ;;
+config)
+    config
+    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && fetch
+    ;;
+*)
+    fetch
+    ;;
+esac
+
+exit 0

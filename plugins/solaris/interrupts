@@ -1,0 +1,128 @@
+#!/bin/bash
+
+: << =cut
+
+=head1 NAME
+
+  interrupts - Munin plugin to monitor Solaris cpu interrupts and context switches
+
+=head1 CONFIGURATION
+
+  Make symlink:
+    cd /path/to/munin/etc/plugins
+    ln -s /path/to/munin/lib/plugins/interrupts .
+
+=head1 AUTHOR
+
+  K.Cima https://github.com/shakemid
+
+=head1 LICENSE
+
+  GPLv2
+
+=head1 Magic markers
+
+  #%# family=contrib
+  #%# capabilities=autoconf
+
+=cut
+
+# Include plugin.sh
+. "${MUNIN_LIBDIR:-}/plugins/plugin.sh"
+
+# Shell options
+set -o nounset  # Like perl use strict;
+
+# Graph settings
+global_attr="
+    graph_title Interrupts and context switches
+    graph_category system
+    graph_args --base 1000 --lower-limit 0 --rigid
+    graph_vlabel count per second
+    graph_info Interrupts and context switches
+
+    rw_wrfails.graph no
+    rw_rdfails.cdef rw_rdfails,rw_wrfails,+
+"
+# data_attr format: field type draw label
+#   label can contain white-spaces.
+data_attr="
+    intr           DERIVE LINE interrupts
+    intrthread     DERIVE LINE interrupts as threads
+    pswitch        DERIVE LINE context switches
+    inv_swtch      DERIVE LINE involuntary context switches
+    cpumigrate     DERIVE LINE thread migrations
+    xcalls         DERIVE LINE inter-processor cross-calls
+    mutex_adenters DERIVE LINE spins on mutexes
+    rw_rdfails     DERIVE LINE spins on r/w locks
+    rw_wrfails     DERIVE LINE dummy
+    syscall        DERIVE LINE system calls
+    trap           DERIVE LINE traps
+"
+# They can be shown by vmstat -s or mpstat
+
+# Functions
+
+autoconf() {
+    if which kstat >/dev/null ; then
+        echo yes
+    else
+        echo "no (failed to find executable 'kstat')"
+    fi
+}
+
+config() {
+    local label_max_length=45
+
+    # print global attributes
+    echo "$global_attr" | sed -e 's/^  *//' -e '/^$/d'
+
+    # print data source attributes
+    # split line into field,type,draw,label 
+    local field type draw label
+    echo "$data_attr" | while read -r field type draw label
+    do
+        [ -z "$field" ] && continue
+
+        echo "${field}.type ${type}"
+        echo "${field}.draw ${draw}"
+        echo "${field}.label ${label:0:${label_max_length}}"
+        if [ "${type}" = DERIVE ]; then
+            echo "${field}.min 0"
+        fi
+    done
+}
+
+fetch() {
+    local field type draw label
+    echo "$data_attr" | while read -r field type draw label
+    do
+        [ -z "$field" ] && continue
+
+        # kstat output example:
+        #   $ kstat -p cpu::sys:intr
+        #   cpu:0:sys:intr  5728473528
+        #   cpu:1:sys:intr  1060016014
+        #   cpu:2:sys:intr  1297441213
+        #   ...
+        value=$( kstat -p "cpu::sys:${field}" | awk '{ sum += $2 } END { print sum }' )
+
+        echo "${field}.value ${value}"
+    done
+}
+
+# Main
+case ${1:-} in
+autoconf)
+    autoconf
+    ;;
+config)
+    config
+    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && fetch
+    ;;
+*)
+    fetch
+    ;;
+esac
+
+exit 0
