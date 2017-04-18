@@ -20,7 +20,7 @@
     cd /path/to/munin/etc/plugins
     ln -s /path/to/munin/lib/plugins/fsstat_bytes .
 
-=head1 ENVIRONMET VARIABLES
+=head1 ENVIRONMENT VARIABLES
 
   env.exclude - file system(s) to exclude seperated by white-space.
     example:  env.exclude  autofs
@@ -82,6 +82,8 @@ is_excluded() {
 get_zone_id() {
     local osver zonename zoneid
 
+    # Note: Solaris 11 fsstat supports statistics per zone. Solaris 10 does not.
+
     zoneid=0
     osver=$( uname -r | cut -d. -f2 )
     
@@ -94,7 +96,7 @@ get_zone_id() {
 }
 
 autoconf() {
-    if [ -x "$( which kstat )" ]; then
+    if which kstat >/dev/null ; then
         echo yes
     else
         echo "no (failed to find executable 'kstat')"
@@ -105,12 +107,12 @@ config() {
     local fs
 
     # Print global attributes
-    echo "${global_attr}" | sed -e 's/^  *//' -e '/^$/d' 
+    echo "$global_attr" | sed -e 's/^  *//' -e '/^$/d'
 
     # Get fs names by kstat
-    kstat -p "unix:${zone_id}:${name_regexp}:${data_in}" | \
-    sed -e 's/vopstats_//' -e 's/:/ /g' | awk '{ print $3 }' | sort -u | \
-    while read -r fs
+    kstat -p "unix:${zone_id}:${name_regexp}:${data_in}" \
+    | sed -e 's/vopstats_//' -e 's/:/ /g' | awk '{ print $3 }' | sort \
+    | while read -r fs
     do
         is_excluded "$fs" && continue
 
@@ -125,11 +127,9 @@ config() {
         echo "${fs}_${data_in}.type DERIVE"
         echo "${fs}_${data_in}.min 0"
     done
-
-    echo
 }
 
-getvalue() {
+fetch() {
     local fs stat value
 
     # Get fs names, stat names and values by kstat
@@ -140,16 +140,14 @@ getvalue() {
     #  unix:0:vopstats_hsfs:nread      407790
     #  ...
 
-    kstat -p "unix:${zone_id}:${name_regexp}:/^(${data_in}|${data_out})\$/" | \
-    sed -e 's/vopstats_//' -e 's/:/ /g' | awk '{ print $3,$4,$5 }' | \
-    while read -r fs stat value
+    kstat -p "unix:${zone_id}:${name_regexp}:/^(${data_in}|${data_out})\$/" \
+    | sed -e 's/vopstats_//' -e 's/:/ /g' | awk '{ print $3,$4,$5 }' \
+    | while read -r fs stat value
     do
         is_excluded "$fs" && continue
 
         echo "${fs}_${stat}.value ${value}"
     done
-
-    echo
 }
 
 # Main
@@ -162,10 +160,10 @@ autoconf)
     ;;
 config)
     config
-    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && getvalue
+    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && fetch
     ;;
 *)
-    getvalue
+    fetch
     ;;
 esac
 

@@ -52,7 +52,7 @@ data_attr="
 # Functions
 
 autoconf() {
-    if [ -x "$( which kstat )" ]; then
+    if which kstat >/dev/null ; then
         echo yes
     else
         echo "no (failed to find executable 'kstat')"
@@ -63,16 +63,14 @@ config() {
     local label_max_length=45
 
     # print global attributes
-    sed -e 's/^  *//' -e '/^$/d' <<< "${global_attr}"
+    echo "$global_attr" | sed -e 's/^  *//' -e '/^$/d'
 
     # print data source attributes
     # split line into field,type,draw,label 
-    local fields field type draw label
-    fields=
-    while read -r field type draw label
+    local field type draw label
+    echo "$data_attr" | while read -r field type draw label
     do
         [ -z "$field" ] && continue
-        fields="${fields} ${field}"
 
         echo "${field}.type ${type}"
         echo "${field}.draw ${draw}"
@@ -80,19 +78,17 @@ config() {
         if [ "${type}" = DERIVE ]; then
             echo "${field}.min 0"
         fi
-    done <<< "${data_attr}"
-
-    echo graph_order "$fields"
+    done
 }
 
-getvalue() {
+fetch() {
     local field type draw label
-    while read -r field type draw label
+    echo "$data_attr" | while read -r field type draw label
     do
         [ -z "$field" ] && continue
         value=$( kstat -p "cpu::sys:${field}" | awk '{ sum += $2 } END { print sum }' )
         echo "${field}.value ${value}"
-    done <<< "${data_attr}"
+    done
 }
 
 # Main
@@ -102,10 +98,10 @@ autoconf)
     ;;
 config)
     config
-    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && getvalue
+    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && fetch
     ;;
 *)
-    getvalue
+    fetch
     ;;
 esac
 

@@ -29,7 +29,7 @@
     ln -s /path/to/munin/lib/plugins/fsstat_act_ fsstat_act_nfs4
     ...
 
-=head1 ENVIRONMET VARIABLES
+=head1 ENVIRONMENT VARIABLES
 
   None
 
@@ -62,17 +62,19 @@ stat_regexp='/^(?!(class|crtime|snaptime|.*_bytes))/'
 
 # Graph settings
 global_attr="
-    graph_title File system statictics - Activities of ${fs_type^^}
+    graph_title File system statictics - Activities of $( echo "$fs_type" | tr '[:lower:]' '[:upper:]' )
     graph_category disk 
     graph_args --base 1000
     graph_vlabel Counts per second
-    graph_info File system statictics - Activities of ${fs_type^^}
+    graph_info File system statictics - Activities of $( echo "$fs_type" | tr '[:lower:]' '[:upper:]' )
 "
 
 # Functions
 
 get_zone_id() {
     local osver zonename zoneid
+
+    # Note: Solaris 11 fsstat supports statistics per zone. Solaris 10 does not.
 
     zoneid=0
     osver=$( uname -r | cut -d. -f2 )
@@ -86,7 +88,7 @@ get_zone_id() {
 }
 
 autoconf() {
-    if [ -x "$( which kstat )" ]; then
+    if which kstat >/dev/null ; then
         echo yes
     else
         echo "no (failed to find executable 'kstat')"
@@ -96,9 +98,9 @@ autoconf() {
 suggest() {
     # Print file systems which look active
 
-    kstat -p "unix:${zone_id}:${name_regexp}:/^(read_bytes|write_bytes)\$/" | \
-    sed -e 's/vopstats_//' -e 's/:/ /g' | \
-    awk '{ 
+    kstat -p "unix:${zone_id}:${name_regexp}:/^(read_bytes|write_bytes)\$/" \
+    | sed -e 's/vopstats_//' -e 's/:/ /g' \
+    | awk '{
         sum[ $3 ] += $5 
     }
     END {
@@ -114,12 +116,12 @@ config() {
     local stat
 
     # Print global attributes
-    echo "${global_attr}" | sed -e 's/^  *//' -e '/^$/d' 
+    echo "$global_attr" | sed -e 's/^  *//' -e '/^$/d'
 
     # Get stat names by kstat
-    kstat -p "unix:${zone_id}:vopstats_${fs_type}:${stat_regexp}" | \
-    sed -e 's/vopstats_//' -e 's/:/ /g' | awk '{ print $4 }' | sort -u | \
-    while read -r stat
+    kstat -p "unix:${zone_id}:vopstats_${fs_type}:${stat_regexp}" \
+    | sed -e 's/vopstats_//' -e 's/:/ /g' | awk '{ print $4 }' | sort \
+    | while read -r stat
     do
         # Print data attributes
         echo "${stat}.label ${stat#n}"
@@ -127,11 +129,9 @@ config() {
         echo "${stat}.type DERIVE"
         echo "${stat}.min 0"
     done
-
-    echo
 }
 
-getvalue() {
+fetch() {
     local stat value
 
     # Get fs names, stat names and values by kstat
@@ -142,14 +142,12 @@ getvalue() {
     #  unix:0:vopstats_hsfs:nread      407790
     #  ...
 
-    kstat -p "unix:${zone_id}:vopstats_${fs_type}:${stat_regexp}" | \
-    sed -e 's/vopstats_//' -e 's/:/ /g' | awk '{ print $4,$5 }' | \
-    while read -r stat value
+    kstat -p "unix:${zone_id}:vopstats_${fs_type}:${stat_regexp}" \
+    | sed -e 's/vopstats_//' -e 's/:/ /g' | awk '{ print $4,$5 }' \
+    | while read -r stat value
     do
         echo "${stat}.value ${value}"
     done
-
-    echo
 }
 
 # Main
@@ -165,10 +163,10 @@ suggest)
     ;;
 config)
     config
-    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && getvalue
+    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && fetch
     ;;
 *)
-    getvalue
+    fetch
     ;;
 esac
 
