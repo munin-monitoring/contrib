@@ -16,9 +16,8 @@ Counts the in/out bandwidth used by each projects/vhost. [Logtail] (https://www.
 ## Installation
 The setup is pretty straight forward. First you need to configure the plugin:
 
-Define the file which will be used by logtail to identify it's position in the log and the path to logtail:
+Define the path to logtail:
 
-      $statepath = '/usr/local/var/munin/plugin-state'; # directory where logtail will save the state
       $logtail = '/usr/local/bin/logtail';
 
 Multiple logs can be used for the same project/vhost and a regular expression (regex) can be used as a filter:
