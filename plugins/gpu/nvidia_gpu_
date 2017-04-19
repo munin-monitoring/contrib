@@ -86,6 +86,7 @@ if [ "$1" = "suggest" ]; then
 	echo "temp"
 	echo "mem"
 	echo "fan"
+	echo "power"
 	exit 0
 fi
 
@@ -162,6 +163,19 @@ if [ "$1" = "config" ]; then
 				: $(( nGpusCounter = $nGpusCounter + 1 ))
 				done 
 			;;
+		power)
+			echo 'graph_title GPU power consumption'
+			echo 'graph_vlabel Watt'
+			echo 'graph_category sensors'
+			echo "graph_info power consumption of NVIDIA GPUs using driver version $driverVersion"
+			nGpusCounter=0
+			while [ $nGpusCounter -lt $nGpus ]
+			do
+				gpuName=`echo "$nGpusOutput" | sed -n $(( $nGpusCounter + 1 ))p | cut -d \( -f 1`
+				echo "power${nGpusCounter}.info power consumption of $gpuName"
+				: $(( nGpusCounter = $nGpusCounter + 1 ))
+				done
+			;;
 		*)
 			echo "Can't run without a proper symlink. Exiting."
 			echo "Try running munin-node-configure --suggest."
@@ -204,6 +218,9 @@ case $name in
 		;;
 	fan)
 		valueGpus=`echo "$smiOutput" | grep "Fan Speed" | cut -d ':' -f 2 | cut -d ' ' -f 2`
+		;;
+	power)
+		valueGpus=`echo "$smiOutput" | grep "Power Draw" | cut -d ':' -f 2 | cut -d ' ' -f 2`
 		;;
 	*)
 		echo "Can't run without a proper symlink. Exiting."
