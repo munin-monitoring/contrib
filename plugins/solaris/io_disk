@@ -106,10 +106,10 @@ functions='ops bytes busy queue latency size'
 #     name_sd1=c0t0d0
 #     name_ssd2=c0tAB_1234d0  (shorten long target)
 #     ...
-instance_names=$( iostat -x | sed -e '1,2d' | awk '{print $1}' | \
-    sed -e 's/^/name_/' )
-logical_device_names=$( iostat -xn | sed -e '1,2d' | awk '{print $NF}' | \
-    sed -e 's/^\(c[0-9]*\)\(t.\{2\}\).*\(.\{4\}\)\(d[0-9]*\)$/\1\2_\3\4/' )
+instance_names=$( iostat -x | sed -e '1,2d' | awk '{print $1}' \
+    | sed -e 's/^/name_/' )
+logical_device_names=$( iostat -xn | sed -e '1,2d' | awk '{print $NF}' \
+    | sed -e 's/^\(c[0-9]*\)\(t.\{2\}\).*\(.\{4\}\)\(d[0-9]*\)$/\1\2_\3\4/' )
 declare $( paste -d= <( echo "$instance_names" ) <( echo "$logical_device_names" ) )
 
 # Functions
@@ -125,8 +125,6 @@ preconfig() {
         conf_vlabel='Ops per second write (-) / read (+)'
         conf_in=reads
         conf_out=writes
-        conf_in_cdef=
-        conf_out_cdef=
         ;;
     bytes)
         conf_title='I/O Throughput'
@@ -134,8 +132,6 @@ preconfig() {
         conf_vlabel='Bytes per second write (-) / read (+)'
         conf_in=nread
         conf_out=nwritten
-        conf_in_cdef=
-        conf_out_cdef=
         ;;
     busy)
         conf_title='Busy & Wait'
@@ -143,8 +139,6 @@ preconfig() {
         conf_vlabel='% wait (-) / busy (+)'
         conf_in=rtime
         conf_out=wtime
-        conf_in_cdef=',100,*'
-        conf_out_cdef=',100,*'
         ;;
     queue)
         conf_title='Queue Length'
@@ -152,8 +146,6 @@ preconfig() {
         conf_vlabel='Queue length wait (-) / actv (+)'
         conf_in=rlentime
         conf_out=wlentime
-        conf_in_cdef=
-        conf_out_cdef=
         ;;
     latency)
         conf_title='Latency'
@@ -161,8 +153,6 @@ preconfig() {
         conf_vlabel='Seconds wsvc_t (-) / asvc_t (+)'
         conf_in=rlentime
         conf_out=wlentime
-        conf_in_cdef=
-        conf_out_cdef=
         ;;
     size)
         conf_title='I/O Size'
@@ -170,8 +160,6 @@ preconfig() {
         conf_vlabel='Average size write (-) / read (+)'
         conf_in=nread
         conf_out=nwritten
-        conf_in_cdef=
-        conf_out_cdef=
         ;;
     *)
         echo "Unknown function: $func"
@@ -181,12 +169,12 @@ preconfig() {
 }
 
 is_excluded() {
-    local dev i
-    dev=$1
+    local arg i
+    arg=$1
 
     for i in ${exclude}
     do
-        if [ "$dev" = "$i" ]; then
+        if [ "$arg" = "$i" ]; then
             return 0
         fi
     done
@@ -199,7 +187,6 @@ do_config() {
 
     func=$1
     preconfig "$func"
-
     echo "multigraph ${plugin_name}_${func}_${module}"
 
     echo "graph_title $title_type $conf_title"
@@ -211,8 +198,9 @@ do_config() {
     fi
 
     # Get device instance names by kstat
-    kstat -p -c "$class" -m "$module_regex" -s "/^${conf_in}\$/" | sed 's/:/ /g' | awk '{ print $3 }' | \
-    while read -r dev
+    kstat -p -c "$class" -m "$module_regex" -s "/^${conf_in}\$/" \
+    | sed 's/:/ /g' | awk '{ print $3 }' \
+    | while read -r dev
     do
         is_excluded "$dev" && continue
 
@@ -225,24 +213,32 @@ do_config() {
         latency|size)
             for stat in reads writes
             do
-                echo "${dev}_$stat.label dummy" 
-                echo "${dev}_$stat.graph no"
-                echo "${dev}_$stat.type DERIVE"
-                echo "${dev}_$stat.min 0"
+                echo "${dev}_${stat}.label dummy" 
+                echo "${dev}_${stat}.graph no"
+                echo "${dev}_${stat}.type DERIVE"
+                echo "${dev}_${stat}.min 0"
             done
             ;;
         esac
 
-        # Set cdef for latency, size
+        # Set CDEF
         case "$func" in
+        busy)
+            conf_in_cdef="${dev}_${conf_in},100,*"
+            conf_out_cdef="${dev}_${conf_out},100,*"
+            ;;
         latency)
             # rlentime / ( reads + writes )
-            conf_in_cdef=,${dev}_reads,${dev}_writes,+,/
-            conf_out_cdef=,${dev}_reads,${dev}_writes,+,/
+            conf_in_cdef="${dev}_${conf_in},${dev}_reads,${dev}_writes,+,/"
+            conf_out_cdef="${dev}_${conf_out},${dev}_reads,${dev}_writes,+,/"
             ;;
         size)
-            conf_in_cdef=,${dev}_reads,/
-            conf_out_cdef=,${dev}_writes,/
+            conf_in_cdef="${dev}_${conf_in},${dev}_reads,/"
+            conf_out_cdef="${dev}_${conf_out},${dev}_writes,/"
+            ;;
+        *)
+            conf_in_cdef=
+            conf_out_cdef=
             ;;
         esac
 
@@ -251,27 +247,28 @@ do_config() {
         echo "${dev}_${conf_out}.graph no"
         echo "${dev}_${conf_out}.type DERIVE"
         echo "${dev}_${conf_out}.min 0"
-        if [ -n "${conf_out_cdef:-}" ]; then
-            echo "${dev}_${conf_out}.cdef ${dev}_${conf_out}${conf_out_cdef}"
+        if [ -n "$conf_out_cdef" ]; then
+            echo "${dev}_${conf_out}.cdef ${conf_out_cdef}"
         fi
 
         echo "${dev}_${conf_in}.label ${devname:-${dev}}"
         echo "${dev}_${conf_in}.negative ${dev}_${conf_out}"
         echo "${dev}_${conf_in}.type DERIVE"
         echo "${dev}_${conf_in}.min 0"
-        if [ -n "${conf_in_cdef:-}" ]; then
-            echo "${dev}_${conf_in}.cdef ${dev}_${conf_in}${conf_in_cdef}"
+        if [ -n "$conf_in_cdef" ]; then
+            echo "${dev}_${conf_in}.cdef ${conf_in_cdef}"
         fi
     done
 
     echo
 }
 
-do_getvalue() {
+do_fetch() {
     local func stat_regex dev stat value
 
     func=$1
     preconfig "$func"
+    echo "multigraph ${plugin_name}_${func}_${module}"
 
     case "$func" in
     latency|size)
@@ -282,8 +279,6 @@ do_getvalue() {
         ;;
     esac
 
-    echo "multigraph ${plugin_name}_${func}_${module}"
-
     # Get device instance names, stat names and values by kstat
 
     # kstat output example:
@@ -292,8 +287,9 @@ do_getvalue() {
     #   sd:1:sd1:reads  52671435
     #   ...
 
-    kstat -p -c "$class" -m "$module_regex" -s "$stat_regex" | sed 's/:/ /g' | awk '{ print $3,$4,$5 }' | \
-    while read -r dev stat value
+    kstat -p -c "$class" -m "$module_regex" -s "$stat_regex" \
+    | sed 's/:/ /g' | awk '{ print $3,$4,$5 }' \
+    | while read -r dev stat value
     do
         is_excluded "$dev" && continue
 
@@ -322,12 +318,12 @@ config() {
     done
 }
 
-getvalue() {
+fetch() {
     local func
 
     for func in $functions
     do
-        do_getvalue "$func"
+        do_fetch "$func"
     done
 }
 
@@ -338,9 +334,10 @@ autoconf)
     ;;
 config)
     config
+    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && fetch
     ;;
 *)
-    getvalue
+    fetch
     ;;
 esac
 
