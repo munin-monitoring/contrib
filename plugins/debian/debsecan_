@@ -74,17 +74,17 @@ MODE=$(echo "$0" | sed 's/.*_//')
 case "${MODE}" in
 	'cve')
 		TITLE_ADD="unique "
-		CUT_FIELD=1
+		FIELD=1
 		;;
 	'pkg' | *)
 		TITLE_ADD="package "
-		CUT_FIELD=2
+		FIELD=2
 		;;
 esac
 
 if [ "$1" = "config" ] ; then
   cat <<EOF_
-graph_title DebSecan : ${TITLE_ADD}vulnerabilities for ${SUITE}
+graph_title DebSecan: ${TITLE_ADD}vulnerabilities for ${SUITE}
 graph_args -l 0 --base 1000
 graph_vlabel number of CVE
 graph_category system
@@ -134,23 +134,29 @@ EOF_
 fi
 
 ALL=$(debsecan --suite "${SUITE}" 2> /dev/null)
-REMOTE=$(echo "$ALL" | grep 'remotely')
-NONREMOTE=$(echo "$ALL" | grep -v 'remotely')
+REMOTE=$(echo "$ALL" | grep -w 'remotely')
+NONREMOTE=$(echo "$ALL" | grep -wv 'remotely')
 
-HIGH=$(echo "${NONREMOTE}" | grep 'high urgency')
-MEDIUM=$(echo "${NONREMOTE}" | grep 'medium urgency')
-LOW=$(echo "${NONREMOTE}" | grep 'low urgency')
-OTHER=$(echo "${NONREMOTE}" | grep -v 'urgency')
-FIXED=$(echo "${ALL}" | grep '(fixed')
+HIGH=$(echo "${NONREMOTE}" | grep -w 'high urgency')
+MEDIUM=$(echo "${NONREMOTE}" | grep -w 'medium urgency')
+LOW=$(echo "${NONREMOTE}" | grep -w 'low urgency')
+OTHER=$(echo "${NONREMOTE}" | grep -wv 'urgency')
+FIXED=$(echo "${ALL}" | grep -w '(fixed')
+
+# Arguments: Field offset to aggregate by
+count_entries() {
+	CUT_FIELD=${1}
+	cut -f "${CUT_FIELD}" -d " "| sort | uniq -c
+}
 
 case "${MODE}" in
 	'cve')
-		remote_count=$(echo "${REMOTE}" | cut -f "${CUT_FIELD}" -d " "| sort | uniq | wc -l)
-		high_count=$(echo "${HIGH}" | cut -f "${CUT_FIELD}" -d " "| sort | uniq | wc -l)
-		medium_count=$(echo "${MEDIUM}" | cut -f "${CUT_FIELD}" -d " "| sort | uniq | wc -l)
-		low_count=$(echo "${LOW}" | cut -f "${CUT_FIELD}" -d " "| sort | uniq | wc -l)
-		other_count=$(echo "${OTHER}" | cut -f "${CUT_FIELD}" -d " "| sort | uniq | wc -l)
-		fixed_count=$(echo "${FIXED}" | cut -f "${CUT_FIELD}" -d " "| sort | uniq | wc -l)
+		remote_count=$(echo "${REMOTE}" | count_entries ${FIELD} | wc -l)
+		high_count=$(echo "${HIGH}" | count_entries ${FIELD} | wc -l)
+		medium_count=$(echo "${MEDIUM}" | count_entries ${FIELD} | wc -l)
+		low_count=$(echo "${LOW}" | count_entries ${FIELD} | wc -l)
+		other_count=$(echo "${OTHER}" | count_entries ${FIELD} | wc -l)
+		fixed_count=$(echo "${FIXED}" | count_entries ${FIELD} | wc -l)
 		;;
 	'pkg' | *)
 		remote_count=$(echo "${REMOTE}" | wc -l)
@@ -169,15 +175,15 @@ CVECOUNTRE="s/^ *\([0-9]\+\) \+\([^ ]\+\)/\2 (\1)/"
 # The nested $(echo ...)s are needed to yet the newlines
 cat <<EOF
 remote.value $remote_count
-remote.extinfo $(echo $(echo "${REMOTE}" | cut -f "${CUT_FIELD}" -d " "| sort | uniq -c | sort -nr | sed "${CVECOUNTRE}"))
+remote.extinfo $(echo $(echo "${REMOTE}" | count_entries ${FIELD} | sort -nr | sed "${CVECOUNTRE}"))
 high.value $high_count
-high.extinfo $(echo $(echo "${HIGH}" | cut -f "${CUT_FIELD}" -d " " | sort | uniq -c | sort -nr | sed "${CVECOUNTRE}"))
+high.extinfo $(echo $(echo "${HIGH}" | count_entries ${FIELD} | sort -nr | sed "${CVECOUNTRE}"))
 medium.value $medium_count
-medium.extinfo $(echo $(echo "${MEDIUM}" | cut -f "${CUT_FIELD}" -d " " | sort | uniq -c | sort -nr | sed "${CVECOUNTRE}"))
+medium.extinfo $(echo $(echo "${MEDIUM}" | count_entries ${FIELD} | sort -nr | sed "${CVECOUNTRE}"))
 low.value $low_count
-low.extinfo $(echo $(echo "${LOW}" | cut -f "${CUT_FIELD}" -d " " | sort | uniq -c | sort -nr | sed "${CVECOUNTRE}"))
+low.extinfo $(echo $(echo "${LOW}" | count_entries ${FIELD} | sort -nr | sed "${CVECOUNTRE}"))
 other.value $other_count
-other.extinfo $(echo $(echo "${OTHER}" | cut -f "${CUT_FIELD}" -d " " | sort | uniq -c | sort -nr | sed "${CVECOUNTRE}"))
+other.extinfo $(echo $(echo "${OTHER}" | count_entries ${FIELD} | sort -nr | sed "${CVECOUNTRE}"))
 fixed.value $fixed_count
-fixed.extinfo $(echo $(echo "${FIXED}" | cut -f "${CUT_FIELD}" -d " " | sort | uniq -c | sort -nr | sed "${CVECOUNTRE}"))
+fixed.extinfo $(echo $(echo "${FIXED}" | count_entries ${FIELD} | sort -nr | sed "${CVECOUNTRE}"))
 EOF
