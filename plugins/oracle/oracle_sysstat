@@ -5,8 +5,9 @@
 
 =head1 NAME
 
-  oracle_sysstat_* - Munin plugin to monitor Oracle Statistics
+  oracle_sysstat - Munin multi-graph plugin to monitor Oracle Statistics
 
+  These modules are implemented:
     execute                 - To monitor Oracle Sysstat SQL Execute Count
     parse                   - To monitor Oracle Sysstat SQL Parse Count
     tablefetch              - To monitor Oracle Sysstat SQL Table Fetch Rows
@@ -42,28 +43,71 @@
 
 =head1 CONFIGURATION
 
-  To get a list of symlinks that can be created, run:   
-
-    ./oracle_sysstat_ suggest
-
-  Make symlinks:
-
-    munin-node-configure --families=contrib --suggest --shell
+  Make symlink:
+    cd /path/to/munin/etc/plugins
+    ln -s /path/to/munin/lib/plugins/oracle_sysstat .
+    ln -s /path/to/munin/lib/plugins/oracle_sysstat oracle_sysstat_asmusage # if necessary
     ...
 
   The following shows example settings for this plugin:
 
-    [oracle_sysstat_*]
+    [oracle_sysstat]
       user  oracle
+      env.ORACLE_SID   ORCL
+      env.ORACLE_HOME  /path/to/oracle/home
       env.oracle_auth  / as SYSDBA
-      env.ORACLE_HOME  /path/to/oracle/product/version
-      env.ORACLE_SID   SOMESID
 
     [oracle_sysstat_asmusage]
       user  grid
-      env.oracle_auth  / as SYSASM
-      env.ORACLE_HOME  /path/to/grid/home/version
-      env.ORACLE_SID   SOMESID
+      env.ORACLE_SID     +ASM
+      env.ORACLE_HOME    /path/to/grid/home
+      env.oracle_auth    / as SYSASM
+      env.include_module asmusage
+      env.plugin_name    oracle_sysstat
+
+=head1 ENVIRONMENT VARIABLES
+
+  env.ORACLE_SID:
+    example:  env.ORACLE_SID  SOMESID
+    default:  ORCL
+
+  env.ORACLE_HOME:
+    example:  env.ORACLE_HOME  /opt/oracle/...
+    default:  Try to find from oratab file
+
+  env.oracle_auth:
+    example:  env.oracle_auth user/pass as SYSDBA
+    default:  / as SYSDBA
+
+  env.exclude_module:
+    example:  env.exclude_module  asmusage tablespace
+    default:  asmusage
+
+    Module name(s) to exclude seperated by white-space.
+    By default, asmusage module is excluded because another privilege 
+    is necessary to connect ASM instance.
+
+  env.include_module:
+    example:  env.include_module  asmusage
+    default:  none
+
+    Module name(s) to include seperated by white-space.
+    If both include_module and exclude_module are set, exclude will be 
+    ignored.
+
+  env.plugin_name: 
+    example:  env.plugin_name  oracle_sysstat_2
+    default:  program name (usually oracle_sysstat)
+
+    Used for internal graph name. 
+    It will be useful to monitor multi-instance databases.
+
+  env.db_name: 
+    example:  env.db_name  dbname
+    default:  none
+
+    Used for graph title. 
+    It will be useful to monitor multi-instance databases.
 
 =head1 NOTES
 
@@ -78,28 +122,32 @@
 
   GPLv2
 
+=head1 MAGIC MARKERS
+
+  #%# family=contrib
+  #%# capabilities=autoconf
+
 =cut
 
-# Magic markers
-#%# family=contrib
-#%# capabilities=autoconf suggest
+# Include plugin.sh
+. "${MUNIN_LIBDIR:-}/plugins/plugin.sh"
+is_multigraph "$@"
 
 # Like perl 'use strict;' 
 set -o nounset
 
-# Include plugin.sh
-. "${MUNIN_LIBDIR:-}/plugins/plugin.sh"
-
-# Environments
-: "${ORACLE_HOME:=$( echo /opt/oracle/product/* )}"
-: "${ORACLE_SID:=orcl}"
+# Global variables
+: "${ORACLE_SID:=ORCL}"
+: "${ORACLE_HOME:=$( cat /etc/oratab /var/opt/oracle/oratab \
+    | awk -F: '$1 == "'$ORACLE_SID'" { print $2 }' 2>/dev/null )}"
 : "${oracle_auth:=/ as SYSDBA}"
+: "${exclude_module:=asmusage}"
+: "${include_module:=}"
+: "${plugin_name:=${0##*/}}"
+[ -n "${db_name:=}" ] && db_name=" ($db_name)"
 
 PATH=$PATH:$ORACLE_HOME/bin
 export PATH ORACLE_HOME ORACLE_SID
-
-# Module name
-module=$( basename "$0" | sed -e 's/^.*_//' )
 
 # Graph settings
 declare -A global_attrs  # required
@@ -107,9 +155,11 @@ declare -A data_attrs    # required (format: field type draw label)
 declare -A getfield_func # optional
 declare -A getvalue_func # required
 
+# Note: Bash 4 (or above) is required to use hash.
+
 key=execute
 global_attrs[$key]="
-    graph_title Oracle Sysstat SQL Execute Count
+    graph_title Oracle$db_name Sysstat SQL Execute Count
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel count per second
@@ -124,7 +174,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=parse
 global_attrs[$key]="
-    graph_title Oracle Sysstat SQL Parse Count
+    graph_title Oracle$db_name Sysstat SQL Parse Count
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel count per second
@@ -140,7 +190,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=tablefetch
 global_attrs[$key]="
-    graph_title Oracle Sysstat SQL Table Fetch Rows
+    graph_title Oracle$db_name Sysstat SQL Table Fetch Rows
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel count per second
@@ -155,7 +205,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=tablescan
 global_attrs[$key]="
-    graph_title Oracle Sysstat SQL Table Scans
+    graph_title Oracle$db_name Sysstat SQL Table Scans
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel count per second
@@ -169,7 +219,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=transaction
 global_attrs[$key]="
-    graph_title Oracle Sysstat SQL Transactions
+    graph_title Oracle$db_name Sysstat SQL Transactions
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel count per second
@@ -183,7 +233,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=sort
 global_attrs[$key]="
-    graph_title Oracle Sysstat SQL Sorts
+    graph_title Oracle$db_name Sysstat SQL Sorts
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel count per second
@@ -197,7 +247,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=logon
 global_attrs[$key]="
-    graph_title Oracle Sysstat User Logons
+    graph_title Oracle$db_name Sysstat User Logons
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel count per second
@@ -210,7 +260,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=cursor
 global_attrs[$key]="
-    graph_title Oracle Sysstat User Opened Cursors
+    graph_title Oracle$db_name Sysstat User Opened Cursors
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel count
@@ -223,7 +273,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=enqueue
 global_attrs[$key]="
-    graph_title Oracle Sysstat Enqueues
+    graph_title Oracle$db_name Sysstat Enqueues
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel count per second
@@ -241,7 +291,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=redolog
 global_attrs[$key]="
-    graph_title Oracle Sysstat Redo Entries
+    graph_title Oracle$db_name Sysstat Redo Entries
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel count per second
@@ -258,7 +308,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=redosize
 global_attrs[$key]="
-    graph_title Oracle Sysstat Redo Size
+    graph_title Oracle$db_name Sysstat Redo Size
     graph_category db
     graph_args --base 1024 --lower-limit 0 --rigid
     graph_vlabel bytes per second
@@ -272,7 +322,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=physicaliops
 global_attrs[$key]="
-    graph_title Oracle Sysstat I/O Physical Requests
+    graph_title Oracle$db_name Sysstat I/O Physical Requests
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel iops
@@ -290,7 +340,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=physicalrw
 global_attrs[$key]="
-    graph_title Oracle Sysstat I/O Physical Bytes
+    graph_title Oracle$db_name Sysstat I/O Physical Bytes
     graph_category db
     graph_args --base 1024 --lower-limit 0 --rigid
     graph_vlabel bytes per second
@@ -306,7 +356,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=blockrw
 global_attrs[$key]="
-    graph_title Oracle Sysstat I/O Blocks
+    graph_title Oracle$db_name Sysstat I/O Blocks
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel blocks per second
@@ -325,7 +375,7 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=netrw
 global_attrs[$key]="
-    graph_title Oracle Sysstat I/O Network Bytes
+    graph_title Oracle$db_name Sysstat I/O Network Bytes
     graph_category db
     graph_args --base 1024 --lower-limit 0 --rigid
     graph_vlabel bytes per second
@@ -341,14 +391,13 @@ getvalue_func[$key]=getvalue_sysstat
 
 key=sgainfo
 global_attrs[$key]="
-    graph_title Oracle Memory SGA
+    graph_title Oracle$db_name Memory SGA
     graph_category db
     graph_args --base 1024 --lower-limit 0 --rigid
     graph_vlabel bytes
     graph_info Oracle Memory SGA
 "
 data_attrs[$key]="
-    maximum_sga_size    GAUGE LINE      Maximum SGA Size
     fixed_sga_size      GAUGE AREASTACK Fixed SGA Size
     redo_buffers        GAUGE AREASTACK Redo Buffers
     shared_pool_size    GAUGE AREASTACK Shared Pool Size
@@ -358,28 +407,29 @@ data_attrs[$key]="
     shared_io_pool_size GAUGE AREASTACK Shared IO Pool Size
     buffer_cache_size   GAUGE AREASTACK Buffer Cache Size
     in_memory_area_size GAUGE AREASTACK In-Memory Area Size
+    maximum_sga_size    GAUGE LINE      Maximum SGA Size
 "
 getvalue_func[$key]=getvalue_sgainfo
 
 key=pgastat
 global_attrs[$key]="
-    graph_title Oracle Memory PGA
+    graph_title Oracle$db_name Memory PGA
     graph_category db
     graph_args --base 1024 --lower-limit 0 --rigid
     graph_vlabel bytes
     graph_info Oracle Memory PGA
 "
 data_attrs[$key]="
+    pga_inuse        GAUGE AREA total PGA inuse
+    pga_allocated    GAUGE LINE total PGA allocated
     pga_target       GAUGE LINE aggregate PGA target parameter
     pga_auto_target  GAUGE LINE aggregate PGA auto target
-    pga_allocated    GAUGE LINE total PGA allocated
-    pga_inuse        GAUGE AREA total PGA inuse
 "
 getvalue_func[$key]=getvalue_pgastat
 
 key=cputime
 global_attrs[$key]="
-    graph_title Oracle CPU Time
+    graph_title Oracle$db_name CPU Time
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel seconds
@@ -421,7 +471,7 @@ field_info=$( for field in buf_physical buf_logical lib_pins lib_reloads dict_ge
    done
 )
 global_attrs[$key]="
-    graph_title Oracle Cache Hit Ratio
+    graph_title Oracle$db_name Cache Hit Ratio
     graph_category db
     graph_args --base 1000 --lower-limit 0 --upper-limit 100 --rigid
     graph_vlabel %
@@ -429,9 +479,9 @@ global_attrs[$key]="
     graph_scale no
 
     ${field_info}
-    buf_hitratio.cdef 100,1,buf_physical,buf_logical,/,-,*,FLOOR
-    lib_hitratio.cdef 100,1,lib_reloads,lib_pins,/,-,*,FLOOR
-    dict_hitratio.cdef 100,dict_gets,dict_getmisses,-,dict_gets,/,*,FLOOR
+    buf_hitratio.cdef 100,1,buf_physical,buf_logical,/,-,*
+    lib_hitratio.cdef 100,1,lib_reloads,lib_pins,/,-,*
+    dict_hitratio.cdef 100,dict_gets,dict_getmisses,-,dict_gets,/,*
 "
 data_attrs[$key]="
     buf_hitratio GAUGE LINE Buffer Cache Hit Ratio
@@ -442,7 +492,7 @@ getvalue_func[$key]=getvalue_cachehit
 
 key=sessionuser
 global_attrs[$key]="
-    graph_title Oracle Session Users
+    graph_title Oracle$db_name Session Users
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel count
@@ -454,7 +504,7 @@ getvalue_func[$key]=getvalue_sessionuser
 
 key=sessionwait
 global_attrs[$key]="
-    graph_title Oracle Session Wait
+    graph_title Oracle$db_name Session Wait
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel count
@@ -466,7 +516,7 @@ getvalue_func[$key]=getvalue_sessionwait
 
 key=eventwait
 global_attrs[$key]="
-    graph_title Oracle Wait Events
+    graph_title Oracle$db_name Wait Events
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel microseconds
@@ -478,7 +528,7 @@ getvalue_func[$key]=getvalue_eventwait
 
 key=eventwaitapplication
 global_attrs[$key]="
-    graph_title Oracle Wait Events Application
+    graph_title Oracle$db_name Wait Events Application
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel microseconds
@@ -490,7 +540,7 @@ getvalue_func[$key]="getvalue_eventwait2 Application"
 
 key=eventwaitnetwork
 global_attrs[$key]="
-    graph_title Oracle Wait Events Network
+    graph_title Oracle$db_name Wait Events Network
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel microseconds
@@ -502,7 +552,7 @@ getvalue_func[$key]="getvalue_eventwait2 Network"
 
 key=eventwaitconcurrency
 global_attrs[$key]="
-    graph_title Oracle Wait Events Concurrency
+    graph_title Oracle$db_name Wait Events Concurrency
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel microseconds
@@ -514,7 +564,7 @@ getvalue_func[$key]="getvalue_eventwait2 Concurrency"
 
 key=eventwaituserio
 global_attrs[$key]="
-    graph_title Oracle Wait Events User I/O
+    graph_title Oracle$db_name Wait Events User I/O
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel microseconds
@@ -526,7 +576,7 @@ getvalue_func[$key]="getvalue_eventwait2 User I/O"
 
 key=eventwaitsystemio
 global_attrs[$key]="
-    graph_title Oracle Wait Events System I/O
+    graph_title Oracle$db_name Wait Events System I/O
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel microseconds
@@ -539,7 +589,7 @@ getvalue_func[$key]="getvalue_eventwait2 System I/O"
 
 key=eventwaitcluster
 global_attrs[$key]="
-    graph_title Oracle Wait Events Cluster
+    graph_title Oracle$db_name Wait Events Cluster
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel microseconds
@@ -551,7 +601,7 @@ getvalue_func[$key]="getvalue_eventwait2 Cluster"
 
 key=eventwaitadministrative
 global_attrs[$key]="
-    graph_title Oracle Wait Events Administrative
+    graph_title Oracle$db_name Wait Events Administrative
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel microseconds
@@ -563,7 +613,7 @@ getvalue_func[$key]="getvalue_eventwait2 Administrative"
 
 key=eventwaitconfiguration
 global_attrs[$key]="
-    graph_title Oracle Wait Events Configuration
+    graph_title Oracle$db_name Wait Events Configuration
     graph_category db
     graph_args --base 1000 --lower-limit 0 --rigid
     graph_vlabel microseconds
@@ -575,7 +625,7 @@ getvalue_func[$key]="getvalue_eventwait2 Configuration"
 
 key=tablespace
 global_attrs[$key]="
-    graph_title Oracle Table Space Usage
+    graph_title Oracle$db_name Table Space Usage
     graph_category db
     graph_args --base 1000 --lower-limit 0 --upper-limit 100 --rigid
     graph_vlabel %
@@ -589,7 +639,7 @@ getvalue_func[$key]=getvalue_tablespace
 
 key=asmusage
 global_attrs[$key]="
-    graph_title Oracle ASM Disk Group Usage
+    graph_title Oracle$db_name ASM Disk Group Usage
     graph_category db
     graph_args --base 1000 --lower-limit 0 --upper-limit 100 --rigid
     graph_vlabel %
@@ -611,10 +661,10 @@ sqlplus_variables="
     set feed off
     set head off
     set linesize 256
-    set numwidth 20
+    set numwidth 30
 "
 
-# functions 
+# Functions 
 
 autoconf() {
     if [ -x "$( which "${sqlplus}" )" ]; then
@@ -624,13 +674,25 @@ autoconf() {
     fi
 }
 
-suggest() {
-    # print hash keys as available module names
-    echo "${!global_attrs[@]}" | tr ' ' '\n' | sort
+config() {
+    for module in $( module_list )
+    do
+        do_config
+    done
 }
 
-config() {
+fetch() {
+    for module in $( module_list )
+    do
+        do_fetch
+    done
+}
+
+do_config() {
     local label_max_length=45
+
+    getfield
+    echo "multigraph ${plugin_name}_${module}"
 
     # print global attributes
     sed -e 's/^  *//' -e '/^$/d' <<< "${global_attrs[$module]}"
@@ -653,6 +715,30 @@ config() {
     done <<< "${data_attrs[$module]}"
 
     echo graph_order "$fields"
+    echo
+}
+
+do_fetch() {
+    echo "multigraph ${plugin_name}_${module}"
+    getvalue
+    echo
+}
+
+module_list() {
+    local i
+
+    if [ -n "$include_module" ]; then
+        echo "$include_module"
+    else
+        for i in $exclude_module
+        do 
+            # remove excluded modules
+            unset -v "global_attrs[$i]"
+        done
+
+        # print hash keys as available module names
+        echo "${!global_attrs[@]}"
+    fi
 }
 
 # wrapper for getfield_*
@@ -778,6 +864,9 @@ SELECT 'lib_pins.value '    || SUM(pins)    FROM v\$librarycache;
 SELECT 'lib_reloads.value ' || SUM(reloads) FROM v\$librarycache;
 SELECT 'dict_gets.value '      || SUM(gets)      FROM v\$rowcache;
 SELECT 'dict_getmisses.value ' || SUM(getmisses) FROM v\$rowcache;
+SELECT 'buf_hitratio.value 0' FROM dual;
+SELECT 'lib_hitratio.value 0' FROM dual;
+SELECT 'dict_hitratio.value 0' FROM dual;
 EOF
 }
 
@@ -1023,20 +1112,17 @@ ORDER BY
 EOF
 }
 
-# main
+# Main
 case ${1:-} in
 autoconf)
     autoconf
     ;;
-suggest)
-    suggest
-    ;;
 config)
-    getfield
     config
+    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && fetch
     ;;
 *)
-    getvalue
+    fetch
     ;;
 esac
 
