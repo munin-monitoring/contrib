@@ -459,17 +459,6 @@ data_attrs[$key]="
 getvalue_func[$key]=getvalue_cputime
 
 key=cachehit
-# buf_hitratio = 1 - physical_reads / ( db_block_gets + consistent_gets )
-# lib_hitratio = 1 - reloads / pins
-# dict_hitratio = ( gets - misses ) / gets
-field_info=$( for field in buf_physical buf_logical lib_pins lib_reloads dict_gets dict_getmisses
-   do
-       echo "${field}.graph no"
-       echo "${field}.type DERIVE"
-       echo "${field}.min 0"
-       echo "${field}.label ${field}"
-   done
-)
 global_attrs[$key]="
     graph_title Oracle$db_name Cache Hit Ratio
     graph_category db
@@ -478,15 +467,24 @@ global_attrs[$key]="
     graph_info Oracle Cache Hit Ratio - The graph shows cache hit ratio between munin-update intervals (5 minutes in most cases).
     graph_scale no
 
-    ${field_info}
     buf_hitratio.cdef 100,1,buf_physical,buf_logical,/,-,*
     lib_hitratio.cdef 100,1,lib_reloads,lib_pins,/,-,*
     dict_hitratio.cdef 100,dict_gets,dict_getmisses,-,dict_gets,/,*
 "
+    # Note:
+    #   buf_hitratio = 1 - physical_reads / ( db_block_gets + consistent_gets )
+    #   lib_hitratio = 1 - reloads / pins
+    #   dict_hitratio = ( gets - misses ) / gets
 data_attrs[$key]="
-    buf_hitratio GAUGE LINE Buffer Cache Hit Ratio
-    lib_hitratio GAUGE LINE Library Cache Hit Ratio
-    dict_hitratio GAUGE LINE Dictionary Cache Hit Ratio
+    buf_physical   DERIVE LINE dummy
+    buf_logical    DERIVE LINE dummy
+    lib_pins       DERIVE LINE dummy
+    lib_reloads    DERIVE LINE dummy
+    dict_gets      DERIVE LINE dummy
+    dict_getmisses DERIVE LINE dummy
+    buf_hitratio   GAUGE  LINE Buffer Cache Hit Ratio
+    lib_hitratio   GAUGE  LINE Library Cache Hit Ratio
+    dict_hitratio  GAUGE  LINE Dictionary Cache Hit Ratio
 "
 getvalue_func[$key]=getvalue_cachehit
 
@@ -558,7 +556,7 @@ global_attrs[$key]="
     graph_vlabel microseconds
     graph_info Oracle Wait Events Concurrency
 "
-data_attrs[$key]=" "
+data_attrs[$key]=""
 getfield_func[$key]="getfield_eventwait2 Concurrency"
 getvalue_func[$key]="getvalue_eventwait2 Concurrency"
 
@@ -582,8 +580,7 @@ global_attrs[$key]="
     graph_vlabel microseconds
     graph_info Oracle Wait Events System I/O
 "
-data_attrs[$key]="
-"
+data_attrs[$key]=""
 getfield_func[$key]="getfield_eventwait2 System I/O"
 getvalue_func[$key]="getvalue_eventwait2 System I/O"
 
@@ -595,7 +592,7 @@ global_attrs[$key]="
     graph_vlabel microseconds
     graph_info Oracle Wait Events Cluster
 "
-data_attrs[$key]=" "
+data_attrs[$key]=""
 getfield_func[$key]="getfield_eventwait2 Cluster"
 getvalue_func[$key]="getvalue_eventwait2 Cluster"
 
@@ -607,7 +604,7 @@ global_attrs[$key]="
     graph_vlabel microseconds
     graph_info Oracle Wait Events Administrative
 "
-data_attrs[$key]=" "
+data_attrs[$key]=""
 getfield_func[$key]="getfield_eventwait2 Administrative"
 getvalue_func[$key]="getvalue_eventwait2 Administrative"
 
@@ -619,7 +616,7 @@ global_attrs[$key]="
     graph_vlabel microseconds
     graph_info Oracle Wait Events Configuration
 "
-data_attrs[$key]=" "
+data_attrs[$key]=""
 getfield_func[$key]="getfield_eventwait2 Configuration"
 getvalue_func[$key]="getvalue_eventwait2 Configuration"
 
@@ -667,7 +664,7 @@ sqlplus_variables="
 # Functions 
 
 autoconf() {
-    if [ -x "$( which "${sqlplus}" )" ]; then
+    if which sqlplus >/dev/null ; then
         echo yes
     else
         echo "no (failed to find executable 'sqlplus')"
@@ -690,17 +687,17 @@ fetch() {
 
 do_config() {
     local label_max_length=45
+    local field type draw label
+    local fields= 
 
     getfield
     echo "multigraph ${plugin_name}_${module}"
 
     # print global attributes
-    sed -e 's/^  *//' -e '/^$/d' <<< "${global_attrs[$module]}"
+    echo "${global_attrs[$module]}" | sed -e 's/^  *//' -e '/^$/d'
 
     # print data source attributes
     # split line into field,type,draw,label 
-    local fields field type draw label
-    fields=
     while read -r field type draw label
     do
         [ -z "$field" ] && continue
@@ -709,8 +706,11 @@ do_config() {
         echo "${field}.type ${type}"
         echo "${field}.draw ${draw}"
         echo "${field}.label ${label:0:${label_max_length}}"
-        if [ "${type}" = DERIVE ]; then
+        if [ "$type" = 'DERIVE' ]; then
             echo "${field}.min 0"
+        fi
+        if [ "$label" = 'dummy' ]; then
+            echo "${field}.graph no"
         fi
     done <<< "${data_attrs[$module]}"
 
