@@ -4,7 +4,7 @@
 
 =head1 NAME
 
-  zfs_arcstats - Munin multi-graph plugin to monitor Solaris ZFS ARC statistics
+  zfs_arcstats - Munin multi-graph plugin to monitor ZFS ARC statistics
 
   These functions are implemented:
     size     : to monitor ARC size
@@ -13,7 +13,7 @@
     actdata  : to monitor ARC activities by data type (Demand/Prefetch)
     hitratio : to monitor ARC hit ratio
 
-  Tested with Solaris 10 and 11.
+  Tested with Solaris 10 and 11, OpenIndiana Hipster, FreeBSD 11, CentOS 7
   This plugin is inspired by arcstat.pl [https://github.com/mharsch/arcstat]
 
 =head1 CONFIGURATION
@@ -21,6 +21,8 @@
   Make symlink:
     cd /path/to/munin/etc/plugins
     ln -s /path/to/munin/lib/plugins/zfs_arcstats .
+
+  For FreeBSD, it should be necessary to change shebang /bin/bash -> /usr/local/bin/bash
 
 =head1 ENVIRONMENT VARIABLES
  
@@ -54,6 +56,25 @@ functions='size activity actlist actdata hitratio'
 
 # Functions
 
+get_osname() {
+    local osname osver
+
+    osname=$( uname -s )
+    osver=$( uname -v )
+
+    case $osname in
+    SunOS)
+        case $osver in
+        illumos*)
+            osname=illumos 
+        ;;
+        esac
+    ;;
+    esac
+
+    echo "$osname"
+}
+
 preconfig() {
     local func=$1
 
@@ -69,13 +90,33 @@ preconfig() {
             graph_vlabel Bytes
             graph_info ZFS ARC - Size
         "
+        case $osname in
+        SunOS)
+            # For Solaris 10,11
+            data_attr="
+                data_size          GAUGE AREASTACK Data size
+                prefetch_meta_size GAUGE AREASTACK Prefetch meta size
+                buf_size           GAUGE AREASTACK Buf size
+                other_size         GAUGE AREASTACK Other size
+            "
+            ;;
+        *)
+            # For illumos, FreeBSD, Linux (OpenZFS)
+            data_attr="
+                data_size     GAUGE AREASTACK Data size
+                metadata_size GAUGE AREASTACK Metadata size
+                hdr_size      GAUGE AREASTACK Hdr size
+                other_size    GAUGE AREASTACK Other size
+                mru_size      GAUGE LINE      MRU size
+                mfu_size      GAUGE LINE      MFU size
+            "
+            ;;
+        esac
         data_attr="
-            data_size          GAUGE AREASTACK Data size
-            prefetch_meta_size GAUGE AREASTACK Prefetch meta size
-            buf_size           GAUGE AREASTACK Buf size
-            other_size         GAUGE AREASTACK Other size
-            c                  GAUGE LINE      Target size
-            p                  GAUGE LINE      Target MRU size
+            $data_attr
+            size GAUGE LINE ARC size
+            c    GAUGE LINE Target size
+            p    GAUGE LINE Target MRU size
         "
         ;;
     activity)
@@ -146,19 +187,13 @@ preconfig() {
             graph_vlabel % hits
             graph_info ZFS ARC - Hit ratio - The graph shows cache hit ratio between munin-update intervals (usually 5 minutes).
 
-            hitratio.cdef                   hits,DUP,DUP,misses,+,/,100,*,hitratio,IF
-            l2_hitratio.cdef                l2_hits,DUP,DUP,l2_misses,+,/,100,*,l2_hitratio,IF
-            demand_data_hitratio.cdef       demand_data_hits,DUP,DUP,demand_data_misses,+,/,100,*,demand_data_hitratio,IF
-            demand_metadata_hitratio.cdef   demand_metadata_hits,DUP,DUP,demand_metadata_misses,+,/,100,*,demand_metadata_hitratio,IF
-            prefetch_data_hitratio.cdef     prefetch_data_hits,DUP,DUP,prefetch_data_misses,+,/,100,*,prefetch_data_hitratio,IF
-            prefetch_metadata_hitratio.cdef prefetch_metadata_hits,DUP,DUP,prefetch_metadata_misses,+,/,100,*,prefetch_metadata_hitratio,IF
+            hitratio.cdef                   hits,DUP,misses,+,/,100,*
+            l2_hitratio.cdef                l2_hits,DUP,l2_misses,+,/,100,*
+            demand_data_hitratio.cdef       demand_data_hits,DUP,demand_data_misses,+,/,100,*
+            demand_metadata_hitratio.cdef   demand_metadata_hits,DUP,demand_metadata_misses,+,/,100,*
+            prefetch_data_hitratio.cdef     prefetch_data_hits,DUP,prefetch_data_misses,+,/,100,*
+            prefetch_metadata_hitratio.cdef prefetch_metadata_hits,DUP,prefetch_metadata_misses,+,/,100,*
         "
-            # Note: hitratio = hits > 0 ? hits / ( hits + misses ) * 100 : 0
-
-            # Bug?: If '0' is set at IF ELSE of CDEF, RRD cur value always become 0. 
-            #   NG: hits,DUP,DUP,misses,+,/,100,*,0,IF
-            #   OK: hits,DUP,DUP,misses,+,/,100,*,hitratio,IF
-
         data_attr="
             hits                       DERIVE LINE  dummy
             misses                     DERIVE LINE  dummy
@@ -218,24 +253,43 @@ do_config() {
 }
 
 get_stats() {
-    local stat value
+    local arcstats stat value
     
+    case $osname in
+    SunOS|illumos)
+        arcstats=$( kstat -p 'zfs:0:arcstats' | sed -e 's/:/ /g' | awk '{ print $4,$5 }' )
+        # kstat output example:
+        #   $ kstat -p zfs:0:arcstats
+        #   zfs:0:arcstats:c        4135233544
+        #   ...
+        ;;
+    *BSD)
+        arcstats=$( /sbin/sysctl -a | sed -n -e 's/^kstat\.zfs\.misc\.arcstats\.//p' | awk -F: '{ print $1,$2 }' )
+        # sysctl output example:
+        #   $ sysctl -a
+        #   ...
+        #   kstat.zfs.misc.arcstats.c: 632540160
+        #   ...
+        ;;
+    Linux)
+        arcstats=$( sed '1,2d' /proc/spl/kstat/zfs/arcstats | awk '{ print $1,$3 }' )
+        # proc file output example:
+        #   $ cat /proc/spl/kstat/zfs/arcstats
+        #   ...
+        #   name        type  data
+        #   hits        4     62
+        #   ...
+        ;;
+    *)
+        echo "Unsupported OS: $osname"
+        exit 1
+    esac
+
     while read -r stat value
     do 
         printf -v "arcstats_${stat}" "%s" "$value" 
         # printf -v means indirect variable assignment (similar to eval)
-    done < <( kstat -p 'zfs:0:arcstats' | sed -e 's/:/ /g' | awk '{ print $4,$5 }' )
-
-    # kstat output example:
-    #   $ kstat -p zfs:0:arcstats:c
-    #   zfs:0:arcstats:c        4135233544
-    #   ...
-
-    # Note: It should be possible to monitor ZFS on FreeBSD/Linux by 
-    #   imprementing get_stats function as well.
-
-    #   FreeBSD: sysctl kstat.zfs.misc.arcstats ...
-    #   Linux: cat /proc/spl/kstat/zfs/arcstats ...
+    done <<< "$arcstats"
 }
 
 do_fetch() {
@@ -260,10 +314,10 @@ do_fetch() {
 }
 
 autoconf() {
-    if which kstat >/dev/null ; then
+    if [ -x /sbin/zfs ]; then
         echo yes
     else
-        echo "no (failed to find executable 'kstat')"
+        echo "no (ZFS looks unavailable)"
     fi
 }
 
@@ -288,6 +342,9 @@ fetch() {
 }
 
 # Main
+
+osname=$( get_osname )
+
 case ${1:-} in
 autoconf)
     autoconf
