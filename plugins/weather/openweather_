@@ -16,16 +16,13 @@
 ## From Oct 9 2015 OpenWeather needs you to register and get an APIKEY
 # include this key by setting 'env.apikey' in munin plugin config, i.e.:
 # [openweather_*]
-# env.owapikey XYZ
+# env.apikey XYZ
 
-query_string=$(printf '%s' "${0#*_}" | tr '_' '=')
-query_string="$query_string&appid=$owapikey"
+location=$(printf '%s' "${0#*_}" | tr '_' '=')
+query_string="${location}&appid=${apikey}&units=metric"
 plugin_name=$( basename $0 )
 
 OWAPI=$( curl -s "http://api.openweathermap.org/data/2.5/weather?mode=xml&${query_string}")
-# API returns temp in K, we have to convert it in C
-# &units=metric would change that ;-)
-KELVIN_BIAS=273
 
 CITY=$( expr "$OWAPI" : '.*\<city.*name=\"\(.*\)\"><coord.*' )
 
@@ -38,7 +35,6 @@ then
 		graph_category sensors
 		graph_info This graph show the temperature in ${CITY}
 		temp_avg.label avg
-		temp_avg.cdef $KELVIN_BIAS,-
 
 		multigraph $plugin_name.temp
 		graph_title Temperature in ${CITY}
@@ -46,11 +42,8 @@ then
 		graph_category sensors
 		graph_info This graph show the temperature in ${CITY}
 		temp_avg.label avg
-		temp_avg.cdef $KELVIN_BIAS,-
 		temp_min.label min
-		temp_min.cdef $KELVIN_BIAS,-
 		temp_max.label max
-		temp_max.cdef $KELVIN_BIAS,-
 
 		multigraph $plugin_name.humidity
 		graph_title Humidity in ${CITY}
@@ -62,7 +55,7 @@ then
 		multigraph $plugin_name.pressure
 		graph_title Pressure in ${CITY}
 		graph_vlabel hPa
-		graph_category sensors 
+		graph_category sensors
 		graph_info This graph show the pressure in ${CITY}
 		pressure.label pressure
 
@@ -75,7 +68,7 @@ then
 
 		multigraph $plugin_name.wind_direction
 		graph_title Wind direction in ${CITY}
-		graph_vlabel m/s
+		graph_vlabel direction
 		graph_category sensors
 		graph_info This graph show the wind direction in ${CITY}
 		direction.label wind direction
@@ -97,7 +90,7 @@ WD_DIREC=$( expr "$OWAPI" : '.*\<direction .*value=\"\(.*\)\" code.*/direction.*
 
 cat <<- EOF
 	multigraph $plugin_name
-	temp_avg.value	$TEMP_AVG
+	temp_avg.value $TEMP_AVG
 
 	multigraph $plugin_name.temp
 	temp_avg.value $TEMP_AVG
