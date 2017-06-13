@@ -146,6 +146,13 @@ sub filter{
 	# status=1 => do download (default)
 	# status=0 => do not download
 
+	# For links, the 'rel' is more relevant that the 'src' attribute
+	if("$tag" =~ /^link/){
+		$status=0;
+		if("$tag" =~ /stylesheet$/){
+			$status=1;
+		}
+	}
 	if("$tag" eq "form action"){
 		$status=0;
 	}
@@ -153,6 +160,9 @@ sub filter{
 		$status=0;
 	}
 	if("$tag" eq "area href"){
+		$status=0;
+	}
+	if("$tag" eq "meta content"){
 		$status=0;
 	}
 	return $status;
@@ -294,6 +304,8 @@ if($ARGV[0] and $ARGV[0] eq "autoconf") {
 		$output{"response_" . $host . "_" . $response->code}+=1;
 		$output{"type_" . $response->content_type}+=1;
 
+		# For <link />s, also capture the rel attribute
+		$HTML::Tagset::linkElements{'link'} = [ qw( href rel ) ];
 	        $page_parser = HTML::LinkExtor->new(undef, $url);
 	        $page_parser->parse($contents)->eof;
 	        my @links = $page_parser->links;
@@ -301,8 +313,13 @@ if($ARGV[0] and $ARGV[0] eq "autoconf") {
 
         	%res=();
 	        foreach $link (@links){
-			my $tag=$$link[0] . " " . $$link[1];
-			
+			my $tag;
+			my($t, %attrs) = @{$link};
+			if ($attrs{rel} =~ /.*\/([^\/]+)/) {
+				$tag=$$link[0] . " " . $1;
+			} else {
+				$tag=$$link[0] . " " . $$link[1];
+			}
 			$output{"tags_" . $$link[0] . "-" . $$link[1]}+=1;
 	
 			if(filter($tag)){
