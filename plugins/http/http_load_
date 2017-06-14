@@ -47,7 +47,10 @@
 #     sudo -u <user> /usr/share/munin/plugins/http_load_ cron verbose
 #
 #  4. Run munin-node-configure --suggest --shell and run the symlink
-#     commands manually to update the munin-node plugin list.
+#     commands manually to update the munin-node plugin list. You should
+#     ignore the _multi suggestion unless you want to use the multigraph
+#     mode (see below), in which case you should only create the _multi
+#     symlinks.
 #  
 # (5. If you want to change the filter which the plugin uses to select which
 #     tags to follow in a web page, edit the subroutine called "filter" below.)
@@ -69,6 +72,16 @@
 #  3. Remove /etc/munin/plugins/http_load_<url_id>*
 #
 #  4. /etc/init.d/munin-node restart
+#
+# Multigraph support
+#
+#  The default behaviour is to output one full graph per metric. This
+#  plugin also supports a multigraph mode, which only outputs one graph
+#  type on the summary # page, and create a separate page with all the
+#  others.
+#
+#  This mode is enabled by only creating the _multi symlink, suggested
+#  by munin-node-configure.
 #
 #####
 #
@@ -482,6 +495,66 @@ sub cache_values{
 	}
 }
 
+sub multi_config{
+	my $id = $_[0];
+	my %urls = %{$_[1]};
+	my %cache = %{$_[2]};
+
+	my $count = 0;
+
+
+	print "multigraph http_load_$id\n";
+	loadtime_config($id, \%urls, \%cache);
+
+	print "\nmultigraph http_load_$id.loadtime\n";
+	loadtime_config($id, \%urls, \%cache);
+
+	print "\nmultigraph http_load_$id.size\n";
+	size_config($id, \%urls, \%cache);
+
+	print "\nmultigraph http_load_$id.elements\n";
+	elements_config($id, \%urls, \%cache);
+
+	print "\nmultigraph http_load_$id.response\n";
+	response_config($id, \%urls, \%cache);
+
+	print "\nmultigraph http_load_$id.type\n";
+	type_config($id, \%urls, \%cache);
+
+	print "\nmultigraph http_load_$id.tags\n";
+	tags_config($id, \%urls, \%cache);
+
+}
+
+sub multi_values{
+	my $id = $_[0];
+	my %cache = %{$_[1]};
+
+	my $count = 0;
+
+
+	print "multigraph http_load_$id\n";
+	cache_values(\%cache, "loadtime");
+
+	print "\nmultigraph http_load_$id.loadtime\n";
+	cache_values(\%cache, "loadtime");
+
+	print "\nmultigraph http_load_$id.size\n";
+	cache_values(\%cache, "size");
+
+	print "\nmultigraph http_load_$id.elements\n";
+	cache_values(\%cache, "elements");
+
+	print "\nmultigraph http_load_$id.response\n";
+	cache_values(\%cache, "response");
+
+	print "\nmultigraph http_load_$id.type\n";
+	cache_values(\%cache, "type");
+
+	print "\nmultigraph http_load_$id.tags\n";
+	cache_values(\%cache, "tags");
+
+}
 $debug && print "Scriptname: " . $scriptname . "\n";
 
 # Get the url id and the type of the graph
@@ -518,6 +591,7 @@ if($ARGV[0] and $ARGV[0] eq "autoconf") {
         	print $id . "_tags\n";
         	print $id . "_type\n";
         	print $id . "_elements\n";
+        	print $id . "_multi\n";
     	}
 	exit(0);
 
@@ -671,6 +745,8 @@ if($ARGV[0] and $ARGV[0] eq "autoconf") {
 		type_config($id, \%urls, \%cache)
 	}elsif($type eq "tags"){
 		tags_config($id, \%urls, \%cache)
+	}elsif($type eq "multi"){
+		multi_config($id, \%urls, \%cache)
 	}
 	exit(0);
 } else {
@@ -679,7 +755,11 @@ if($ARGV[0] and $ARGV[0] eq "autoconf") {
 	my %cache=read_cache($cachefile);
 	$debug && print "Number of lines in cache file: " . keys(%cache) . "\n";
 
-	cache_values(\%cache, $type);
+	if($type eq "multi"){
+		multi_values($id, \%cache);
+	} else {
+		cache_values(\%cache, $type);
+	}
 } 
 
 # vim:syntax=perl
