@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # -*- sh -*-
 
 : << =cut
@@ -9,7 +9,7 @@ multi_ssl - Plugin to monitor CERTificate expiration on multiple services and po
 
 =head1 CONFIGURATION
 
-  [multi_ssl_*]
+  [multi_ssl]
     env.services www.service.tld blah.example.net_PORT
 
 To set warning and critical levels do like this:
@@ -46,7 +46,7 @@ case $1 in
 	echo "graph_info This graph shows the days left for the certificate"
 	for service in $services; do
 	    fieldname=$(clean_fieldname "$service")
-	    echo "${fieldname}.label ${service/_/:}"
+	    echo "${fieldname}.label $(echo ${service} | sed 's/_/:/')"
 	    print_thresholds "${fieldname}"
 	done
 
@@ -54,10 +54,10 @@ case $1 in
 	;;
 esac
 
-function get_expire()
+get_expire()
 {
-    SITE="${1/_*/}"
-    PORT="${1##*_}"
+    SITE="$(echo ${1} | sed 's/_.*//')"
+    PORT="$(echo ${1} | sed 's/.*_//')"
     VAR="$(clean_fieldname "$1")"
     if [ "$PORT" = "$SITE" ]; then
 	PORT=443
@@ -65,7 +65,7 @@ function get_expire()
 
     CERT=$(echo "" | openssl s_client -CApath /etc/ssl/certs -servername "${SITE}" -connect "${SITE}:${PORT}" 2>/dev/null);
 
-    if [[ "${CERT}" = *"-----BEGIN CERTIFICATE-----"* ]]; then
+    if echo "${CERT}" | grep -q -- "-----BEGIN CERTIFICATE-----"; then
 	echo "${CERT}" \
 		| openssl x509 -noout -enddate \
 		| awk -F= 'BEGIN {
