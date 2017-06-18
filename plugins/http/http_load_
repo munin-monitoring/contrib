@@ -18,6 +18,8 @@
 # 
 # Author:  Espen Braastad / Linpro AS
 #          espen@linpro.no
+#          Olivier Mehani (multigraph support)
+#          shtrom+munin@ssji.net
 #
 ##### Short usage guide: #####
 #
@@ -47,11 +49,8 @@
 #     sudo -u <user> /usr/share/munin/plugins/http_load_ cron verbose
 #
 #  4. Run munin-node-configure --suggest --shell and run the symlink
-#     commands manually to update the munin-node plugin list. You should
-#     ignore the _multi suggestion unless you want to use the multigraph
-#     mode (see below), in which case you should only create the _multi
-#     symlinks.
-#  
+#     commands manually to update the munin-node plugin list.xi
+#
 # (5. If you want to change the filter which the plugin uses to select which
 #     tags to follow in a web page, edit the subroutine called "filter" below.)
 #
@@ -73,15 +72,23 @@
 #
 #  4. /etc/init.d/munin-node restart
 #
-# Multigraph support
+# Single graph support
 #
-#  The default behaviour is to output one full graph per metric. This
-#  plugin also supports a multigraph mode, which only outputs one graph
-#  type on the summary # page, and create a separate page with all the
-#  others.
+#  The default behaviour is the multigraph mode: only the loadtime will be shown
+#  on the Munin summary page. The graphs there are linked to a second-level
+#  summary page that list all other metrics. It is also possible to create
+#  single graphs, that would show immediately on the summary page, by using
+#  symlinks with a different name, postfixed with the name of the metric:
+#  * http_load_hostname:		multigraph (default)
+#  * http_load_hostname_loadtime:	loadtime only
+#  * http_load_hostname_size:		total page size
+#  * http_load_hostname_response:	response code
+#  * http_load_hostname_tags:		HTML tags summary
+#  * http_load_hostname_type:		Content-Types
+#  * http_load_hostname_elements:	source site of the loaded elements
 #
-#  This mode is enabled by only creating the _multi symlink, suggested
-#  by munin-node-configure.
+#  Note that hostname is not the FQDN of the host, but rather the one given when
+#  running munin-node-configure --suggest --shell and run the symlink
 #
 #####
 #
@@ -564,9 +571,13 @@ $debug && print "Scriptname: " . $scriptname . "\n";
 # Y: The type of graph (elements, size, loadtime, ..)
 
 my ($id,$type);
-$0 =~ /http_load(?:_([^_]+)|)_(.+)\s*$/;
+$0 =~ /http_load(?:_([^_]+)|)(_(.+))?\s*$/;
 $id  = $1;
-$type = $2;
+$type = $3;
+
+if($type eq "") {
+	$type = "multi";
+}
 
 $debug && print "Id: $id, Type: $type\n";
 
@@ -585,13 +596,7 @@ if($ARGV[0] and $ARGV[0] eq "autoconf") {
 	my %urls=&read_urls($url_file);
 	while ( my ($id, $url) = each(%urls) ) {
         	$debug && print "id: $id => url: $url\n";
-        	print $id . "_size\n";
-        	print $id . "_loadtime\n";
-        	print $id . "_response\n";
-        	print $id . "_tags\n";
-        	print $id . "_type\n";
-        	print $id . "_elements\n";
-        	print $id . "_multi\n";
+        	print $id . "\n";
     	}
 	exit(0);
 
