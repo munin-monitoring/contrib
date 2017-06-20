@@ -10,13 +10,24 @@ multi_ssl - Plugin to monitor CERTificate expiration on multiple services and po
 =head1 CONFIGURATION
 
   [multi_ssl]
-    env.services www.service.tld blah.example.net_PORT
+    env.services www.service.tld blah.example.net:PORT
 
 To set warning and critical levels do like this:
 
   [multi_ssl]
     env.services ...
     env.warning 30:
+
+Alternatively, if you want to monitor hosts separately, you can create multiple symlinks named as follows.
+
+  multi_ssl_HOST:PORT
+
+For example:
+
+  multi_ssl_www.example.net
+  multi_ssl_www.example.org_443
+  multi_ssl_192.0.2.42_636
+  multi_ssl_2001:0DB8::badc:0fee_485
 
 =head1 AUTHOR
 
@@ -36,6 +47,13 @@ if [ "${MUNIN_DEBUG}" = 1 ]; then
     set -x
 fi
 
+HOSTPORT=${0##*multi_ssl_}
+
+if [ "${HOSTPORT}" != "${0}" ] \
+	&& [ ! -z "${HOSTPORT}" ]; then
+	services="${HOSTPORT}"
+fi
+
 case $1 in
     config)
 
@@ -46,7 +64,7 @@ case $1 in
 	echo "graph_info This graph shows the days left for the certificate"
 	for service in $services; do
 	    fieldname=$(clean_fieldname "$service")
-	    echo "${fieldname}.label $(echo ${service} | sed 's/_/:/')"
+	    echo "${fieldname}.label $(echo "${service}" | sed 's/_/:/')"
 	    print_thresholds "${fieldname}"
 	done
 
@@ -56,11 +74,15 @@ esac
 
 get_expire()
 {
-    SITE="$(echo ${1} | sed 's/_.*//')"
-    PORT="$(echo ${1} | sed 's/.*_//')"
+    SITE="$(echo "${1}" | sed 's/_.*//')"
+    PORT="$(echo "${1}" | sed 's/.*_//')"
+
     VAR="$(clean_fieldname "$1")"
     if [ "$PORT" = "$SITE" ]; then
 	PORT=443
+    fi
+    if echo "$SITE" | grep -q ':'; then
+        SITE="[${SITE}]"
     fi
 
     CERT=$(echo "" | openssl s_client -CApath /etc/ssl/certs -servername "${SITE}" -connect "${SITE}:${PORT}" 2>/dev/null);
