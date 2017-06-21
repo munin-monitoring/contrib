@@ -1,28 +1,78 @@
-#!/usr/bin/python2
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+'''
+=head1 NAME
+tor_ 
+
+=head1 DESCRIPTION
+Wildcard plugin that gathers some metrics from the Tor deamon
+https://github.com/daftaupe/munin-plugins-tor
+
+Derived from https://github.com/mweinelt/munin-tor
+
+This plugin requires the stem library : https://stem.torproject.org/
+This plugin requires the GeoIP library : https://www.maxmind.com for the countries plugin
+
+Available plugins :
+tor_bandwidth    # Graph the glabal bandwidth
+tor_connections  # Graph the number of connexions
+tor_countries    # Graph the countries represented our connexions
+tor_dormant      # Graph if tor is dormant or not
+tor_flags        # Graph the different flags of the relay
+tor_routers      # Graph the number of routers seen by the relay
+tor_traffic      # Graph the read/written traffic
+
+=head2 CONFIGURATION
+The default configuration is below
+[tor_*]
+user toranon # or any other user/group that is running tor
+group toranon
+env.torcachefile 'munin_tor_country_stats.json'
+env.torconnectmethod 'port'
+env.torgeoippath "/usr/share/GeoIP/GeoIP.dat"
+env.tormaxcountries 15
+env.torport 9051
+env.torsocket '/var/run/tor/control'
+
+To make it connect through a socket modify this way
+[tor_*]
+user toranon # or any other user/group that is running tor
+group toranon
+env.torcachefile 'munin_tor_country_stats.json'
+env.torconnectmethod 'socket'
+env.torgeoippath "/usr/share/GeoIP/GeoIP.dat"
+env.tormaxcountries 15
+env.torport 9051
+env.torsocket '/var/run/tor/control'
+
+=head1 COPYRIGHT
+MIT License
+
+=head1 AUTHOR
+daftaupe <daftaupe[at]protonmail.com>
+'''
 
 from __future__ import print_function
 import collections
 import json
 import os
-import stem
-import stem.control
 import sys
 
-default_torgeoippath = "/usr/share/GeoIP/GeoIP.dat"
+import GeoIP
+import stem
+import stem.control
+import stem.connection
+
 default_torcachefile = 'munin_tor_country_stats.json'
+default_torconnectmethod = 'port'
+default_torgeoippath = "/usr/share/GeoIP/GeoIP.dat"
+default_tormaxcountries = 15
 default_torport = 9051
 default_torsocket = '/var/run/tor/control'
-default_torconnectmethod = 'port'
 
 #%# family=auto
 #%# capabilities=autoconf suggest
 
-def simplify(cn):
-    """Simplify country name"""
-    cn = cn.replace(' ', '_')
-    cn = cn.replace("'", '_')
-    cn = cn.split(',', 1)[0]
-    return cn
 
 
 class ConnectionError(Exception):
@@ -49,18 +99,18 @@ def authenticate(controller):
     try:
         controller.authenticate(password=password)
     except stem.connection.PasswordAuthFailed:
-        print("Authentication failed (incorrect password)")
+        print("Authentication failed (incorrect password)", file=sys.stderr)
 
 
 def gen_controller():
-    connect_method = os.environ.get('connectmethod', default_torconnectmethod)
+    connect_method = os.environ.get('torconnectmethod', default_torconnectmethod)
     if connect_method == 'port':
-        return stem.control.Controller.from_port(port=int(os.environ.get('port', default_torport)))
+        return stem.control.Controller.from_port(port=int(os.environ.get('torport', default_torport)))
     elif connect_method == 'socket':
-        return stem.control.Controller.from_socket_file(path=os.environ.get('socket', default_torsocket))
+        return stem.control.Controller.from_socket_file(path=os.environ.get('torsocket', default_torsocket))
     else:
-        print("env.connectmethod contains an invalid value. Please specify either 'port' or 'socket'.", file=sys.stderr)
-        sys.exit(-1)
+        print("env.torconnectmethod contains an invalid value. Please specify either 'port' or 'socket'.", file=sys.stderr)
+        sys.exit(1)
 
 
 #########################
@@ -88,6 +138,18 @@ class TorPlugin(object):
     @staticmethod
     def autoconf():
         try:
+            import stem
+
+        except ImportError as e:
+            print('no ({})'.format(e))
+
+        try:
+            import GeoIP 
+
+        except ImportError as e:
+            print('no ({})'.format(e))
+
+        try:
             with gen_controller() as controller:
                 try:
                     authenticate(controller)
@@ -100,7 +162,7 @@ class TorPlugin(object):
 
     @staticmethod
     def suggest():
-        options = ['connections', 'traffic', 'dormant', 'bandwidth', 'flags', 'countries']
+        options = ['bandwidth', 'connections', 'countries', 'dormant', 'flags', 'routers', 'traffic']
 
         for option in options:
             print(option)
@@ -122,7 +184,7 @@ class TorBandwidth(TorPlugin):
         graph = {'title': 'Observed bandwidth',
                  'args': '-l 0 --base 1000',
                  'vlabel': 'bytes/s',
-                 'category': 'Tor',
+                 'category': 'network',
                  'info': 'estimated capacity based on usage in bytes/s'}
         labels = {'bandwidth': {'label': 'bandwidth', 'min': 0, 'type': 'GAUGE'}}
 
@@ -143,12 +205,12 @@ class TorBandwidth(TorPlugin):
             fingerprint = controller.get_info('fingerprint', None)
             if fingerprint is None:
                 print("Error while reading fingerprint from Tor daemon", file=sys.stderr)
-                sys.exit(-1)
+                sys.exit(1)
 
             response = controller.get_server_descriptor(fingerprint, None)
             if response is None:
                 print("Error while getting server descriptor from Tor daemon", file=sys.stderr)
-                sys.exit(-1)
+                sys.exit(1)
             print('bandwidth.value {}'.format(response.observed_bandwidth))
 
 
@@ -160,7 +222,7 @@ class TorConnections(TorPlugin):
         graph = {'title': 'Connections',
                  'args': '-l 0 --base 1000',
                  'vlabel': 'connections',
-                 'category': 'Tor',
+                 'category': 'network',
                  'info': 'OR connections by state'}
         labels = {'new': {'label': 'new', 'min': 0, 'max': 25000, 'type': 'GAUGE'},
                   'launched': {'label': 'launched', 'min': 0, 'max': 25000, 'type': 'GAUGE'},
@@ -178,7 +240,7 @@ class TorConnections(TorPlugin):
                 response = controller.get_info('orconn-status', None)
                 if response is None:
                     print("No response from Tor daemon in TorConnection.fetch()", file=sys.stderr)
-                    sys.exit(-1)
+                    sys.exit(1)
                 else:
                     connections = response.split('\n')
                     states = dict((state, 0) for state in stem.ORStatus)
@@ -198,26 +260,19 @@ class TorCountries(TorPlugin):
             self.cache_dir_name = os.path.join(self.cache_dir_name,
                                                os.environ.get('torcachefile', default_torcachefile))
 
-        max_countries = os.environ.get('tormaxcountries', 15)
+        max_countries = os.environ.get('tormaxcountries', default_tormaxcountries)
         self.max_countries = int(max_countries)
 
         geoip_path = os.environ.get('torgeoippath', default_torgeoippath)
-        try:
-            import GeoIP
-            self.geodb = GeoIP.open(geoip_path, GeoIP.GEOIP_MEMORY_CACHE)
-            self.available = True
-        except Exception:
-            self.available = False
+        self.geodb = GeoIP.open(geoip_path, GeoIP.GEOIP_MEMORY_CACHE)
 
     def conf(self):
         """Configure plugin"""
-        if not self.available:
-            return
 
         graph = {'title': 'Countries',
                  'args': '-l 0 --base 1000',
                  'vlabel': 'countries',
-                 'category': 'Tor',
+                 'category': 'network',
                  'info': 'OR connections by state'}
         labels = {}
 
@@ -237,9 +292,6 @@ class TorCountries(TorPlugin):
         """Generate metrics"""
 
         # If possible, read cached data instead of doing the processing twice
-        if not self.available:
-            return
-
         try:
             with open(self.cache_dir_name) as f:
                 countries_num = json.load(f)
@@ -251,29 +303,20 @@ class TorCountries(TorPlugin):
         for c, v in countries_num:
             print("%s.value %d" % (c, v))
 
-    # Unused
-    #@staticmethod
-    #def _gen_ipaddrs_from_circuits(controller):
-    #    """Generate a sequence of ipaddrs for every built circuit"""
-    #    # Currently unused
-    #    for circ in controller.get_circuits():
-    #        if circ.status != CircStatus.BUILT:
-    #            continue
-    #
-    #        for entry in circ.path:
-    #            fingerprint, nickname = entry
-    #
-    #            desc = controller.get_network_status(fingerprint, None)
-    #            if desc:
-    #                ipaddr = desc.address
-    #                yield ipaddr
-
     @staticmethod
     def _gen_ipaddrs_from_statuses(controller):
         """Generate a sequence of ipaddrs for every network status"""
         for desc in controller.get_network_statuses():
             ipaddr = desc.address
             yield ipaddr
+
+    @staticmethod
+    def simplify(cn):
+        """Simplify country name"""
+        cn = cn.replace(' ', '_')
+        cn = cn.replace("'", '_')
+        cn = cn.split(',', 1)[0]
+        return cn
 
     def _gen_countries(self, controller):
         """Generate a sequence of countries for every built circuit"""
@@ -283,7 +326,7 @@ class TorCountries(TorPlugin):
                 yield 'Unknown'
                 continue
 
-            yield simplify(country)
+            yield self.simplify(country)
 
     def top_countries(self):
         """Build a list of top countries by number of circuits"""
@@ -305,7 +348,7 @@ class TorDormant(TorPlugin):
         graph = {'title': 'Dormant',
                  'args': '-l 0 --base 1000',
                  'vlabel': 'dormant',
-                 'category': 'Tor',
+                 'category': 'network',
                  'info': 'Is Tor not building circuits because it is idle?'}
         labels = {'dormant': {'label': 'dormant', 'min': 0, 'max': 1, 'type': 'GAUGE'}}
 
@@ -314,13 +357,12 @@ class TorDormant(TorPlugin):
     def fetch(self):
         with gen_controller() as controller:
             try:
-                #controller.authenticate()
                 authenticate(controller)
 
                 response = controller.get_info('dormant', None)
                 if response is None:
                     print("Error while reading dormant state from Tor daemon", file=sys.stderr)
-                    sys.exit(-1)
+                    sys.exit(1)
                 print('dormant.value {}'.format(response))
             except stem.connection.AuthenticationFailure as e:
                 print('Authentication failed ({})'.format(e))
@@ -334,7 +376,7 @@ class TorFlags(TorPlugin):
         graph = {'title': 'Relay flags',
                  'args': '-l 0 --base 1000',
                  'vlabel': 'flags',
-                 'category': 'Tor',
+                 'category': 'network',
                  'info': 'Flags active for relay'}
         labels = {flag: {'label': flag, 'min': 0, 'max': 1, 'type': 'GAUGE'} for flag in stem.Flag}
 
@@ -355,12 +397,12 @@ class TorFlags(TorPlugin):
             fingerprint = controller.get_info('fingerprint', None)
             if fingerprint is None:
                 print("Error while reading fingerprint from Tor daemon", file=sys.stderr)
-                sys.exit(-1)
+                sys.exit(1)
 
             response = controller.get_network_status(fingerprint, None)
             if response is None:
                 print("Error while getting server descriptor from Tor daemon", file=sys.stderr)
-                sys.exit(-1)
+                sys.exit(1)
             for flag in stem.Flag:
                 if flag in response.flags:
                     print('{}.value 1'.format(flag))
@@ -376,7 +418,7 @@ class TorRouters(TorPlugin):
         graph = {'title': 'Routers',
                  'args': '-l 0',
                  'vlabel': 'routers',
-                 'category': 'Tor',
+                 'category': 'network',
                  'info': 'known Tor onion routers'}
         labels = {'routers': {'label': 'routers', 'min': 0, 'type': 'GAUGE'} }
                  
@@ -395,7 +437,7 @@ class TorRouters(TorPlugin):
             response = controller.get_info('ns/all', None)
             if response is None:
                 print("Error while reading ns/all from Tor daemon", file=sys.stderr)
-                sys.exit(-1)
+                sys.exit(1)
             else:
                 routers = response.split('\n')
 	        onr = 0
@@ -414,7 +456,7 @@ class TorTraffic(TorPlugin):
         graph = {'title': 'Traffic',
                  'args': '-l 0 --base 1024',
                  'vlabel': 'data',
-                 'category': 'Tor',
+                 'category': 'network',
                  'info': 'bytes read/written'}
         labels = {'read': {'label': 'read', 'min': 0, 'type': 'DERIVE'},
                   'written': {'label': 'written', 'min': 0, 'type': 'DERIVE'}}
@@ -432,14 +474,14 @@ class TorTraffic(TorPlugin):
             response = controller.get_info('traffic/read', None)
             if response is None:
                 print("Error while reading traffic/read from Tor daemon", file=sys.stderr)
-                sys.exit(-1)
+                sys.exit(1)
 
             print('read.value {}'.format(response))
 
             response = controller.get_info('traffic/written', None)
             if response is None:
                 print("Error while reading traffic/write from Tor daemon", file=sys.stderr)
-                sys.exit(-1)
+                sys.exit(1)
             print('written.value {}'.format(response))
 
 
@@ -477,15 +519,16 @@ def main():
         elif __file__.endswith('_traffic'):
             provider = TorTraffic()
         else:
-            print('Unknown plugin name, try "suggest" for a list of possible ones.')
-            sys.exit()
+            print('Unknown plugin name, try "suggest" for a list of possible ones.', file=sys.stderr)
+            sys.exit(1)
 
         if param == 'config':
             provider.conf()
         elif param == 'fetch':
             provider.fetch()
         else:
-            print('Unknown parameter "{}"'.format(param))
+            print('Unknown parameter "{}"'.format(param), file=sys.stderr)
+	    sys.exit(1)
 
 if __name__ == '__main__':
     main()
