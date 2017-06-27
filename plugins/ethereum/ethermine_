@@ -1,0 +1,96 @@
+#!/usr/bin/env python
+
+#
+# ethermine_
+#
+# Munin plugin to monitor your ethermine.org hashrate.
+#
+# Author: Nils Knieling - https://github.com/Cyclenerd
+# Licence: GPLv2
+#
+# USAGE
+# ethermine_<YOUR_PUBLIC_ETHEREUM_ADDRESS>_<YOUR_RIG_NAME>
+#
+# EXAMPLE
+# ln -s /usr/share/munin/plugins/ethermine_ /etc/munin/plugins/ethermine_3257bde8cf067ae6f1ddc0e4b140fe02e3c5e44f_mine
+#
+
+import os, sys, urllib2, socket, json
+
+OPTIONS = sys.argv[0].split('_')
+
+command = ''
+if len(sys.argv) > 1:
+    command = sys.argv[1]
+
+if command == 'suggest':
+    print "ethermine_<YOUR_PUBLIC_ETHEREUM_ADDRESS>_<YOUR_RIG_NAME>"
+    sys.exit(0)
+
+try:
+    OPTIONS[1]
+except IndexError:
+    print "Ethereum address missing!"
+    sys.exit(9)
+
+ETH_ADDRESS = OPTIONS[1]
+
+if ETH_ADDRESS == "":
+    print "Ethereum address missing!"
+    sys.exit(9)
+
+try:
+    OPTIONS[2]
+except IndexError:
+    print "Rig name missing!"
+    sys.exit(9)
+
+MINER = OPTIONS[2]
+
+if MINER == "":
+    print "Rig name missing!"
+    sys.exit(9)
+
+if command == 'config':
+    print "graph_title Ethermine " + MINER
+    print "graph_info Ethermine Hashrate " + ETH_ADDRESS +"/" + MINER
+    print "graph_vlabel Ethermine Hashrate"
+    print "graph_category htc"
+    print ETH_ADDRESS + "_" + MINER + ".warning 20:"
+    print ETH_ADDRESS + "_" + MINER + ".critical 10:"
+    print ETH_ADDRESS + "_" + MINER + ".label MH/s"
+    sys.exit(0)
+
+
+POOL_URL = 'https://ethermine.org/api/miner_new'
+STATS = POOL_URL + '/' + ETH_ADDRESS
+
+mining_req = urllib2.Request(STATS)
+mining_req.add_header('User-Agent', 'Mozilla/5.0')
+
+try:
+    mining_stats_raw = urllib2.urlopen(mining_req, None, 1.5 )
+except urllib2.HTTPError as e:
+    print "HTTP Error!"
+    sys.exit(9)
+except urllib2.URLError:
+    print "HTTP URL Error!"
+    sys.exit(9)
+except socket.timeout:
+    print "HTTP Timed out!"
+    sys.exit(9)
+
+try:
+    mining_stats = json.load(mining_stats_raw)
+except:
+    print "JSON Error!"
+    sys.exit(9)
+
+workers = mining_stats['workers']
+
+# ethermine.org sometimes has caching errors. You can see data from other miner. Always check your rig name.
+for worker in workers:
+    if workers[worker]['worker'] == MINER:
+        hash_rate = workers[worker]['hashrate']
+        hash_rate = hash_rate.replace(" MH/s", "")
+        print ETH_ADDRESS + "_" + MINER + ".value %s " % hash_rate
