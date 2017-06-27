@@ -1,0 +1,83 @@
+#!/usr/bin/env python
+
+#
+# etherscan_balance_
+#
+# Munin plugin to monitor your ethereum (ETH) balance.
+# Account balance is queried via etherscan.io API (https://etherscan.io/apis).
+#
+# Author: Nils Knieling - https://github.com/Cyclenerd
+# Licence: GPLv2
+#
+# USAGE
+# etherscan_balance_<YOUR_PUBLIC_ETHEREUM_ADDRESS>
+#
+# EXAMPLE
+# ln -s /usr/share/munin/plugins/etherscan_balance_ /etc/munin/plugins/etherscan_balance_0x3257bde8cf067ae6f1ddc0e4b140fe02e3c5e44f
+#
+
+import os, sys, urllib2, socket, json
+
+OPTIONS = sys.argv[0].split('_')
+
+command = ''
+if len(sys.argv) > 1:
+    command = sys.argv[1]
+
+if command == 'suggest':
+    print "etherscan_balance_<YOUR_PUBLIC_ETHEREUM_ADDRESS>"
+    sys.exit(0)
+
+try:
+    OPTIONS[2]
+except IndexError:
+    print "Ethereum address missing!"
+    sys.exit(9)
+
+ETH_ADDRESS = OPTIONS[2]
+
+if ETH_ADDRESS == "":
+    print "Ethereum address missing!"
+    sys.exit(9)
+
+if command == 'config':
+    print "graph_title ETH " + ETH_ADDRESS
+    print "graph_info Ethereum Address " + ETH_ADDRESS
+    print "graph_vlabel Ethereum Balance"
+    print "graph_category htc"
+    print ETH_ADDRESS + ".label ETH"
+    sys.exit(0)
+
+
+URL = 'https://api.etherscan.io/api?module=account&action=balance&tag=latest'
+STATS = URL + '&address=' + ETH_ADDRESS
+
+mining_req = urllib2.Request(STATS)
+mining_req.add_header('User-Agent', 'Mozilla/5.0')
+
+try:
+    mining_stats_raw = urllib2.urlopen(mining_req, None, 1.5 )
+except urllib2.HTTPError:
+    print "HTTP Error!"
+    sys.exit(9)
+except urllib2.URLError:
+    print "HTTP URL Error!"
+    sys.exit(9)
+except socket.timeout:
+    print "HTTP Timed out!"
+    sys.exit(9)
+
+try:
+    mining_stats = json.load(mining_stats_raw)
+except:
+    print "JSON Error!"
+    sys.exit(9)
+
+try:
+    float(mining_stats['result'])
+except:
+    print "Result Error!"
+    sys.exit(9)
+    
+ETH = float(mining_stats['result']) / 1000000000000000000
+print ETH_ADDRESS + ".value %.2f" % ETH
