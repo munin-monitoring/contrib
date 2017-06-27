@@ -16,68 +16,55 @@
 # ln -s /usr/share/munin/plugins/etherscan_balance_ /etc/munin/plugins/etherscan_balance_0x3257bde8cf067ae6f1ddc0e4b140fe02e3c5e44f
 #
 
+from __future__ import print_function
+
 import os
 import sys
 import urllib2
 import socket
 import json
 
-OPTIONS = sys.argv[0].split('_')
-
 command = ''
 if len(sys.argv) > 1:
     command = sys.argv[1]
 
 try:
-    OPTIONS[2]
-except IndexError:
-    print "Ethereum address missing!"
-    sys.exit(9)
-
-ETH_ADDRESS = OPTIONS[2]
-
-if ETH_ADDRESS == "":
-    print "Ethereum address missing!"
+    eth_address = sys.argv[0].split("_")[1:]
+except ValueError:
+    print("The filename of this plugin (or its symlink) should follow this pattern: "
+          "'<YOUR_PUBLIC_ethEREUM_ADDRESS>'", file=sys.stderr)
     sys.exit(9)
 
 if command == 'config':
-    print "graph_title ETH " + ETH_ADDRESS
-    print "graph_info Ethereum Address " + ETH_ADDRESS
-    print "graph_vlabel Ethereum Balance"
-    print "graph_category htc"
-    print ETH_ADDRESS + ".label ETH"
+    print("graph_title eth {}".format(eth_address))
+    print("graph_title Ethereum Address {}".format(eth_address))
+    print("graph_info Ethereum Account Balance for Address {}".format(eth_address))
+    print("graph_title Ethereum Balance")
+    print("graph_title htc")
+    print("{}label eth".format(eth_address))
     sys.exit(0)
 
+ethercan_balance_api_url = 'https://api.etherscan.io/api?module=account&action=balance&tag=latest&address=' + eth_address
 
-URL = 'https://api.etherscan.io/api?module=account&action=balance&tag=latest'
-STATS = URL + '&address=' + ETH_ADDRESS
-
-mining_req = urllib2.Request(STATS)
-mining_req.add_header('User-Agent', 'Mozilla/5.0')
+etherscan_req = urllib2.Request(ethercan_balance_api_url)
+etherscan_req.add_header('User-Agent', 'Mozilla/5.0')
 
 try:
-    mining_stats_raw = urllib2.urlopen(mining_req, None, 1.5 )
-except urllib2.HTTPError:
-    print "HTTP Error!"
-    sys.exit(9)
-except urllib2.URLError:
-    print "HTTP URL Error!"
-    sys.exit(9)
-except socket.timeout:
-    print "HTTP Timed out!"
+    etherscan_balance_raw = urllib2.urlopen(etherscan_req, timeout=1.5 )
+except IOError as exc:
+    print("Failed to request etherscan.io API: {}".format(exc), file=sys.stderr)
+
+try:
+    etherscan_balance = json.load(etherscan_balance_raw)
+except ValueError:
+    print("Failed to parse JSON responce.", file=sys.stderr);
     sys.exit(9)
 
 try:
-    mining_stats = json.load(mining_stats_raw)
+    float(etherscan_balance['result'])
 except:
-    print "JSON Error!"
+    print("Result Error!", file=sys.stderr);
     sys.exit(9)
 
-try:
-    float(mining_stats['result'])
-except:
-    print "Result Error!"
-    sys.exit(9)
-    
-ETH = float(mining_stats['result']) / 1000000000000000000
-print ETH_ADDRESS + ".value %.2f" % ETH
+eth = float(etherscan_balance['result']) / 1000000000000000000
+print("{}_{}.value %.2f".format(eth_address, eth));
