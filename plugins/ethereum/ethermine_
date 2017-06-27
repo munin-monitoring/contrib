@@ -23,33 +23,31 @@ import urllib2
 import socket
 import json
 
-OPTIONS = sys.argv[0].split('_')
-
 command = ''
 if len(sys.argv) > 1:
     command = sys.argv[1]
 
 try:
-    ETH_ADDRESS, MINER = sys.argv[0].split("_")[1:]
+    eth_address, miner = sys.argv[0].split("_")[1:]
 except ValueError:
     print("The filename of this plugin (or its symlink) should follow this pattern: "
           "'<YOUR_PUBLIC_ETHEREUM_ADDRESS>_<YOUR_RIG_NAME>'", file=sys.stderr)
-    sys.exit(0)
+    sys.exit(9)
 
 if command == 'config':
-    print("graph_title Ethermine {}".format(ETH_ADDRESS))
-    print("graph_info Ethermine Hashrate {}/{}".format(ETH_ADDRESS, MINER))
+    print("graph_title Ethermine {}".format(eth_address))
+    print("graph_info Ethermine Hashrate {}/{}".format(eth_address, miner))
     print("graph_vlabel Ethermine Hashrate")
     print("graph_category htc")
-    print("{}_{}.warning 20:".format(ETH_ADDRESS, MINER));
-    print("{}_{}.critical 10:".format(ETH_ADDRESS, MINER));
-    print("{}_{}.label MH/s:".format(ETH_ADDRESS, MINER));
+    print("{}_{}.warning 20:".format(eth_address, miner));
+    print("{}_{}.critical 10:".format(eth_address, miner));
+    print("{}_{}.label MH/s:".format(eth_address, miner));
     sys.exit(0)
 
 
-ETHERMINE_API_URL = 'https://ethermine.org/api/miner_new/' + ETH_ADDRESS
+ethermine_api_url = 'https://ethermine.org/api/miner_new/' + eth_address
 
-mining_req = urllib2.Request(ETHERMINE_API_URL)
+mining_req = urllib2.Request(ethermine_api_url)
 mining_req.add_header('User-Agent', 'Mozilla/5.0')
 
 try:
@@ -67,7 +65,7 @@ workers = mining_stats['workers']
 
 # ethermine.org sometimes has caching errors. You can see data from other miner. Always check your rig name.
 for worker in workers:
-    if workers[worker]['worker'] == MINER:
+    if workers[worker]['worker'] == miner:
         hash_rate = workers[worker]['hashrate']
         hash_rate = hash_rate.replace(" MH/s", "")
-        print("{}_{}.value %s".format(ETH_ADDRESS, MINER, hash_rate));
+        print("{}_{}.value %s".format(eth_address, miner, hash_rate));
