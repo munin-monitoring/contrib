@@ -13,7 +13,7 @@ install:
   - cpanm --notest Capture::Tiny
   - cpanm --notest File::Find
   - cpanm --notest Test::More
-  #
+
   # Modules used by plugins
   - cpanm --notest Asterisk::AMI
   - cpanm --notest BerkeleyDB
@@ -59,4 +59,20 @@ install:
   # - Sun::Solaris::Kstat
   # - VMware::VIRuntime
   # - MythTV
-script: "PERL5LIB=$PERL5LIB:/usr/share/perl5 prove"
+
+# Mixing modules installed via cpan and apt is a bit problematic:
+#   * perl (as it is used by travis) seems to be built without threading support
+#   * perl modules installed via apt were built against a threaded perl (e.g. DBI/DBI.so)
+# Thus we need to make sure, that the modules installed via CPAN and the binary modules prepared by
+# travis are preferred over the binary perl modules installed via apt (e.g. below /usr/lib/perl).
+# Since the PERL5LIB environment variable precedes all other search paths, we use the sequence
+# below in order to achieve the following order of preference:
+#   1) /usr/share/perl5 (unknown requirement)
+#   2) perl search path defined by travis environment
+#   3) binary system-wide installed perl modules (via apt)
+script:
+  - dpkg -L libsys-virt-perl
+  - mkdir -p ~/system-perl/auto
+  - ln -s /usr/lib/perl5/Sys ~/system-perl/
+  - ln -s /usr/lib/perl5/auto/Sys ~/system-perl/auto/
+  - "PERL5LIB=$PERL5LIB:/usr/share/perl5:~/system-perl prove"
