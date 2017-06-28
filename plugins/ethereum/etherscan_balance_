@@ -28,9 +28,10 @@ command = ''
 if len(sys.argv) > 1:
     command = sys.argv[1]
 
-try:
-    eth_address =  sys.argv[0][(sys.argv[0].rfind('_')+1):]
-except ValueError:
+
+api_action, eth_address = sys.argv[0].split("_")[1:]
+
+if not eth_address:
     print("The filename of this plugin (or its symlink) should follow this pattern: "
           "'etherscan_balance_<YOUR_PUBLIC_ETHEREUM_ADDRESS>'", file=sys.stderr)
     sys.exit(9)
@@ -41,14 +42,14 @@ if command == 'config':
     print("graph_info Ethereum Account Balance for Address {}".format(eth_address))
     print("graph_title Ethereum Balance")
     print("graph_title htc")
-    print("{}label eth".format(eth_address))
+    print("{}.label ETH".format(eth_address))
     sys.exit(0)
 
 ethercan_balance_api_url = 'https://api.etherscan.io/api?module=account&action=balance&tag=latest&address=' + eth_address
 
 etherscan_req = urllib2.Request(ethercan_balance_api_url)
-# User-Agent
-etherscan_req.add_header('User-Agent', 'Mozilla/5.0')
+# User-Agent to bypass Cloudflare
+etherscan_req.add_header('User-Agent', 'Etherscan Munin Plugin/1.0')
 
 try:
     etherscan_balance_raw = urllib2.urlopen(etherscan_req, timeout=1.5 )
@@ -64,8 +65,8 @@ except ValueError:
 try:
     float(etherscan_balance['result'])
 except:
-    print("Result Error!", file=sys.stderr);
+    print("JSON result error!", file=sys.stderr);
     sys.exit(9)
 
 eth = float(etherscan_balance['result']) / 1000000000000000000
-print("{}_{}.value %.2f".format(eth_address, eth));
+print("{}.value {:.2f}".format(eth_address, eth));
