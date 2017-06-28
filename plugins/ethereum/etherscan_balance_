@@ -44,11 +44,18 @@ GPLv2
 
 from __future__ import print_function
 
-import os
 import sys
-import urllib2
-import socket
 import json
+import codecs
+
+try:
+    # python3
+    from urllib.request import urlopen
+    from urllib.request import Request
+except ImportError:
+    # python2
+    from urllib2 import urlopen
+    from urllib2 import Request
 
 command = ''
 if len(sys.argv) > 1:
@@ -64,34 +71,35 @@ if not eth_address:
 
 if command == 'config':
     print("graph_title ETH {}".format(eth_address))
-    print("graph_title Ethereum Address {}".format(eth_address))
     print("graph_info Ethereum Account Balance for Address {}".format(eth_address))
-    print("graph_title Ethereum Balance")
-    print("graph_title htc")
+    print("graph_vlabel Ethereum Balance")
+    print("graph_category htc")
     print("{}.label ETH".format(eth_address))
     sys.exit(0)
 
 ethercan_balance_api_url = 'https://api.etherscan.io/api?module=account&action=balance&tag=latest&address=' + eth_address
 
-etherscan_req = urllib2.Request(ethercan_balance_api_url)
+etherscan_req = Request(ethercan_balance_api_url)
 # User-Agent to bypass Cloudflare
 etherscan_req.add_header('User-Agent', 'Etherscan Munin Plugin/1.0')
 
 try:
-    etherscan_balance_raw = urllib2.urlopen(etherscan_req, timeout=1.5 )
+    etherscan_balance_raw = urlopen(etherscan_req, timeout=15)
 except IOError as exc:
     print("Failed to request etherscan.io API: {}".format(exc), file=sys.stderr)
 
+reader = codecs.getreader("utf-8")
+
 try:
-    etherscan_balance = json.load(etherscan_balance_raw)
+    etherscan_balance = json.load(reader(etherscan_balance_raw))
 except ValueError:
-    print("Failed to parse JSON responce.", file=sys.stderr);
+    print("Failed to parse JSON responce.", file=sys.stderr)
     sys.exit(9)
 
 try:
     float(etherscan_balance['result'])
 except:
-    print("JSON result error!", file=sys.stderr);
+    print("JSON result error!", file=sys.stderr)
     sys.exit(9)
 
 eth = float(etherscan_balance['result']) / 1000000000000000000
