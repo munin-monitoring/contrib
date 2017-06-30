@@ -8,6 +8,10 @@ install:
   - sudo apt-get --no-install-recommends install munin-node
   - sudo apt-get --no-install-recommends install libsys-virt-perl
 
+  # we use locally installed cpan modules instead of travis' builtin 'homebrew' perl support
+  # The homebrew variation does not work for us, since:
+  #   * it is built without threading
+  #   * the 'libvirt' plugin requires Sys::Virt, which is not available via cpan anymore - thus we need to install the Debian package 'libsys-virt-perl', which was built with threading
   - cpanm --local-lib=~/perl5 local::lib && eval $(perl -I ~/perl5/lib/perl5/ -Mlocal::lib)
 
   # Modules used by test script
@@ -61,19 +65,5 @@ install:
   # - VMware::VIRuntime
   # - MythTV
 
-# Mixing modules installed via cpan and apt is a bit problematic:
-#   * perl (as it is used by travis) seems to be built without threading support
-#   * perl modules installed via apt were built against a threaded perl (e.g. DBI/DBI.so)
-# Thus we need to make sure, that the modules installed via CPAN and the binary modules prepared by
-# travis are preferred over the binary perl modules installed via apt (e.g. below /usr/lib/perl).
-# Since the PERL5LIB environment variable precedes all other search paths, we use the sequence
-# below in order to achieve the following order of preference:
-#   1) /usr/share/perl5 (unknown requirement)
-#   2) perl search path defined by travis environment
-#   3) binary system-wide installed perl modules (via apt)
 script:
-  - dpkg -L libsys-virt-perl
-  - mkdir -p ~/system-perl/auto
-  - ln -s /usr/lib/perl5/Sys ~/system-perl/
-  - ln -s /usr/lib/perl5/auto/Sys ~/system-perl/auto/
-  - "PERL5LIB=$PERL5LIB:/usr/share/perl5:~/system-perl prove"
+  - prove
