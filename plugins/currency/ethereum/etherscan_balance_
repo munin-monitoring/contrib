@@ -1,0 +1,116 @@
+#!/usr/bin/env python
+
+"""
+=head1 NAME
+
+etherscan_balance_ - Munin plugin to monitor your ethereum (ETH) balance
+
+=head1 APPLICABLE SYSTEMS
+
+All systems with "python" and "munin"
+
+=head1 CONFIGURATION
+
+etherscan_balance_<YOUR_PUBLIC_ETHEREUM_ADDRESS>
+
+=head1 SYNOPSIS
+
+  ln -s /usr/share/munin/plugins/etherscan_balance_ \
+  /etc/munin/plugins/etherscan_balance_0x3257bde8cf067ae6f1ddc0e4b140fe02e3c5e44f
+
+=head1 INTERPRETATION
+
+This plugin shows the ether balance (ETH) of a given ethereum address.
+Account balance is queried via etherscan.io API L<https://etherscan.io/apis>.
+
+=head1 VERSION
+
+0.0.1
+
+=head1 AUTHOR
+
+L<Nils Knieling|https://github.com/Cyclenerd>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+"""
+
+from __future__ import print_function
+
+import sys
+import json
+import codecs
+
+try:
+    # python3
+    from urllib.request import urlopen
+    from urllib.request import Request
+except ImportError:
+    # python2
+    from urllib2 import urlopen
+    from urllib2 import Request
+
+command = ''
+if len(sys.argv) > 1:
+    command = sys.argv[1]
+
+
+api_action, eth_address = sys.argv[0].split("_")[1:]
+
+if not eth_address:
+    print("The filename of this plugin (or its symlink) should follow this pattern: "
+          "'etherscan_balance_<YOUR_PUBLIC_ETHEREUM_ADDRESS>'", file=sys.stderr)
+    sys.exit(9)
+
+"""
+API result is in Wei. Convert Wei to Ether (ETH) via 'fieldname.cdef'
+1     : Wei
+10^12 : Szabo
+10^15 : Finney
+10^18 : Ether
+233874700000000000000000 Wei = 233,874.7 Ether
+"""
+if command == 'config':
+    print("graph_title Ether {}".format(eth_address))
+    print("graph_info Ethereum Account Balance for Address {}".format(eth_address))
+    print("graph_vlabel Ethereum Balance")
+    print("graph_category other")
+    print("wei_balance_{0}.cdef wei_balance_{0},1000000000000000000,/".format(eth_address))
+    print("wei_balance_{}.label ETH".format(eth_address))
+    sys.exit(0)
+
+ethercan_balance_api_url = 'https://api.etherscan.io/api?module=account&action=balance&tag=latest&address=' + eth_address
+
+etherscan_req = Request(ethercan_balance_api_url)
+# User-Agent to bypass Cloudflare
+etherscan_req.add_header('User-Agent', 'Etherscan Munin Plugin/1.0')
+
+try:
+    etherscan_balance_raw = urlopen(etherscan_req, timeout=15)
+except IOError as exc:
+    print("Failed to request etherscan.io API: {}".format(exc), file=sys.stderr)
+    sys.exit(9)
+
+reader = codecs.getreader("utf-8")
+
+try:
+    etherscan_balance = json.load(reader(etherscan_balance_raw))
+except ValueError:
+    # Error in decoding operation or in JSON parsing throw a ValueError
+    print("Failed to parse JSON response.", file=sys.stderr)
+    sys.exit(9)
+
+try:
+    eth = int(etherscan_balance['result'])
+except:
+    print("JSON result error!", file=sys.stderr)
+    sys.exit(9)
+
+print("wei_balance_{}.value {}".format(eth_address, eth));

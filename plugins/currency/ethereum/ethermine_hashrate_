@@ -1,0 +1,114 @@
+#!/usr/bin/env python
+
+"""
+=head1 NAME
+
+ethermine_hashrate_ - Munin plugin to monitor your ethermine.org hashrate (MH/s)
+
+=head1 APPLICABLE SYSTEMS
+
+All systems with "python" and "munin"
+
+=head1 CONFIGURATION
+
+ethermine_hashrate_<YOUR_PUBLIC_ETHEREUM_ADDRESS>_<YOUR_RIG_NAME>
+
+=head1 SYNOPSIS
+
+  ln -s /usr/share/munin/plugins/ethermine_hashrate_ \
+  /etc/munin/plugins/ethermine_hashrate_3257bde8cf067ae6f1ddc0e4b140fe02e3c5e44f_mine
+
+=head1 INTERPRETATION
+
+This plugin shows the ethermine.org mining pool hashrate (MH/s) of a given ethereum address and rig name.
+Hashrate is queried via ethermine.org API L<https://ethermine.org>.
+
+=head1 VERSION
+
+0.0.1
+
+=head1 AUTHOR
+
+L<Nils Knieling|https://github.com/Cyclenerd>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+"""
+
+from __future__ import print_function
+
+import sys
+import json
+import codecs
+
+try:
+    # python3
+    from urllib.request import urlopen
+    from urllib.request import Request
+except ImportError:
+    # python2
+    from urllib2 import urlopen
+    from urllib2 import Request
+
+command = ''
+if len(sys.argv) > 1:
+    command = sys.argv[1]
+
+try:
+    eth_address, miner = sys.argv[0].split("_")[2:]
+except ValueError:
+    print("The filename of this plugin (or its symlink) should follow this pattern: "
+          "'ethermine_hashrate_<YOUR_PUBLIC_ETHEREUM_ADDRESS>_<YOUR_RIG_NAME>'", file=sys.stderr)
+    sys.exit(9)
+
+if command == 'config':
+    print("graph_title Ethermine {}".format(miner))
+    print("graph_info ethermine.org Mining Pool Hashrate for {}_{}".format(eth_address, miner))
+    print("graph_vlabel Ethermine Hashrate")
+    print("graph_category other")
+    print("ethermine_mhs_{}_{}.warning 20:".format(eth_address, miner))
+    print("ethermine_mhs_{}_{}.critical 10:".format(eth_address, miner))
+    print("ethermine_mhs_{}_{}.label MH/s:".format(eth_address, miner))
+    sys.exit(0)
+
+
+ethermine_api_url = 'https://ethermine.org/api/miner_new/' + eth_address
+
+mining_req = Request(ethermine_api_url)
+# User-Agent to bypass Cloudflare
+mining_req.add_header('User-Agent', 'Ethermine Munin Plugin/1.0')
+
+try:
+    mining_stats_raw = urlopen(mining_req, timeout=15)
+except IOError as exc:
+    print("Failed to request ethermine.org API: {}".format(exc), file=sys.stderr)
+    sys.exit(9)
+
+reader = codecs.getreader("utf-8")
+
+try:
+    mining_stats = json.load(reader(mining_stats_raw))
+except ValueError:
+    # Error in decoding operation or in JSON parsing throw a ValueError
+    print("Failed to parse JSON response.", file=sys.stderr)
+    sys.exit(9)
+
+try:
+    workers = mining_stats['workers']
+except:
+    print("JSON result error!", file=sys.stderr)
+    sys.exit(9)
+
+# ethermine.org sometimes has caching errors. You can see data from other miner. Always check your rig name.
+for worker in workers:
+    if workers[worker]['worker'] == miner:
+        hash_rate = workers[worker]['hashrate']
+        hash_rate = hash_rate.replace(" MH/s", "")
+        print("ethermine_mhs_{}_{}.value {}".format(eth_address, miner, hash_rate))
