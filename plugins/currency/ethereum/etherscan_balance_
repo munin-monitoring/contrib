@@ -20,7 +20,7 @@ etherscan_balance_<YOUR_PUBLIC_ETHEREUM_ADDRESS>
 
 =head1 INTERPRETATION
 
-This plugin shows the balance (ETH) of a given ethereum address.
+This plugin shows the ether balance (ETH) of a given ethereum address.
 Account balance is queried via etherscan.io API L<https://etherscan.io/apis>.
 
 =head1 VERSION
@@ -69,12 +69,21 @@ if not eth_address:
           "'etherscan_balance_<YOUR_PUBLIC_ETHEREUM_ADDRESS>'", file=sys.stderr)
     sys.exit(9)
 
+"""
+API result is in Wei. Convert Wei to Ether (ETH) via 'fieldname.cdef'
+1     : Wei
+10^12 : Szabo
+10^15 : Finney
+10^18 : Ether
+233874700000000000000000 Wei = 233,874.7 Ether
+"""
 if command == 'config':
     print("graph_title ETH {}".format(eth_address))
     print("graph_info Ethereum Account Balance for Address {}".format(eth_address))
     print("graph_vlabel Ethereum Balance")
     print("graph_category other")
-    print("{}.label ETH".format(eth_address))
+    print("wei_balance_{0}.cdef wei_balance_{0},1000000000000000000,/".format(eth_address))
+    print("wei_balance_{}.label ETH".format(eth_address))
     sys.exit(0)
 
 ethercan_balance_api_url = 'https://api.etherscan.io/api?module=account&action=balance&tag=latest&address=' + eth_address
@@ -99,18 +108,9 @@ except ValueError:
     sys.exit(9)
 
 try:
-    float(etherscan_balance['result'])
+    eth = int(etherscan_balance['result'])
 except:
     print("JSON result error!", file=sys.stderr)
     sys.exit(9)
 
-"""
-API result is in Wei. Convert Wei to Ether (ETH).
-1     : Wei
-10^12 : Szabo
-10^15 : Finney
-10^18 : Ether
-233874700000000000000000 Wei = 233,874.7 Ether
-"""
-eth = float(etherscan_balance['result']) / 1000000000000000000
-print("{}.value {:.2f}".format(eth_address, eth));
+print("wei_balance_{}.value {}".format(eth_address, eth));
