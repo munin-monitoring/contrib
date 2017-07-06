@@ -1,0 +1,234 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# vim: set fileencoding=utf-8
+
+
+"""
+=head1 NAME
+
+nanopool_ - Munin plugin to monitor nanopool eth user data.
+
+=head1 VERSION
+0.0.1
+
+=head1 AUTHOR
+L<Ralf Geschke|https://github.com/geschke>
+
+=head1 LICENSE
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=head1 CONFIGURATION
+
+        - Copy to /usr/share/munin/plugins 
+        - Create symlinks in /etc/munin/plugins to nanopool_<graph type>,
+          e.g. ln -s /usr/share/munin/plugins/nanopool_ /etc/munin/plugins/nanopool_hashrate
+        - To enable graphs, link to one or more of the graph types available
+        - Then restart munin-node
+
+Graph types and their links:
+        balance: link to nanopool_balance           Show current balance 
+        hashrate: link to nanopool_hashrate         Show current calculated hashrate
+        avghashrate: link to nanopool_avghashrate   Show average hashrate of last hour
+        worker: link to nanopool_worker             Show worker data
+
+Configuration parameters:
+        env.account_address - the address of the account in form "0x<address>"
+
+Thanks to the authors of other Python munin plugins. I've used some of 
+them as inspiring example. 
+        
+
+=head1 MAGIC MARKERS
+
+#%# family=contrib
+#%# capabilities=autoconf suggest
+
+
+"""
+
+
+import os
+import sys
+import json
+
+try:
+    from urllib.request import Request, urlopen  # Python 3
+except:
+    from urllib2 import Request, urlopen  # Python 2
+
+
+
+
+GRAPH_TYPES = {
+    "balance" : [
+        {
+            "title" : "Balance",
+            "type" : "GAUGE",
+            "args" : "--base 1000 -l 0",
+            "fields" : ["ETH"],
+            "scale": "no",
+            "info": "Balance in ETH"
+        }
+    ],
+    "hashrate" : [
+        {
+            "title" : "Hashrate",
+            "type" : "GAUGE",
+            "args" : "--base 1000 -l 0",
+            "fields" : ["hashrate"],
+            "info": "Current Calculated Hashrate in Mh/s"
+        }
+    ],
+    "avghashrate" : [
+        {
+            "title" : "Average Hashrate",
+            "type" : "GAUGE",
+            "args" : "--base 1000 -l 0",
+            "fields" : ["avg_hashrate"],
+            "info": "Average Hashrate of last hour in Mh/s"
+
+        }
+    ],
+    "worker" : [
+        {
+            "title" : "Worker"
+        }
+    ]
+}
+
+
+def request_data():
+
+    try:
+        address = os.environ["account_address"]
+    except KeyError:
+        raise Exception("Environment variable account_address not found, please configure!")
+
+    url = 'https://api.nanopool.org/v1/eth/user/' + address
+
+    req = Request(url)
+    req.add_header('User-Agent', 'Nozilla/5.0') # this fake is necessary to get values, otherwise the request ends in a 403 error
+    txt = urlopen(req).read()
+
+    return json.loads(txt.decode("utf-8"))
+
+
+def write_config_worker():
+    data = request_data()
+    worker_data = data["data"]["workers"]
+
+    print("multigraph worker_hashrate")
+    print("graph_title Hashrate in Mh/s per worker")
+    print("graph_args --base 1000 -l 0")
+    print("graph_vlabel Mh/s")
+    print("graph_category other")
+    print("graph_width 400")
+    print("graph_scale no")
+
+    for i, val in enumerate(worker_data):
+        print("worker" + str(i) + "_hashrate.label " + str(val["id"]))
+        print("worker" + str(i) + "_hashrate.type GAUGE")
+        print("worker" + str(i) + "_hashrate.info Hashrate of worker '" + str(val["id"]) + "'")
+        print("worker" + str(i) + "_hashrate.min 0")
+        print("worker" + str(i) + "_hashrate.draw LINE1")
+
+    print("")
+    print("multigraph worker_shares")
+    print("graph_title Number of accepted shares")
+    print("graph_args --base 1000 -l 0")
+    print("graph_vlabel Shares per ${graph_period}")
+    print("graph_category other")
+    print("graph_width 400")
+    print("graph_scale no")
+    print("graph_period minute")
+
+    for i, val in enumerate(worker_data):
+        print("worker" + str(i) + "_shares.label " + str(val["id"]))
+        print("worker" + str(i) + "_shares.type COUNTER")
+        print("worker" + str(i) + "_shares.info Rating of worker '" + str(val["id"]) + "'")
+        print("worker" + str(i) + "_shares.min 0")
+        print("worker" + str(i) + "_shares.draw LINE1")
+
+
+def write_data_worker(data):
+    worker_data = data["data"]["workers"]
+
+    print("multigraph worker_hashrate")
+    for i, val in enumerate(worker_data):
+        print("worker" + str(i) + "_hashrate.value " + str(val["hashrate"]))
+
+    print
+    print("multigraph worker_shares")
+    for i, val in enumerate(worker_data):
+        print("worker" + str(i) + "_shares.value " + str(val["rating"]))
+
+
+def write_config():
+    if graph_type not in GRAPH_TYPES.keys():
+        raise Exception("Unknown graph type '%s'" %graph_type)
+    if graph_type == "worker":
+        write_config_worker()
+        return
+    params = GRAPH_TYPES[graph_type]
+    for item in params:
+        print("graph_title %s" % item["title"])
+        print("graph_category other")
+        if "info" in item:
+            print("graph_info %s" % item["info"])
+        if "scale" in item:
+            print("graph_scale %s" % item["scale"])
+        if "args" in item:
+            print("graph_args %s" % item["args"])
+        for field in item["fields"]:
+            print("%s.label %s" % (field, field))
+            print("%s.type %s" % (field, item["type"]))
+
+def write_suggest():
+    for item in GRAPH_TYPES.keys():
+        print(item)
+
+def write_data():
+    data = request_data()
+
+    if graph_type == "balance":
+        print("ETH.value %s" % data['data']['balance'])
+    elif graph_type == "hashrate":
+        print("hashrate.value %s" % data["data"]["hashrate"])
+    elif graph_type == "avghashrate":
+        print("avg_hashrate.value %s" % data["data"]["avgHashrate"]["h1"])
+    elif graph_type == "worker":
+        write_data_worker(data)
+
+def check_autoconf():
+    try:
+        address = os.environ["account_address"]
+        print("yes")
+    except KeyError:
+        print("no (Environment variable account_address not found, please configure!)")
+    exit(0)
+
+if __name__ == "__main__":
+
+    program = sys.argv[0]
+    graph_type = program[program.rfind("_")+1:]
+
+    if len(sys.argv) == 2 and sys.argv[1] == "autoconf":
+        check_autoconf()
+    elif len(sys.argv) == 2 and sys.argv[1] == "config":
+        write_config()
+    elif len(sys.argv) == 2 and sys.argv[1] == "suggest":
+        write_suggest()
+    else:
+        write_data()
