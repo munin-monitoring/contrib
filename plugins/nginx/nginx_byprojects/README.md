@@ -21,21 +21,12 @@ In your munin plugin configuration file (for example, a new dedicated /etc/munin
       [byprojects_*]
       env.logtail /usr/local/bin/logtail
 
-Multiple logs can be used for the same project/vhost and a regular expression (regex) can be used as a filter:
+Multiple logs can be used for the same project/vhost and a regular expression (regex) can be used as a filter.
+Each log is defined in a dedicated environment variable, named env.site.[siteName]. The value is JSON formatted.
 
-      my %logs = (
-        'prod' => [
-                    {'path' => '/home/prod/log/access.log'}
-                  ],
-         'dev' => [
-                    {'path' => '/var/log/httpd/ssl-dev-access.log'},
-                    {'path' => '/home/dev/log/access*.log'} # glob is supported
-                  ],
-        'test' => [
-                    {'path' => '/var/log/access.log', 'regex' => '"[A-Z]+ /test/'},
-                    {'path' => '/home/test/log/access.log'}
-                  ],
-      );
+      env.site.prod 	[{"path":"/home/prod/log/access.log"}]
+      env.site.dev		[{"path":"/var/log/httpd/ssl-dev-access.log"}, {"path":"/home/dev/log/access*.log"}]
+      env.site.test 	[{"path":"/var/log/access.log","regex":"\"[A-Z]+ /test/"}, {"path":"/home/test/log/access.log"}]
 
 In the previous example the prod project graph will be using everything in /home/prod/log/access.log. The test project will be using eveything in /home/test/log/access.log and stuff that match '"[A-Z] /test/' in /var/log/httpd/access.log (e.g. "GET /test/).
 
