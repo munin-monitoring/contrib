@@ -16,9 +16,10 @@ Counts the in/out bandwidth used by each projects/vhost. [Logtail] (https://www.
 ## Installation
 The setup is pretty straight forward. First you need to configure the plugin:
 
-Define the path to logtail:
+In your munin plugin configuration file (for example, a new dedicated /etc/munin/plugin-conf.d/nginx_byprojects), configure the plugins : 
 
-      $logtail = '/usr/local/bin/logtail';
+      [byprojects_*]
+      env.logtail /usr/local/bin/logtail
 
 Multiple logs can be used for the same project/vhost and a regular expression (regex) can be used as a filter:
 
