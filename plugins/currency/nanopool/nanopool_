@@ -31,7 +31,7 @@ Thanks to the authors of other Python munin plugins. I've used some of
 them as inspiring example.
 
 =head1 VERSION
-1.0.0
+1.0.1
 
 =head1 AUTHOR
 L<Ralf Geschke|https://github.com/geschke>
@@ -69,10 +69,12 @@ try:
     # Python 3
     from urllib.request import Request
     from urllib.request import urlopen
+    from urllib.request import URLError
 except:
     # Python 2
     from urllib2 import Request
     from urllib2 import urlopen
+    from urllib2 import URLError
    
 
 
@@ -125,13 +127,18 @@ def request_data():
     req.add_header('User-Agent', 'Nozilla/5.0')
     try:
         txt = urlopen(req).read()
-    except Exception as err:
-        # there could be different exceptions like ValueError, URLError, HTTPError
+    except URLError as err:
         print("API request error: {0}". format(err), file=sys.stderr)
         exit(1)
-
-    return json.loads(txt.decode("utf-8"))
-
+    except:
+        print("Unhandled error:", sys.exc_info()[0])    
+        exit(1)
+    try:
+        result = json.loads(txt.decode("utf-8"))
+    except ValueError as err:
+        print("Could not decode JSON error: {0}". format(err), file=sys.stderr)
+        exit(1)
+    return result
 
 def write_config_worker():
     data = request_data()
@@ -144,11 +151,11 @@ def write_config_worker():
     print("graph_category other")
     print("graph_scale no")
 
-    for i, val in enumerate(worker_data):
+    for val in worker_data:
         worker_name = "_".join(val["id"].split())
-        print("worker_{0}_hashrate.label {1}".format(worker_name, str(val["id"])))
+        print("worker_{0}_hashrate.label {1}".format(worker_name, val["id"]))
         print("worker_{0}_hashrate.type GAUGE".format(worker_name))
-        print("worker_{0}_hashrate.info Hashrate of worker '{1}'".format(worker_name, str(val["id"])))
+        print("worker_{0}_hashrate.info Hashrate of worker '{1}'".format(worker_name, val["id"]))
         print("worker_{0}_hashrate.min 0".format(worker_name))
         print("worker_{0}_hashrate.draw LINE1".format(worker_name))
     
@@ -163,7 +170,7 @@ def write_config_worker():
         print("graph_scale no")
         print("whashrate.label hashrate")
         print("whashrate.type GAUGE")
-        print("whashrate.info Hashrate of worker {0}".format(str(val["id"])))
+        print("whashrate.info Hashrate of worker {0}".format(val["id"]))
         print("whashrate.min 0")
         print("whashrate.draw LINE1")
 
@@ -176,11 +183,11 @@ def write_config_worker():
     print("graph_scale no")
     print("graph_period minute")
 
-    for i, val in enumerate(worker_data):
+    for val in worker_data:
         worker_name = "_".join(val["id"].split())
-        print("worker_{0}_shares.label {1} ".format(worker_name, str(val["id"])))
+        print("worker_{0}_shares.label {1} ".format(worker_name, val["id"]))
         print("worker_{0}_shares.type COUNTER".format(worker_name))
-        print("worker_{0}_shares.info Accepted shares of worker '{1}'".format(worker_name, str(val["id"])))
+        print("worker_{0}_shares.info Accepted shares of worker '{1}'".format(worker_name, val["id"]))
         print("worker_{0}_shares.min 0".format(worker_name))
         print("worker_{0}_shares.draw LINE1".format(worker_name))
 
@@ -196,7 +203,7 @@ def write_config_worker():
         print("graph_period minute")
         print("wshares.label shares")
         print("wshares.type COUNTER")
-        print("wshares.info Accepted shares of worker '{0}'".format(str(val["id"])))
+        print("wshares.info Accepted shares of worker '{0}'".format(val["id"]))
         print("wshares.min 0")
         print("wshares.draw LINE1")
 
@@ -206,27 +213,27 @@ def write_data_worker(data):
 
     print("multigraph worker_hashrate_{0}".format(account_address))
 
-    for i, val in enumerate(worker_data):
+    for val in worker_data:
         worker_name = "_".join(val["id"].split())
-        print("worker_{0}_hashrate.value {1}".format(worker_name, str(val["hashrate"])))
+        print("worker_{0}_hashrate.value {1}".format(worker_name, val["hashrate"]))
 
     for val in worker_data:
         print("")
         worker_name = "_".join(val["id"].split())
         print("multigraph worker_hashrate_{0}.worker_{1}".format(account_address, worker_name))
-        print("whashrate.value {0}".format(str(val["hashrate"])))
+        print("whashrate.value {0}".format(val["hashrate"]))
 
     print("")
     print("multigraph worker_shares_{0}".format(account_address))
-    for i, val in enumerate(worker_data):
+    for val in worker_data:
         worker_name = "_".join(val["id"].split())
-        print("worker_{0}_shares.value {1}".format(worker_name, str(val["rating"])))
+        print("worker_{0}_shares.value {1}".format(worker_name, val["rating"]))
 
     for val in worker_data:
         worker_name = "_".join(val["id"].split())
         print("")
         print("multigraph worker_shares_{0}.worker_{1}".format(account_address, worker_name))
-        print("wshares.value {0} ".format(str(val["rating"])))
+        print("wshares.value {0} ".format(val["rating"]))
       
 
 
@@ -280,9 +287,7 @@ if __name__ == "__main__":
         exit(1)
 
     GRAPH_TYPES = define_graph_types()
-    if len(sys.argv) > 1 and sys.argv[1] == "autoconf":
-        print("no")
-    elif len(sys.argv) > 1 and sys.argv[1] == "config":
+    if len(sys.argv) > 1 and sys.argv[1] == "config":
         write_config()
     elif len(sys.argv) > 1 and sys.argv[1] == "suggest":
         write_suggest()
