@@ -1,5 +1,6 @@
 #!/usr/bin/perl -w
 use strict;
+use JSON qw(decode_json);
 #
 # byprojects_access
 #
@@ -23,25 +24,23 @@ use strict;
 #   Test graph will be using everything file matching /home/test/log/access*.log
 #   and stuff that match the expression '"[A-Z] /test/' in /var/log/access.log
 #   such as '"GET /test/'
+#
+# Configuration
+# [byprojects_*]
+# env.logtail_path /usr/local/bin/logtail
+# env.site.prod  [{"path":"/home/prod/log/access.log"}]
+# env.site.dev   [{"path":"/var/log/httpd/ssl-dev-access.log"}, {"path":"/home/dev/log/access*.log"}]
+# env.site.test  [{"path":"/var/log/access.log","regex":"\"[A-Z]+ /test/"}, {"path":"/home/test/log/access.log"}]
 
 my $server = 'Nginx';
 
 my $statepath = $ENV{MUNIN_PLUGSTATE};
-my $logtail = '/usr/local/bin/logtail';
+my $logtail = $ENV{logtail_path} || '/usr/local/bin/logtail';
 
-my %logs = (
-    'prod' => [
-                {'path' => '/home/prod/log/access.log'}
-              ],
-    'dev'  => [
-                {'path' => '/var/log/httpd/ssl-dev-access.log'},
-                {'path' => '/home/dev/log/access*.log'} # glob is supported
-              ],
-    'test' => [
-                {'path' => '/var/log/access.log', 'regex' => '"[A-Z]+ /test/'},
-                {'path' => '/home/test/log/access.log'}
-              ],
-);
+my @loglist = grep {$_ =~ /site\./} keys(%ENV);
+my %envLogs = %ENV{@loglist};
+my %logs;
+while(my($k, $v) = each %envLogs) { @logs{substr($k, 5)} = decode_json($v); }
 
 ###########
 
