@@ -1,0 +1,295 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# vim: set fileencoding=utf-8
+
+"""
+=head1 NAME
+
+nanopool_ - Munin plugin to monitor nanopool ethereum user data.
+
+
+=head1 CONFIGURATION
+
+[nanopool_*]
+
+        - Copy to /usr/share/munin/plugins
+        - Create symlinks in /etc/munin/plugins to nanopool_<graph type>_<account_address>,
+          e.g. ln -s /usr/share/munin/plugins/nanopool_ /etc/munin/plugins/nanopool_hashrate_0x1234567890abcdef1234567890
+          Please use the account address in the format "0x<address>".
+
+        - To enable graphs, link to one or more of the graph types available
+        - Then restart munin-node
+
+Graph types and their links:
+        balance: link to nanopool_balance           Show current balance
+        hashrate: link to nanopool_hashrate         Show current calculated hashrate
+        avghashrate: link to nanopool_avghashrate   Show average hashrate of last hour
+        worker: link to nanopool_worker             Show worker data
+
+
+Thanks to the authors of other Python munin plugins. I've used some of
+them as inspiring example.
+
+=head1 VERSION
+1.0.1
+
+=head1 AUTHOR
+L<Ralf Geschke|https://github.com/geschke>
+
+=head1 LICENSE
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=head1 MAGIC MARKERS
+
+#%# family=contrib
+#%# capabilities=suggest
+
+=cut
+"""
+
+from __future__ import print_function
+
+import os
+import sys
+import json
+
+try:
+    # Python 3
+    from urllib.request import Request
+    from urllib.request import urlopen
+    from urllib.request import URLError
+except:
+    # Python 2
+    from urllib2 import Request
+    from urllib2 import urlopen
+    from urllib2 import URLError
+   
+
+
+def define_graph_types():
+    graph_types = {
+        "balance" : [
+            {
+                "title" : "Balance of {0}".format(account_address),
+                "type" : "GAUGE",
+                "args" : "--base 1000 -l 0",
+                "fields" : ["ETH"],
+                "scale": "no",
+                "info": "Balance in ETH"
+            }
+        ],
+        "hashrate" : [
+            {
+                "title" : "Hashrate of {0}".format(account_address),
+                "type" : "GAUGE",
+                "args" : "--base 1000 -l 0",
+                "fields" : ["hashrate"],
+                "info": "Current Calculated Hashrate in Mh/s"
+            }
+        ],
+        "avghashrate" : [
+            {
+                "title" : "Average Hashrate of {0}".format(account_address),
+                "type" : "GAUGE",
+                "args" : "--base 1000 -l 0",
+                "fields" : ["avg_hashrate"],
+                "info": "Average Hashrate of last hour in Mh/s"
+
+            }
+        ],
+        "worker" : [
+            {
+                "title" : "Worker"
+            }
+        ]
+    }
+    return graph_types
+
+
+def request_data():
+
+    url = "https://api.nanopool.org/v1/eth/user/{0}".format(account_address)
+
+    req = Request(url)
+    # this fake is necessary to get values, otherwise the request ends in a 403 error
+    req.add_header('User-Agent', 'Nozilla/5.0')
+    try:
+        txt = urlopen(req).read()
+    except URLError as err:
+        print("API request error: {0}". format(err), file=sys.stderr)
+        exit(1)
+    except:
+        print("Unhandled error:", sys.exc_info()[0])    
+        exit(1)
+    try:
+        result = json.loads(txt.decode("utf-8"))
+    except ValueError as err:
+        print("Could not decode JSON error: {0}". format(err), file=sys.stderr)
+        exit(1)
+    return result
+
+def write_config_worker():
+    data = request_data()
+    worker_data = sorted(data["data"]["workers"], key=lambda element: element["id"])
+
+    print("multigraph worker_hashrate_{0}".format(account_address))
+    print("graph_title Hashrate in Mh/s per worker ({0})".format(account_address))
+    print("graph_args --base 1000 -l 0")
+    print("graph_vlabel Mh/s")
+    print("graph_category other")
+    print("graph_scale no")
+
+    for val in worker_data:
+        worker_name = "_".join(val["id"].split())
+        print("worker_{0}_hashrate.label {1}".format(worker_name, val["id"]))
+        print("worker_{0}_hashrate.type GAUGE".format(worker_name))
+        print("worker_{0}_hashrate.info Hashrate of worker '{1}'".format(worker_name, val["id"]))
+        print("worker_{0}_hashrate.min 0".format(worker_name))
+        print("worker_{0}_hashrate.draw LINE1".format(worker_name))
+    
+    for val in worker_data:
+        print("")
+        worker_name = "_".join(val["id"].split())
+        print("multigraph worker_hashrate_{0}.worker_{1}".format(account_address, worker_name))
+        print("graph_title Hashrate in Mh/s of worker {0}".format(worker_name))
+        print("graph_args --base 1000 -l 0")
+        print("graph_vlabel Mh/s")
+        print("graph_category other")
+        print("graph_scale no")
+        print("whashrate.label hashrate")
+        print("whashrate.type GAUGE")
+        print("whashrate.info Hashrate of worker {0}".format(val["id"]))
+        print("whashrate.min 0")
+        print("whashrate.draw LINE1")
+
+    print("")
+    print("multigraph worker_shares_{0}".format(account_address))
+    print("graph_title Number of accepted shares ({0})".format(account_address))
+    print("graph_args --base 1000 -l 0")
+    print("graph_vlabel Shares per ${graph_period}")
+    print("graph_category other")
+    print("graph_scale no")
+    print("graph_period minute")
+
+    for val in worker_data:
+        worker_name = "_".join(val["id"].split())
+        print("worker_{0}_shares.label {1} ".format(worker_name, val["id"]))
+        print("worker_{0}_shares.type COUNTER".format(worker_name))
+        print("worker_{0}_shares.info Accepted shares of worker '{1}'".format(worker_name, val["id"]))
+        print("worker_{0}_shares.min 0".format(worker_name))
+        print("worker_{0}_shares.draw LINE1".format(worker_name))
+
+    for val in worker_data:
+        worker_name = "_".join(val["id"].split())
+        print("")
+        print("multigraph worker_shares_{0}.worker_{1}".format(account_address, worker_name))
+        print("graph_title Number of accepted shares {0}".format(worker_name))
+        print("graph_args --base 1000 -l 0")
+        print("graph_vlabel Shares per ${graph_period}")
+        print("graph_category other")
+        print("graph_scale no")
+        print("graph_period minute")
+        print("wshares.label shares")
+        print("wshares.type COUNTER")
+        print("wshares.info Accepted shares of worker '{0}'".format(val["id"]))
+        print("wshares.min 0")
+        print("wshares.draw LINE1")
+
+
+def write_data_worker(data):
+    worker_data = sorted(data["data"]["workers"], key=lambda element: element["id"])
+
+    print("multigraph worker_hashrate_{0}".format(account_address))
+
+    for val in worker_data:
+        worker_name = "_".join(val["id"].split())
+        print("worker_{0}_hashrate.value {1}".format(worker_name, val["hashrate"]))
+
+    for val in worker_data:
+        print("")
+        worker_name = "_".join(val["id"].split())
+        print("multigraph worker_hashrate_{0}.worker_{1}".format(account_address, worker_name))
+        print("whashrate.value {0}".format(val["hashrate"]))
+
+    print("")
+    print("multigraph worker_shares_{0}".format(account_address))
+    for val in worker_data:
+        worker_name = "_".join(val["id"].split())
+        print("worker_{0}_shares.value {1}".format(worker_name, val["rating"]))
+
+    for val in worker_data:
+        worker_name = "_".join(val["id"].split())
+        print("")
+        print("multigraph worker_shares_{0}.worker_{1}".format(account_address, worker_name))
+        print("wshares.value {0} ".format(val["rating"]))
+      
+
+
+def write_config():
+    if graph_type not in GRAPH_TYPES.keys():
+        print("Unknown graph type '{0}'".format(graph_type), file=sys.stderr)
+        exit(1)
+    if graph_type == "worker":
+        write_config_worker()
+        return
+    params = GRAPH_TYPES[graph_type]
+    for item in params:
+        print("graph_title {0}".format(item["title"]))
+        print("graph_category other")
+        if "info" in item:
+            print("graph_info {0}".format(item["info"]))
+        if "scale" in item:
+            print("graph_scale {0}".format(item["scale"]))
+        if "args" in item:
+            print("graph_args {0}".format(item["args"]))
+        for field in item["fields"]:
+            print("{0}.label {1}".format(field, field))
+            print("{0}.type {1}".format(field, item["type"]))
+
+def write_suggest():
+    for item in GRAPH_TYPES.keys():
+        print(item)
+
+def write_data():
+    data = request_data()
+
+    if graph_type == "balance":
+        print("ETH.value {0}".format(data['data']['balance']))
+    elif graph_type == "hashrate":
+        print("hashrate.value {0}".format(data["data"]["hashrate"]))
+    elif graph_type == "avghashrate":
+        print("avg_hashrate.value {0}".format(data["data"]["avgHashrate"]["h1"]))
+    elif graph_type == "worker":
+        write_data_worker(data)
+    else:
+        pass
+
+
+if __name__ == "__main__":
+
+    program = sys.argv[0]
+    try:
+        graph_type, account_address = program.split("_")[1:]
+    except ValueError:
+        print("Please configure the plugin as described in the configuration section.")
+        exit(1)
+
+    GRAPH_TYPES = define_graph_types()
+    if len(sys.argv) > 1 and sys.argv[1] == "config":
+        write_config()
+    elif len(sys.argv) > 1 and sys.argv[1] == "suggest":
+        write_suggest()
+    else:
+        write_data()
