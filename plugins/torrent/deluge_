@@ -66,12 +66,10 @@ connections
 =head2 bandwidth
 
 In the "bandwidth" mode, this plugin show graphs for the download and upload
-bandwidth.
+bandwidths.
 Each of them has "payload" and "overhead" value.
- - with positive values : the download values
- (payloadDownloadRate & overheadDownloadRate)
- - with negative values : the upload values
- (payloadUploadRate & overheadUploadRate)
+ - with positive values : the upload values
+ - with negative values : the download values
 
 =head2 states
 
@@ -308,35 +306,37 @@ def print_config(mode):
               ".info The number of connections used by Deluge Torrent")
     elif mode == "bandwidth":
         print("graph_title Bandwidth usage")
-        print("graph_order payloadUploadRate payloadDownloadRate overheadUploadRate overheadDownloadRate")
+        print("graph_order payloadDownloadRate overheadDownloadRate payloadUploadRate overheadUploadRate")
         print("graph_args --base 1024 -r")
-        print("graph_vlabel octet/s : down(+) and up(-)")
+        print("graph_vlabel bytes/s : down(-) and up(+)")
         print("graph_scale yes")
         print("graph_info This graph shows the bandwidth used by Deluge Torrent")
         print("graph_category filetransfer")
         print("graph_period second")
 
-        print("payloadUploadRate.label payload")
-        print("payloadUploadRate.draw AREA")
-        print("payloadUploadRate.min 0")
-        # print("payloadUploadRate.info Bandwidth used to upload torrents")
-
         print("payloadDownloadRate.label payload")
         print("payloadDownloadRate.draw AREA")
         print("payloadDownloadRate.min 0")
-        print("payloadDownloadRate.negative payloadUploadRate")
+        print("payloadDownloadRate.graph no")
         print("payloadDownloadRate.info Bandwidth used to download / upload torrents")
-
-        print("overheadUploadRate.label overhead")
-        print("overheadUploadRate.draw STACK")
-        print("overheadUploadRate.min 0")
-        # print("overheadUploadRate.info Bandwidth 'lost' due to overhead while downloading and uploading torrents")
 
         print("overheadDownloadRate.label overhead")
         print("overheadDownloadRate.draw STACK")
         print("overheadDownloadRate.min 0")
-        print("overheadDownloadRate.negative overheadUploadRate")
+        print("overheadDownloadRate.graph no")
         print("overheadDownloadRate.info Bandwidth 'lost' due to overhead while downloading and uploading torrents")
+
+        print("payloadUploadRate.label payload")
+        print("payloadUploadRate.draw AREA")
+        print("payloadUploadRate.min 0")
+        print("payloadUploadRate.negative payloadDownloadRate")
+        print("payloadUploadRate.info Bandwidth used to upload torrents")
+
+        print("overheadUploadRate.label overhead")
+        print("overheadUploadRate.draw STACK")
+        print("overheadUploadRate.min 0")
+        print("overheadUploadRate.negative overheadDownloadRate")
+        print("overheadUploadRate.info Bandwidth 'lost' due to overhead while downloading and uploading torrents")
     elif mode == "states":
         print("graph_title Torrents states")
 
@@ -351,15 +351,10 @@ def print_config(mode):
         print("graph_category filetransfer")
         print("graph_period second")
 
-        first = True
         for state_name in torrent_states:
             print(names_for_munin["state." +
                                   state_name] + ".label " + state_name)
-            if first:
-                first = False
-                print(names_for_munin["state." + state_name] + ".draw AREA")
-            else:
-                print(names_for_munin["state." + state_name] + ".draw STACK")
+            print(names_for_munin["state." + state_name] + ".draw AREASTACK")
             print(names_for_munin["state." + state_name] + ".type GAUGE")
             print(names_for_munin["state." + state_name] + ".min 0")
             print(names_for_munin["state." + state_name] +
