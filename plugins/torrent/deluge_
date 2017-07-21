@@ -43,17 +43,21 @@
 ##########################################
 
 
-import commands
-from deluge.log import setupLogger
-from deluge.ui.client import client
 import logging
 import os
 import string
 import sys
-from twisted.internet import reactor, defer
 
+try:
+    from deluge.log import setupLogger
+    from deluge.ui.client import client
+    from twisted.internet import reactor, defer
+    setupLogger()
+except (ImportError, NameError):
+    successful_import = False
+else:
+    successful_import = True
 
-setupLogger()
 
 plugin_version = "1.0.0"
 
@@ -308,6 +312,10 @@ def print_config(mode):
 
 
 def fetch_info(mode):
+    if not successful_import:
+        print('Missing imports, cannot run !')
+        sys.exit(1)
+
     log.debug("Launching tests")
     c = StatClient(conf, mode)
     c.fetch_info()
@@ -320,13 +328,10 @@ if len(sys.argv) > 1:
         print_config(get_mode())
         sys.exit(0)
     elif action == "autoconf":
-        status, output = commands.getstatusoutput('which deluged')
-        if status == 0:
-            print('yes')
-            sys.exit(0)
-        else:
-            print('no (deluged not found)')
+        if not successful_import:
+            print('no (required modules not found)')
             sys.exit(1)
+        print('yes')
     elif action == "suggest":
         for mode in modes:
             print(mode)
