@@ -36,10 +36,12 @@
 #      $ echo "http://www.intrafish.no/" >> /etc/munin/urls.txt
 #
 #  3. Add a cron job running the plugin with cron as the argument:
-#     */15 * * * * <user> /usr/share/munin/plugins/http_load_ cron
-#     <user> should be the user that has write permission to
-#     the $cachedir directory set below. Set the intervals to
-#     whatever you want.
+#     */15 * * * * <user> /usr/sbin/munin-run http_load_<site>_loadtime cron
+#     <user> should be the user that has write permission to the $cachedir
+#     directory set below. <site> should be any of the configured sites (all
+#     sites will get updated), likewise, you should replace loadtime by any
+#     metric that is enabled for that site (all metrics will get updated).
+#     Set the intervals to whatever you want.
 #
 #     For verbose output (for debugging) you can do:
 #     sudo -u <user> /usr/share/munin/plugins/http_load_ cron verbose
@@ -89,11 +91,11 @@ use LWP::ConnCache;
 my $url_file="/etc/munin/http_load_urls.txt";
 my $cachedir=$ENV{MUNIN_PLUGSTATE};
 
-my $debug=0;
+my $debug=$ENV{MUNIN_DEBUG};
 my $timeout=10;
 my $max_redirects=10;
 my $scriptname="http_load_";
-my $useragent="Mozilla/5.0";
+my $useragent="Mozilla/5.0 (Munin; $scriptname)";
 
 # Function to read the $url_file and return the contents in a hash
 sub read_urls{
@@ -144,6 +146,13 @@ sub filter{
 	# status=1 => do download (default)
 	# status=0 => do not download
 
+	# For links, the 'rel' is more relevant that the 'src' attribute
+	if("$tag" =~ /^link/){
+		$status=0;
+		if("$tag" =~ /stylesheet$/){
+			$status=1;
+		}
+	}
 	if("$tag" eq "form action"){
 		$status=0;
 	}
@@ -153,6 +162,9 @@ sub filter{
 	if("$tag" eq "area href"){
 		$status=0;
 	}
+	if("$tag" eq "meta content"){
+		$status=0;
+	}
 	return $status;
 }
 
@@ -160,7 +172,6 @@ sub filter{
 sub get_cache_file_name{
 	my $scriptname=$_[0];
 	my $id=$_[1];
-	my $type=$_[2];
 	my $file="";
 
 	$file = $scriptname . $id . ".cache";
@@ -241,7 +252,10 @@ if($ARGV[0] and $ARGV[0] eq "autoconf") {
 	# read from
 
 	my $verbose=0;
-	if($ARGV[1] and $ARGV[1] eq "verbose") {
+	if(
+		$ENV{MUNIN_DEBUG} eq "1" or
+		$ARGV[1] and $ARGV[1] eq "verbose"
+	) {
 		$verbose=1;
 		print "Verbose output\n";
 	}
@@ -290,6 +304,8 @@ if($ARGV[0] and $ARGV[0] eq "autoconf") {
 		$output{"response_" . $host . "_" . $response->code}+=1;
 		$output{"type_" . $response->content_type}+=1;
 
+		# For <link />s, also capture the rel attribute
+		$HTML::Tagset::linkElements{'link'} = [ qw( href rel ) ];
 	        $page_parser = HTML::LinkExtor->new(undef, $url);
 	        $page_parser->parse($contents)->eof;
 	        my @links = $page_parser->links;
@@ -297,15 +313,20 @@ if($ARGV[0] and $ARGV[0] eq "autoconf") {
 
         	%res=();
 	        foreach $link (@links){
-			my $tag=$$link[0] . " " . $$link[1];
-			
+			my $tag;
+			my($t, %attrs) = @{$link};
+			if ($attrs{rel} =~ /.*\/([^\/]+)/) {
+				$tag=$$link[0] . " " . $1;
+			} else {
+				$tag=$$link[0] . " " . $$link[1];
+			}
 			$output{"tags_" . $$link[0] . "-" . $$link[1]}+=1;
 	
 			if(filter($tag)){
 				$verbose && print "  Processing: " . $$link[0] . " " . $$link[1] . " " . $$link[2] . "\n";
 
 				# Extract the hostname and add it to the hash
-				if($$link[2] =~ m/http\:\/\/([^\/]+).*/){
+				if($$link[2] =~ m/https?\:\/\/([^\/]+).*/){
 					$host=$1;
 					$output{"elements_" . $host}+=1;
 				}
@@ -327,7 +348,7 @@ if($ARGV[0] and $ARGV[0] eq "autoconf") {
 			}
 		}
 
-		$cachefile=$cachedir . "/" . &get_cache_file_name($scriptname,$id,$type);
+		$cachefile=$cachedir . "/" . &get_cache_file_name($scriptname,$id);
 		$debug && print "Reading cache file: " . $cachefile . "... ";
 
 		my %input=read_cache($cachefile);
@@ -362,7 +383,7 @@ if($ARGV[0] and $ARGV[0] eq "autoconf") {
         print "graph_args -l 0 --base 1000\n";
         print "graph_category webserver\n";
 	$debug && print "Reading cache file\n";
-	my $cachefile=$cachedir . "/" . &get_cache_file_name($scriptname,$id,$type);
+	my $cachefile=$cachedir . "/" . &get_cache_file_name($scriptname,$id);
 	my %cache=read_cache($cachefile);
 
 	my $count=0;
@@ -553,7 +574,7 @@ if($ARGV[0] and $ARGV[0] eq "autoconf") {
 	}
 	exit(0); 
 } else {
-	my $cachefile=$cachedir . "/" . &get_cache_file_name($scriptname,$id,$type);
+	my $cachefile=$cachedir . "/" . &get_cache_file_name($scriptname,$id);
 	$debug && print "Reading cache file: " . $cachefile . "\n";
 	my %cache=read_cache($cachefile);
 	$debug && print "Number of lines in cache file: " . keys(%cache) . "\n";
