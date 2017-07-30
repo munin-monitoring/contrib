@@ -158,7 +158,7 @@ class StatClient:
         self.connected = False
 
     def end_session(self, msg):
-        log.debug("end_session : {0}".format(msg))
+        log.debug("end_session : %s", msg)
 
         if self.connected:
             log.debug("Disconnecting")
@@ -167,8 +167,8 @@ class StatClient:
         reactor.stop()
 
     def fetch_info(self):
-        log.debug("Connecting to {0}:{1} ...".format(
-            self.conf['host'], self.conf['port']))
+        log.debug("Connecting to %s:%d ...",
+                  self.conf['host'], self.conf['port'])
         client.connect(
             self.conf['host'],
             self.conf['port'],
@@ -205,15 +205,13 @@ class StatClient:
                 errbackArgs=("get_session_state failed"))
 
     def on_num_connections(self, num_connections):
-        log.debug("Got num_connections from the daemon : {0}".format(
-            num_connections))
+        log.debug("Got num_connections from the daemon : %s", num_connections)
         print("{0}.value {1}".format(
             names_for_munin["numConnections"], num_connections))
         self.end_session("Done")
 
     def on_bandwidth(self, values):
-        log.debug(
-            "Got bandwidth info from the daemon : {0}".format(values))
+        log.debug("Got bandwidth info from the daemon : %s", values)
 
         download_rate = values['download_rate']
         payload_download_rate = values['payload_download_rate']
@@ -241,7 +239,7 @@ class StatClient:
 
         deferred_list = []
         for torrent_id in torrent_ids:
-            log.debug(" - TorrentId : {0}".format(torrent_id))
+            log.debug(" - TorrentId : %s", torrent_id)
             d = client.core.get_torrent_status(torrent_id, ['state'])
             d.addCallback(self.on_one_torrent_info, torrent_id)
             d.addErrback(self.on_one_torrent_info_failed, torrent_id)
@@ -251,21 +249,21 @@ class StatClient:
             self.on_all_torrent_info_fetched)
 
     def on_one_torrent_info_failed(self, torrent_id):
-        log.debug("Failed fetching torrent info {0}".format(torrent_id))
+        log.debug("Failed fetching torrent info %s", torrent_id)
         self.state["Error"] = self.state["Error"] + 1
 
     def on_one_torrent_info(self, value, torrent_id):
-        log.debug("Got torrent info : {0} -> {1}".format(torrent_id, value))
+        log.debug("Got torrent info : %s -> %s", torrent_id, value)
         state = value.get("state", "Error")
 
         if state not in self.states:
-            log.warn("State '{0}' is unknown !".format(state))
+            log.warn("State '%s' is unknown !", state)
             state = "Other"
 
         self.states[state] += 1
 
     def on_all_torrent_info_fetched(self, res):
-        log.debug("on_all_torrent_info_fetched : {0}".format(self.states))
+        log.debug("on_all_torrent_info_fetched : %s", self.states)
 
         for state in self.states:
             print("{0}.value {1}".format(
@@ -278,11 +276,11 @@ def get_mode():
     script_name = os.path.basename(sys.argv[0])
     mode = script_name[string.rindex(script_name, '_') + 1:]
 
-    log.debug("Mode : {0}".format(mode))
+    log.debug("Mode : %s", mode)
 
     if mode not in modes:
-        log.error("Unknown mode '{0}'".format(mode))
-        log.info("Available modes are : {0}".format(modes))
+        log.error("Unknown mode '%s'", mode)
+        log.info("Available modes are : %s", modes)
         sys.exit(1)
 
     return mode
@@ -388,7 +386,7 @@ if len(sys.argv) > 1:
             plugin_version))
         sys.exit(0)
     elif action:
-        log.warn("Unknown argument '{0}'".format(action))
+        log.warn("Unknown argument '%s'", action)
         sys.exit(1)
     else:
         fetch_info(get_mode())
