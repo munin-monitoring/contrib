@@ -1,0 +1,111 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+ssl-certificate-expiry - Plugin to monitor CERTificate expiration on multiple services and ports
+
+=head1 CONFIGURATION
+
+  [ssl-certificate-expiry]
+    env.services www.service.tld blah.example.net_PORT
+
+To set warning and critical levels do like this:
+
+  [ssl-certificate-expiry]
+    env.services ...
+    env.warning 30:
+
+Alternatively, if you want to monitor hosts separately, you can create multiple symlinks named as follows.
+
+  ssl-certificate-expiry_HOST_PORT
+
+For example:
+
+  ssl-certificate-expiry_www.example.net
+  ssl-certificate-expiry_www.example.org_443
+  ssl-certificate-expiry_192.0.2.42_636
+  ssl-certificate-expiry_2001:0DB8::badc:0fee_485
+
+=head1 AUTHOR
+
+Pactrick Domack (ssl_)
+Olivier Mehani (ssl-certificate-expiry)
+
+Copyright (C) 2013 Patrick Domack <patrickdk@patrickdk.com>
+Copyright (C) 2017 Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+=cut
+
+. "${MUNIN_LIBDIR}/plugins/plugin.sh"
+
+if [ "${MUNIN_DEBUG}" = 1 ]; then
+    set -x
+fi
+
+HOSTPORT=${0##*ssl-certificate-expiry_}
+
+if [ "${HOSTPORT}" != "${0}" ] \
+	&& [ ! -z "${HOSTPORT}" ]; then
+	services="${HOSTPORT}"
+fi
+
+case $1 in
+    config)
+
+	echo "graph_title SSL Certificates Expiration"
+	echo 'graph_args --base 1000'
+	echo 'graph_vlabel days left'
+	echo 'graph_category security'
+	echo "graph_info This graph shows the days left for the certificate"
+	for service in $services; do
+	    fieldname=$(clean_fieldname "$service")
+	    echo "${fieldname}.label $(echo "${service}" | sed 's/_/:/')"
+	    print_thresholds "${fieldname}"
+	done
+
+	exit 0
+	;;
+esac
+
+get_expire()
+{
+    SITE="$(echo "${1}" | sed 's/_.*//')"
+    PORT="$(echo "${1}" | sed 's/.*_//')"
+
+    VAR="$(clean_fieldname "$1")"
+    if [ "$PORT" = "$SITE" ]; then
+	PORT=443
+    fi
+    if echo "$SITE" | grep -q ':'; then
+	# Wrap IPv6 addresses in square brackets
+        SITE="[${SITE}]"
+    fi
+
+    CERT=$(echo "" | openssl s_client -CApath /etc/ssl/certs -servername "${SITE}" -connect "${SITE}:${PORT}" 2>/dev/null);
+
+    if echo "${CERT}" | grep -q -- "-----BEGIN CERTIFICATE-----"; then
+	echo "${CERT}" \
+		| openssl x509 -noout -enddate \
+		| awk -F= 'BEGIN {
+			split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", month, " ");
+			for (i=1; i<=12; i++)
+				mdigit[month[i]] = i;
+		}
+		/notAfter/ {
+			split($0,a,"="); split(a[2],b," "); split(b[3],time,":");
+			datetime=b[4] " " mdigit[b[1]] " " b[2] " " time[1] " " time[2] " " time[3];
+			days=(mktime(datetime)-systime())/86400;
+			print "VAR.value " days;
+		}' \
+		| sed "s/VAR/${VAR}/g"
+    fi
+}
+
+for service in $services; do
+    get_expire "$service"
+done
