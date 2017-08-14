@@ -68,7 +68,7 @@ zfs_cmd=/sbin/zfs
 # Functions
 
 preconfig() {
-    local func=$1
+    local func="$1"
     local p c
 
     # data_attr format: field type draw label
@@ -131,7 +131,7 @@ preconfig() {
 }
 
 do_config() {
-    local func=$1
+    local func="$1"
     local label_max_length=45 
     local field type draw label
 
@@ -162,16 +162,16 @@ do_config() {
 }
 
 get_stats() {
-    local func=$1
+    local func="$1"
 
     case $func in
     capacity)
-        $zpool_cmd list -H -o name,capacity | sed 's/%$//'
+        "$zpool_cmd" list -H -o name,capacity | sed 's/%$//'
         ;;
     allocated)
-        ( $zpool_cmd list -H -o name,allocated \
+        ( "$zpool_cmd" list -H -o name,allocated \
           | awk '{ print $1"_allocated", $2 }'
-          $zpool_cmd list -H -o name,size \
+          "$zpool_cmd" list -H -o name,size \
           | awk '{ print $1"_size", $2 }'
         ) \
         | perl -ane '
@@ -185,19 +185,27 @@ get_stats() {
         # Note: ZFS supports up to 16EB.
         ;;
     dedup)
-        $zpool_cmd list -H -o name,dedup \
+        "$zpool_cmd" list -H -o name,dedup \
         | sed 's/x$//' \
         | awk '{ print $1"_dedup", $2 }'
-        $zpool_cmd list -H -o name \
-        | xargs $zfs_cmd get -H -o name,value compressratio \
+        # example output:
+        #   $ zpool list -H -o name,dedup
+        #   rpool   1.00x
+        #   ...
+
+        "$zpool_cmd" list -H -o name \
+        | xargs "$zfs_cmd" get -H -o name,value compressratio \
         | sed 's/x$//' \
         | awk '{ print $1"_compress", $2 }'
+        # example output:
+        #   $ zfs get -H -o name,value compressratio rpool
+        #   rpool   1.00x
         ;;
     esac
 }
 
 do_fetch() {
-    local func=$1
+    local func="$1"
     local zpool_stats field value
 
     # zpool_stats contains 'key value\n'
@@ -225,7 +233,7 @@ autoconf() {
 config() {
     local func
 
-    pool_list=$( $zpool_cmd list -H -o name )
+    pool_list=$( "$zpool_cmd" list -H -o name )
 
     for func in $functions
     do
