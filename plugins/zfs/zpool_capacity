@@ -1,0 +1,267 @@
+#!/bin/bash
+
+: << =cut
+
+=head1 NAME
+
+  zpool_capacity - Munin plugin to monitor ZFS capacity
+
+  These functions are implemented:
+    capacity  : to monitor zpool capacity %
+    allocated : to monitor zpool allocated bytes
+    dedup     : to monitor zpool dedup and compress ratio
+
+  Tested with Solaris 10 and 11, OpenIndiana Hipster, FreeBSD 11, CentOS 7
+
+=head1 CONFIGURATION
+
+  Make symlink:
+    cd /path/to/munin/etc/plugins
+    ln -s /path/to/munin/lib/plugins/zpool_capacity .
+
+  For FreeBSD, it should be necessary to change shebang /bin/bash -> /usr/local/bin/bash
+
+  For Linux, root privilege is necessary to run zpool command.
+    [zpool_capacity]
+      user  root
+
+=head1 ENVIRONMENT VARIABLES
+ 
+  critical : default 90
+  warning  : default 80
+
+=head1 AUTHOR
+
+  K.Cima https://github.com/shakemid
+
+=head1 LICENSE
+
+  GPLv2
+
+=head1 Magic markers
+
+  #%# family=contrib
+  #%# capabilities=autoconf
+
+=cut
+
+# Include plugin.sh
+. "${MUNIN_LIBDIR:-}/plugins/plugin.sh"
+is_multigraph "$@"
+
+# Shell options
+set -o nounset
+
+# Global variables
+plugin_name=zpool_capacity
+functions='capacity allocated dedup'
+zpool_cmd=/sbin/zpool
+zfs_cmd=/sbin/zfs
+
+# Environment variables
+: "${warning:=80}"
+: "${critical:=90}"
+
+# Note: The performance of ZFS may significantly degrade when zpool capacity > 90%
+# See also: https://docs.oracle.com/cd/E53394_01/html/E54801/zfspools-4.html
+
+# Functions
+
+preconfig() {
+    local func="$1"
+    local p c
+
+    # data_attr format: field type draw label
+    #   label can contain white-spaces.
+    data_attr=
+
+    case $func in
+    capacity)
+        global_attr="
+            graph_title ZFS storage pool - Capacity
+            graph_category fs
+            graph_args --base 1000 --lower-limit 0 --upper-limit 100
+            graph_vlabel % allocated
+            graph_info ZFS storage pool - Capacity
+            warning ${warning}
+            critical ${critical}
+        "
+        for p in $pool_list
+        do
+            data_attr="${data_attr}
+                ${p} GAUGE LINE2 ${p}"
+        done
+        ;;
+    allocated)
+        global_attr="
+            graph_title ZFS storage pool - Allocated bytes
+            graph_category fs
+            graph_args --base 1024 --lower-limit 0
+            graph_vlabel Bytes
+            graph_info ZFS storage pool - Allocated bytes
+        "
+        c=0
+        for p in $pool_list
+        do
+            data_attr="${data_attr}
+                ${p}_size      GAUGE LINE  ${p} size
+                ${p}_allocated GAUGE LINE2 ${p} allocated"
+            global_attr="${global_attr}
+                ${p}_size.colour      COLOUR${c}
+                ${p}_allocated.colour COLOUR${c}"
+            c=$(( c + 1 ))
+        done
+        ;;
+    dedup)
+        global_attr="
+            graph_title ZFS storage pool - Dedup and compress ratio
+            graph_category fs
+            graph_args --base 1000 --lower-limit 1
+            graph_vlabel Ratio
+            graph_info ZFS storage pool - Dedup and compress ratio
+        "
+        for p in $pool_list
+        do
+            data_attr="${data_attr}
+                ${p}_dedup    GAUGE LINE ${p} dedup
+                ${p}_compress GAUGE LINE ${p} compress"
+        done
+        ;;
+    esac
+}
+
+do_config() {
+    local func="$1"
+    local label_max_length=45 
+    local field type draw label
+
+    preconfig "$func"
+    echo "multigraph ${plugin_name}_${func}"
+
+    # print global attributes
+    echo "$global_attr" | sed -e 's/^  *//' -e '/^$/d'
+
+    # print data source attributes
+    echo "$data_attr" | while read -r field type draw label
+    do
+        [ -z "$field" ] && continue
+
+        field=$( clean_fieldname "$field" )
+        echo "${field}.type ${type}"
+        echo "${field}.draw ${draw}"
+        echo "${field}.label ${label:0:${label_max_length}}"
+        if [ "$type" = 'DERIVE' ]; then
+            echo "${field}.min 0"
+        fi
+        if [ "$label" = 'dummy' ]; then
+            echo "${field}.graph no"
+        fi
+    done
+
+    echo
+}
+
+get_stats() {
+    local func="$1"
+
+    case $func in
+    capacity)
+        "$zpool_cmd" list -H -o name,capacity | sed 's/%$//'
+        ;;
+    allocated)
+        ( "$zpool_cmd" list -H -o name,allocated \
+          | awk '{ print $1"_allocated", $2 }'
+          "$zpool_cmd" list -H -o name,size \
+          | awk '{ print $1"_size", $2 }'
+        ) \
+        | perl -ane '
+            @unit{ qw/ K M G T P E / } = ( 1 .. 6 );
+            $name = $F[0];
+            $byteu = $F[1];
+            ( $n, $u ) = $byteu =~ /^([\d.]+)([KMGTPE]?)$/;
+            $byte  = int( $n * 1024 ** ( $u ? $unit{ $u } : 0 ) );
+            print "$name $byte\n";
+        '
+        # Note: ZFS supports up to 16EB.
+        ;;
+    dedup)
+        "$zpool_cmd" list -H -o name,dedup \
+        | sed 's/x$//' \
+        | awk '{ print $1"_dedup", $2 }'
+        # example output:
+        #   $ zpool list -H -o name,dedup
+        #   rpool   1.00x
+        #   ...
+
+        "$zpool_cmd" list -H -o name \
+        | xargs "$zfs_cmd" get -H -o name,value compressratio \
+        | sed 's/x$//' \
+        | awk '{ print $1"_compress", $2 }'
+        # example output:
+        #   $ zfs get -H -o name,value compressratio rpool
+        #   rpool   1.00x
+        ;;
+    esac
+}
+
+do_fetch() {
+    local func="$1"
+    local zpool_stats field value
+
+    # zpool_stats contains 'key value\n'
+    zpool_stats=$( get_stats "$func" )
+
+    echo "multigraph ${plugin_name}_${func}"
+
+    echo "$zpool_stats" | while read -r field value
+    do
+        field=$( clean_fieldname "$field" )
+        echo "${field}.value ${value}"
+    done
+
+    echo
+}
+
+autoconf() {
+    if [ -x "$zpool_cmd" ]; then
+        echo yes
+    else
+        echo "no (failed to find executable 'zpool')"
+    fi
+}
+
+config() {
+    local func
+
+    pool_list=$( "$zpool_cmd" list -H -o name )
+
+    for func in $functions
+    do
+        do_config "$func"
+    done
+}
+
+fetch() {
+    local func
+
+    for func in $functions
+    do
+        do_fetch "$func"
+    done
+}
+
+# Main
+case ${1:-} in
+autoconf)
+    autoconf
+    ;;
+config)
+    config
+    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && fetch
+    ;;
+*)
+    fetch
+    ;;
+esac
+
+exit 0
