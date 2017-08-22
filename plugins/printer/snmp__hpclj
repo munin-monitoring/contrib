@@ -2,7 +2,7 @@
 
 =head1 NAME
 
-Monitor Consumables on HP Color LaserJet Printers.
+Monitor Consumables of HP Color LaserJet Printers.
 Should also work on non-Color LaserJet Printers though.
 
 =head1 AUTHOR
@@ -30,7 +30,7 @@ if (defined $ARGV[0] and $ARGV[0] eq "snmpconf") {
 ###
 use strict;
 use Munin::Plugin::SNMP;
-my $session	= Munin::Plugin::SNMP->session();
+my $session = Munin::Plugin::SNMP->session();
 
 
 #####
@@ -40,8 +40,8 @@ use constant oid_black_max		=> ".1.3.6.1.2.1.43.11.1.1.8.1.1";
 use constant oid_black_cur		=> ".1.3.6.1.2.1.43.11.1.1.9.1.1";
 use constant oid_cyan_max		=> ".1.3.6.1.2.1.43.11.1.1.8.1.2";
 use constant oid_cyan_cur		=> ".1.3.6.1.2.1.43.11.1.1.9.1.2";
-use constant oid_magenta_max	=> ".1.3.6.1.2.1.43.11.1.1.8.1.3";
-use constant oid_magenta_cur	=> ".1.3.6.1.2.1.43.11.1.1.9.1.3";
+use constant oid_magenta_max		=> ".1.3.6.1.2.1.43.11.1.1.8.1.3";
+use constant oid_magenta_cur		=> ".1.3.6.1.2.1.43.11.1.1.9.1.3";
 use constant oid_yellow_max		=> ".1.3.6.1.2.1.43.11.1.1.8.1.4";
 use constant oid_yellow_cur		=> ".1.3.6.1.2.1.43.11.1.1.9.1.4";
 use constant oid_tray1_max		=> ".1.3.6.1.2.1.43.8.2.1.9.1.1";
@@ -50,6 +50,7 @@ use constant oid_tray2_max		=> ".1.3.6.1.2.1.43.8.2.1.9.1.2";
 use constant oid_tray2_cur		=> ".1.3.6.1.2.1.43.8.2.1.10.1.2";
 use constant oid_tray3_max		=> ".1.3.6.1.2.1.43.8.2.1.9.1.3";
 use constant oid_tray3_cur		=> ".1.3.6.1.2.1.43.8.2.1.10.1.3";
+use constant oid_pagecount_total	=> ".1.3.6.1.2.1.43.10.2.1.4.1.1";
 
 
 #####
@@ -58,8 +59,9 @@ use constant oid_tray3_cur		=> ".1.3.6.1.2.1.43.8.2.1.10.1.3";
 if (defined $ARGV[0] and $ARGV[0] eq "config") {
 	my ($host) = Munin::Plugin::SNMP->config_session();
 	print "host_name $host\n" unless $host eq 'localhost';
-	print "graph_category printing";
-	print "graph_title HP Printer Consumption Levels
+	print "multigraph hpclj
+graph_category printing
+graph_title HP Printer Consumption Levels
 graph_info This graph shows Consumption-Levels on HP Printers.
 graph_vlabel %
 graph_args --upper-limit 100 -l 0
@@ -134,6 +136,18 @@ tray3.min 0
 tray3.max 100
 ";
 	}
+	
+	print "multigraph hpclj_pagecount
+graph_category printing
+graph_title HP Printer Page Counters
+graph_info This graph shows Page-Counters for HP Printers.
+graph_vlabel Pages
+graph_args --base 1000 -l 0
+";
+	print "pagecount.label Printouts
+pagecount.draw AREA
+pagecount.colour 000000
+";
 	exit 0;
 }
 
@@ -141,19 +155,23 @@ tray3.max 100
 #####
 # Get Values
 ###
-printValue("black",		oid_black_cur,		oid_black_max);
-printValue("cyan",		oid_cyan_cur,		oid_cyan_max);
-printValue("magenta",	oid_magenta_cur,	oid_magenta_max);
-printValue("yellow",	oid_yellow_cur,		oid_yellow_max);
-printValue("tray1",		oid_tray1_cur,		oid_tray1_max);
-printValue("tray2",		oid_tray2_cur,		oid_tray2_max);
-printValue("tray3",		oid_tray3_cur,		oid_tray3_max);
+print "multigraph hpclj\n";
+printPercentageValue("black",	oid_black_cur,		oid_black_max);
+printPercentageValue("cyan",	oid_cyan_cur,		oid_cyan_max);
+printPercentageValue("magenta",	oid_magenta_cur,	oid_magenta_max);
+printPercentageValue("yellow",	oid_yellow_cur,		oid_yellow_max);
+printPercentageValue("tray1",	oid_tray1_cur,		oid_tray1_max);
+printPercentageValue("tray2",	oid_tray2_cur,		oid_tray2_max);
+printPercentageValue("tray3",	oid_tray3_cur,		oid_tray3_max);
+
+print "multigraph hpclj_pagecount\n";
+printValue("pagecount",		oid_pagecount_total);
 
 
 #####
 # Subroutines
 ###
-sub printValue {
+sub printPercentageValue {
 	if(not defined $_[0] || not defined $_[1] || not defined $_[2]) {
 		exit 0;
 	}
@@ -162,13 +180,29 @@ sub printValue {
 	my $oid_max = $_[2];
 	
 	if(not oidExists($oid_cur) || not oidExists($oid_max)){
-		exit 0;
+		return(0);
 	}
 	
 	my $val_max	= $session->get_single($oid_max) || 'U';
-	my $val_cur	= $session->get_single($oid_cur) || 'U';
-	if ($val_max ne 'U' && $val_cur ne 'U') {
+	my $val_cur	= $session->get_single($oid_cur);
+	if ($val_max ne 'U') {
 		print $field, ".value ", ($val_cur * 100 / $val_max), "\n";
+	}
+}
+sub printValue {
+	if(not defined $_[0] || not defined $_[1]) {
+		exit 0;
+	}
+	my $field = $_[0];
+	my $oid = $_[1];
+	
+	if(not oidExists($oid)){
+		return(0);
+	}
+	
+	my $val_cur	= $session->get_single($oid) || 'U';
+	if ($val_cur ne 'U') {
+		print $field, ".value ", $val_cur, "\n";
 	}
 }
 sub oidExists {
@@ -176,9 +210,9 @@ sub oidExists {
 		exit 0;
 	}
 	my $oid = $_[0];
-	my $val = $session->get_single($oid) || 'U';
+	my $val = $session->get_single($oid);
 	
-	if($val eq 'noSuchInstance' || $val eq 'U'){
+	if(!length $val || $val eq 'noSuchInstance' || $val eq 'U'){
 		return(0);
 	}else{
 		return(1);
