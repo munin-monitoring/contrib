@@ -1,0 +1,224 @@
+#!/usr/bin/perl -w
+
+=head1 NAME
+
+Monitor Consumables of HP Color LaserJet Printers.
+Should also work on non-Color LaserJet Printers though.
+
+=head1 AUTHOR
+
+Kai Boenke
+
+=head1 LICENSE
+
+Attribution-NonCommercial-ShareAlike 3.0 Unported (CC BY-NC-SA 3.0)
+
+=back
+
+
+#####
+# Enable SNMP-Discovery
+###
+=head1 MAGIC MARKERS
+  #%# family=snmpauto
+  #%# capabilities=snmpconf
+=cut
+if (defined $ARGV[0] and $ARGV[0] eq "snmpconf") {
+	print "require 1.3.6.1.2.1.43.11.1.1.9.1.1\n";
+	exit 0;
+}
+
+
+#####
+# Initialize
+###
+use strict;
+use Munin::Plugin::SNMP;
+my $session = Munin::Plugin::SNMP->session();
+
+
+#####
+# Declare OIDs
+###
+use constant oid_black_max		=> ".1.3.6.1.2.1.43.11.1.1.8.1.1";
+use constant oid_black_cur		=> ".1.3.6.1.2.1.43.11.1.1.9.1.1";
+use constant oid_cyan_max		=> ".1.3.6.1.2.1.43.11.1.1.8.1.2";
+use constant oid_cyan_cur		=> ".1.3.6.1.2.1.43.11.1.1.9.1.2";
+use constant oid_magenta_max		=> ".1.3.6.1.2.1.43.11.1.1.8.1.3";
+use constant oid_magenta_cur		=> ".1.3.6.1.2.1.43.11.1.1.9.1.3";
+use constant oid_yellow_max		=> ".1.3.6.1.2.1.43.11.1.1.8.1.4";
+use constant oid_yellow_cur		=> ".1.3.6.1.2.1.43.11.1.1.9.1.4";
+use constant oid_tray1_max		=> ".1.3.6.1.2.1.43.8.2.1.9.1.1";
+use constant oid_tray1_cur		=> ".1.3.6.1.2.1.43.8.2.1.10.1.1";
+use constant oid_tray2_max		=> ".1.3.6.1.2.1.43.8.2.1.9.1.2";
+use constant oid_tray2_cur		=> ".1.3.6.1.2.1.43.8.2.1.10.1.2";
+use constant oid_tray3_max		=> ".1.3.6.1.2.1.43.8.2.1.9.1.3";
+use constant oid_tray3_cur		=> ".1.3.6.1.2.1.43.8.2.1.10.1.3";
+use constant oid_pagecount_total	=> ".1.3.6.1.2.1.43.10.2.1.4.1.1";
+
+
+#####
+# Config
+###
+if (defined $ARGV[0] and $ARGV[0] eq "config") {
+	my ($host) = Munin::Plugin::SNMP->config_session();
+	print "host_name $host\n" unless $host eq 'localhost';
+	print "multigraph hpclj
+graph_category printing
+graph_title HP Printer Consumption Levels
+graph_info This graph shows Consumption-Levels on HP Printers.
+graph_vlabel %
+graph_args --upper-limit 100 -l 0
+graph_scale no
+";
+	print "black.label Black Toner Level
+black.draw LINE2
+black.type GAUGE
+black.colour 000000
+black.warning 10:
+black.critical 3:
+black.min 0
+black.max 100
+";
+	if(oidExists(oid_cyan_max)){
+		print "cyan.label Cyan Toner Level
+cyan.draw LINE2
+cyan.type GAUGE
+cyan.colour 00FFFF
+cyan.warning 5:
+cyan.critical 1:
+cyan.min 0
+cyan.max 100
+";
+	}
+	if(oidExists(oid_magenta_max)){
+		print "magenta.label Magenta Toner Level
+magenta.draw LINE2
+magenta.type GAUGE
+magenta.colour FF00FF
+magenta.warning 5:
+magenta.critical 1:
+magenta.min 0
+magenta.max 100
+";
+	}
+	if(oidExists(oid_yellow_max)){
+		print "yellow.label Yellow Toner Level
+yellow.draw LINE2
+yellow.type GAUGE
+yellow.colour FFFF00
+yellow.warning 5:
+yellow.critical 1:
+yellow.min 0
+yellow.max 100
+";
+	}
+	if(oidExists(oid_tray1_max)){
+		print "tray1.label Tray1 Fill Level
+tray1.draw LINE1
+tray1.type GAUGE
+tray1.colour 333333
+tray1.min 0
+tray1.max 100
+";
+	}
+	if(oidExists(oid_tray2_max)){
+		print "tray2.label Tray2 Fill Level
+tray2.draw LINE1
+tray2.type GAUGE
+tray2.colour 666666
+tray2.min 0
+tray2.max 100
+";
+	}
+	if(oidExists(oid_tray3_max)){
+		print "tray3.label Tray3 Fill Level
+tray3.draw LINE1
+tray3.type GAUGE
+tray3.colour 999999
+tray3.min 0
+tray3.max 100
+";
+	}
+	
+	print "multigraph hpclj_pagecount
+graph_category printing
+graph_title HP Printer Page Counters
+graph_info This graph shows Page-Counters for HP Printers.
+graph_vlabel Pages
+graph_args --base 1000 -l 0
+";
+	print "pagecount.label Printouts
+pagecount.draw AREA
+pagecount.colour 000000
+";
+	exit 0;
+}
+
+
+#####
+# Get Values
+###
+print "multigraph hpclj\n";
+printPercentageValue("black",	oid_black_cur,		oid_black_max);
+printPercentageValue("cyan",	oid_cyan_cur,		oid_cyan_max);
+printPercentageValue("magenta",	oid_magenta_cur,	oid_magenta_max);
+printPercentageValue("yellow",	oid_yellow_cur,		oid_yellow_max);
+printPercentageValue("tray1",	oid_tray1_cur,		oid_tray1_max);
+printPercentageValue("tray2",	oid_tray2_cur,		oid_tray2_max);
+printPercentageValue("tray3",	oid_tray3_cur,		oid_tray3_max);
+
+print "multigraph hpclj_pagecount\n";
+printValue("pagecount",		oid_pagecount_total);
+
+
+#####
+# Subroutines
+###
+sub printPercentageValue {
+	if(not defined $_[0] || not defined $_[1] || not defined $_[2]) {
+		exit 0;
+	}
+	my $field = $_[0];
+	my $oid_cur = $_[1];
+	my $oid_max = $_[2];
+	
+	if(not oidExists($oid_cur) || not oidExists($oid_max)){
+		return(0);
+	}
+	
+	my $val_max	= $session->get_single($oid_max) || 'U';
+	my $val_cur	= $session->get_single($oid_cur);
+	if ($val_max ne 'U') {
+		print $field, ".value ", ($val_cur * 100 / $val_max), "\n";
+	}
+}
+sub printValue {
+	if(not defined $_[0] || not defined $_[1]) {
+		exit 0;
+	}
+	my $field = $_[0];
+	my $oid = $_[1];
+	
+	if(not oidExists($oid)){
+		return(0);
+	}
+	
+	my $val_cur	= $session->get_single($oid) || 'U';
+	if ($val_cur ne 'U') {
+		print $field, ".value ", $val_cur, "\n";
+	}
+}
+sub oidExists {
+	if(not defined $_[0]) {
+		exit 0;
+	}
+	my $oid = $_[0];
+	my $val = $session->get_single($oid);
+	
+	if(!length $val || $val eq 'noSuchInstance' || $val eq 'U'){
+		return(0);
+	}else{
+		return(1);
+	}
+}
