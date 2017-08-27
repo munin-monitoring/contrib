@@ -66,14 +66,34 @@ case $1 in
         echo 'graph_args -l 0 --base 1024'
         echo 'graph_vlabel byte'
         echo 'graph_category virtualization'
-        echo 'mem_usage.label Mem usage'
-        echo 'mem_usage.type GAUGE'
-        echo 'mem_cache.label Cache'
+        echo 'graph_order mem_rss mem_kmem mem_cache mem_swap mem_usage mem_active mem_inactive'
+        # Try to match colours with the official memory plugin
+        echo 'mem_rss.label apps'
+        echo 'mem_rss.type GAUGE'
+        echo 'mem_rss.draw AREASTACK'
+        echo 'mem_kmem.label kernel'
+        echo 'mem_kmem.colour FFCC00' # Dark yellow
+        echo 'mem_kmem.type GAUGE'
+        echo 'mem_kmem.draw AREASTACK'
+        echo 'mem_cache.label cache'
+        echo 'mem_cache.colour 330099' # Dark blue
         echo 'mem_cache.type GAUGE'
-        echo 'mem_active.label Active'
+        echo 'mem_cache.draw AREASTACK'
+        echo 'mem_swap.label swap'
+        echo 'mem_swap.colour FF0000' # Red
+        echo 'mem_swap.type GAUGE'
+        echo 'mem_swap.draw AREASTACK'
+        echo 'mem_usage.label total mem'
+        echo 'mem_usage.colour 000000' # Black
+        echo 'mem_usage.type GAUGE'
+        echo 'mem_active.label active'
+        echo 'mem_active.colour B35A00' # Orange
         echo 'mem_active.type GAUGE'
-        echo 'mem_inactive.label Inactive'
+        echo 'mem_active.draw LINE2'
+        echo 'mem_inactive.label inactive'
+        echo 'mem_inactive.colour B38F00' # Dark yellow
         echo 'mem_inactive.type GAUGE'
+        echo 'mem_inactive.draw LINE2'
         exit 0
         ;;
 esac
@@ -82,7 +102,11 @@ tmp_v=$($f_comm -n $CONTAINER memory.usage_in_bytes 2> /dev/null)
 # Report an unknown value if the container is not currently running
 [[ -z "$tmp_v" ]] && tmp_v='U'
 echo 'mem_usage.value '$tmp_v
-   
+
+tmp_v=$($f_comm -n $CONTAINER memory.kmem.usage_in_bytes 2> /dev/null)
+[[ -z "$tmp_v" ]] && tmp_v='U'
+echo 'mem_kmem.value '$tmp_v
+
 tmp_v=$($f_comm -n $CONTAINER memory.stat 2> /dev/null | grep total_cache | cut -d ' ' -f 2)
 [[ -z "$tmp_v" ]] && tmp_v='U'
 echo  'mem_cache.value '$tmp_v
@@ -94,3 +118,11 @@ echo  'mem_active.value '$tmp_v
 tmp_v=$($f_comm -n $CONTAINER memory.stat 2> /dev/null | grep total_inactive_anon | cut -d ' ' -f 2)
 [[ -z "$tmp_v" ]] && tmp_v='U'
 echo  'mem_inactive.value '$tmp_v
+
+tmp_v=$($f_comm -n $CONTAINER memory.stat 2> /dev/null | grep total_swap | cut -d ' ' -f 2)
+[[ -z "$tmp_v" ]] && tmp_v='U'
+echo  'mem_swap.value '$tmp_v
+
+tmp_v=$($f_comm -n $CONTAINER memory.stat 2> /dev/null | grep '^rss ' | cut -d ' ' -f 2)
+[[ -z "$tmp_v" ]] && tmp_v='U'
+echo  'mem_rss.value '$tmp_v
