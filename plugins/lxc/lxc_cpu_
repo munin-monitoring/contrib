@@ -9,9 +9,6 @@ lxc_cpu - Plugin to monitor LXC CPU usage
 
 =head1 CONFIGURATION
 
-  [lxc_*]
-    user root
-
 This is a wildcard plugin. To monitor CPU usage for a LXC container, link
 lxc_cpu_<container> to this file. For example,
 
@@ -21,9 +18,19 @@ lxc_cpu_<container> to this file. For example,
 will monitor the container "mycontainer".
 
 
-=head1 INTERPRETATION
+This plugin needs root privilege, you need to use the following
+configuration:
 
-This plugin needs root privilege.
+  [lxc_*]
+    user root
+
+Default configuration:
+
+  [lxc_cpu_*]
+    env.HZ  100
+
+See the documentation of the official "cpu" plugin for an explanation of
+this setting.
 
 =head1 AUTHOR
 
@@ -45,6 +52,7 @@ Unknown license
 . $MUNIN_LIBDIR/plugins/plugin.sh
 
 CONTAINER="${0##*lxc_cpu_}"
+HZ=${HZ:-100}
 
 f_comm='lxc-cgroup  '
 
@@ -71,7 +79,7 @@ case $1 in
         # TODO: it could be interesting to figure out how many CPU cores a
         # container is allowed to use, and set this value as upper limit.
         echo 'graph_args -l 0 -u 100 --base 1000'
-        echo 'graph_vlabel USER_HZ'
+        echo 'graph_vlabel %'
         echo 'graph_category virtualization'
         echo 'graph_order cpu_system cpu_user'
         echo 'cpu_user.label user'
@@ -86,11 +94,7 @@ case $1 in
         ;;
 esac
 
-tmp_v=$($f_comm -n $CONTAINER cpuacct.stat 2> /dev/null | grep user | cut -d ' ' -f 2)
-# Report an unknown value if the container is not currently running
-[[ -z "$tmp_v" ]] && tmp_v='U'
-echo 'cpu_user.value '$tmp_v
-
-tmp_v=$($f_comm -n $CONTAINER cpuacct.stat 2> /dev/null | grep system | cut -d ' ' -f 2)
-[[ -z "$tmp_v" ]] && tmp_v='U'
-echo 'cpu_system.value '$tmp_v
+# Use a single awk call to display both user and system values, and print
+# "U" in case the container is not running.  Inspired from the official
+# "cpu" plugin and https://stackoverflow.com/questions/11222190/print-specified-text-if-string-is-empty-using-awk#11222496
+$f_comm -n $CONTAINER cpuacct.stat 2> /dev/null | awk -v hz=$HZ '/^user / { printf "cpu_user.value %.0f\n", $2*100/hz; } /^system / { printf "cpu_system.value %.0f\n", $2*100/hz; } END { if (!NR) printf "cpu_user.value U\ncpu_system.value U\n"; }'
