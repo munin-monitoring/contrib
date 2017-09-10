@@ -140,16 +140,21 @@ def query_olsrd_txtservice(section=""):
         request = bytes("/%s" % section)
     conn.sendall(request)
     fconn = conn.makefile()
-    # "enumerate" is not suitable since it reads all lines at once (not a generator in micropython)
-    index = 0
+    in_header = True
+    in_body_count = 0
     for line in fconn.readlines():
-        # skip the first five lines - they are headers
-        if index < 5:
-            index += 1
-            continue
-        line = line.strip()
-        if line:
-            yield line
+        if in_header:
+            if not line.strip():
+                # the empty line marks the end of the header
+                in_header = False
+            # ignore header lines (nothing to be done)
+        else:
+            # skip the first two body lines - they are table headers
+            if in_body_count >= 2:
+                line = line.strip()
+                if line:
+                    yield line
+            in_body_count += 1
     fconn.close()
     conn.close()
 
@@ -159,15 +164,17 @@ def get_address_device_mapping():
     for line in query_olsrd_txtservice("mid"):
         # example line content:
         #    192.168.2.171   192.168.22.171;192.168.12.171
-        device_id, mids = line.split()
-        for mid in mids.split(";"):
+        # since olsr v0.9.5:
+        #    192.168.2.171   192.168.22.171    192.168.12.171
+        device_id, mids = line.split(None, 1)
+        for mid in mids.replace(";", " ").split():
             mapping[mid] = device_id
     return mapping
 
 
 def count_routes_by_neighbour(address_mapping, ignore_list):
     node_count = {}
-    for line in query_olsrd_txtservice("routes"):
+    for line in query_olsrd_txtservice("rou"):
         # example line content:
         #    192.168.1.79/32 192.168.12.38   4       4.008   wlan0
         tokens = line.split()
@@ -192,8 +199,12 @@ def get_olsr_links():
     hna_list = [line.split()[0] for line in query_olsrd_txtservice("hna")]
     route_count = count_routes_by_neighbour(mid_mapping, hna_list)
     result = []
-    for line in query_olsrd_txtservice("links"):
+    for line in query_olsrd_txtservice("lin"):
         tokens = line.split()
+        # the "cost" may be infinite
+        if tokens[-1] == "INFINITE":
+            # "inf" is the python keyword for "maximum float number"
+            tokens[-1] = "inf"
         link = {}
         link["local"] = tokens.pop(0)
         remote = tokens.pop(0)
@@ -217,7 +228,7 @@ def _read_file(filename):
 
 def get_ping_times(hosts):
     tempfile = "/tmp/munin-olsrd-{pid}.tmp".format(pid=os.getpid())
-    command = 'for host in {hosts}; do echo -n "$host "; ping -c 1 -w 1 "$host" | grep /avg/ || true; done >{tempfile}'\
+    command = 'for host in {hosts}; do echo -n "$host "; ping -c 1 -w 1 "$host" | grep /avg/ || echo; done >{tempfile}'\
               .format(hosts=" ".join(hosts), tempfile=tempfile)
     # micropython supports only "os.system" (as of 2015) - thus we need to stick with it for openwrt
     returncode = os.system(command)
@@ -331,17 +342,16 @@ if __name__ == "__main__":
     ping_times = get_ping_times([link["remote"] for link in links])
     for link in links:
         ping_time = ping_times.get(link["remote"], None)
-        if ping_time is not None:
-            print("neighbour_{remote}.value {value:.4f}"
-                  .format(value=ping_time,
-                          remote=get_clean_fieldname(link["remote"])))
+        value = "{:.4f}".format(ping_time) if ping_time is not None else "U"
+        print("neighbour_{remote}.value {value}"
+              .format(value=value, remote=get_clean_fieldname(link["remote"])))
     # single detailed graphs for the ping time of each link
     for link in links:
         ping_time = ping_times.get(link["remote"], None)
-        if ping_time is not None:
-            remote = get_clean_fieldname(link["remote"])
-            print("multigraph olsr_neighbour_ping.host_{remote}".format(remote=remote))
-            print("neighbour_{remote}.value {value:.4f}".format(remote=remote, value=ping_time))
+        value = "{:.4f}".format(ping_time) if ping_time is not None else "U"
+        remote = get_clean_fieldname(link["remote"])
+        print("multigraph olsr_neighbour_ping.host_{remote}".format(remote=remote))
+        print("neighbour_{remote}.value {value}".format(remote=remote, value=value))
 
 # final marker for shell / python hybrid script (see "Interpreter Selection")
 EOF = True
