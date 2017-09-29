@@ -38,18 +38,18 @@ fi
 
 hits=$($command packetcache-hit)
 queries=$($command udp-queries)
-if [ -f $state_file ]; then
-        old_hits=$(cat $state_file | head -n1)
-        old_queries=$(cat $state_file | tail -n1)
+if [ -f "$state_file" ]; then
+        old_hits=$(head -n1 "$state_file")
+        old_queries=$(tail -n1 "$state_file")
 fi
 
-if [ -f $state_file ] && [ $(ls -l --time-style=+%s $state_file | awk '{print $6}') -gt $(date --date="7 minutes ago" +%s) ] ; then
-        d_hits=$(($hits - $old_hits))
-        d_queries=$(($queries - $old_queries))
+if [ -f "$state_file" ] && [ "$(stat --format=%Y "$state_file")" -gt "$(date --date="7 minutes ago" +%s)" ] ; then
+        d_hits=$((hits - old_hits))
+        d_queries=$((queries - old_queries))
         if [ $d_queries -gt 0 ] ; then
-           echo packetcache_hitrate.value $(( $d_hits * 100 / $d_queries ))
+           echo packetcache_hitrate.value $(( d_hits * 100 / d_queries ))
         fi
 fi
 
-echo $hits > $state_file
-echo $queries >> $state_file
+echo "$hits" > "$state_file"
+echo "$queries" >> "$state_file"
