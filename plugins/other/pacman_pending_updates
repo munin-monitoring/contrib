@@ -31,7 +31,7 @@ This plugin will draw one line: the number of updates pending.
 
 =head1 VERSION
 
-  1.0.0
+  1.1.0
 
 =head1 AUTHOR
 
@@ -63,7 +63,13 @@ EOM
 		;;
 
 	*)
-		echo updates.value $(checkupdates | wc -l)
+		tmpfile=$(mktemp)
+		updates=$(checkupdates | tee "$tmpfile" | wc -l)
+		echo updates.value $updates
+		if [ $updates -gt 0 ]; then
+			echo updates.extinfo $(paste -s -d, "$tmpfile")
+		fi
+		rm "$tmpfile"
 		;;
 esac
 
