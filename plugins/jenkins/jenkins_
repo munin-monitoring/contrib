@@ -28,6 +28,7 @@ env.port 		Jenkins Port
 env.context		Jenkins Context path
 env.user 		User for the API Tokent
 env.apiToken 	Jenkins API Token (see https://wiki.jenkins-ci.org/display/JENKINS/Authenticating+scripted+clients)
+env.jobDepth    How far into job "folders" should the plugin check for jobs
 
 Example:
 
@@ -62,6 +63,7 @@ my $port = ($ENV{'port'} || '4040');
 my $user = ($ENV{'user'} || '');
 my $apiToken = ($ENV{'apiToken'} || '');
 my $context = ($ENV{'context'} || '');
+my $jobDepth = ($ENV{'jobDepth'} || 1);
 my $wgetBin = "/usr/bin/wget";
 
 my $type = basename($0);
@@ -130,8 +132,15 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 } else {
 	my $cmd = "$wgetBin $auth -qO- $url:$port$context";
 
+	my $tree = 'jobs[name,color]';
+	for (2..$jobDepth) {
+		$tree = "jobs[name,color,$tree]";
+	}
+	
 	if( $type eq "results" ) {
-		my $counts = get_results('');
+		my $result = `$cmd'/api/json?depth=$jobDepth&tree=$tree'`;
+		my $parsed = decode_json($result);
+		my $counts = parse_results($parsed->{'jobs'});
 
 		foreach my $status (keys %{$counts}) {
 			print "build_$status.value $counts->{$status}\n";
@@ -140,9 +149,11 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 	}
 
 	if( $type eq "running" ) {
-		my $running_count = get_running('');
-		print "build_running.value ", $running_count, "\n";
-		exit;
+		my $result = `$cmd'/api/json?depth=$jobDepth&tree=$tree'`;
+		my $parsed = decode_json($result);
+		my $count = parse_running_builds($parsed->{'jobs'});
+		print "build_running.value ", $count, "\n";
+		exit;	
 	}
 
 	if( $type eq "queue" ) {
@@ -153,53 +164,36 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 	}
 }
 
-{
-    my %counts;
-
-    sub get_results{
-        my $query_context = shift;
-        die "get_results requires an argument" unless defined $query_context;
-        unless (%counts) {
-            # initialise
-            %counts = ('stable' => 0, 'unstable'=>0, 'failing'=>0, 'disabled'=>0);
-        }
-        my $cmd = "$wgetBin $auth -qO- $url:$port$context$query_context/api/json";
-        my $result = `$cmd`;
-        my $parsed = decode_json($result);
-        foreach my $cur(@{$parsed->{'jobs'}}) {
-                if (exists $cur->{'color'} && defined $states{$cur->{'color'}}) {
-                    $counts{$states{$cur->{'color'}}} += 1;
-                } elsif ($cur->{'_class'} eq 'com.cloudbees.hudson.plugins.folder.Folder'){
-                    my $uri = URI->new($cur->{'url'});
-                    my $folder = $uri->path;
-                    get_results($folder);
-                } else {
-                    warn "Ignoring unknown color " . $cur->{'color'} . "\n"
-                }
-        }
-        return \%counts;
-    }
+sub parse_running_builds {
+	my $builds = shift;
+	my $count = 0;
+	foreach my $cur (@{$builds}) {
+		if( defined($cur->{'jobs'}) ) {
+			$count += parse_running_builds($cur->{'jobs'});
+		} elsif( defined ($cur->{'color'}) and $cur->{'color'} =~ /anime$/ ) {
+			$count += 1;
+		}
+	}
+	return $count;
 }
 
-{
-    my $running_count;
-    sub get_running{
-        my $query_context = shift;
-        die "get_results requires an argument" unless defined $query_context;
-        $running_count //= 0;
-        my $cmd = "$wgetBin $auth -qO- $url:$port$context$query_context/api/json";
-        my $result = `$cmd`;
-        my $parsed = decode_json($result);
-        foreach my $cur(@{$parsed->{'jobs'}}) {
-                if( exists $cur->{'color'} && $cur->{'color'} =~ /anime$/ ) {
-                    $running_count += 1;
-                } elsif ($cur->{'_class'} eq 'com.cloudbees.hudson.plugins.folder.Folder'){
-                    my $uri = URI->new($cur->{'url'});
-                    my $folder = $uri->path;
-                    get_running($folder);
-                }
-        }
-        return $running_count;
-    }
-}
+sub parse_results {
+	my $builds = shift;
+	my %counts = ('stable' => 0, 'unstable' => 0, 'failing' => 0, 'disabled' => 0);
 
+	foreach my $cur(@{$builds}) {
+		if( defined($cur->{'jobs'}) ) {
+			my $new_counts = parse_results($cur->{'jobs'});
+			foreach my $new_count_key (keys %{$new_counts}) {
+				$counts{$new_count_key} += $new_counts->{$new_count_key};
+			}
+		} elsif (defined($cur->{'color'})) {
+			if (defined($states{$cur->{'color'}})) {
+				$counts{$states{$cur->{'color'}}} += 1;
+			} else {
+				warn "Ignoring unknown color " . $cur->{'color'} . "\n"
+			}
+		}
+	}
+	return \%counts;
+}
