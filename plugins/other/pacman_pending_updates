@@ -14,12 +14,6 @@ All systems with pacman as their package manager.
 
 The plugin needs no additional configuration and works out of the box.
 
-It is possible to add warnings for certain numbers of updates pending. The
-following will send a warning when there are more than 10 updates pending.
-
-  [pacman_pending_updates]
-  env.PENDING_UPDATES_WARNING :10
-
 =head1 INTERPRETATION
 
 This plugin will draw one line: the number of updates pending.
@@ -31,7 +25,7 @@ This plugin will draw one line: the number of updates pending.
 
 =head1 VERSION
 
-  1.0.0
+  1.1.0
 
 =head1 AUTHOR
 
@@ -53,9 +47,6 @@ graph_category security
 updates.label updates
 updates.info Current number of pending updates
 EOM
-		if [[ -n $PENDING_UPDATES_WARNING ]]; then
-			echo updates.warning $PENDING_UPDATES_WARNING
-		fi
 		;;
 
 	autoconf)
@@ -63,7 +54,13 @@ EOM
 		;;
 
 	*)
-		echo updates.value $(checkupdates | wc -l)
+		updates="$(checkupdates)"
+		if [ -n "$updates" ]; then
+			echo "updates.value $(echo "$updates" | wc -l)"
+			echo "updates.extinfo $(echo "$updates" | paste -s -d,)"
+		else
+			echo updates.value 0
+		fi
 		;;
 esac
 
