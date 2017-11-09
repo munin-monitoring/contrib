@@ -54,6 +54,7 @@ use warnings;
 use strict;
 use JSON;
 use File::Basename;
+use URI;
 
 # VARS
 my $url = ($ENV{'url'} || 'localhost');
@@ -79,7 +80,7 @@ my %states = (
 	'aborted'=>'failing',
 	'aborted_anime'=>'failing'
 );
-my %counts = ('stable' => 0, 'unstable'=>0, 'failing'=>0, 'disabled'=>0);
+my $auth = ( $user ne "" and $apiToken ne ""  ? " --auth-no-challenge --user=$user --password=$apiToken" : "" );
 
 if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 	if( $type eq "results" ) {
@@ -103,7 +104,7 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
     	print "build_stable.draw STACK\n";
     	print "build_stable.label stable\n";
     	print "build_stable.type GAUGE\n";
-    	print "build_stable.colour 294D99\n"; 
+    	print "build_stable.colour 294D99\n";
         exit;
 	}
 	if( $type eq "queue" ) {
@@ -125,46 +126,80 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
     	print "build_running.label running Builds\n";
     	print "build_running.type GAUGE\n";
 		exit;
-	}	
+	}
 } else {
-	# CODE
-	my $auth = ( $user ne "" and $apiToken ne ""  ? " --auth-no-challenge --user=$user --password=$apiToken" : "" );
-	my $cmd = "$wgetBin $auth -qO- $url:$port$context";  
-	
+	my $cmd = "$wgetBin $auth -qO- $url:$port$context";
+
 	if( $type eq "results" ) {
-		my $result = `$cmd/api/json`;
-		my $parsed = decode_json($result);
-		foreach my $cur(@{$parsed->{'jobs'}}) {
-			if (defined $states{$cur->{'color'}}) {
-				$counts{$states{$cur->{'color'}}} += 1;
-			} else {
-				warn "Ignoring unknown color " . $cur->{'color'} . "\n"
-			}
-		}
-		
-		foreach my $status (keys %counts) {
-			print "build_$status.value $counts{$status}\n";
+		my $counts = get_results('');
+
+		foreach my $status (keys %{$counts}) {
+			print "build_$status.value $counts->{$status}\n";
 		}
 		exit;
 	}
-	
+
 	if( $type eq "running" ) {
-		my $count = 0;
-		my $result = `$cmd/api/json`;
-		my $parsed = decode_json($result);
-		foreach my $cur(@{$parsed->{'jobs'}}) {
-			if( $cur->{'color'} =~ /anime$/ ) {
-				$count += 1;
-			}
-		}
-		print "build_running.value ", $count, "\n";
-		exit;	
+		my $running_count = get_running('');
+		print "build_running.value ", $running_count, "\n";
+		exit;
 	}
-	
+
 	if( $type eq "queue" ) {
 		my $result = `$cmd/queue/api/json`;
-		my $parsed = decode_json($result);	
+		my $parsed = decode_json($result);
 		print "build_count.value ", scalar( @{$parsed->{'items'}} ), "\n";
 		exit;
 	}
 }
+
+{
+    my %counts;
+
+    sub get_results{
+        my $query_context = shift;
+        die "get_results requires an argument" unless defined $query_context;
+        unless (%counts) {
+            # initialise
+            %counts = ('stable' => 0, 'unstable'=>0, 'failing'=>0, 'disabled'=>0);
+        }
+        my $cmd = "$wgetBin $auth -qO- $url:$port$context$query_context/api/json";
+        my $result = `$cmd`;
+        my $parsed = decode_json($result);
+        foreach my $cur(@{$parsed->{'jobs'}}) {
+                if (exists $cur->{'color'} && defined $states{$cur->{'color'}}) {
+                    $counts{$states{$cur->{'color'}}} += 1;
+                } elsif ($cur->{'_class'} eq 'com.cloudbees.hudson.plugins.folder.Folder'){
+                    my $uri = URI->new($cur->{'url'});
+                    my $folder = $uri->path;
+                    get_results($folder);
+                } else {
+                    warn "Ignoring unknown color " . $cur->{'color'} . "\n"
+                }
+        }
+        return \%counts;
+    }
+}
+
+{
+    my $running_count;
+    sub get_running{
+        my $query_context = shift;
+        die "get_results requires an argument" unless defined $query_context;
+        $running_count //= 0;
+        my $cmd = "$wgetBin $auth -qO- $url:$port$context$query_context/api/json";
+        my $result = `$cmd`;
+        my $parsed = decode_json($result);
+        foreach my $cur(@{$parsed->{'jobs'}}) {
+                if( exists $cur->{'color'} && $cur->{'color'} =~ /anime$/ ) {
+                    $running_count += 1;
+                } elsif ($cur->{'_class'} eq 'com.cloudbees.hudson.plugins.folder.Folder'){
+                    my $uri = URI->new($cur->{'url'});
+                    my $folder = $uri->path;
+                    get_running($folder);
+                }
+        }
+        return $running_count;
+    }
+}
+
