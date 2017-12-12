@@ -1,0 +1,217 @@
+#!/bin/bash
+#
+# Plugin to graph docker container and storage.
+#
+# GNU GPL Are Tysland & Philip Gabrielsen
+
+TYPE=$( echo $0 | cut -f2 -d'_' )
+
+case $1 in
+autoconf)
+  if [[ -x /usr/bin/docker ]]; then
+    if $( /usr/bin/docker info 1>/dev/null 2>/dev/null ); then
+      echo "yes"
+    else
+      echo "no (no info from /usr/bin/docker info)"
+    fi
+  else
+    echo "no (/usr/bin/docker not found)"
+  fi
+  exit 0
+  ;;
+suggest)
+  if [[ -x /usr/bin/docker ]]; then
+    if $( /usr/bin/docker info 1>/dev/null 2>/dev/null ); then
+      echo "container"
+      echo "storage"
+      echo "storage-percent"
+    fi
+  fi
+  exit 0
+  ;;
+config)
+  case ${TYPE} in
+  container)
+    echo "graph_title Docker containers"
+    echo "graph_args --base 1000 -l 0"
+    echo "graph_vlabel number"
+    echo "graph_scale no"
+    echo "graph_category docker"
+    echo "graph_info Number of containers is different states, and number of images"
+    /usr/bin/docker info | while read line; do
+      KEY=$( echo "$line"|cut -f1 -d:|tr ' ' '_' )
+      case ${KEY} in
+      Containers)
+        echo "containers.label Containers"
+        echo "containers.info Total number of containers"
+        ;;
+      Running)
+        echo "running.label Running"
+        echo "running.info Number of running containers"
+        ;;
+      Paused)
+        echo "paused.label Paused"
+        echo "paused.info Number of paused containers"
+        ;;
+      Stopped)
+        echo "stopped.label Stopped"
+        echo "stopped.info Number of stopped containers"
+        ;;
+      Images)
+        echo "images.label Images"
+        echo "images.info Number of images"
+        ;;
+      esac
+    done
+    ;;
+  storage)
+    echo "graph_title Docker storage"
+    echo "graph_args --base 1024 -l 0"
+    echo "graph_vlabel size (bytes)"
+    echo "graph_scale yes"
+    echo "graph_category docker"
+    echo "graph_info Available and used storage"
+    /usr/bin/docker info | while read line; do
+      KEY=$( echo "$line"|cut -f1 -d:|tr ' ' '_' )
+      case ${KEY} in
+      Pool_Blocksize)
+        echo "poolblocksize.label Pool Blocksize"
+        echo "poolblocksize.info Pool Blocksize in bytes"
+        ;;
+      Base_Device_Size)
+        echo "basedevsize.label Base Device Size"
+        echo "basedevsize.info Base Device Size in bytes"
+        ;;
+      Data_Space_Used)
+        echo "dataspaceused.label Data Space Used"
+        echo "dataspaceused.info Data Space Used in bytes"
+        ;;
+      Data_Space_Total)
+        echo "dataspacetotal.label Data Space Total"
+        echo "dataspacetotal.info Data Space Total in bytes"
+        ;;
+      Data_Space_Available)
+        echo "dataspaceavail.label Data Space Available"
+        echo "dataspaceavail.info Data Space Available in bytes"
+        ;;
+      Metadata_Space_Used)
+        echo "metadataspaceused.label Metadata Space Used"
+        echo "metadataspaceused.info Metadata Space Used in bytes"
+        ;;
+      Metadata_Space_Total)
+        echo "metadataspacetotal.label Metadata Space Total"
+        echo "metadataspacetotal.info Metadata Space Total in bytes"
+        ;;
+      Metadata_Space_Available)
+        echo "metadataspaceavail.label Metadata Space Available"
+        echo "metadataspaceavail.info Metadata Space Available in bytes"
+        ;;
+      Thin_Pool_Minimum_Free_Space)
+        echo "thinpoolminfreespace.label Thin Pool Minimum Free Space"
+        echo "thinpoolminfreespace.info Thin Pool Minimum Free Space in bytes"
+        ;;
+      esac
+    done
+    ;;
+  storage-percent)
+    echo "graph_title Docker storage in percent"
+    echo "graph_args --upper-limit 100 -l 0"
+    echo "graph_vlabel %"
+    echo "graph_scale no"
+    echo "graph_category docker"
+    echo "graph_info Storage usage in percent"
+    /usr/bin/docker info | while read line; do
+      KEY=$( echo "$line"|cut -f1 -d:|tr ' ' '_' )
+      case ${KEY} in
+      Data_Space_Used)
+        echo "dataspaceused-percent.label Data Space Used"
+        echo "dataspaceused-percent.info Data Space Used in percent"
+        ;;
+      Metadata_Space_Used)
+        echo "metadataspaceused-percent.label Metadata Space Used"
+        echo "metadataspaceused-percent.info Metadata Space Used in percent"
+        ;;
+      esac
+    done
+    ;;
+  esac
+  exit 0
+  ;;
+esac
+
+DATASPACETOTAL=$( /usr/bin/docker info|grep "Data Space Total"|cut -f2 -d:|tr -d 'B'| tr -d ' ')
+METADATASPACETOTAL=$( /usr/bin/docker info|grep "Metadata Space Total"|cut -f2 -d:|tr -d 'B'|tr -d ' ' )
+
+/usr/bin/docker info | while read line; do
+  KEY=$( echo "$line"|cut -f1 -d:|tr ' ' '_' )
+  VAL=$( echo "$line"|cut -f2 -d:|cut -f2 -d' ' )
+  UNT=$( echo "$line"|cut -f2 -d:|cut -f3 -d' '|tr -d 'B'| awk '{print toupper($0)}' )
+  case ${TYPE} in
+  container)
+    case ${KEY} in
+    Containers)
+      echo "containers.value ${VAL}"
+      ;;
+    Running)
+      echo "running.value ${VAL}"
+      ;;
+    Paused)
+      echo "paused.value ${VAL}"
+      ;;
+    Stopped)
+      echo "stopped.value ${VAL}"
+      ;;
+    Images)
+      echo "images.value ${VAL}"
+      ;;
+    esac
+    ;;
+  storage)
+  case ${KEY} in
+    Pool_Blocksize)
+      echo "poolblocksize.value $(numfmt --from=si ${VAL}${UNT} )"
+      ;;
+    Base_Device_Size)
+      echo "basedevsize.value $(numfmt --from=iec ${VAL}${UNT} )"
+      ;;
+    Data_Space_Used)
+      echo "dataspaceused.value $(numfmt --from=iec ${VAL}${UNT} )"
+      ;;
+    Data_Space_Total)
+      echo "dataspacetotal.value $(numfmt --from=iec ${VAL}${UNT} )"
+      ;;
+    Data_Space_Available)
+      echo "dataspaceavail.value $(numfmt --from=iec ${VAL}${UNT} )"
+      ;;
+    Metadata_Space_Used)
+      echo "metadataspaceused.value $(numfmt --from=iec ${VAL}${UNT} )"
+      ;;
+    Metadata_Space_Total)
+      echo "metadataspacetotal.value $(numfmt --from=iec ${VAL}${UNT} )"
+      ;;
+    Metadata_Space_Available)
+      echo "metadataspaceavail.value $(numfmt --from=iec ${VAL}${UNT} )"
+      ;;
+    Thin_Pool_Minimum_Free_Space)
+      echo "thinpoolminfreespace.value $(numfmt --from=iec ${VAL}${UNT} )"
+      ;;
+    esac
+    ;;
+  storage-percent)
+  case ${KEY} in
+    Data_Space_Used)
+      USED=$(numfmt --from=iec ${VAL}${UNT} )
+      TOTAL=$(numfmt --from=si $DATASPACETOTAL )
+      VALUE=`bc <<< "scale=2;$USED*100/$TOTAL"`
+      echo "dataspaceused-percent.value $VALUE"
+      ;;
+    Metadata_Space_Used)
+      USED=$(numfmt --from=iec ${VAL}${UNT} )
+      TOTAL=$(numfmt --from=si $METADATASPACETOTAL )
+      VALUE=`bc <<< "scale=2;$USED*100/$TOTAL"`
+      echo "metadataspaceused-percent.value $VALUE"
+      ;;
+    esac
+    ;;
+  esac
+done
