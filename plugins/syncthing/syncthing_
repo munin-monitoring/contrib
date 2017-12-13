@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # -*- sh -*-
 : <<=cut
 =head1 NAME
@@ -8,6 +8,7 @@ syncthing_ - Plugin to monitor Syncthing server
 This plugin gathers metrics from a Syncthing server.
 
 This plugin requires the jq utility : https://stedolan.github.io/jq/
+This plugin requires the cURL utility : https://curl.haxx.se/
 
 Available plugins :
 syncthing_cpu       # 
@@ -46,7 +47,7 @@ EOM
             exit 0;;
         *)
             printf "syncthing_cpu.value "
-            curl -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/status | jq '.cpuPercent'
+            $CURL -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/status | $JQ '.cpuPercent'
     esac
 }
 
@@ -66,8 +67,8 @@ syncthing_mem_sys.cdef syncthing_mem_sys,8,*
 EOM
             exit 0;;
 	*)
-            ALL=$(curl -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/status | jq '.alloc')
-            SYS=$(curl -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/status | jq '.sys')
+            ALL=$($CURL -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/status | $JQ '.alloc')
+            SYS=$($CURL -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/status | $JQ '.sys')
             printf "syncthing_mem_all.value $ALL\nsyncthing_mem_sys.value $SYS\n"
     esac
 }
@@ -84,7 +85,7 @@ EOM
             exit 0;;
         *)
             printf "syncthing_uptime.value "
-            curl -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/status | jq '.uptime'
+            $CURL -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/status | $JQ '.uptime'
     esac
 }
 
@@ -100,7 +101,7 @@ EOM
             exit 0;;
         *)
             printf "syncthing_goroutine.value "
-            curl -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/status | jq '.goroutines'
+            $CURL -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/status | $JQ '.goroutines'
     esac
 }
 
@@ -124,13 +125,16 @@ syncthing_transfer_up.cdef syncthing_transfer_up,8,*
 EOM
             exit 0;;
 	*)
-            IBT=$(curl -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/connections | jq '.total | .inBytesTotal')
-            OBT=$(curl -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/connections | jq '.total | .outBytesTotal')
+            IBT=$($CURL -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/connections | $JQ '.total | .inBytesTotal')
+            OBT=$($CURL -s -X GET -H "X-API-Key: $ST_APIKEY" $ST_PROTO://$ST_HOST:$ST_PORT/rest/system/connections | $JQ '.total | .outBytesTotal')
             printf "syncthing_transfer_up.value $IBT\nsyncthing_transfer_down.value $OBT\n"
     esac
 }
 
 cd $(dirname $0)
+
+CURL=$(which curl)
+JQ=$(which jq)
 
 case $(basename $0) in 
     syncthing_cpu)
