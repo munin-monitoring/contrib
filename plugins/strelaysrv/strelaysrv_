@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 : <<=cut
 =head1 NAME
 strelaysrv_ - Plugin to monitor Syncthing relay server
@@ -7,6 +7,7 @@ strelaysrv_ - Plugin to monitor Syncthing relay server
 This plugin gathers metrics from a Syncthing relay server.
 
 This plugin requires the jq utility : https://stedolan.github.io/jq/
+This plugin requires the curl utility : https://curl.haxx.se/
 
 Available plugins :
 strelaysrv_goroutine #
@@ -43,10 +44,10 @@ strelaysrv_num_proxies.label proxies
 EOM
         exit 0;;
         *)
-            NS=$(curl -s http://$STR_HOST:$STR_PORT/status | jq '.numActiveSessions ')
-            NC=$(curl -s http://$STR_HOST:$STR_PORT/status | jq '.numConnections ')
-            NK=$(curl -s http://$STR_HOST:$STR_PORT/status | jq '.numPendingSessionKeys ')
-            NP=$(curl -s http://$STR_HOST:$STR_PORT/status | jq '.numProxies ')
+            NS=$($CURL -s http://$STR_HOST:$STR_PORT/status | $JQ '.numActiveSessions ')
+            NC=$($CURL -s http://$STR_HOST:$STR_PORT/status | $JQ '.numConnections ')
+            NK=$($CURL -s http://$STR_HOST:$STR_PORT/status | $JQ '.numPendingSessionKeys ')
+            NP=$($CURL -s http://$STR_HOST:$STR_PORT/status | $JQ '.numProxies ')
             printf "strelaysrv_num_sessions.value $NS\nstrelaysrv_num_connections.value $NC\nstrelaysrv_num_pending.value $NK\nstrelaysrv_num_proxies.value $NP\n"
     esac
 }
@@ -63,7 +64,7 @@ EOM
         exit 0;;
         *)
             printf "strelaysrv_uptime.value "
-            curl -s http://$STR_HOST:$STR_PORT/status | jq '.uptimeSeconds' 
+            $CURL -s http://$STR_HOST:$STR_PORT/status | $JQ '.uptimeSeconds' 
     esac
 }
 
@@ -79,7 +80,7 @@ EOM
         exit 0;;
         *)
 printf "strelaysrv_goroutine.value "
-curl -s http://$STR_HOST:$STR_PORT/status | jq '.goNumRoutine'
+$CURL -s http://$STR_HOST:$STR_PORT/status | $JQ '.goNumRoutine'
     esac
 }
 
@@ -97,11 +98,14 @@ EOM
             exit 0;;
 	*)
             printf "strelaysrv_transfer.value "
-            curl -s http://$STR_HOST:$STR_PORT/status | jq '.kbps10s1m5m15m30m60m[2] '
+            $CURL -s http://$STR_HOST:$STR_PORT/status | $JQ '.kbps10s1m5m15m30m60m[2] '
     esac
 }
 
 cd $(dirname $0)
+
+CURL=$(which curl)
+JQ=$(which jq) 
 
 case $(basename $0) in 
     strelaysrv_num)
