@@ -12,6 +12,7 @@ This plugin requires the curl utility : https://curl.haxx.se/
 Available plugins :
 strelaysrv_goroutine #
 strelaysrv_num       # 
+strelaysrv_proxied   #
 strelaysrv_transfer  #
 strelaysrv_uptime    #
 
@@ -84,6 +85,24 @@ $CURL -s http://$STR_HOST:$STR_PORT/status | $JQ '.goNumRoutine'
     esac
 }
 
+function proxied {
+    case $1 in
+       config)
+            cat <<'EOM'
+graph_title Syncthing relay total proxied bits
+graph_category network
+graph_vlabel bits
+graph_args --base 1000
+strelaysrv_proxied.label bits
+strelaysrv_proxied.cdef strelaysrv_proxied,8,*
+EOM
+            exit 0;;
+	*)
+            printf "strelaysrv_proxied.value "
+            $CURL -s http://$STR_HOST:$STR_PORT/status | $JQ '.bytesProxied '
+    esac
+}
+
 function transfer {
     case $1 in
        config)
@@ -93,7 +112,7 @@ graph_category network
 graph_vlabel bps
 graph_args --base 1000
 strelaysrv_transfer.label bps
-strelaysrv_transfer.cdef strelaysrv_transfer,8000,*
+strelaysrv_transfer.cdef strelaysrv_transfer,1000,*
 EOM
             exit 0;;
 	*)
@@ -116,6 +135,9 @@ case $(basename $0) in
 	exit 0;;
     strelaysrv_goroutine)
 	goroutine $1
+	exit 0;;
+    strelaysrv_proxied)
+	proxied $1
 	exit 0;;
     strelaysrv_transfer)
 	transfer $1
