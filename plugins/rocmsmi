@@ -1,0 +1,110 @@
+#!/usr/bin/perl
+# -*- perl -*-
+
+=head1 NAME
+
+rocmsmi_ - Wildcard plugin for monitoring AMD GPUs
+
+=head1 CONFIGURATION
+
+This is a wildcard plugin.  The plugin link name prefix (after the final "_")
+should be a GPU device numeric ID (0,1,2,3,...).
+
+[rocmsmi_*]
+user root
+env.rocmsmiexec /opt/rocm/bin/rocm-smi
+
+=head1 AUTHOR
+
+Šarūnas Burdulis, sarunas@mail.saabnet.com
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 BUGS
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+
+=cut
+
+use strict;
+use warnings;
+
+my $rocmsmi = defined $ENV{rocmsmiexec} ? $ENV{rocmsmiexec} : '/opt/rocm/bin/rocm-smi';
+my $output;
+my $gpu_id;
+my $temp;
+my $power;
+my $fan;
+my $gpuclock;
+my $memclock;
+my $gpuident;
+
+# GPU ID defined?
+if ($0 =~ /^.*\_(\d+)$/) {
+    $gpu_id = $1;
+}else{
+    die "No GPU ID provided in symlink.";
+}
+
+#/opt/rocm/bin/rocm-smi -itcfP|grep -v ===
+#GPU[0]          : GPU ID: 0x67df
+#GPU[0]          : Temperature: 69.0c
+#GPU[0]          : GPU Clock Level: 7 (1288Mhz)
+#GPU[0]          : GPU Memory Clock Level: 1 (2000Mhz)
+#GPU[0]          : Fan Level: 158 (61.96)%
+#GPU[0]          : Average GPU Power:    109.108 W
+
+$output = `$rocmsmi -itcfP -d$gpu_id|grep -v ===`;
+
+$output =~ /^.*GPU ID:\s*(.+?)\b.*$/s;
+$gpuident = $1;
+
+if ($ARGV[0] and $ARGV[0] eq "config") {
+        print "graph_title GPU$gpu_id ($gpuident) operating parameters\n";
+        print "graph_args --base 1000 --lower-limit 0\n";
+        print "graph_info AMD GPU parameters\n";
+        print "graph_category GPU\n";
+        print "graph_scale no\n";
+        print "power.label Power, W\n";
+        print "power.info GPU power in W\n";
+        print "temp.label Temperature, C\n";
+        print "temp.info GPU temperature in C\n";
+        print "fan.label Fan level, %\n";
+        print "fan.info GPU fan rotation speed in %\n";
+        print "gpuclock.label GPU clock, x100 MHz\n";
+        print "gpuclock.info GPU clock, x100 MHz\n";
+        print "gpuclock.cdef gpuclock,0.01,*\n";
+        print "memclock.label Memory clock, x100 MHz\n";
+        print "memclock.info Memory clock, x100 MHz\n";
+        print "memclock.cdef memclock,0.01,*\n";
+        exit 0;
+}
+
+$output =~ /^.*Average GPU Power:\s*(\d+\.\d+)\sW.*$/s;
+$power = $1;
+
+$output =~ /^.*Temperature:\s*(\d+\.\d+)c.*$/s;
+$temp = $1;
+
+$output =~ /^.*Fan Level:\s*\d+\s\((\d+\.\d+)\).*$/s;
+$fan = $1;
+
+$output =~ /^.*GPU Clock Level:\s*\d+\s\((\d+)Mhz\).*$/s;
+$gpuclock = $1;
+
+$output =~ /^.*GPU Memory Clock Level:\s*\d+\s\((\d+)Mhz\).*$/s;
+$memclock = $1;
+
+print <<"EOT";
+power.value $power
+temp.value $temp
+fan.value $fan
+gpuclock.value $gpuclock
+memclock.value $memclock
+EOT
+
+exit 0;
