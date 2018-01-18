@@ -1,0 +1,210 @@
+#!/usr/bin/perl
+# -*- perl -*-
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+# $Id$
+#
+# Magic markers (used by munin-node-configure and some installation scripts):
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use warnings;
+use WWW::Mechanize;
+
+=pod
+
+=encoding UTF-8
+
+=head1 NAME
+
+tl_sg108e - Plugin to monitor packets per second  and link speed for TP-Link SG108E switches 
+
+=head1 APPLICABLE SYSTEMS
+
+TP-Link SG108E switches with web management (http). Tested with software version 1.0.2 Build 20160526 Rel.34615
+
+=head1 CONFIGURATION
+
+Add this to the relevant munin-node config file. You can specify switch address, username, password and description for each port
+(the switch management doesn't allow port descriptions)
+
+  [tl_sg108e]
+  env.switch 192.168.1.12
+  env.username admin
+  env.password mySecretPassword
+  env.p1 'Link to PC1'
+  env.p2 'Link to server1'
+  env.p3 'Not used'
+  env.p4 'Link to AP'
+  env.p5 'Link to PC2'
+  env.p6 'Link to PC3'
+  env.p7 'Not used'
+  env.p8 'Uplink'
+
+Requires WWW:Mechanize module:
+  sudo apt-get install libwww-mechanize-perl
+
+=head1 BUGS/GOTCHAS
+
+The link speed is represented as a number:
+  0 - down
+  5 - 100Mbps full
+  6 - 1Gbps
+
+=head1 AUTHOR
+
+Adrian Popa (https://github.com/mad-ady)
+
+=head1 COPYRIGHT
+
+Copyright (c) 2018, Adrian Popa
+
+All rights reserved. This program is free software; you can
+redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation; version 2
+dated June, 1991.
+
+=head1 VERSION
+
+  $Id$
+
+=cut
+
+# read parameters from munin
+my $switch   = ( $ENV{switch}   || '192.168.1.1' );
+my $username = ( $ENV{username} || 'admin' );
+my $password = ( $ENV{password} || 'admin' );
+my $numberOfPorts = 8;
+
+#populate the ports and descriptions based on ENV
+my %ports = ();
+for ( 1 .. $numberOfPorts ) {
+    my $i = $_;
+    if ( defined $ENV{"p$i"} ) {
+        $ports{$i} = $ENV{"p$i"};
+    }
+    else {
+        #no description
+        $ports{$i} = "";
+    }
+}
+
+if ( $ARGV[0] and $ARGV[0] eq 'autoconf' ) {
+    print "no (manual configuration needed)\n";
+    exit 0;
+}
+
+if ( $ARGV[0] and $ARGV[0] eq "config" ) {
+    foreach my $graphType (qw/Packets Speed/) {
+        foreach my $port ( sort keys %ports ) {
+            print "multigraph ${graphType}_if_$port\n",
+              "graph_title $graphType for $switch port $port $ports{$port}\n",
+              "graph_info $graphType graph for port $port $ports{$port}\n",
+              "graph_args --base 1000 -l 0\n",
+              "graph_scale yes\n",
+              "graph_category switch\n";
+            if ( $graphType eq 'Speed' ) {
+                print "graph_vlabel speed\n";
+                print "p${port}.label Port $port Link speed\n";
+                print "p${port}.type GAUGE\n";
+            }
+            else {
+                print "graph_vlabel packets\n";
+                foreach my $gb (qw/good bad/) {
+                    foreach my $direction (qw/tx rx/) {
+                        print "p${port}${direction}${gb}.label Port $port $direction ($gb)\n";
+                        print "p${port}${direction}${gb}.type COUNTER\n";
+                    }
+                }
+            }
+        }
+    }
+    exit 0;
+}
+
+# extract data from the switch - uses web scraping (tested with 1.0.2 Build 20160526 Rel.34615)
+
+# print STDERR "Connecting to $switch with user $username";
+my $mech = WWW::Mechanize->new(
+    autocheck             => 0,
+    requests_redirectable => [ 'GET', 'HEAD', 'POST' ],
+    user_agent => 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:57.0) Gecko/20100101 Firefox/57.0'
+);
+my $result = $mech->post(
+    "http://$switch/logon.cgi",
+    [ username => $username, password => $password, logon => 'Login' ],
+    "Referer" => "http://$switch/"
+);
+my $response = $mech->response();
+
+# navigate to the page with the network stats
+$result   = $mech->get("http://$switch/PortStatisticsRpm.htm");
+$response = $mech->response();
+
+# print STDERR $response->code()."\n";
+
+# get the data
+my $data = $mech->content( raw => 1 );
+
+# print STDERR "$data\n";
+
+# The page stores the data in a table, but internally it is stored in 3 javascript arrays:
+# state:[1,1,1,1,1,1,1,1,0,0],
+# link_status:[0,5,0,0,5,5,5,6,0,0],
+# pkts:[0,0,0,0,14141090,0,10461386,0,14226,0,12252,0,0,0,0,0,2872063,0,1402200,0,59764503,0,34619246,0,4913873,0,4393574,0,44170456,0,68499653,0,0,0]
+
+# state: 1 - Enabled, 0 - Disabled (administratively)
+# link_status: 0 - down, 5 - 100Mbps full, 6 - 1Gbps
+# pkts: every group of 4 values represent txGoodPkt, txBadPkt, rxGoodPkt, rxBadPkt
+
+# parse good/bad packets
+if ( $data =~ /pkts:\[([0-9,]+)\]/ ) {
+
+    my $packetString = $1;
+    my @packets = split( /,/, $packetString );
+
+    for ( 1 .. $numberOfPorts ) {
+        my $currentPort = $_;
+        my $txGoodPkt   = $packets[ ( $currentPort - 1 ) * 4 ];
+        my $txBadPkt    = $packets[ ( $currentPort - 1 ) * 4 + 1 ];
+        my $rxGoodPkt   = $packets[ ( $currentPort - 1 ) * 4 + 2 ];
+        my $rxBadPkt    = $packets[ ( $currentPort - 1 ) * 4 + 3 ];
+        print "multigraph Packets_if_$currentPort\n";
+
+        print "p${currentPort}txgood.value $txGoodPkt\n";
+        print "p${currentPort}rxgood.value $rxGoodPkt\n";
+        print "p${currentPort}txbad.value $txBadPkt\n";
+        print "p${currentPort}rxbad.value $rxBadPkt\n";
+    }
+}
+
+# parse link speed
+if ( $data =~ /link_status:\[([0-9,]+)\]/ ) {
+
+    my $linkString = $1;
+    my @links = split( /,/, $linkString );
+    for ( 1 .. $numberOfPorts ) {
+        my $currentPort = $_;
+        my $link        = $links[ $currentPort - 1 ];
+        print "multigraph Speed_if_$currentPort\n";
+
+        print "p${currentPort}.value $link\n";
+    }
+
+}
+
+# vim: ft=perl : ts=4 : expandtab
