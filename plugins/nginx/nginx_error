@@ -49,6 +49,7 @@ None known.
 =head1 VERSION
 
 1.1 - 2018/01/20
+      * add 'dirty config' capability support
       * fix shell style issues reported by shellcheck
       * improve readability of symlink configuration code
 
@@ -102,7 +103,7 @@ http_codes[503]='Service Unavailable'
 
 
 # parse error counts from log file
-do_ () {
+do_fetch () {
   local count status_code
   declare -A line_counts
   while read -r count status_code; do
@@ -112,7 +113,6 @@ do_ () {
   for status_code in "${!http_codes[@]}"; do
     echo "error${status_code}.value ${line_counts[$status_code]:-0}"
   done
-  exit 0
 }
 
 
@@ -128,19 +128,26 @@ do_config () {
     echo "error${status_code}.min 0"
     echo "error${status_code}.label $status_code ${http_codes[$status_code]}"
   done
-  exit 0
 }
 
 
 do_autoconf () {
   echo yes
-  exit 0
 }
 
 
 case $1 in
-  config|autoconf|'')
-  eval "do_$1"
+  config)
+    do_config
+    # support "dirty config" capability
+    if [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ]; then do_fetch; fi
+    ;;
+  autoconf)
+    do_autoconf
+    ;;
+  '')
+    do_fetch
+    ;;
 esac
 
 exit $?
