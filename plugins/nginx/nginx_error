@@ -7,20 +7,26 @@
 
 nginx error - Munin plugin to monitor nginx error rates (http status codes per minute).
 
+
 =head1 APPLICABLE SYSTEMS
 
-Any Linux host, running nginx, with bash version > 4.0
+Any host running nginx, with bash version > 4.0
+
 
 =head1 CONFIGURATION
 
 This shows the default configuration of this plugin.  You can override
 the log file path and the logpattern.
+Additionally you may want to adjust 'group' (or 'user') based on the
+permissions required for reading the log file.
 
   [nginx_error]
+        group          adm
 	env.logpath    /var/log/nginx
 	env.logpattern a.*.log
 
 	Nginx must also be configured to log accesses in "combined" log format (default)
+
 
 =head1 USAGE
 
@@ -33,26 +39,39 @@ will parse the log file /var/log/nginx/a.mydomaincom.log
 
 You can change 'env.logpattern' using asterisk ('*') to match your logs filenames.
 
+'env.logpattern' is ignored for a non-symlink configuration.
+
+
 =head1 INTERPRETATION
 
 The plugin shows nginx http "error" status rates by parsing access log.
+
 
 =head1 MAGIC MARKERS
 
  #%# family=auto
  #%# capabilities=autoconf
 
+
 =head1 BUGS
 
 None known.
 
+
 =head1 VERSION
 
-$Id:$
+1.1 - 2018/01/20
+      * add 'dirty config' capability support
+      * fix shell style issues reported by shellcheck
+      * improve readability of symlink configuration code
+
+1.0 - 2017/02/21
+
 
 =head1 AUTHOR
 
 vovansystems@gmail.com, 2013
+
 
 =head1 LICENSE
 
@@ -60,24 +79,28 @@ GPLv3
 
 =cut
 
-if [ -z $logpath ]; then
-  logpath='/var/log/nginx'
-fi
 
-name=`basename $0`
+set -eu
 
-domain=${name/nginx_error/}
-if [[ $domain != '_' && ${#domain} -ne 0 ]]; then
-  domain=${domain:1}
-  if [ -z $logpattern ]; then
-    logpattern='a.*.log'
-  fi
-  logpattern=${logpattern/\*/$domain}
+
+# default environment variable values
+logpath=${logpath:-/var/log/nginx}
+
+
+# derive the name of the log file from a potential symlink-configured virtual host
+script_name=$(basename "$0")
+plugin_suffix=${script_name#nginx_error}
+if [ -n "${plugin_suffix#_}" ]; then
+  # a domain was given via symlink configuration: adjust the logpattern
+  domain=${plugin_suffix#_}
+  # default logpattern for symlink configuration mode
+  logpattern=${logpattern:-a.*.log}
+  log_filename=${logpattern/\*/$domain}
 else
-  logpattern='access.log'
+  log_filename='access.log'
 fi
 
-log="$logpath/$logpattern"
+log="$logpath/$log_filename"
 
 # declaring an array with http status codes, we are interested in
 declare -A http_codes
@@ -94,44 +117,53 @@ http_codes[500]='Internal Server Error'
 http_codes[502]='Bad Gateway'
 http_codes[503]='Service Unavailable'
 
-do_ () { # Fetch
-  declare -A line_counts
-  values=`awk '{print $9}' $log | sort | uniq -c`
-  if [ -n "$values" ]; then
-    while read -r line; do
-      read -a tmp <<< "$line";
-      line_counts[${tmp[1]}]=${tmp[0]};
-    done <<< "$values"
-  fi
 
-  for k in ${!http_codes[@]}; do
-    echo "error$k.value ${line_counts[$k]:-0}"
+# parse error counts from log file
+do_fetch () {
+  local count status_code
+  declare -A line_counts
+  while read -r count status_code; do
+      line_counts[$status_code]=$count
+  done <<< "$(awk '{print $9}' "$log" | sort | uniq -c)"
+
+  for status_code in "${!http_codes[@]}"; do
+    echo "error${status_code}.value ${line_counts[$status_code]:-0}"
   done
-  exit 0
 }
+
 
 do_config () {
-  echo "graph_title $logpattern - Nginx errors per minute"
-  echo 'graph_vlabel pages with http error codes / ${graph_period}'
+  local status_code
+  echo "graph_title $(basename "$log") - Nginx errors per minute"
+  echo "graph_vlabel pages with http error codes / \${graph_period}"
   echo "graph_category webserver"
   echo "graph_period minute"
-  echo "graph_info This graph shows nginx error amount per minute"
-  for k in ${!http_codes[@]}; do
-    echo "error$k.type DERIVE"
-    echo "error$k.min 0"
-    echo "error$k.label $k ${http_codes[$k]}"
+  echo "graph_info This graph shows nginx error rate per minute"
+  for status_code in "${!http_codes[@]}"; do
+    echo "error${status_code}.type DERIVE"
+    echo "error${status_code}.min 0"
+    echo "error${status_code}.label $status_code ${http_codes[$status_code]}"
   done
-  exit 0
 }
+
 
 do_autoconf () {
   echo yes
-  exit 0
 }
 
-case $1 in
-  config|autoconf|'')
-  eval do_$1
+
+case ${1:-} in
+  config)
+    do_config
+    # support "dirty config" capability
+    if [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ]; then do_fetch; fi
+    ;;
+  autoconf)
+    do_autoconf
+    ;;
+  '')
+    do_fetch
+    ;;
 esac
 
 exit $?
