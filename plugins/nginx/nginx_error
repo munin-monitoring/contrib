@@ -48,7 +48,11 @@ None known.
 
 =head1 VERSION
 
+1.1 - 2018/01/20
+      * improve readability of symlink configuration code
+
 1.0 - 2017/02/21
+
 
 =head1 AUTHOR
 
@@ -60,24 +64,25 @@ GPLv3
 
 =cut
 
-if [ -z $logpath ]; then
-  logpath='/var/log/nginx'
-fi
 
-name=`basename $0`
+# default environment variable values
+logpath=${logpath:-/var/log/nginx}
 
-domain=${name/nginx_error/}
-if [[ $domain != '_' && ${#domain} -ne 0 ]]; then
-  domain=${domain:1}
-  if [ -z $logpattern ]; then
-    logpattern='a.*.log'
-  fi
-  logpattern=${logpattern/\*/$domain}
+
+# derive the name of the log file from a potential symlink-configured virtual host
+script_name=$(basename "$0")
+plugin_suffix=${script_name#nginx_error}
+if [ -n "${plugin_suffix#_}" ]; then
+  # a domain was given via symlink configuration: adjust the logpattern
+  domain=${plugin_suffix#_}
+  # default logpattern for symlink configuration mode
+  logpattern=${logpattern:-a.*.log}
+  log_filename=${logpattern/\*/$domain}
 else
-  logpattern='access.log'
+  log_filename='access.log'
 fi
 
-log="$logpath/$logpattern"
+log="$logpath/$log_filename"
 
 # declaring an array with http status codes, we are interested in
 declare -A http_codes
@@ -111,7 +116,7 @@ do_ () { # Fetch
 }
 
 do_config () {
-  echo "graph_title $logpattern - Nginx errors per minute"
+  echo "graph_title $(basename "$log") - Nginx errors per minute"
   echo 'graph_vlabel pages with http error codes / ${graph_period}'
   echo "graph_category webserver"
   echo "graph_period minute"
