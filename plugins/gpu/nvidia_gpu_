@@ -37,8 +37,7 @@ C<ln -s /usr/share/munin/plugins/nvidia_gpu_ /etc/munin/plugins/nvidia_gpu_temp>
 
 =item *
 
-Add support for specific professional GPU features such as number of compute 
-processes, clocks, power draw, utilization, and so on.
+Add support for specific professional GPU features such as number of compute processes, clocks and so on.
 
 =item *
 
@@ -87,6 +86,7 @@ if [ "$1" = "suggest" ]; then
 	echo "mem"
 	echo "fan"
 	echo "power"
+	echo "utilization"
 	exit 0
 fi
 
@@ -176,6 +176,20 @@ if [ "$1" = "config" ]; then
 				: $((nGpusCounter=nGpusCounter+1))
 				done
 			;;
+		utilization)
+			echo 'graph_title GPU utilization'
+			echo 'graph_args -l 0 -u 100'
+			echo 'graph_vlabel Percentage'
+			echo 'graph_category sensors'
+			echo "graph_info GPU utilization of NVIDIA GPUs using driver version $driverVersion"
+			nGpusCounter=0
+			while [ "$nGpusCounter" -lt "$nGpus" ]
+			do
+				gpuName=$(echo "$nGpusOutput" | sed -n $((nGpusCounter+1))p | cut -d \( -f 1)
+				echo "utilization${nGpusCounter}.info GPU utilization information for $gpuName"
+				: $((nGpusCounter=nGpusCounter+1))
+				done 
+			;;
 		*)
 			echo "Can't run without a proper symlink. Exiting."
 			echo "Try running munin-node-configure --suggest."
@@ -221,6 +235,9 @@ case $name in
 		;;
 	power)
 		valueGpus=$(echo "$smiOutput" | grep "Power Draw" | cut -d ':' -f 2 | cut -d ' ' -f 2)
+		;;
+	utilization)
+		valueGpus=$(echo "$smiOutput" | grep "Gpu" | cut -d ':' -f 2 | cut -d ' ' -f 2)
 		;;
 	*)
 		echo "Can't run without a proper symlink. Exiting."
