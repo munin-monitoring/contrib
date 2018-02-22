@@ -64,7 +64,7 @@ faken@fakenmc.com
 =cut
 
 # Determine name of parameter to monitor
-name=`basename $0 | sed 's/^nvidia_gpu_//g'`
+name=$(basename "$0" | sed 's/^nvidia_gpu_//g')
 
 # Get location of nvidia-smi executable or use default
 nvSmiExec=${smiexec:-'/usr/bin/nvidia-smi'}
@@ -91,8 +91,8 @@ if [ "$1" = "suggest" ]; then
 fi
 
 # Get number of GPUs
-nGpusOutput=`$nvSmiExec -L`
-nGpus=`echo "$nGpusOutput" | wc -l`
+nGpusOutput=$($nvSmiExec -L)
+nGpus=$(echo "$nGpusOutput" | wc -l)
 if [ $nGpus -eq 0 ]; then
 	# Exit if no GPUs found
 	echo "No NVIDIA GPUs detected. Exiting."
@@ -100,13 +100,13 @@ if [ $nGpus -eq 0 ]; then
 fi
 
 # Get full output from nvidia-smi
-smiOutput=`$nvSmiExec -q`
+smiOutput=$($nvSmiExec -q)
 
 # Check if config was requested
 if [ "$1" = "config" ]; then
 
 	# Get driver version
-	driverVersion=`nvidia-smi -q | grep "Driver Version" | cut -d : -f 2 | tr -d ' '`
+	driverVersion=$(nvidia-smi -q | grep "Driver Version" | cut -d : -f 2 | tr -d ' ')
 
 	# Configure graph depending on what which quantity will be plotted
 	case $name in
@@ -119,7 +119,7 @@ if [ "$1" = "config" ]; then
 			nGpusCounter=0
 			while [ $nGpusCounter -lt $nGpus ]
 			do
-				gpuName=`echo "$nGpusOutput" | sed -n $(( $nGpusCounter + 1 ))p | cut -d \( -f 1`
+				gpuName=$(echo "$nGpusOutput" | sed -n $(( $nGpusCounter + 1 ))p | cut -d \( -f 1)
 				echo "temp${nGpusCounter}.warning ${warning:-75}"
 				echo "temp${nGpusCounter}.critical ${critical:-95}"
 				echo "temp${nGpusCounter}.info Temperature information for $gpuName"
@@ -128,14 +128,14 @@ if [ "$1" = "config" ]; then
 			;;
 		mem)
 			# First determine total memory of each GPU...
-			gpusTotalMemOutput=`echo "$smiOutput" | grep -v BAR1 | grep -A 3 "Memory Usage" | grep "Total" | cut -d : -f 2 | tr -d ' '`
+			gpusTotalMemOutput=$(echo "$smiOutput" | grep -v BAR1 | grep -A 3 "Memory Usage" | grep "Total" | cut -d : -f 2 | tr -d ' ')
 			gpusTotalMem=''
 			nGpusCounter=0
 			while [ $nGpusCounter -lt $nGpus ]
 			do
-				gpuName=`echo "$nGpusOutput" | sed -n $(( $nGpusCounter + 1 ))p | cut -d \( -f 1`
+				gpuName=$(echo "$nGpusOutput" | sed -n $(( $nGpusCounter + 1 ))p | cut -d \( -f 1)
 				echo "mem${nGpusCounter}.info Memory information for $gpuName"
-				gpuMem=`echo "$gpusTotalMemOutput"| sed -n $(( $nGpusCounter + 1 ))p`
+				gpuMem=$(echo "$gpusTotalMemOutput"| sed -n $(( $nGpusCounter + 1 ))p)
 				gpusTotalMem="${gpusTotalMem}${gpuMem} for GPU ${nGpusCounter}"
 				: $(( nGpusCounter = $nGpusCounter + 1 ))
 				if [ $nGpusCounter -lt $nGpus ]; then
@@ -158,7 +158,7 @@ if [ "$1" = "config" ]; then
 			nGpusCounter=0
 			while [ $nGpusCounter -lt $nGpus ]
 			do
-				gpuName=`echo "$nGpusOutput" | sed -n $(( $nGpusCounter + 1 ))p | cut -d \( -f 1`
+				gpuName=$(echo "$nGpusOutput" | sed -n $(( $nGpusCounter + 1 ))p | cut -d \( -f 1)
 				echo "fan${nGpusCounter}.info Fan information for $gpuName"
 				: $(( nGpusCounter = $nGpusCounter + 1 ))
 				done 
@@ -171,7 +171,7 @@ if [ "$1" = "config" ]; then
 			nGpusCounter=0
 			while [ $nGpusCounter -lt $nGpus ]
 			do
-				gpuName=`echo "$nGpusOutput" | sed -n $(( $nGpusCounter + 1 ))p | cut -d \( -f 1`
+				gpuName=$(echo "$nGpusOutput" | sed -n $(( $nGpusCounter + 1 ))p | cut -d \( -f 1)
 				echo "power${nGpusCounter}.info power consumption of $gpuName"
 				: $(( nGpusCounter = $nGpusCounter + 1 ))
 				done
@@ -187,7 +187,7 @@ if [ "$1" = "config" ]; then
 	nGpusCounter=0
 	while [ $nGpusCounter -lt $nGpus ]
 	do
-		gpuName=`echo "$nGpusOutput" | sed -n $(( $nGpusCounter + 1 ))p | cut -d \( -f 1`
+		gpuName=$(echo "$nGpusOutput" | sed -n $(( $nGpusCounter + 1 ))p | cut -d \( -f 1)
 		echo "${name}${nGpusCounter}.label $gpuName"
 		: $(( nGpusCounter = $nGpusCounter + 1 ))
 		#print_warning $name
@@ -200,27 +200,27 @@ fi
 # Get requested value
 case $name in
 	temp)
-		valueGpus=`echo "$smiOutput" | grep -A 1 "Temperature" | grep -i "Gpu" | cut -d : -f 2 | cut -d ' ' -f 2`
+		valueGpus=$(echo "$smiOutput" | grep -A 1 "Temperature" | grep -i "Gpu" | cut -d : -f 2 | cut -d ' ' -f 2)
 		;;
 	mem)
-		totalMemGpus=`echo "$smiOutput" | grep -v BAR1 | grep -A 3 "Memory Usage" | grep "Total" | cut -d : -f 2 | cut -d ' ' -f 2`
-		usedMemGpus=`echo "$smiOutput" | grep -v BAR1 | grep -A 3 "Memory Usage" | grep "Used" | cut -d : -f 2 | cut -d ' ' -f 2`
+		totalMemGpus=$(echo "$smiOutput" | grep -v BAR1 | grep -A 3 "Memory Usage" | grep "Total" | cut -d : -f 2 | cut -d ' ' -f 2)
+		usedMemGpus=$(echo "$smiOutput" | grep -v BAR1 | grep -A 3 "Memory Usage" | grep "Used" | cut -d : -f 2 | cut -d ' ' -f 2)
 		valueGpus=''
 		nGpusCounter=0
 		while [ $nGpusCounter -lt $nGpus ]
 		do
-			totalMemGpu=`echo "$totalMemGpus" | sed -n $(( $nGpusCounter + 1 ))p`
-			usedMemGpu=`echo "$usedMemGpus" | sed -n $(( $nGpusCounter + 1 ))p`
+			totalMemGpu=$(echo "$totalMemGpus" | sed -n $(( $nGpusCounter + 1 ))p)
+			usedMemGpu=$(echo "$usedMemGpus" | sed -n $(( $nGpusCounter + 1 ))p)
 			percentMemUsed=$(( $usedMemGpu * 100 / $totalMemGpu ))
 			valueGpus="${valueGpus}${percentMemUsed}"$'\n'
 			: $(( nGpusCounter = $nGpusCounter + 1 ))
 		done
 		;;
 	fan)
-		valueGpus=`echo "$smiOutput" | grep "Fan Speed" | cut -d ':' -f 2 | cut -d ' ' -f 2`
+		valueGpus=$(echo "$smiOutput" | grep "Fan Speed" | cut -d ':' -f 2 | cut -d ' ' -f 2)
 		;;
 	power)
-		valueGpus=`echo "$smiOutput" | grep "Power Draw" | cut -d ':' -f 2 | cut -d ' ' -f 2`
+		valueGpus=$(echo "$smiOutput" | grep "Power Draw" | cut -d ':' -f 2 | cut -d ' ' -f 2)
 		;;
 	*)
 		echo "Can't run without a proper symlink. Exiting."
@@ -234,7 +234,7 @@ case $name in
 nGpusCounter=0
 while [ $nGpusCounter -lt $nGpus ]
 do
-	value=`echo "$valueGpus" | sed -n $(( $nGpusCounter + 1 ))p`
+	value=$(echo "$valueGpus" | sed -n $(( $nGpusCounter + 1 ))p)
 	echo "${name}${nGpusCounter}.value $value"
 	: $(( nGpusCounter = $nGpusCounter + 1 ))
 done
