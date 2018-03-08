@@ -895,7 +895,7 @@ check out this git repository from
     git clone git://github.com/munin-monitoring/contrib.git
     cd contrib/plugins/apt/deb_packages
     sudo cp deb_packages.py /etc/munin/plugins/deb_packages
-    sudo cp deb_packages.munin-conf /etc/munin/plugin-conf.d/deb_packages
+    sudo cp deb_packages.munin.conf /etc/munin/plugin-conf.d/deb_packages
 
 =back
 
@@ -910,7 +910,7 @@ Verify the installation by
 
 =head1 CONFIGURATION
 
-If you copied deb_packages.munin-conf to plugin-conf.d you have a starting point.
+If you copied deb_packages.munin.conf to plugin-conf.d you have a starting point.
 
 A typical configuration looks like this
 
