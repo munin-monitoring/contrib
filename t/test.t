@@ -56,8 +56,22 @@ sub process_file {
                     description => 'sh syntax check'
                 }
             );
+            my $checkbashisms_location = `command -v checkbashisms 2>/dev/null`;
+            chomp($checkbashisms_location);
+            my $command;
+            if ($checkbashisms_location ne "") {
+                # monkey-patch "checkbashisms" in order to allow "command -v"
+                # see https://unix.stackexchange.com/a/85250: "command -v" vs. which/hash/...
+                # see https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=733511
+                my $run_modified_checkbashisms = q/sed 's#command\\\s+-\[\^p\]#command\s+-[^pvV]#'/
+                    . " '$checkbashisms_location' | perl - '$file'";
+                $command = [ 'sh', '-c', $run_modified_checkbashisms ];
+            } else {
+                # make sure that the non-confusing "checkbashisms not found" message is displayed
+                $command = [ 'checkbashisms', $file ];
+            }
             run_check(
-                {   command     => [ 'checkbashisms', $file ],
+                {   command     => $command,
                     description => 'checkbashisms'
                 }
             );
