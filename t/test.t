@@ -48,7 +48,14 @@ sub process_file {
     my ( $file, $filename, $interpreter, $arguments ) = @_;
     use v5.10.1;
 
-    if ( $interpreter =~ m{/bin/sh} ) {
+    if ( ! -x $file ) {
+        # missing executable flag
+        diag(
+            sprintf("\nFile '%s' lacks executable permission bits. Maybe try 'chmod +x $file'?\n",
+                    $file)
+        );
+    }
+    elsif ( $interpreter =~ m{/bin/sh} ) {
         subtest $filename => sub {
             plan tests => 2;
             run_check(
