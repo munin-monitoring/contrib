@@ -42,7 +42,7 @@ my($devinfo_re, $devstat_re, $action_re) = (
 # Interestingly, swap is presented as "active (auto-read-only)"
 # and mdadm has '--readonly' option to make the array 'active (read-only)'
 
-my($dev, $ro, $type, $members, $nmem, $nact, $status, $action, $proc, $minute);
+my($dev, $ro, $type, $members, $failed, $nmem, $nact, $status, $action, $proc, $minute);
 while (@text) {
     my $line = shift @text;
     if ($line =~ /$devinfo_re/) {
@@ -51,6 +51,9 @@ while (@text) {
         $ro = $2 || '';
         $type = $3;
         $members = $4;
+        $failed = $members;
+        $failed =~ s/[^F]+//g;
+        $failed = length($failed);
         
         $line = shift @text;
         if ($line =~ /$devstat_re/) {
@@ -104,6 +107,9 @@ while (@text) {
         print $dev, "_rebuild.critical 98:\n";
         print $dev, "_check.label $dev check/resync \n";
         print $dev, "_check.info $action $minute\n";
+        print $dev, "_failed.label $dev failed disks \n";
+        print $dev, "_failed.info $action $minute\n";
+        print $dev, "_failed.critical 0:0\n";
     } else {
         my $pct = 100 * $nact / $nmem;
         my $rpct = 100;
@@ -127,6 +133,7 @@ while (@text) {
         print "$dev.value $pct\n";
         print $dev, "_rebuild.value $rpct\n";
         print $dev, "_check.value $cpct\n";
+        print $dev, "_failed.value $failed\n";
     }
 }
 
