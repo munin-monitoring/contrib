@@ -13,7 +13,7 @@ qstat_exe='/usr/bin/qstat'
 
 #---------------------------------------------------------------#
 # End of config
-script_name=$(basename $0)
+script_name=$(basename "$0")
 #################################################################
 
 #################################################################
@@ -29,9 +29,9 @@ usage() {
 
 config() {
 	if [ "${script_name}" != "qstat_" ]; then
-                gametype=$(echo ${script_name} | cut -d_ -f2)
-                ip=$(echo ${script_name} | cut -d_ -f3)
-                port=$(echo ${script_name} | cut -d_ -f4)
+                gametype=$(echo "$script_name" | cut -d_ -f2)
+                ip=$(echo "$script_name" | cut -d_ -f3)
+                port=$(echo "$script_name" | cut -d_ -f4)
         else
                 gametype=$1
                 ip=$2
@@ -51,20 +51,19 @@ player.label players"
 #---------------------------------------------------------------#
 quake_stat() {
 	if [ "${script_name}" != "qstat_" ]; then
-		gametype=$(echo ${script_name} | cut -d_ -f2)
-		ip=$(echo ${script_name} | cut -d_ -f3)
-		port=$(echo ${script_name} | cut -d_ -f4)
+                gametype=$(echo "$script_name" | cut -d_ -f2)
+                ip=$(echo "$script_name" | cut -d_ -f3)
+                port=$(echo "$script_name" | cut -d_ -f4)
 	else
 		gametype=$1
 		ip=$2
 		port=$3
 	fi
 
-	if [ ! -z ${gametype} ] && [ ! -z ${gametype} ] && [ ! -z ${gametype} ]; then
-		dummy=$(${qstat_exe} -P -pa -sort P -${gametype} ${ip}:${port} | grep team | grep -wv 0ms | wc -l)
-		dummy2=$(${qstat_exe} -P -pa -sort P -${gametype} ${ip}:${port} | grep team | grep -w 0ms | wc -l)
-		playervalue=$dummy
-		maxplayervalue=$dummy2
+	if [ ! -z "$gametype" ] && [ ! -z "$gametype" ] && [ ! -z "$gametype" ]; then
+		stat_output=$("$qstat_exe" -P -pa -sort P "-${gametype}" "${ip}:${port}" | grep team)
+		playervalue=$(echo "$stat_output" | grep -cwv 0ms)
+		maxplayervalue=$(echo "$stat_output" | grep -cw 0ms)
 
 		if [ -z "${playervalue}" ]; then
 			playervalue=0
@@ -73,7 +72,6 @@ quake_stat() {
 		if [ -z "${maxplayervalue}" ]; then
 		        maxplayervalue=0
 		fi
-
 
 		echo "maxplayer.value "${maxplayervalue};
 		echo "player.value "${playervalue};
@@ -88,7 +86,7 @@ quake_stat() {
 #---------------------------------------------------------------#
 case $1 in
 	config)
-		config
+		config "$@"
 		exit 0
    	;;
 	help | ?)
@@ -99,8 +97,7 @@ case $1 in
 		echo "no (edit the script for set qstat path)"
 	;;
 	*)
-		quake_stat $1 $2 $3
+		quake_stat "$@"
 		exit 0
 	;;
 esac
-
