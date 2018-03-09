@@ -85,12 +85,20 @@ sub process_file {
         };
     }
     elsif ( $interpreter =~ m{/bin/ksh} ) {
-        run_check(
-            {   command     => [ 'ksh', '-n', $file ],
-                description => 'ksh syntax check',
-                filename    => $filename
-            }
-        );
+        subtest $filename => sub {
+            plan tests => 2;
+            run_check(
+                {   command     => [ 'ksh', '-n', $file ],
+                    description => 'ksh syntax check',
+                    filename    => $filename
+                }
+            );
+            run_check(
+                {   command     => [ 'shellcheck', $file ],
+                    description => 'shellcheck'
+                }
+            );
+        }
     }
     elsif ( $interpreter =~ m{bash} ) {
         run_check(
