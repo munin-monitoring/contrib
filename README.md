@@ -5,19 +5,11 @@ This is the repository for all user contributed stuff
 **This is usually where you want to begin your journey.**
 
 Here you find a plethora of plugins for the most diverse topics. Please take a look and
-refresh/improve existing or propose new plugins.
+improve existing or propose new plugins.
+
+Please read the [hints for plugin contributions](./plugins#contributed-munin-plugins).
 
 See the [gallery](http://gallery.munin-monitoring.org/) for a browsable overview of these plugins.
-
-Hints for code submissions:
-
-* add [documentation](http://guide.munin-monitoring.org/en/latest/develop/documenting.html#plugin-documentation) including configuration, author, license and [magic markers](http://guide.munin-monitoring.org/en/latest/architecture/syntax.html#magic-markers)
-* pick a suitable [category](guide.munin-monitoring.org/en/latest/reference/graph-category.html)
-* you should probably use the [multigraph approach](http://guide.munin-monitoring.org/en/latest/plugin/multigraphing.html#plugin-multigraphing) for non-trivial plugins
-* use style check tools for the language of the plugin (e.g. `shellcheck` for shell and `flake8` for Python)
-* bonus: add [example graphs](http://munin-monitoring.org/wiki/PluginGallery#Rulesforplugincontributors) for the [gallery](http://gallery.munin-monitoring.org/)
-
-See the [plugin development documentation](http://guide.munin-monitoring.org/en/latest/develop/plugins/index.html) for more details.
 
 
 # contrib/templates/ -  3rd-party templates
