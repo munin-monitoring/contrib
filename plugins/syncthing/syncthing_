@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 # -*- sh -*-
 : <<=cut
 =head1 NAME
@@ -34,7 +34,7 @@ Pierre-Alain TORET <pierre-alain.toret@protonmail.com>
 MIT
 =cut
 
-function cpu {
+cpu() {
     case $1 in
         config)
             cat <<'EOM'
@@ -46,12 +46,12 @@ syncthing_cpu.label cpu
 EOM
             exit 0;;
         *)
-            printf "syncthing_cpu.value "
-            $CURL -s -X GET -H "X-API-Key: $syncthing_apikey" $syncthing_proto://$syncthing_host:$syncthing_port/rest/system/status | $JQ '.cpuPercent'
+			CPU=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto"://"$syncthing_host":"$syncthing_port"/rest/system/status | $JQ '.cpuPercent')
+            printf "syncthing_cpu.value %s\\n" "$CPU"
     esac
 }
 
-function mem {
+mem() {
     case $1 in
         config)
             cat <<'EOM'
@@ -66,14 +66,16 @@ syncthing_mem_sys.label obtained
 syncthing_mem_sys.cdef syncthing_mem_sys,8,*
 EOM
             exit 0;;
-	*)
-            ALL=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" $syncthing_proto://$syncthing_host:$syncthing_port/rest/system/status | $JQ '.alloc')
-            SYS=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" $syncthing_proto://$syncthing_host:$syncthing_port/rest/system/status | $JQ '.sys')
-            printf "syncthing_mem_all.value $ALL\nsyncthing_mem_sys.value $SYS\n"
+	    *)
+            STATUS=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto"://"$syncthing_host":"$syncthing_port"/rest/system/status)
+            ALL=$(echo "$STATUS" | $JQ '.alloc')
+            SYS=$(echo "$STATUS" | $JQ '.sys')
+            printf "syncthing_mem_all.value %s\\n" "$ALL"
+            printf "syncthing_mem_sys.value %s\\n" "$SYS"
     esac
 }
 
-function uptime {
+uptime() {
     case $1 in
         config)
             cat <<'EOM'
@@ -84,12 +86,12 @@ syncthing_uptime.label uptime
 EOM
             exit 0;;
         *)
-            printf "syncthing_uptime.value "
-            $CURL -s -X GET -H "X-API-Key: $syncthing_apikey" $syncthing_proto://$syncthing_host:$syncthing_port/rest/system/status | $JQ '.uptime'
+            UPTIME=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto"://"$syncthing_host":"$syncthing_port"/rest/system/status | $JQ '.uptime')
+            printf "syncthing_uptime.value %s\\n" "$UPTIME"
     esac
 }
 
-function goroutine {
+goroutine() {
     case $1 in
         config)
             cat <<'EOM'
@@ -100,12 +102,12 @@ syncthing_goroutine.label routines
 EOM
             exit 0;;
         *)
-            printf "syncthing_goroutine.value "
-            $CURL -s -X GET -H "X-API-Key: $syncthing_apikey" $syncthing_proto://$syncthing_host:$syncthing_port/rest/system/status | $JQ '.goroutines'
+            GOROUTINES=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto"://"$syncthing_host":"$syncthing_port"/rest/system/status | $JQ '.goroutines')
+            printf "syncthing_goroutine.value %s\\n" "$GOROUTINES"
     esac
 }
 
-function transfer {
+transfer() {
     case $1 in
         config)
             cat <<'EOM'
@@ -124,32 +126,34 @@ syncthing_transfer_up.negative syncthing_transfer_down
 syncthing_transfer_up.cdef syncthing_transfer_up,8,*
 EOM
             exit 0;;
-	*)
-            IBT=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" $syncthing_proto://$syncthing_host:$syncthing_port/rest/system/connections | $JQ '.total | .inBytesTotal')
-            OBT=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" $syncthing_proto://$syncthing_host:$syncthing_port/rest/system/connections | $JQ '.total | .outBytesTotal')
-            printf "syncthing_transfer_up.value $IBT\nsyncthing_transfer_down.value $OBT\n"
+	    *)
+            CONNECTIONS=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto"://"$syncthing_host":"$syncthing_port"/rest/system/connections)
+            IBT=$(echo "$CONNECTIONS" | $JQ '.total | .inBytesTotal')
+            OBT=$(echo "$CONNECTIONS" | $JQ '.total | .outBytesTotal')
+            printf "syncthing_transfer_up.value %s\\n" "$IBT"
+            printf "syncthing_transfer_down.value %s\\n" "$OBT"
     esac
 }
 
-cd $(dirname $0)
+cd "$(dirname "$0")" || exit
 
 CURL=$(which curl)
 JQ=$(which jq)
 
-case $(basename $0) in 
+case $(basename "$0") in 
     syncthing_cpu)
-	cpu $1
+	cpu "$1"
 	exit 0;;
     syncthing_mem)
-	mem $1
+	mem "$1"
 	exit 0;;
     syncthing_uptime)
-	uptime $1
+	uptime "$1"
 	exit 0;;
     syncthing_goroutine)
-	goroutine $1
+	goroutine "$1"
 	exit 0;;
     syncthing_transfer)
-	transfer $1
+	transfer "$1"
 	exit 0;;
 esac
