@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 : <<=cut
 =head1 NAME
 strelaysrv_ - Plugin to monitor Syncthing relay server
@@ -31,9 +31,9 @@ Pierre-Alain TORET <pierre-alain.toret@protonmail.com>
 MIT
 =cut
 
-function num {
+num() {
     case $1 in
-       config)
+        config)
             cat <<'EOM'
 graph_title Syncthing relay numbers
 graph_category network
@@ -43,51 +43,55 @@ strelaysrv_num_connections.label connections
 strelaysrv_num_pending.label pending session keys
 strelaysrv_num_proxies.label proxies
 EOM
-        exit 0;;
+            exit 0;;
         *)
-            NS=$($CURL -s http://$syncthing_relaysrv_host:$syncthing_relaysrv_port/status | $JQ '.numActiveSessions ')
-            NC=$($CURL -s http://$syncthing_relaysrv_host:$syncthing_relaysrv_port/status | $JQ '.numConnections ')
-            NK=$($CURL -s http://$syncthing_relaysrv_host:$syncthing_relaysrv_port/status | $JQ '.numPendingSessionKeys ')
-            NP=$($CURL -s http://$syncthing_relaysrv_host:$syncthing_relaysrv_port/status | $JQ '.numProxies ')
-            printf "strelaysrv_num_sessions.value $NS\nstrelaysrv_num_connections.value $NC\nstrelaysrv_num_pending.value $NK\nstrelaysrv_num_proxies.value $NP\n"
+            STATUS=$($CURL -s http://"$syncthing_relaysrv_host":"$syncthing_relaysrv_port"/status)
+            NS=$(echo "$STATUS" | $JQ '.numActiveSessions ')
+            NC=$(echo "$STATUS" | $JQ '.numConnections ')
+            NK=$(echo "$STATUS" | $JQ '.numPendingSessionKeys ')
+            NP=$(echo "$STATUS" | $JQ '.numProxies ')
+            printf "strelaysrv_num_sessions.value %s\\n" "$NS"
+            printf "strelaysrv_num_connections.value %s\\n" "$NC"
+            printf "strelaysrv_num_pending.value %s\\n" "$NK"
+            printf "strelaysrv_num_proxies.value %s\\n" "$NP"
     esac
 }
 
-function uptime {
+uptime() {
     case $1 in
-       config)
+        config)
             cat <<'EOM'
 graph_title Syncthing relay uptime
 graph_vlabel uptime in seconds
 graph_category network
 strelaysrv_uptime.label uptime
 EOM
-        exit 0;;
+            exit 0;;
         *)
-            printf "strelaysrv_uptime.value "
-            $CURL -s http://$syncthing_relaysrv_host:$syncthing_relaysrv_port/status | $JQ '.uptimeSeconds' 
+            UPTIME=$($CURL -s http://"$syncthing_relaysrv_host":"$syncthing_relaysrv_port"/status | $JQ '.uptimeSeconds')
+            printf "strelaysrv_uptime.value %s\\n" "$UPTIME"
     esac
 }
 
-function goroutine {
+goroutine() {
     case $1 in
-       config)
+        config)
             cat <<'EOM'
 graph_title Syncthing relay go routines
 graph_vlabel number of go routines
 graph_category network
 strelaysrv_goroutine.label routines 
 EOM
-        exit 0;;
+            exit 0;;
         *)
-printf "strelaysrv_goroutine.value "
-$CURL -s http://$syncthing_relaysrv_host:$syncthing_relaysrv_port/status | $JQ '.goNumRoutine'
+            GOROUTINE=$($CURL -s http://"$syncthing_relaysrv_host":"$syncthing_relaysrv_port"/status | $JQ '.goNumRoutine')
+            printf "strelaysrv_goroutine.value %s\\n" "$GOROUTINE"
     esac
 }
 
-function proxied {
+proxied() {
     case $1 in
-       config)
+        config)
             cat <<'EOM'
 graph_title Syncthing relay total proxied bits
 graph_category network
@@ -97,15 +101,15 @@ strelaysrv_proxied.label bits
 strelaysrv_proxied.cdef strelaysrv_proxied,8,*
 EOM
             exit 0;;
-	*)
-            printf "strelaysrv_proxied.value "
-            $CURL -s http://$syncthing_relaysrv_host:$syncthing_relaysrv_port/status | $JQ '.bytesProxied '
+	    *)
+            BP=$($CURL -s http://"$syncthing_relaysrv_host":"$syncthing_relaysrv_port"/status | $JQ '.bytesProxied ')
+            printf "strelaysrv_proxied.value %s\\n" "$BP"
     esac
 }
 
-function transfer {
+transfer() {
     case $1 in
-       config)
+        config)
             cat <<'EOM'
 graph_title Syncthing relay transfer rate
 graph_category network
@@ -115,31 +119,31 @@ strelaysrv_transfer.label bps
 strelaysrv_transfer.cdef strelaysrv_transfer,1000,*
 EOM
             exit 0;;
-	*)
-            printf "strelaysrv_transfer.value "
-            $CURL -s http://$syncthing_relaysrv_host:$syncthing_relaysrv_port/status | $JQ '.kbps10s1m5m15m30m60m[2] '
+	    *)
+            TRANSFER=$($CURL -s http://"$syncthing_relaysrv_host":"$syncthing_relaysrv_port"/status | $JQ '.kbps10s1m5m15m30m60m[2] ')
+            printf "strelaysrv_transfer.value %s\\n" "$TRANSFER"
     esac
 }
 
-cd $(dirname $0)
+cd "$(dirname "$0")" || exit
 
 CURL=$(which curl)
 JQ=$(which jq) 
 
-case $(basename $0) in 
+case $(basename "$0") in 
     strelaysrv_num)
-	num $1
+	num "$1"
 	exit 0;;
     strelaysrv_uptime)
-	uptime $1
+	uptime "$1"
 	exit 0;;
     strelaysrv_goroutine)
-	goroutine $1
+	goroutine "$1"
 	exit 0;;
     strelaysrv_proxied)
-	proxied $1
+	proxied "$1"
 	exit 0;;
     strelaysrv_transfer)
-	transfer $1
+	transfer "$1"
 	exit 0;;
 esac
