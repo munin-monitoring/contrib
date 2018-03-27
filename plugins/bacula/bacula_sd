@@ -15,126 +15,129 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 #
-
+#
 #
 # Munin Plugin to get storage device throughput for Bacula by parsing the bconsole
 # output.
 #
 # Parameters:
 #
-# 	config   (required)
-# 	autoconf (optional - only used by munin-config)
+#    config   (required)
+#    autoconf (optional - only used by munin-config)
 #
-
+#
 # Magic markers (optional - only used by munin-config and some
 # installation scripts):
 #
-#%# family=contrib
-#%# capabilities=autoconf
+#  #%# family=contrib
+#  #%# capabilities=autoconf
 
 import subprocess
-import time
 import sys
 import re
 import os
 
+
 def parse_devices():
-	""" Parse the bconsole output once to get the device names """
+    """ Parse the bconsole output once to get the device names """
 
-	bconsole = subprocess.Popen("bconsole", stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-	stdout, stderr = bconsole.communicate("status\n2")
+    bconsole = subprocess.Popen("bconsole", stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    stdout, stderr = bconsole.communicate("status\n2")
 
-	devs = []
+    devs = []
 
-	# Hold the line numbers for devices
-	dev_line = []
-	input = stdout.split("\n")
+    # Hold the line numbers for devices
+    dev_line = []
+    input_lines = stdout.split("\n")
 
-	for line, i in zip(input, range(0, len(input))):
-		if line.startswith("Connecting to Storage daemon "):
-			hostname = line.split()[-1].split(":")[0]
-		if line.startswith("Device \""):
-			dev_line.append(i)
+    for line, i in zip(input_lines, range(0, len(input_lines))):
+        if line.startswith("Connecting to Storage daemon "):
+            hostname = line.split()[-1].split(":")[0]
+        if line.startswith("Device \""):
+            dev_line.append(i)
 
-	for pos in dev_line:
-		# Get the device name
-		dev_name = input[pos].split()[1][1:-1]
-		dev_dev = input[pos].split()[2][1:-1]
-		dev_dev_clean = re.sub("^[^A-Za-z_]", "_", dev_dev, 1)
-		dev_dev_clean = re.sub("[^A-Za-z0-9_]", "_", dev_dev_clean, 0)
-		devs.append([dev_name, dev_dev, dev_dev_clean])
+    for pos in dev_line:
+        # Get the device name
+        dev_name = input_lines[pos].split()[1][1:-1]
+        dev_dev = input_lines[pos].split()[2][1:-1]
+        dev_dev_clean = re.sub("^[^A-Za-z_]", "_", dev_dev, 1)
+        dev_dev_clean = re.sub("[^A-Za-z0-9_]", "_", dev_dev_clean, 0)
+        devs.append([dev_name, dev_dev, dev_dev_clean])
 
-	return hostname, devs
+    return hostname, devs
 
 
 def parse():
-	""" Parse the bconsole output """
+    """ Parse the bconsole output """
 
-	bconsole = subprocess.Popen("bconsole", stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-	stdout, stderr = bconsole.communicate("status\n2")
+    bconsole = subprocess.Popen("bconsole", stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    stdout, stderr = bconsole.communicate("status\n2")
 
-	devstats = []
+    devstats = []
 
-	# Hold the line numbers for devices
-	dev_line = []
-	input = stdout.split("\n")
+    # Hold the line numbers for devices
+    dev_line = []
+    input_lines = stdout.split("\n")
 
-	for line, i in zip(input, range(0, len(input))):
-		if line.startswith("Device \""):
-			dev_line.append(i)
+    for line, i in zip(input_lines, range(0, len(input_lines))):
+        if line.startswith("Device \""):
+            dev_line.append(i)
 
-	for pos in dev_line:
-		# Get the device name
-		dev_dev = input[pos].split()[2][1:-1]
-		dev_dev_clean = re.sub("^[^A-Za-z_]", "_", dev_dev, 1)
-		dev_dev_clean = re.sub("[^A-Za-z0-9_]", "_", dev_dev_clean, 0)
+    for pos in dev_line:
+        # Get the device name
+        dev_dev = input_lines[pos].split()[2][1:-1]
+        dev_dev_clean = re.sub("^[^A-Za-z_]", "_", dev_dev, 1)
+        dev_dev_clean = re.sub("[^A-Za-z0-9_]", "_", dev_dev_clean, 0)
 
-		# Get the current bytes
-		if input[pos].endswith("is mounted with:"):
-			bytes = long(input[pos+5].split()[1].split("=")[1].replace(",", ""))
-			devstats.append([dev_dev, dev_dev_clean, bytes])
-		else:
-			devstats.append([dev_dev, dev_dev_clean, 0])
+        # Get the current bytes
+        if input_lines[pos].endswith("is mounted with:"):
+            bytes_count_text = input_lines[pos+5].split()[1].split("=")[1].replace(",", "")
+            try:
+                bytes_count = long(bytes_count_text)
+            except NameError:
+                bytes_count = int(bytes_count_text)
+            devstats.append([dev_dev, dev_dev_clean, bytes_count])
+        else:
+            devstats.append([dev_dev, dev_dev_clean, 0])
 
-	return devstats
+    return devstats
 
 
 def print_config():
-	hostname, devstats = parse_devices()
-	print "graph_title Bacula Storage Daemon throughput"
-	print "graph_vlabel bytes per ${graph_period}"
-	print "graph_args --base 1024 -l 0"
-	print "graph_scale yes"
-	print "graph_info Bacula Storage Daemon througput measurement based on written bytes. This may be somewhat inacurate whenever a tape is changed."
-	print "graph_category backup"
-	print "graph_order", 
-	for dev in devstats:
-		print dev[2],
-	print
-	if os.getenv("report_hostname") is not None and \
-		os.getenv("report_hostname").upper() in ["YES", "TRUE", "1", "Y"]:
-		print "host_name", hostname
-	for dev in devstats:
-		print "%s.label %s" % (dev[2], dev[1])
-		print "%s.type DERIVE" % (dev[2])
-		print "%s.min 0" % (dev[2])
-#		print "%s.max %s" % (dev[2], str(1024*1024*1024*16))
-#		print "%s.cdef up,8,*" (dev[2])
-	sys.exit(0)
+    hostname, devstats = parse_devices()
+    print("graph_title Bacula Storage Daemon throughput")
+    print("graph_vlabel bytes per ${graph_period}")
+    print("graph_args --base 1024 -l 0")
+    print("graph_scale yes")
+    print("graph_info Bacula Storage Daemon througput measurement based on written bytes. "
+          "This may be somewhat inacurate whenever a tape is changed.")
+    print("graph_category backup")
+    print("graph_order", " ".join([dev[2] for dev in devstats]))
+    print()
+    if (os.getenv("report_hostname") is not None
+            and (os.getenv("report_hostname").upper() in ["YES", "TRUE", "1", "Y"])):
+        print("host_name", hostname)
+    for dev in devstats:
+        print("%s.label %s" % (dev[2], dev[1]))
+        print("%s.type DERIVE" % (dev[2]))
+        print("%s.min 0" % (dev[2]))
+#       print("%s.max %s" % (dev[2], str(1024*1024*1024*16)))
+#       print("%s.cdef up,8,*" (dev[2]))
+    sys.exit(0)
 
 
 if "config" in sys.argv[1:]:
-	print_config()
+    print_config()
 elif "autoconf" in sys.argv[1:]:
-	for dir in os.getenv("PATH").split(":"): 
-		for root, dirs, files in os.walk(dir):
-			if "bconsole" in files:
-				print "yes"
-				sys.exit(0)
-	print "no"
-	sys.exit(1)
+    for directory in os.getenv("PATH").split(":"):
+        for root, dirs, files in os.walk(directory):
+            if "bconsole" in files:
+                print("yes")
+                sys.exit(0)
+    print("no")
+    sys.exit(0)
 elif "suggest" in sys.argv[1:]:
-	sys.exit(1)
+    sys.exit(1)
 else:
-	for dev in parse():
-		print "%s.value %s" % (dev[1], dev[2])
+    for dev in parse():
+        print("%s.value %s" % (dev[1], dev[2]))
