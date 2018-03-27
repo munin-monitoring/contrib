@@ -22,145 +22,149 @@
 #
 # Parameters:
 #
-# 	config   (required)
-# 	autoconf (optional - only used by munin-config)
+#   config   (required)
+#   autoconf (optional - only used by munin-config)
 #
 
 # Magic markers (optional - only used by munin-config and some
 # installation scripts):
 #
-#%# family=contrib
-#%# capabilities=autoconf
+#  #%# family=contrib
+#  #%# capabilities=autoconf
 
 import subprocess
-import time
 import sys
 import re
 import os
 
+
 def parse_running_jobs():
-	""" Parse the bconsole output once to get the running jobs """
+    """ Parse the bconsole output once to get the running jobs """
 
-	bconsole = subprocess.Popen("bconsole", stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-	stdout, stderr = bconsole.communicate("status\n1\nstatus\n3\n.")
+    bconsole = subprocess.Popen("bconsole", stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    stdout, stderr = bconsole.communicate("status\n1\nstatus\n3\n.")
 
-	jobs = []
-	clients = []
-	clientlist = False
+    jobs = []
+    clients = []
+    clientlist = False
 
-	# Hold the line numbers for devices
-	dev_line = []
-	input = stdout.split("\n")
+    # Hold the line numbers for devices
+    input_lines = stdout.split("\n")
 
-	for line, i in zip(input, range(0, len(input))):
-		if line.startswith("Connecting to Director "):
-			hostname = line.split()[-1].split(":")[0]
+    for line, i in zip(input_lines, range(0, len(input_lines))):
+        if line.startswith("Connecting to Director "):
+            hostname = line.split()[-1].split(":")[0]
 
-		if line.endswith(" is running"):
-			jobs.append(line.split()[2].split(".")[0])
+        if line.endswith(" is running"):
+            jobs.append(line.split()[2].split(".")[0])
 
-		# Parse the clientlist, warning, order of statements is important
-		if line.startswith("Select Client (File daemon) resource"):
-			clientlist = False
+        # Parse the clientlist, warning, order of statements is important
+        if line.startswith("Select Client (File daemon) resource"):
+            clientlist = False
 
-		if clientlist is True:
-			client_id, client_name = line.split()
-			client_clean = re.sub("^[^A-Za-z_]", "_", client_name, 1)
-			client_clean = re.sub("[^A-Za-z0-9_]", "_", client_clean, 0)
-			clients.append((client_name, client_clean, client_id[:-1]))
+        if clientlist is True:
+            client_id, client_name = line.split()
+            client_clean = re.sub("^[^A-Za-z_]", "_", client_name, 1)
+            client_clean = re.sub("[^A-Za-z0-9_]", "_", client_clean, 0)
+            clients.append((client_name, client_clean, client_id[:-1]))
 
-		if line.startswith("The defined Client resources are:"):
-			clientlist = True
+        if line.startswith("The defined Client resources are:"):
+            clientlist = True
 
-	return hostname, jobs, clients
+    return hostname, jobs, clients
 
 
 def parse(clients):
-	""" Parse the bconsole output """
+    """ Parse the bconsole output """
 
-	query_str = ""
-	for client in clients:
-		query_str = query_str + "status\n3\n" + client[1] + "\n"
-	query_str = query_str + "quit"
+    query_str = ""
+    for client in clients:
+        query_str = query_str + "status\n3\n" + client[1] + "\n"
+    query_str = query_str + "quit"
 
-	bconsole = subprocess.Popen("bconsole", stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-	stdout, stderr = bconsole.communicate(query_str)
+    bconsole = subprocess.Popen("bconsole", stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    stdout, stderr = bconsole.communicate(query_str)
 
-	input = stdout.split("\n")
+    input_lines = stdout.split("\n")
 
-	jobstats = []
+    jobstats = []
 
-	for line, pos in zip(input, range(0, len(input))):
+    for line, pos in zip(input_lines, range(0, len(input_lines))):
 
-		# Get the client name
-		if line.startswith("Connecting to Client "):
-			# client_name = input[pos].split()[3].split(".")[0]
-			client_name = line.split()[3]
-			client_clean = re.sub("^[^A-Za-z_]", "_", client_name, 1)
-			client_clean = re.sub("[^A-Za-z0-9_]", "_", client_clean, 0)
+        # Get the client name
+        if line.startswith("Connecting to Client "):
+            # client_name = input_lines[pos].split()[3].split(".")[0]
+            client_name = line.split()[3]
+            client_clean = re.sub("^[^A-Za-z_]", "_", client_name, 1)
+            client_clean = re.sub("[^A-Za-z0-9_]", "_", client_clean, 0)
 
-		# Get the current bytes
-		if line.endswith(" is running."):
-			bytes = long(input[pos+2].split()[1].split("=")[1].replace(",", ""))
-			jobstats.append([client_name, client_clean, bytes])
+        # Get the current bytes
+        if line.endswith(" is running."):
+            bytes_count_text = input_lines[pos+2].split()[1].split("=")[1].replace(",", "")
+            try:
+                # python2
+                bytes_count = long(bytes_count_text)
+            except NameError:
+                # python3
+                bytes_count = int(bytes_count_text)
+            jobstats.append([client_name, client_clean, bytes_count])
 
-	job_dict = {}
-	for job in jobstats:
-		job_dict[job[0].split("-")[0]] = job
+    job_dict = {}
+    for job in jobstats:
+        job_dict[job[0].split("-")[0]] = job
 
-	return job_dict
+    return job_dict
 
 
 def print_config():
-	hostname, jobs, clients = parse_running_jobs()
-	print "graph_title Bacula Job throughput"
-	print "graph_vlabel bytes per ${graph_period}"
-	print "graph_args --base 1024 -l 0"
-	print "graph_scale yes"
-	print "graph_info Bacula Job measurement."
-	print "graph_category backup"
-	print "graph_order", 
-	for fd in clients:
-		print fd[1],
-	print
-	if os.getenv("report_hostname") is not None and \
-		os.getenv("report_hostname").upper() in ["YES", "TRUE", "1", "Y"]:
-		print "host_name", hostname
-	for client in clients:
-		print "%s.label %s" % (client[1], client[0])
-		print "%s.type DERIVE" % (client[1])
-		print "%s.min 0" % (client[1])
-#		print "%s.max %s" % (client[1], str(1024*1024*1024*16))
-#		print "%s.cdef up,8,*" (client[1])
-	sys.exit(0)
+    hostname, jobs, clients = parse_running_jobs()
+    print("graph_title Bacula Job throughput")
+    print("graph_vlabel bytes per ${graph_period}")
+    print("graph_args --base 1024 -l 0")
+    print("graph_scale yes")
+    print("graph_info Bacula Job measurement.")
+    print("graph_category backup")
+    print("graph_order", " ".join(fd[1] for fd in clients))
+    print()
+    if ((os.getenv("report_hostname") is not None) and
+            (os.getenv("report_hostname").upper() in ["YES", "TRUE", "1", "Y"])):
+        print("host_name", hostname)
+    for client in clients:
+        print("%s.label %s" % (client[1], client[0]))
+        print("%s.type DERIVE" % (client[1]))
+        print("%s.min 0" % (client[1]))
+#       print("%s.max %s" % (client[1], str(1024*1024*1024*16)))
+#       print("%s.cdef up,8,*" (client[1]))
+    sys.exit(0)
 
 
 if "config" in sys.argv[1:]:
-	print_config()
+    print_config()
 elif "autoconf" in sys.argv[1:]:
-	for dir in os.getenv("PATH").split(":"): 
-		for root, dirs, files in os.walk(dir):
-			if "bconsole" in files:
-				print "yes"
-				sys.exit(0)
-	print "no"
-	sys.exit(1)
+    for directory in os.getenv("PATH").split(":"):
+        for root, dirs, files in os.walk(directory):
+            if "bconsole" in files:
+                print("yes")
+                sys.exit(0)
+    print("no")
+    sys.exit(0)
 elif "suggest" in sys.argv[1:]:
-	sys.exit(1)
+    sys.exit(1)
 else:
-	hostname, jobs, clients = parse_running_jobs()
-	str = []
-	for client in clients:
-		if client[0].split("-")[0] in jobs:
-			str.append((client[0], client[2]))
+    hostname, jobs, clients = parse_running_jobs()
+    client_pairs = []
+    for client in clients:
+        if client[0].split("-")[0] in jobs:
+            client_pairs.append((client[0], client[2]))
 
-	client_values = parse(str)
+    client_values = parse(client_pairs)
 
-	for client in clients:
-		client_name_short =  client[0].split("-")[0]
-		if client_name_short in client_values:
-			print "%s.value %s" % (client_values[client_name_short][1], client_values[client_name_short][2])
-		else:
-			print "%s.value %s" % (client[1], "0")
+    for client in clients:
+        client_name_short = client[0].split("-")[0]
+        if client_name_short in client_values:
+            print("%s.value %s" % (client_values[client_name_short][1],
+                                   client_values[client_name_short][2]))
+        else:
+            print("%s.value %s" % (client[1], "0"))
 
-	sys.exit(0)
+    sys.exit(0)
