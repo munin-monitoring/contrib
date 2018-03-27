@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/bin/sh
 # -*- sh -*-
 : <<=cut
 =head1 NAME
@@ -34,6 +34,10 @@ Pierre-Alain TORET <pierre-alain.toret@protonmail.com>
 MIT
 =cut
 
+getstatus() {
+    "$CURL" -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto://$syncthing_host:$syncthing_port/rest/system/status"
+}
+
 cpu() {
     case $1 in
         config)
@@ -46,8 +50,9 @@ syncthing_cpu.label cpu
 EOM
             exit 0;;
         *)
-			CPU=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto"://"$syncthing_host":"$syncthing_port"/rest/system/status | $JQ '.cpuPercent')
-            printf "syncthing_cpu.value %s\\n" "$CPU"
+            STATUS=$(getstatus)
+			CPU=$(echo "$STATUS" | "$JQ" '.cpuPercent')
+            printf "syncthing_cpu.value %s\n" "$CPU"
     esac
 }
 
@@ -67,11 +72,11 @@ syncthing_mem_sys.cdef syncthing_mem_sys,8,*
 EOM
             exit 0;;
 	    *)
-            STATUS=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto"://"$syncthing_host":"$syncthing_port"/rest/system/status)
-            ALL=$(echo "$STATUS" | $JQ '.alloc')
-            SYS=$(echo "$STATUS" | $JQ '.sys')
-            printf "syncthing_mem_all.value %s\\n" "$ALL"
-            printf "syncthing_mem_sys.value %s\\n" "$SYS"
+            STATUS=$(getstatus)
+            ALL=$(echo "$STATUS" | "$JQ" '.alloc')
+            SYS=$(echo "$STATUS" | "$JQ" '.sys')
+            printf "syncthing_mem_all.value %s\n" "$ALL"
+            printf "syncthing_mem_sys.value %s\n" "$SYS"
     esac
 }
 
@@ -86,8 +91,9 @@ syncthing_uptime.label uptime
 EOM
             exit 0;;
         *)
-            UPTIME=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto"://"$syncthing_host":"$syncthing_port"/rest/system/status | $JQ '.uptime')
-            printf "syncthing_uptime.value %s\\n" "$UPTIME"
+            STATUS=$(getstatus)
+            UPTIME=$(echo "$STATUS" | "$JQ" '.uptime')
+            printf "syncthing_uptime.value %s\n" "$UPTIME"
     esac
 }
 
@@ -102,8 +108,9 @@ syncthing_goroutine.label routines
 EOM
             exit 0;;
         *)
-            GOROUTINES=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto"://"$syncthing_host":"$syncthing_port"/rest/system/status | $JQ '.goroutines')
-            printf "syncthing_goroutine.value %s\\n" "$GOROUTINES"
+            STATUS=$(getstatus)
+            GOROUTINES=$(echo "$STATUS" | "$JQ" '.goroutines')
+            printf "syncthing_goroutine.value %s\n" "$GOROUTINES"
     esac
 }
 
@@ -127,9 +134,9 @@ syncthing_transfer_up.cdef syncthing_transfer_up,8,*
 EOM
             exit 0;;
 	    *)
-            CONNECTIONS=$($CURL -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto"://"$syncthing_host":"$syncthing_port"/rest/system/connections)
-            IBT=$(echo "$CONNECTIONS" | $JQ '.total | .inBytesTotal')
-            OBT=$(echo "$CONNECTIONS" | $JQ '.total | .outBytesTotal')
+            CONNECTIONS=$("$CURL" -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto://$syncthing_host:$syncthing_port/rest/system/connections")
+            IBT=$(echo "$CONNECTIONS" | "$JQ" '.total | .inBytesTotal')
+            OBT=$(echo "$CONNECTIONS" | "$JQ" '.total | .outBytesTotal')
             printf "syncthing_transfer_up.value %s\\n" "$IBT"
             printf "syncthing_transfer_down.value %s\\n" "$OBT"
     esac
