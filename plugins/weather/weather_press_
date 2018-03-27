@@ -18,33 +18,27 @@ import re
 
 url = 'http://tgftp.nws.noaa.gov/data/observations/metar/decoded/%s.TXT'
 
-re_hPa = re.compile('Pressure.*\((\d+) hPa\)')
+re_hpa = re.compile('Pressure.*\((\d+) hPa\)')
 
 
 code = sys.argv[0][(sys.argv[0].rfind('_')+1):]
-if code == None: sys.exit(1)
-
-if len(sys.argv) == 2 and sys.argv[1] == "autoconf":
-
-  print "yes"
-
+if not code:
+    sys.exit(1)
+elif len(sys.argv) == 2 and sys.argv[1] == "autoconf":
+    print("yes")
 elif len(sys.argv) == 2 and sys.argv[1] == "config":
+    print('graph_title Atmospheric pressure at code %s' % code)
+    print('graph_vlabel Pressure in hPa')
+    print('graph_category sensors')
 
-  print 'graph_title Atmospheric pressure at code %s' % code
-  print 'graph_vlabel Pressure in hPa'
-  print 'graph_category sensors'
-
-  print 'pressure.label Pressure'
-  print 'pressure.type GAUGE'
-  print 'graph_args --base 1000 -l 850 -u 1050 --rigid'
-  print 'graph_scale no'
-
+    print('pressure.label Pressure')
+    print('pressure.type GAUGE')
+    print('graph_args --base 1000 -l 850 -u 1050 --rigid')
+    print('graph_scale no')
 else:
+    u = urllib.urlopen(url % code)
+    txt = u.read()
+    u.close()
 
-  u = urllib.urlopen(url % code)
-  txt = u.read()
-  u.close()
-
-  hPa = re_hPa.findall(txt)[0]
-
-  print 'pressure.value %s' % hPa
+    hpa = re_hpa.findall(txt)[0]
+    print('pressure.value %s' % hpa)
