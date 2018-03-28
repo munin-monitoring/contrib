@@ -24,7 +24,8 @@
 # This plugin requires pythons MySQLdb module which can be installed via easy_install.
 #
 # ## Installation
-# Copy file to directory /usr/share/munin/plugins/ and create symbolic links for each type you wish to monitor:
+# Copy file to directory /usr/share/munin/plugins/ and create symbolic links for each type you wish
+# to monitor:
 # 	percona_flow
 # 	percona_queues
 # 	percona_replication
@@ -37,14 +38,19 @@
 #     env.user root
 #     env.password vErYsEcReT
 #
-#%# capabilities=autoconf
-#%# family=contrib
+#  #%# capabilities=autoconf
+#  #%# family=contrib
 
+import os
+import sys
 from warnings import filterwarnings
-import os, sys, MySQLdb, MySQLdb.cursors
-filterwarnings('ignore', category = MySQLdb.Warning)
 
-progName = os.path.basename(__file__)
+import MySQLdb
+import MySQLdb.cursors
+
+filterwarnings('ignore', category=MySQLdb.Warning)
+
+program_name = os.path.basename(__file__)
 
 variables = {
   'percona_queues': {
@@ -76,13 +82,13 @@ variables = {
 
 # Parse environment variables
 # Mysql host
-if "host" in os.environ and os.environ["host"] != None:
+if "host" in os.environ and os.environ["host"] is not None:
     server = os.environ["host"]
 else:
-    server =  "localhost"
+    server = "localhost"
 
 # Mysql port
-if "port" in os.environ and os.environ["port"] != None:
+if "port" in os.environ and os.environ["port"] is not None:
     try:
         port = int(os.environ["port"])
     except ValueError:
@@ -91,13 +97,13 @@ else:
     port = 3306
 
 # Mysql username
-if "user" in os.environ and os.environ["user"] != None:
+if "user" in os.environ and os.environ["user"] is not None:
     login = os.environ["user"]
 else:
     login = ""
 
 # Mysql password
-if "password" in os.environ and os.environ["password"] != None:
+if "password" in os.environ and os.environ["password"] is not None:
     passw = os.environ["password"]
 else:
     passw = ""
@@ -105,9 +111,9 @@ else:
 # Mysql connection handler
 conn = None
 
-label = variables[progName]['label']
-vlabel = variables[progName]['vlabel']
-fields = ['\'{0}\''.format(x) for x in variables[progName]['fields']]  
+label = variables[program_name]['label']
+vlabel = variables[program_name]['vlabel']
+fields = ["'{0}'".format(x) for x in variables[program_name]['fields']]
 
 query = "show status where Variable_name in (%s)" % ', '.join(fields)
 
@@ -115,31 +121,31 @@ query = "show status where Variable_name in (%s)" % ', '.join(fields)
 try:
     conn = MySQLdb.connect(host=server, user=login, passwd=passw)
     cursor = conn.cursor()
-except MySQLdb.Error, e:
-    print "Error %d: %s" % (e.args[0], e.args[1])
+except MySQLdb.Error as e:
+    print("Error %d: %s" % (e.args[0], e.args[1]))
     sys.exit(1)
 
 
 values = {}
 
 if len(sys.argv) == 2 and sys.argv[1] == "autoconf":
-    print "yes"
+    print("yes")
 elif len(sys.argv) == 2 and sys.argv[1] == "config":
 
-    print "graph_title %s" % label
-    print "graph_vlabel %s" % vlabel
-    print "graph_category db"
-    print ""
+    print("graph_title %s" % label)
+    print("graph_vlabel %s" % vlabel)
+    print("graph_category db")
+    print()
 
     try:
         cursor.execute(query)
         results = cursor.fetchall()
 
         for result in results:
-        	print "%s_size.label %s" % (result[0], result[0])
+            print("%s_size.label %s" % (result[0], result[0]))
 
-    except MySQLdb.Error, e:
-        print "Error %d: %s" % (e.args[0], e.args[1])
+    except MySQLdb.Error as e:
+        print("Error %d: %s" % (e.args[0], e.args[1]))
 
 else:
     try:
@@ -147,10 +153,10 @@ else:
         results = cursor.fetchall()
 
         for result in results:
-        	print "%s_size.value %s" % (result[0], result[1])
+            print("%s_size.value %s" % (result[0], result[1]))
 
-    except MySQLdb.Error, e:
-        print "Error %d: %s" % (e.args[0], e.args[1])
+    except MySQLdb.Error as e:
+        print("Error %d: %s" % (e.args[0], e.args[1]))
 
 if conn:
     conn.close()
