@@ -11,6 +11,7 @@ case $1 in
         cat <<'EOM'
 graph_title Number of young files at backup directory
 graph_vlabel number
+graph_category backup
 autobackup.label number
 autobackup.critical 1:
 EOM
