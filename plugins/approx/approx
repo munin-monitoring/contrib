@@ -8,64 +8,57 @@
 #
 # Parameters understood:
 #
-# 	config   (required)
-# 	autoconf (optional - used by munin-config)
+#     config   (required)
+#     autoconf (optional - used by munin-config)
 #
 # Magic markers - optional - used by installation scripts and
 # munin-config:
 #
-#%# family=manual
-#%# capabilities=autoconf
+#  #%# family=manual
+#  #%# capabilities=autoconf
 #
 # Now for the real work...
 
-from sys import argv, exit
 from os.path import walk, exists, isfile, join
+from sys import argv, exit
+
 
 def get_file_types():
-	"""Returns an array of filetype => count."""
+    """Returns an array of filetype => count."""
+    out = {}
 
-	out = {}
+    def visitor(arg, dirname, names):
+        for filename in names:
+            if not isfile(join(dirname, filename)):
+                continue
+            ext = filename.split(".")[-1].lower()
+            out[ext] = out.get(ext, 0) + 1
 
-	def visitor(arg, dirname, names):
-		for file in names:
-			if not isfile(join(dirname, file)):
-				continue
-			ext = file.split(".")[-1]
-
-			out[ext] = out.get(ext, 0) + 1
-
-	walk('/var/cache/approx/', visitor, None)
-
-	return out
+    walk('/var/cache/approx/', visitor, None)
+    return out
 
 
-# Autoconfiguration
 if len(argv) > 1:
 
-	if argv[1] == "autoconf":
-		# Test if we can find a approx cache
-		if exists('/var/cache/approx'):
-			print "yes"
-		else:
-			print "no ('/var/cacne/approx' not found)"
-			exit(1)
-		exit()
+    # Autoconfiguration
+    if argv[1] == "autoconf":
+        # Test if we can find a approx cache
+        if exists('/var/cache/approx'):
+            print("yes")
+        else:
+            print("no ('/var/cache/approx' not found)")
+        exit()
 
-	elif argv[1] == "config":
-		print "graph_title Approx cache";
-		print "graph yes";
-		#print "graph_category Other";
-		#print "graph_total Total";
-		print "graph_info Statistics from the Approx cache.";
-		#print "debs.label DEBs";
-		#print "pending.warning 0:0";
-		#print "hold.label hold";
-		for type in get_file_types().keys():
-			print "%s.label %s" % (type.lower(), type)
-		exit()
+    elif argv[1] == "config":
+        print("graph_title Approx cache")
+        print("graph yes")
+        print("graph_category loadbalancer")
+        print("graph_info Statistics from the Approx cache.")
+        for filetype in get_file_types().keys():
+            print("%s.label %s" % (filetype.lower(), filetype))
+        exit()
 
-for type, count in get_file_types().iteritems():
-	print "%s.value %d" % (type.lower(), count)
+for filetype, count in get_file_types().iteritems():
+    print("%s.value %d" % (filetype.lower(), count))
 
 exit()
