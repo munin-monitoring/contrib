@@ -19,5 +19,4 @@ EOM
 esac
 
 printf "autobackup.value "
-find $BACKUP_DIR  -mtime -$LIFETIME | wc  -l
-
+find "$BACKUP_DIR" -mtime "-$LIFETIME" | wc  -l
