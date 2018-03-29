@@ -1,0 +1,160 @@
+#!/bin/sh
+: <<=cut
+=head1 NAME
+strelaysrv_ - Plugin to monitor Syncthing relay server
+
+=head1 DESCRIPTION
+This plugin gathers metrics from a Syncthing relay server.
+
+This plugin requires the jq utility : https://stedolan.github.io/jq/
+This plugin requires the curl utility : https://curl.haxx.se/
+
+Available plugins :
+strelaysrv_goroutine #
+strelaysrv_num       # 
+strelaysrv_proxied   #
+strelaysrv_transfer  #
+strelaysrv_uptime    #
+
+=head1 CONFIGURATION
+To make the plugin connect to the Syncthing relay server one has to use this type of 
+configuration
+[strelaysrv_*]
+
+env.syncthing_relaysrv_host 127.0.0.1
+env.syncthing_relaysrv_port 22070
+
+=head1 AUTHOR
+Pierre-Alain TORET <pierre-alain.toret@protonmail.com>
+
+=head1 LICENSE
+MIT
+=cut
+
+syncthing_relaysrv_host=${syncthing_relaysrv_host:-}
+syncthing_relaysrv_port=${syncthing_relaysrv_port:-}
+
+getstatus() {
+    "$CURL" -s "http://$syncthing_relaysrv_host:$syncthing_relaysrv_port/status"
+}
+
+num() {
+    case $1 in
+        config)
+            cat <<'EOM'
+graph_title Syncthing relay numbers
+graph_category network
+graph_vlabel numbers
+strelaysrv_num_sessions.label sessions
+strelaysrv_num_connections.label connections
+strelaysrv_num_pending.label pending session keys
+strelaysrv_num_proxies.label proxies
+EOM
+            exit 0;;
+        *)
+            STATUS=$(getstatus)
+            NS=$(echo "$STATUS" | $JQ '.numActiveSessions ')
+            NC=$(echo "$STATUS" | $JQ '.numConnections ')
+            NK=$(echo "$STATUS" | $JQ '.numPendingSessionKeys ')
+            NP=$(echo "$STATUS" | $JQ '.numProxies ')
+            printf "strelaysrv_num_sessions.value %s\n" "$NS"
+            printf "strelaysrv_num_connections.value %s\n" "$NC"
+            printf "strelaysrv_num_pending.value %s\n" "$NK"
+            printf "strelaysrv_num_proxies.value %s\n" "$NP"
+    esac
+}
+
+uptime() {
+    case $1 in
+        config)
+            cat <<'EOM'
+graph_title Syncthing relay uptime
+graph_vlabel uptime in seconds
+graph_category network
+strelaysrv_uptime.label uptime
+EOM
+            exit 0;;
+        *)
+            STATUS=$(getstatus)
+            UPTIME=$(echo "$STATUS" | "$JQ" '.uptimeSeconds')
+            printf "strelaysrv_uptime.value %s\n" "$UPTIME"
+    esac
+}
+
+goroutine() {
+    case $1 in
+        config)
+            cat <<'EOM'
+graph_title Syncthing relay go routines
+graph_vlabel number of go routines
+graph_category network
+strelaysrv_goroutine.label routines 
+EOM
+            exit 0;;
+        *)
+            STATUS=$(getstatus)
+            GOROUTINE=$(echo "$STATUS" | "$JQ" '.goNumRoutine')
+            printf "strelaysrv_goroutine.value %s\n" "$GOROUTINE"
+    esac
+}
+
+proxied() {
+    case $1 in
+        config)
+            cat <<'EOM'
+graph_title Syncthing relay total proxied bits
+graph_category network
+graph_vlabel bits
+graph_args --base 1000
+strelaysrv_proxied.label bits
+strelaysrv_proxied.cdef strelaysrv_proxied,8,*
+EOM
+            exit 0;;
+	    *)
+            STATUS=$(getstatus)
+            BP=$(echo "$STATUS" | "$JQ" '.bytesProxied ')
+            printf "strelaysrv_proxied.value %s\n" "$BP"
+    esac
+}
+
+transfer() {
+    case $1 in
+        config)
+            cat <<'EOM'
+graph_title Syncthing relay transfer rate
+graph_category network
+graph_vlabel bps
+graph_args --base 1000
+strelaysrv_transfer.label bps
+strelaysrv_transfer.cdef strelaysrv_transfer,1000,*
+EOM
+            exit 0;;
+	    *)
+            STATUS=$(getstatus)
+            TRANSFER=$(echo "$STATUS" | "$JQ" '.kbps10s1m5m15m30m60m[2] ')
+            printf "strelaysrv_transfer.value %s\n" "$TRANSFER"
+    esac
+}
+
+cd "$(dirname "$0")" || exit
+
+CURL=$(which curl)
+JQ=$(which jq) 
+
+case $(basename "$0") in 
+    strelaysrv_num)
+	num "$1"
+	exit 0;;
+    strelaysrv_uptime)
+	uptime "$1"
+	exit 0;;
+    strelaysrv_goroutine)
+	goroutine "$1"
+	exit 0;;
+    strelaysrv_proxied)
+	proxied "$1"
+	exit 0;;
+    strelaysrv_transfer)
+	transfer "$1"
+	exit 0;;
+esac
