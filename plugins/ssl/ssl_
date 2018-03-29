@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # -*- sh -*-
 
 : << =cut
@@ -26,14 +26,42 @@ Copyright (C) 2013 Patrick Domack <patrickdk@patrickdk.com>
 
 =cut
 
+# shellcheck disable=SC1090
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
 ARGS=${0##*ssl_}
-SITE=${ARGS/_*/}
-PORT=${ARGS##*_}
-if [ "$PORT" = "$SITE" ]; then
-	PORT=443
+if echo "$ARGS" | grep -q "_"; then
+    SITE=$(echo "$ARGS" | cut -f 1 -d "_")
+    PORT=$(echo "$ARGS" | cut -f 2 -d "_")
+else
+    SITE=$ARGS
+    PORT=443
 fi
+
+
+# Read data including a certificate from stdin and output the (fractional) number of days left
+# until the expiry of this certificate. The output is empty if parsing failed.
+parse_valid_days_from_certificate() {
+    local input_data
+    local valid_until_string
+    local valid_until_epoch
+    local now_epoch
+    local input_data
+    input_data=$(cat)
+    if echo "$input_data" | grep -q -- "-----BEGIN CERTIFICATE-----"; then
+        valid_until_string=$(echo "$input_data" | openssl x509 -noout -enddate \
+            | grep "^notAfter=" | cut -f 2 -d "=")
+        if [ -n "$valid_until_string" ]; then
+            valid_until_epoch=$(date --date="$valid_until_string" +%s)
+            if [ -n "$valid_until_epoch" ]; then
+                now_epoch=$(date +%s)
+                # calculate the number of days left
+                echo "$valid_until_epoch" "$now_epoch" | awk '{ print(($1 - $2) / (24 * 3600)); }'
+            fi
+        fi
+    fi
+}
+
 
 case $1 in
     config)
@@ -53,18 +81,7 @@ esac
 
 cert=$(echo "" | openssl s_client -CApath /etc/ssl/certs -servername "${SITE}" -connect "${SITE}:${PORT}" 2>/dev/null);
 
-if [[ "${cert}" = *"-----BEGIN CERTIFICATE-----"* ]]; then
-	echo "${cert}" \
-		| openssl x509 -noout -enddate \
-		| awk -F= 'BEGIN {
-			split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", month, " ");
-			for (i=1; i<=12; i++)
-				mdigit[month[i]] = i;
-		}
-		/notAfter/ {
-			split($0,a,"="); split(a[2],b," "); split(b[3],time,":");
-			datetime=b[4] " " mdigit[b[1]] " " b[2] " " time[1] " " time[2] " " time[3];
-			days=(mktime(datetime)-systime())/86400;
-			print "expire.value " days;
-		}'
-fi
+days_left=$(echo "$cert" | parse_valid_days_from_certificate)
+[ -n "$days_left" ] || days_left="U"
+
+printf "expire.value %s\n" "$days_left"
