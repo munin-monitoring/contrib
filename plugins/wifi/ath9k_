@@ -5,6 +5,7 @@
 #   * rate control statistics ("rc_stats")
 #   * events (dropped, transmitted, beacon loss, ...)
 #   * traffic (packets, bytes)
+#   * DFS events (processed patterns, approved signals)
 #
 # All data is collected for each separate station (in case of multiple
 # connected peers). Combined graphs are provided as a summary.
@@ -15,7 +16,19 @@
 #   * micropython
 #
 #
-# Copyright (C) 2015 Lars Kruse <devel@sumpfralle.de>
+# The following graphs are generated for each physical ath9k interface:
+#     phy0_wifi0_traffic
+#       phy0_wifi0_traffic.station0
+#      ...
+#    pyh0_wifi0_events
+#      phy0_wifi0_events.station0
+#      ...
+#    pyh0_wifi0_rc_stats
+#      phy0_wifi0_rc_stats.station0
+#      ...
+#
+#
+# Copyright (C) 2015-2018 Lars Kruse <devel@sumpfralle.de>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -31,8 +44,8 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 # Magic markers
-#%# capabilities=autoconf suggest
-#%# family=auto
+#  #%# capabilities=autoconf suggest
+#  #%# family=auto
 
 """true"
 # ****************** Interpreter Selection ***************
@@ -41,14 +54,16 @@
 #
 # This "execution hack" works as follows:
 #   * the script is executed by busybox ash or another shell
-#   * the above line (three quotes before and one quote after 'true') evaluates differently for shell and python:
-#    * shell: run "true" (i.e. nothing happens)
-#    * python: ignore everything up to the next three consecutive quotes
+#   * the above line (three quotes before and one quote after 'true') evaluates differently for
+#     shell and python:
+#       * shell: run "true" (i.e. nothing happens)
+#       * python: ignore everything up to the next three consecutive quotes
 # Thus we may place shell code here that will take care for selecting an interpreter.
 
-# prefer micropython if it is available - otherwise fall back to any python (2 or 3)
-if which micropython >/dev/null; then
-    /usr/bin/micropython "$0" "$@"
+# prefer micropython if it is available - otherwise fall back to python 3
+MICROPYTHON_BIN=$(which micropython || true)
+if [ -n "$MICROPYTHON_BIN" ]; then
+    "$MICROPYTHON_BIN" "$0" "$@"
 else
     python3 "$0" "$@"
 fi
@@ -59,26 +74,20 @@ exit $?
 true <<EOF
 """
 
-
-"""
-The following graphs are generated for each physical ath9k interface:
-    phy0_wifi0_traffic
-      phy0_wifi0_traffic.station0
-      ...
-    pyh0_wifi0_events
-      phy0_wifi0_events.station0
-      ...
-    pyh0_wifi0_rc_stats
-      phy0_wifi0_rc_stats.station0
-      ...
-"""
+import os
+import os.path
+import sys
 
 
-plugin_version = "0.2"
+plugin_version = "0.5"
 
 STATION_TRAFFIC_COUNTERS = ("rx_bytes", "tx_bytes", "rx_packets", "tx_packets")
 STATION_EVENT_COUNTERS = ("tx_retry_count", "tx_retry_failed", "tx_filtered", "tx_fragments",
                           "rx_dropped", "rx_fragments", "rx_duplicates", "beacon_loss_count")
+# dictionary of fieldnames and labels
+# the labels need to match exactly in /sys/kernel/debug/ieee80211/phy0/ath9k/dfs_stats
+DFS_EVENT_COUNTERS = {"Pulse events processed": "pulses_processed",
+                      "Radars detected": "radars_detected"}
 # 16 colors (see http://munin-monitoring.org/wiki/fieldname.colour) for visualizing
 # rate control selection (see rc_stats)
 QUALITY_GRAPH_COLORS_16 = ("FF1F00", "FF4500", "FF7000", "FF9700",
@@ -87,13 +96,7 @@ QUALITY_GRAPH_COLORS_16 = ("FF1F00", "FF4500", "FF7000", "FF9700",
                            "007986", "0058A8", "0033CC", "0018DE")
 SYS_BASE_DIR = "/sys/kernel/debug/ieee80211"
 GRAPH_BASE_NAME = "ath9k_stats"
-PLUGIN_SCOPES = ("traffic", "events", "rcstats")
-
-
-import os
-import os.path
-import subprocess
-import sys
+PLUGIN_SCOPES = ("traffic", "events", "rcstats", "dfs_events")
 
 
 class Station:
@@ -114,6 +117,40 @@ class Station:
         self._rc_stats = self._parse_rc_stats()
 
     def _parse_rc_stats(self):
+        csv_filename = os.path.join(self._path, "rc_stats_csv")
+        legacy_filename = os.path.join(self._path, "rc_stats")
+        if os.path.exists(csv_filename):
+            return self._parse_rc_stats_csv(csv_filename)
+        else:
+            return self._parse_rc_stats_legacy(legacy_filename)
+
+    def _parse_rc_stats_csv(self, filename):
+        """ example content (there is no header)
+        HT20,LGI,1,ABCDP,MCS0 ,0,1477,5.6,4.5,73.6,1.4,100.0,3,1,1,89,194,82,8,1.0
+        HT20,LGI,1,,MCS1 ,1,739,10.5,0.0,0.0,0.0,0.0,0,0,0,0,1,82,8,1.0
+        HT20,LGI,1,,MCS2 ,2,493,14.9,0.0,0.0,0.0,0.0,0,0,0,0,0,82,8,1.0
+        HT20,LGI,1,,MCS3 ,3,369,18.7,0.0,0.0,0.0,0.0,0,0,0,0,1,82,8,1.0
+        HT20,LGI,1,,MCS4 ,4,246,25.3,0.0,0.0,0.0,0.0,0,0,0,0,1,82,8,1.0
+        HT20,LGI,1,,MCS5 ,5,185,30.6,0.0,0.0,0.0,0.0,0,0,0,0,0,82,8,1.0
+        HT20,LGI,1,,MCS6 ,6,164,32.9,0.0,0.0,0.0,0.0,0,0,0,0,0,82,8,1.0
+        """
+        column_map = {"rate": (4, lambda text: text.strip()), "success": (15, int)}
+        stats = {}
+        with open(filename, "r") as statsfile:
+            for index, line in enumerate(statsfile.readlines()):
+                tokens = line.split(",")
+                entry = {key: convert(tokens[column])
+                         for key, (column, convert) in column_map.items()}
+                # some "rate" values are given in MBit/s - some are MCS0..15
+                try:
+                    entry["rate_label"] = "{rate:d} MBit/s".format(rate=int(entry["rate"]))
+                except ValueError:
+                    # keep the MCS string
+                    entry["rate_label"] = entry["rate"]
+                stats[entry["rate"]] = entry
+        return stats
+
+    def _parse_rc_stats_legacy(self, filename):
         """ example content
 
          type           rate      tpt eprob *prob ret  *ok(*cum)        ok(      cum)
@@ -127,25 +164,32 @@ class Station:
          HT20/LGI    DP MCS7     35.0  90.4  95.2   5    0(   0)     63356(    88600)
          HT20/LGI       MCS8     10.5 100.0 100.0   0    0(   0)         1(        1)
 
-        beware: sometimes the last two pairs of columns are joined without withespace: "90959383(100188029)"
+        beware: sometimes the last two pairs of columns are joined without withespace
+                (e.g. "90959383(100188029)")
+        The format changed over different versions of the ath9k driver. Thus the CSV format
+        above is preferable (available since 2016).
         """
         stats = {}
-        with open(os.path.join(self._path, "rc_stats"), "r") as statsfile:
+        with open(filename, "r") as statsfile:
             rate_column = None
             skip_retry_column = False
             for index, line in enumerate(statsfile.readlines()):
-                # remove trailing linebreak, replace braces (annoyingly present in the lasf four columns)
+                # Remove trailing linebreak, replace braces (annoyingly present in the last four
+                # columns).
                 line = line.rstrip().replace("(", " ").replace(")", " ")
                 # ignore the trailing summary lines
                 if not line:
                     break
                 if index == 0:
-                    # we need to remember the start of the "rate" column (in order to skip the flags)
+                    # We need to remember the start of the "rate" column (in order to skip the
+                    # flags).
                     rate_column = line.index("rate")
                     if rate_column == 0:
-                        # the following weird format was found on a Barrier Breaker host (2014, Linux 3.10.49):
-                        #   rate      throughput  ewma prob  this prob  this succ/attempt   success    attempts
-                        #   ABCDP  6         5.4       89.9      100.0             0(  0)       171         183
+                        # The following weird format was found on a Barrier Breaker host
+                        # (2014, Linux 3.10.49):
+                        #  rate      throughput  ewma prob  this prob  this succ/attempt   success    attempts  # noqa: E501
+                        #  ABCDP  6         5.4       89.9      100.0             0(  0)       171         183  # noqa: E501
+                        # (ignore the "# noqa: ..." tags for "flake8" at the end of the lines)
                         # Thus we just assume that there are five flag letters and two blanks.
                         # Let's hope for the best!
                         rate_column = 6
@@ -153,21 +197,37 @@ class Station:
                         skip_retry_column = True
                     # skip the header line
                     continue
+                elif (index == 1) and ("MCS0" in line) and (line.index("MCS0") != rate_column):
+                    # The following weird format was found on an Attitude Adjustment host
+                    # (2012, Linux 3.3.8):
+                    #   type      rate     throughput  ewma prob   this prob  this succ/attempt   success    attempts  # noqa: E501
+                    #   HT20/LGI  t MCS0        4.9       79.0      100.0          0(  0)       1469        1664       # noqa: E501
+                    #   HT20/LGI T PMCS1       10.0       85.1      100.0          1(  1)      44661       62798       # noqa: E501
+                    #   HT20/LGI    MCS2        8.4       51.2       33.3          0(  0)      37495       64721       # noqa: E501
+                    # (ignore the "# noqa: ..." tags for "flake8" at the end of the lines)
+                    rate_column = line.index("MCS0")
+                    skip_retry_column = True
                 cutoff_line = line[rate_column:]
                 tokens = cutoff_line.split()
                 entry = {}
                 entry["rate"] = tokens.pop(0)
-                entry["throughput"] = float(tokens.pop(0))
-                entry["ewma_probability"] = float(tokens.pop(0))
-                entry["this_probability"] = float(tokens.pop(0))
-                if skip_retry_column:
-                    entry["retry"] = 0
-                else:
-                    entry["retry"] = int(tokens.pop(0))
-                entry["this_success"] = int(tokens.pop(0))
-                entry["this_attempts"] = int(tokens.pop(0))
+                # throughput (float)
+                tokens.pop()
+                # ewma_probability (float)
+                tokens.pop(0)
+                # this_probability (float)
+                tokens.pop(0)
+                # retry (int)
+                if not skip_retry_column:
+                    tokens.pop(0)
+                # this_success (int)
+                tokens.pop(0)
+                # this_attempts (int)
+                tokens.pop(0)
+                # success (int)
                 entry["success"] = int(tokens.pop(0))
-                entry["attempts"] = int(tokens.pop(0))
+                # attempts (int)
+                tokens.pop(0)
                 # some "rate" values are given in MBit/s - some are MCS0..15
                 try:
                     entry["rate_label"] = "{rate:d} MBit/s".format(rate=int(entry["rate"]))
@@ -178,7 +238,8 @@ class Station:
         return stats
 
     def _get_rc_stats_success(self):
-        rc_values = {self._get_rate_fieldname(rate["rate"]): rate["success"] for rate in self._rc_stats.values()}
+        rc_values = {self._get_rate_fieldname(rate["rate"]): rate["success"]
+                     for rate in self._rc_stats.values()}
         rc_values["sum"] = sum(rc_values.values())
         return rc_values
 
@@ -194,7 +255,8 @@ class Station:
 
     def get_values(self, scope, graph_base):
         func = self.values_map[scope]
-        yield "multigraph {base}_{suffix}.{station}".format(base=graph_base, suffix=scope, station=self.key)
+        yield "multigraph {base}_{suffix}.{station}".format(base=graph_base, suffix=scope,
+                                                            station=self.key)
         for key, value in func(self).items():
             yield "{key}.value {value}".format(key=key, value=value)
         yield ""
@@ -213,7 +275,8 @@ class Station:
 
     def get_config(self, scope, graph_base):
         func = self.config_map[scope]
-        yield "multigraph {base}_{suffix}.{station}".format(base=graph_base, suffix=scope, station=self.key)
+        yield "multigraph {base}_{suffix}.{station}".format(base=graph_base, suffix=scope,
+                                                            station=self.key)
         yield from func(self, label=self.label, siblings=[self])
 
     @classmethod
@@ -233,8 +296,10 @@ class Station:
         yield "graph_vlabel received (-) / transmitted (+)"
         yield "graph_category wireless"
         # convert bytes/s into kbit/s (x * 8 / 1000 = x / 125)
-        yield from _get_up_down_pair("kBit/s", "tx_bytes", "rx_bytes", divider=125, use_negative=False)
-        yield from _get_up_down_pair("Packets/s", "tx_packets", "rx_packets", use_negative=False)
+        yield from _get_up_down_pair("kBit/s", "tx_bytes", "rx_bytes", divider=125,
+                                     use_negative=False)
+        yield from _get_up_down_pair("Packets/s", "tx_packets", "rx_packets",
+                                     use_negative=False)
         yield ""
 
     @classmethod
@@ -272,32 +337,39 @@ class Station:
         for station in siblings:
             for rate, details in station._rc_stats.items():
                 all_rates[rate] = details
+
+        # helper for sorting of mixed alphanumeric strings
+        def num_extract(text):
+            return int("".join([char for char in text if "0" <= char <= "9"]))
+
+        # helper for getting the fieldname for a given rate
+        def get_rate_fieldname(rate_name):
+            return cls._get_rate_fieldname(all_rates[rate_name]["rate"])
+
         # return all rates
-        is_first = True
-        num_extract = lambda text: int("".join([char for char in text if "0" <= char <= "9"]))
-        get_key = lambda rate_name: cls._get_rate_fieldname(all_rates[rate_name]["rate"])
-        # add all rates for percent visualization ("MCS7,MCS6,MCS5,MCS4,MCS3,MCS2,MCS1,MCS0,+,+,+,+,+,+,+")
+        # sum up all rates for percent visualization:
+        #     "MCS7,MCS6,MCS5,MCS4,MCS3,MCS2,MCS1,MCS0,+,+,+,+,+,+,+"
         cdef = None
         for sum_rate in all_rates:
             if cdef is None:
-                cdef = get_key(sum_rate)
+                cdef = get_rate_fieldname(sum_rate)
             else:
-                cdef = "{key},{cdef},+".format(key=get_key(sum_rate), cdef=cdef)
+                cdef = "{key},{cdef},+".format(key=get_rate_fieldname(sum_rate), cdef=cdef)
         yield "sum.label Sum of all counters"
         yield "sum.type DERIVE"
         yield "sum.graph no"
         for index, rate in enumerate(sorted(all_rates, key=num_extract)):
             details = all_rates[rate]
-            key = get_key(rate)
+            key = get_rate_fieldname(rate)
             yield "{key}.label {rate_label}".format(key=key, rate_label=details["rate_label"])
             yield "{key}.type DERIVE".format(key=key)
             yield "{key}.min 0".format(key=key)
             if index < len(QUALITY_GRAPH_COLORS_16):
-                yield "{key}.colour {colour}".format(key=key, colour=QUALITY_GRAPH_COLORS_16[index])
-            yield "{key}.draw {draw_type}".format(key=key, draw_type=("AREA" if is_first else "STACK"))
+                yield "{key}.colour {colour}".format(key=key,
+                                                     colour=QUALITY_GRAPH_COLORS_16[index])
+            yield "{key}.draw AREASTACK".format(key=key)
             # divide the current value by the above sum of all counters and calculate percent
             yield "{key}.cdef 100,{key},sum,/,*".format(key=key, cdef=cdef)
-            is_first = False
         yield ""
 
 
@@ -318,14 +390,14 @@ class WifiInterface:
         #   192.168.12.76    0x1         0x2         24:a4:3c:fd:76:98     *        eth1.10
         for line in open("/proc/net/arp", "r").read().split("\n"):
             # skip empty lines
-            if not line: continue
-            tokens = line.split()
-            ip, mac = tokens[0], tokens[3]
-            # the header line can be ignored - all other should have well-formed MACs
-            if not ":" in mac: continue
-            # ignore remote peers outside of the broadcast domain
-            if mac == "00:00:00:00:00:00": continue
-            arp_cache[mac] = ip
+            if line:
+                tokens = line.split()
+                ip, mac = tokens[0], tokens[3]
+                # the header line can be ignored - all other should have well-formed MACs
+                if ":" in mac:
+                    # ignore remote peers outside of the broadcast domain
+                    if mac != "00:00:00:00:00:00":
+                        arp_cache[mac] = ip
         return arp_cache
 
     def _parse_stations(self):
@@ -355,32 +427,97 @@ class WifiInterface:
         yield ""
 
 
+class WifiPhy:
+
+    def __init__(self, name, path, graph_base):
+        self._path = path
+        self._graph_base = graph_base
+        self.name = name
+        self.dfs_events = self._parse_dfs_events()
+        self.interfaces = tuple(self._parse_interfaces())
+
+    def _parse_dfs_events(self):
+        result = {}
+        fname = os.path.join(self._path, "ath9k", "dfs_stats")
+        if not os.path.exists(fname):
+            # older ath9k modules (e.g. Linux 3.3) did not provide this data
+            return {}
+        for line in open(fname, "r").read().split("\n"):
+            tokens = line.split(":")
+            if len(tokens) == 2:
+                label, value = tokens[0].strip(), tokens[1].strip()
+                if label in DFS_EVENT_COUNTERS:
+                    fieldname = DFS_EVENT_COUNTERS[label]
+                    result[fieldname] = value
+        return result
+
+    def _parse_interfaces(self):
+        for item in os.listdir(self._path):
+            if item.startswith("netdev:"):
+                wifi = item.split(":", 1)[1]
+                label = "{phy}/{interface}".format(phy=self.name, interface=wifi)
+                wifi_path = os.path.join(self._path, item)
+                graph_base = "{base}_{phy}_{interface}".format(base=self._graph_base,
+                                                               phy=self.name, interface=wifi)
+                yield WifiInterface(label, wifi_path, graph_base)
+
+    def get_config(self, scope):
+        if scope == "dfs_events":
+            yield "multigraph {graph_base}_dfs_events".format(graph_base=self._graph_base)
+            yield "graph_title DFS Events"
+            yield "graph_vlabel events per second"
+            yield "graph_args --base 1000 --logarithmic"
+            yield "graph_category wireless"
+            for label, fieldname in DFS_EVENT_COUNTERS.items():
+                yield "{fieldname}.label {label}".format(fieldname=fieldname, label=label)
+                yield "{fieldname}.type COUNTER".format(fieldname=fieldname)
+            yield ""
+        else:
+            for interface in self.interfaces:
+                yield from interface.get_config(scope)
+
+    def get_values(self, scope):
+        if scope == "dfs_events":
+            yield "multigraph {graph_base}_dfs_events".format(graph_base=self._graph_base)
+            for fieldname, value in self.dfs_events.items():
+                yield "{fieldname}.value {value}".format(fieldname=fieldname, value=value)
+            yield ""
+        else:
+            for interface in self.interfaces:
+                yield from interface.get_values(scope)
+
+
 class Ath9kDriver:
 
     def __init__(self, path, graph_base):
         self._path = path
         self._graph_base = graph_base
-        self.interfaces = tuple(self._parse_interfaces())
+        self.phys = list(self._parse_phys())
 
-    def _parse_interfaces(self):
+    def _parse_phys(self):
+        if not os.path.exists(self._path):
+            return
         for phy in os.listdir(self._path):
             phy_path = os.path.join(self._path, phy)
-            for item in os.listdir(phy_path):
-                if item.startswith("netdev:"):
-                    wifi = item.split(":", 1)[1]
-                    label = "{phy}/{interface}".format(phy=phy, interface=wifi)
-                    wifi_path = os.path.join(phy_path, item)
-                    graph_base = "{base}_{phy}_{interface}".format(base=self._graph_base, phy=phy, interface=wifi)
-                    yield WifiInterface(label, wifi_path, graph_base)
+            graph_base = "{base}_{phy}".format(base=self._graph_base, phy=phy)
+            yield WifiPhy(phy, phy_path, graph_base)
 
     def get_config(self, scope):
-        for interface in self.interfaces:
-            yield from interface.get_config(scope)
+        for phy in self.phys:
+            yield from phy.get_config(scope)
 
     def get_values(self, scope):
-        for interface in self.interfaces:
-            yield from interface.get_values(scope)
+        for phy in self.phys:
+            yield from phy.get_values(scope)
 
+    def has_dfs_support(self):
+        for phy in self.phys:
+            if phy.dfs_events:
+                return True
+        return False
+
+    def has_devices(self):
+        return len(self.phys) > 0
 
 
 def _get_up_down_pair(unit, key_up, key_down, factor=None, divider=None, use_negative=True):
@@ -407,8 +544,9 @@ def get_scope():
     name_prefix = "ath9k_"
     if called_name.startswith(name_prefix):
         scope = called_name[len(name_prefix):]
-        if not scope in PLUGIN_SCOPES:
-            print_error("Invalid scope requested: {0} (expected: {1})".format(scope, PLUGIN_SCOPES))
+        if scope not in PLUGIN_SCOPES:
+            print_error("Invalid scope requested: {0} (expected: {1})"
+                        .format(scope, PLUGIN_SCOPES))
             sys.exit(2)
     else:
         print_error("Invalid filename - failed to discover plugin scope")
@@ -422,23 +560,37 @@ def print_error(message):
     sys.stderr.write(message + linesep)
 
 
+def do_fetch(ath9k):
+    for item in ath9k.get_values(get_scope()):
+        print(item)
+
+
+def do_config(ath9k):
+    for item in ath9k.get_config(get_scope()):
+        print(item)
+
+
 if __name__ == "__main__":
     ath9k = Ath9kDriver(SYS_BASE_DIR, GRAPH_BASE_NAME)
     # parse arguments
     if len(sys.argv) > 1:
-        if sys.argv[1]=="config":
-            for item in ath9k.get_config(get_scope()):
-                print(item)
+        if sys.argv[1] == "config":
+            do_config(ath9k)
+            if os.getenv("MUNIN_CAP_DIRTYCONFIG") == "1":
+                do_fetch(ath9k)
             sys.exit(0)
         elif sys.argv[1] == "autoconf":
-            if os.path.exists(SYS_BASE_PATH):
+            if os.path.exists(SYS_BASE_DIR):
                 print('yes')
             else:
-                print('no')
+                print('no (missing ath9k driver sysfs directory: {})'.format(SYS_BASE_DIR))
             sys.exit(0)
         elif sys.argv[1] == "suggest":
-            for scope in PLUGIN_SCOPES:
-                print(scope)
+            if ath9k.has_devices():
+                for scope in PLUGIN_SCOPES:
+                    # skip the "dfs_events" scope if there is not DFS support
+                    if (scope != "dfs_events") or ath9k.has_dfs_support():
+                        print(scope)
             sys.exit(0)
         elif sys.argv[1] == "version":
             print_error('olsrd Munin plugin, version %s' % plugin_version)
@@ -451,9 +603,7 @@ if __name__ == "__main__":
             print_error("Unknown argument")
             sys.exit(1)
 
-    # output values
-    for item in ath9k.get_values(get_scope()):
-        print(item)
+    do_fetch(ath9k)
 
 # final marker for shell / python hybrid script (see "Interpreter Selection")
 EOF = True
