@@ -38,9 +38,18 @@ TP-Link SG108E/SG1016E switches with web management (http). Tested with software
 =head1 CONFIGURATION
 
 Add this to the relevant munin-node config file. You can specify switch address, username, password and description for each port
-(the switch management doesn't allow port descriptions)
+(the switch management doesn't allow port descriptions). You should also create a fake host for the switch and attach the graphs to it.
+Details here: https://cweiske.de/tagebuch/munin-multiple-hosts.htm
+
+In /etc/munin/munin.conf add a new host called tl-sg108e (or whatever you want):
+  [tl-sg108e]
+    address 127.0.0.1
+    use_node_name no 
+
+In /etc/munin/plugin-conf.d/munin-node add the following entry:
 
   [tl_sg]
+  host_name tl-sg108e
   env.host 192.168.1.12
   env.port 80
   env.numberOfPorts 8
@@ -54,6 +63,8 @@ Add this to the relevant munin-node config file. You can specify switch address,
   env.p6 'Link to PC3'
   env.p7 'Not used'
   env.p8 'Uplink'
+
+The name in host_name must match the name defined in munin.conf, and the tl_sg name must match the plugin instance name (symlink).
 
 If you're monitoring multiple switches, create different symlinks in /etc/munin/plugins pointing to this plugin and use the symlink
 name as a configuration section as described above.
@@ -94,6 +105,17 @@ my $username = ( $ENV{username} || 'admin' );
 my $password = ( $ENV{password} || 'admin' );
 my $numberOfPorts = ( $ENV{numberOfPorts} || '8' );
 
+my %speedMapping = (
+    0 => "down",
+    1 => "auto",
+    2 => "10M half-duplex",
+    3 => "10M full-duplex",
+    4 => "100M half-duplex",
+    5 => "100M full-duplex",
+    6 => "1G full-duplex",
+);
+
+
 #populate the ports and descriptions based on ENV
 my %ports = ();
 for ( 1 .. $numberOfPorts ) {
@@ -123,8 +145,10 @@ if ( $ARGV[0] and $ARGV[0] eq "config" ) {
               "graph_category network\n";
             if ( $graphType eq 'Speed' ) {
                 print "graph_vlabel speed\n";
-                print "p${port}.label Port $port Link speed\n";
-                print "p${port}.type GAUGE\n";
+                foreach my $value (sort keys %speedMapping){
+                    print "p${port}_$value.label $speedMapping{$value}\n";
+                    print "p${port}_$value.type GAUGE\n";
+                }
             }
             else {
                 print "graph_vlabel packets\n";
@@ -158,12 +182,12 @@ my $response = $mech->response();
 $result   = $mech->get("http://$host:$tcpport/PortStatisticsRpm.htm");
 $response = $mech->response();
 
-# print STDERR $response->code()."\n";
+#print STDERR $response->code()."\n";
 
 # get the data
 my $data = $mech->content( raw => 1 );
 
-# print STDERR "$data\n";
+#print STDERR "$data\n";
 
 # The page stores the data in a table, but internally it is stored in 3 javascript arrays:
 # state:[1,1,1,1,1,1,1,1,0,0],
@@ -171,7 +195,7 @@ my $data = $mech->content( raw => 1 );
 # pkts:[0,0,0,0,14141090,0,10461386,0,14226,0,12252,0,0,0,0,0,2872063,0,1402200,0,59764503,0,34619246,0,4913873,0,4393574,0,44170456,0,68499653,0,0,0]
 
 # state: 1 - Enabled, 0 - Disabled (administratively)
-# link_status: 0 - down, 5 - 100Mbps full, 6 - 1Gbps
+# link_status: 0 - down, 1 - auto, 2 - 10Mbps half, 3 - 10Mbps full, 4 - 100Mbps half, 5 - 100Mbps full, 6 - 1Gbps full
 # pkts: every group of 4 values represent txGoodPkt, txBadPkt, rxGoodPkt, rxBadPkt
 
 # parse good/bad packets
@@ -204,8 +228,9 @@ if ( $data =~ /link_status:\[([0-9,]+)\]/ ) {
         my $currentPort = $_;
         my $link        = $links[ $currentPort - 1 ];
         print "multigraph Speed_if_$currentPort\n";
-
-        print "p${currentPort}.value $link\n";
+        foreach my $value (sort keys %speedMapping){
+            print "p${currentPort}_$value.value ".(($value eq $link)?1:0)."\n";
+        }
     }
 
 }
