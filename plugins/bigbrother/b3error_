@@ -1,0 +1,95 @@
+#!/bin/bash
+#
+# Plugin to monitor BigBrotherBot errors
+#
+#    ln -s /usr/share/node/node/plugins-auto/b3error_
+#    /etc/munin/node.d/b3error_name
+#
+#    you must provide the path to bigbrotherbot logfile with env.logfile
+# Parameters understood:
+#
+# 	config   (required)
+# 	autoconf (optional)
+#
+# Magic markers (optional - used by munin-config and installation
+# scripts):
+#
+#%# capabilities=autoconf
+
+B3NAME=${0##*/b3error_}
+LOGTAIL=${logtail:-`which logtail`}
+#logfile from env
+STATEFILE=$MUNIN_PLUGSTATE/${B3NAME}.offset
+
+mktempfile () {
+  mktemp -t $1
+}  
+
+
+if [ "$1" = "autoconf" ]; then
+    if [ -n "${B3NAME}" -a -f "${logfile}" -a -n "${LOGTAIL}" -a -x "${LOGTAIL}" ]; then
+        echo yes
+        exit 0
+    else
+        echo -n "no"
+        if [ ! -n "${B3NAME}" ]; then
+          echo " (you must call that plugin with a symlink)"
+        elif [ ! -n "${logfile}" ]; then
+          echo " (you must set the env variable env.logfile)"
+        elif [ ! -f "${logfile}" ]; then
+          echo " (log file : '${logfile}' not found)"
+        elif [ ! -n "${LOGTAIL}" ]; then
+          echo " (logtail required)"
+        elif [ ! -x "${LOGTAIL}" ]; then
+          echo " (cannot execute ${LOGTAIL})"
+        fi
+        exit 1
+    fi
+fi
+
+if [ "$1" = "config" ]; then
+    echo "graph_title BigBrotherBot errors - ${B3NAME}"
+    cat <<'EOM' 
+graph_args --base 1000 -l 0
+graph_vlabel Errors
+graph_category Games
+errors.label total errors
+errors.draw AREA
+rconreading.label RCON: ERROR reading
+rconreading.draw AREA
+eventqueue.label Event sat in queue too long
+eventqueue.draw AREA
+parseline.label could not parse line
+parseline.draw AREA
+other.label Other errors
+other.draw AREA
+EOM
+    exit 0
+fi
+
+errors=U
+rconsocketerror=U
+parseline=U
+eventqueue=U
+other=U
+
+TEMP_FILE=`mktempfile munin-${B3NAME}-log.XXXXXX`
+if [ -n "$TEMP_FILE" -a -f "$TEMP_FILE" ]
+then
+    $LOGTAIL ${logfile} $STATEFILE > ${TEMP_FILE}
+    errors=`sed -rne 's/^[0-9]+\s+[0-9:]+\s+ERROR\s+(.+)/\1/p' ${TEMP_FILE} | wc -l`
+    rconreading=`grep 'RCON: ERROR reading' ${TEMP_FILE} | wc -l`
+    parseline=`grep 'could not parse line' ${TEMP_FILE} | wc -l`
+    eventqueue=`grep '**** Event sat in queue too long:' ${TEMP_FILE} | wc -l`
+    other=$(( $errors - ($rconreading + $parseline + $eventqueue) ))
+    /bin/rm -f $TEMP_FILE
+fi
+
+
+echo "errors.value ${errors}"
+echo "rconreading.value ${rconreading}"
+echo "eventqueue.value ${eventqueue}"
+echo "parseline.value ${parseline}"
+echo "other.value ${other}"
+
+exit 0

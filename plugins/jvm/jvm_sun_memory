@@ -1,0 +1,182 @@
+#!/usr/bin/perl -w
+
+# Sun JVM memory statistics.  Parses a verbose log of minor GC and
+# tenured GC stats.
+
+# To determine the totalheap value it looks for maxmem stats (from a
+# tenured gc) in the last 5 minutes of the log file.  If there are no
+# log lines in the last 5 minutes the value will be U(ndefined).
+
+# Since the log lines are timestamped with seconds since the JVM
+# started we look at the last line of the log to determine when "now"
+# is for the JVM.  In a reasonably active JVM there will be several
+# minor GCs a minute so the "now" approximation based on these log
+# lines are close enough.
+
+# Configuration (common with the other sun_jvm_* plugins in this family):
+# [jvm_sun_*]
+#    env.logfile /var/foo/java.log  (default: /var/log/app/jvm/gc.log)
+#    env.graphtitle                 (default: "Sun Java")
+
+# You need to configure your Sun JVM with these options:
+# -verbose:gc 
+# -Xloggc:/var/log/app/jvm/gc.log
+# -XX:+PrintGCTimeStamps
+# -XX:+PrintGCDetails
+
+# History: 
+
+# This plugin was developed by various people over some time - no logs
+# of this has been found. - In 2006 significant contributions was
+# financed by NRK (Norwegian Broadcasting Coproration) and performed
+# by Nicolai Langfeldt of Linpro AS in Oslo, Norway.
+
+# $Id: $
+
+use strict;
+use warnings;
+use Fcntl qw(:seek);
+
+# Full path to jvm log file
+my $logfile = $ENV{logfile} || "/var/log/app/jvm/gc.log";
+my $grtitle = $ENV{graphtitle} || "Sun Java";
+
+# Title that appears on munin graph
+my $title = "$grtitle memory usage";
+# Extended information that appears below munin graph
+my $info = "Write som info about this graph...";
+
+sub analyze_record {
+    # Match all interesting elements of a record and insert them 
+    # into a hash
+
+    my $record = shift;
+    my %elements;
+
+    if ( $record =~
+	 m/(\d+\.\d+).+?(\d+\.\d+).+?DefNew: (\d+).+?(\d+).+?(\d+).+?(\d+\.\d+).+?(\d+\.\d+): \[Tenured(\[U.+\])*: (\d+).+?(\d+).+?(\d+).+?(\d+\.\d+).+?(\d+).+?(\d+).+?(\d+).+?(\d+\.\d+).+/
+	 ) {
+	%elements = (
+		     total_timestamp   => $1,
+		     defnew_timestamp  => $2,
+		     defnew_mem_from   => $3*1024,
+		     defnew_mem_to     => $4*1024,
+		     defnew_mem_max    => $5*1024,
+		     defnew_time_used  => $6,
+		     tenured_timestamp => $7,
+		     tenured_mem_from  => $9*1024,
+		     tenured_mem_to    => $10*1024,
+		     tenured_mem_max   => $11*1024,
+		     tenured_time_used => $12,
+		     total_mem_from    => $13*1024,
+		     total_mem_to      => $14*1024,
+		     total_mem_max     => $15*1024,
+		     total_time_used   => $16 );
+    }
+    return %elements;
+}
+
+my $record='';
+
+# Print config information to munin server
+if ( $ARGV[0] and $ARGV[0] eq "config" ) {
+  print "graph_title $title\n";
+  print "graph_vlabel Bytes Memory\n";
+  print "graph_category virtualization\n";
+  print "graph_args --lower-limit 0\n";
+  print "graph_info Show heap memory usage of JVM\n";
+  print "graph_order defnew_max tenured_max tenured_start tenured_end defnew_start defnew_end totalheap totalheapmax\n";
+  print "defnew_max.label DefNew max\n";
+  print "defnew_max.draw AREA\n";
+  print "tenured_max.label Tenured max\n";
+  print "tenured_max.draw STACK\n";
+  print "tenured_max.info DefNew max and Tenured max are stacked to show the total heap memory usage\n";
+  print "tenured_start.label Tenured start\n";
+  print "tenured_start.info Tenured (long term) memory used at start of GC\n";
+  print "tenured_end.label Tenured end\n";
+  print "tenured_end.info Tenured (long term) memory used at end of GC\n";
+  print "defnew_start.label DefNew start\n";
+  print "defnew_start.info Short term memory used by objects at start of GC\n";
+  print "defnew_end.label DefNew end\n";
+  print "defnew_end.info Short term memory claimed by objects that survived the GC\n";
+  print "totalheapmax.label Maximum total heap\n";
+  print "totalheapmax.info Maximum used total heap last 5 minutes\n";
+  print "totalheaptomax.label Total heap end\n";
+  print "totalheaptomax.info Heapsize at maximum after GC\n";
+  exit 0;
+}
+
+# Scan through the log file and keep the last instance of a
+# Tenured record in $record.
+
+my %last;
+# We can't be sure that there is a totalmemto in the log.
+my $totalmemto_atmax = 0;
+my $totalmemfrom_max = 0;
+
+
+open( FILE, "< $logfile" ) or die "Can't open $logfile: $!\n";
+
+# We want to collect the highest total_mem_max in the last 5 minute period.
+seek(FILE,-4096,SEEK_END);
+my $now;
+my $lastnow = 0;
+
+while (<FILE>) {
+    chomp;
+    if (/:/) {
+	($now,undef) = split(/:/,$_,2);
+	$now = $lastnow unless $now;
+    }
+}
+
+my $noolderthan = $now - 300;
+
+# print "Latest time is: $now.  5 min ago is $noolderthan\n";
+
+seek(FILE,0,SEEK_SET);
+
+$lastnow = 0;
+$now=0;
+
+while (<FILE>) {
+    chomp;
+    if (/:/) {
+	($now,undef) = split(/:/,$_,2);
+	$now = $lastnow unless $now;
+    }
+    
+    if (/.+Tenured.+/) {
+	$record = $_;
+    } elsif (/^:.+/) {
+	$record .= $_;
+    }
+    if ($record =~ /Tenured.+secs\]$/) {
+	%last = analyze_record($record);
+
+#print "($now > $noolderthan and $last{total_mem_from} > $totalmemfrom_max)\n";
+
+	if ($now > $noolderthan and $last{total_mem_from} > $totalmemfrom_max) {
+	    $totalmemfrom_max = $last{total_mem_max};
+	    $totalmemto_atmax = $last{total_mem_to};
+#	    print "New larger at $now: $totalmemto_max\n";
+	}
+	$record = '';
+    }
+    $lastnow=$now;
+}
+close FILE;
+
+$totalmemfrom_max=$totalmemto_atmax='U' if $totalmemfrom_max==0;
+
+# Print the values to be represented in the munin graph
+print "tenured_max.value  $last{total_mem_max}\n";
+print "tenured_start.value $last{total_mem_from}\n";
+print "tenured_end.value $last{total_mem_to}\n";
+
+print "defnew_max.value $last{defnew_mem_max}\n";
+print "defnew_start.value $last{defnew_mem_from}\n";
+print "defnew_end.value $last{defnew_mem_to}\n";
+
+print "totalheapmax.value $totalmemfrom_max\n";
+print "totalheaptomax.value $totalmemto_atmax\n";

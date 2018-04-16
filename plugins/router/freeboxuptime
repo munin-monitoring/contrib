@@ -1,0 +1,129 @@
+#!/bin/bash
+#
+# Plugin made by Dju
+# useful to know your freebox uptime, and to see when it has rebooted ;)
+#
+# Uses nmap to get the uptime (by tcp connection, RFC1323)
+# ports usually opened on the freebox: 80 554 9100
+#
+# ----------------------------------------------------------------------------------------------------
+# nmap example with the -O option
+# on a freebox v5
+#
+# Starting Nmap 4.62 ( http://nmap.org ) at 2010-12-17 02:25 CET
+# Interesting ports on mafreebox.freebox.fr (212.27.38.253):
+# Not shown: 1712 filtered ports
+# PORT     STATE SERVICE
+# 80/tcp   open  http
+# 554/tcp  open  rtsp
+# 9100/tcp open  jetdirect
+# Warning: OSScan results may be unreliable because we could not find at least 1 open and 1 closed port
+# Device type: remote management
+# Running: HP embedded
+# OS details: HP Onboard Administrator management console
+# Uptime: 7.226 days (since Thu Dec  9 21:01:44 2010)
+# 
+# OS detection performed. Please report any incorrect results at http://nmap.org/submit/ .
+# Nmap done: 1 IP address (1 host up) scanned in 29.279 seconds
+# ----------------------------------------------------------------------------------------------------
+#
+# by using nmap on a specific tcp port, the detection is pretty fast (2-5 seconds)
+# with this command: nmap -O --osscan-guess -p80 remote_host
+#
+# if you dont want nmap to query your freebox each time, set CACHE_HOURS=n
+# to keep the uptime in cache for n hours
+# if not, set CACHE_HOURS=0
+#
+# to allow this plugin to use nmap, edit /etc/munin/plugin-conf.d/munin-node and add
+# [FreeboxUptime]
+# user root
+#
+# exit value if error:
+# 1: nmap not installed
+# 2: freebox not reachable by ping
+# 3: uptime not found in nmap result
+#
+# Magic markers - optional - used by installation scripts and
+# munin-config:
+#
+#%# family=manual
+#%# capabilities=autoconf
+
+CACHE_FILE=$MUNIN_PLUGSTATE/FreeboxUptime.cache
+CACHE_HOURS=3
+NMAP=$(which nmap)
+TCP_PORT=9100
+FREEBOX_HOST=mafreebox.freebox.fr
+
+# check if network connection is ok
+if ping -c1 -w1 -s20 $FREEBOX_HOST 2>/dev/null > /dev/null; then
+   PING=1
+else
+   PING=0
+fi
+
+if [ "$1" = "autoconf" ]; then
+	if [ -z "$NMAP" ]; then
+		echo "no (nmap not installed)"
+		exit 1
+	else
+		if [ $PING -eq 0 ]; then
+			echo "no (Freebox not reachable)"
+			exit 2
+		else
+			echo yes 
+			exit 0
+		fi
+	fi
+fi
+
+
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title Freebox Uptime'
+	echo 'graph_category system'
+	echo 'graph_args --base 1000 -l 0 '
+	echo 'graph_vlabel uptime in days'
+	graph_info="Shows the uptime of your freebox (cache: ${CACHE_HOURS}h"
+	if [ -f $CACHE_FILE ]; then
+		lastCheck=$(stat -c %z $CACHE_FILE | cut -d"." -f1)
+		lastReboot=$(awk -F"@" '{print $2}' $CACHE_FILE)	
+		graph_info="${graph_info} - last check: ${lastCheck} - last reboot: $lastReboot"
+	else
+		graph_info="${graph_info})"
+	fi
+	echo "graph_info ${graph_info}"
+	echo 'uptime.label uptime'
+	echo 'uptime.draw AREA'
+	exit 0
+fi
+
+
+if [ -z "$NMAP" ]; then
+	exit 1
+elif [ $PING -eq 0 ]; then
+	exit 2
+else
+	use_nmap=1
+	if [ -f $CACHE_FILE ]; then
+		ts_cache=$(stat -c %Y $CACHE_FILE)
+		ts_now=$(date "+%s")
+		sec_diff=$(expr $ts_now - $ts_cache)
+		hours_diff=$(expr $sec_diff / 3600)
+		if [ $hours_diff -lt $CACHE_HOURS ]; then
+			use_nmap=0
+			uptime=$(cat $CACHE_FILE | awk -F"@" '{print $1}')
+		fi
+	fi
+	if [ $use_nmap -eq 1 ]; then
+		uptime=$(nmap -O --osscan-guess -p${TCP_PORT} ${FREEBOX_HOST} | grep Uptime)
+		if [ -z "$uptime" ]; then
+			exit 3
+		else
+			lastReboot=$(echo $uptime | grep -o '(since .*)' | sed 's/(since //g')
+			uptime=$(echo $uptime | awk '{print $2}')
+			echo "${uptime}@${lastReboot}" > $CACHE_FILE
+		fi
+	fi
+	echo "uptime.value ${uptime}"
+fi

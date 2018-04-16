@@ -18,49 +18,56 @@
 # This plugin requires pythons sphinxsearch module which can be installed via easy_install.
 #
 # ## Installation
-# Copy file to directory /usr/share/munin/pligins/ and create symbolic links for each index you wish to monitor.
+# Copy file to directory /usr/share/munin/pligins/ and create symbolic links for each index you
+# wish to monitor.
 # For example, if you've got indexes called index1 and index2 create these symlinks:
 #
 #     ln -s /usr/share/munin/plugins/sphindex_ /etc/munin/plugins/sphindex_index1
 #     ln -s /usr/share/munin/plugins/sphindex_ /etc/munin/plugins/sphindex_index2
 #
-# If you run munin-node at different box than Sphinxsearch you can specify hostname and port options in munin-node.conf:
+# If you run munin-node at different box than Sphinxsearch you can specify hostname and port
+# options in munin-node.conf:
 #
 #     [sphindex_*]
 #     env.server 10.216.0.141
 #     env.port 9312
 #
-#%# capabilities=autoconf
-#%# family=contrib
+#  #%# capabilities=autoconf
+#  #%# family=contrib
 
-import os, sys, sphinxsearch
-progName  = sys.argv[0]
-indexName = progName[progName.find("_")+1:]
+import os
+import sys
+
+import sphinxsearch
+
+
+prog_name = sys.argv[0]
+index_name = prog_name[prog_name.find("_")+1:]
 
 if len(sys.argv) == 2 and sys.argv[1] == "autoconf":
-    print "yes"
+    print("yes")
 elif len(sys.argv) == 2 and sys.argv[1] == "config":
     warning = "0:"
     critical = "0:"
-    if "warning" in os.environ and os.environ["warning"] != None:
+    if "warning" in os.environ and os.environ["warning"]:
         warning = os.environ["warning"]
-    if "critical" in os.environ and os.environ["critical"] != None:
+    if "critical" in os.environ and os.environ["critical"]:
         critical = os.environ["critical"]
 
-    print "graph_title Sphinx index %s stats" % indexName
-    print "graph_vlabel docs count"
-    print "graph_category search"
-    print "documents_count.warning %s" % warning
-    print "documents_count.critical %s" % critical
-    print "documents_count.label Documents count in index"
-    print "graph_args --base 1000 -l 0"
+    print("graph_title Sphinx index %s stats" % index_name)
+    print("graph_vlabel docs count")
+    print("graph_category search")
+    print("documents_count.warning %s" % warning)
+    print("documents_count.critical %s" % critical)
+    print("documents_count.label Documents count in index")
+    print("graph_args --base 1000 -l 0")
 else:
-    if "server" in os.environ and os.environ["server"] != None:
+    if "server" in os.environ and os.environ["server"]:
         server = os.environ["server"]
     else:
-        server =  "localhost"
+        server = "localhost"
 
-    if "port" in os.environ and os.environ["port"] != None:
+    if "port" in os.environ and os.environ["port"]:
         try:
             port = int(os.environ["port"])
         except ValueError:
@@ -71,7 +78,7 @@ else:
     client = sphinxsearch.SphinxClient()
     client.SetServer(server, port)
     client.SetLimits(0, 1, 0, 0)
-    result = client.Query("", indexName)
-    docCount = result["total_found"]
+    result = client.Query("", index_name)
+    doc_count = result["total_found"]
 
-    print "documents_count.value %d" % docCount
+    print("documents_count.value %d" % doc_count)

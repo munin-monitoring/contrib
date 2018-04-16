@@ -1,0 +1,214 @@
+#!/bin/bash
+#
+# Plugin to monitor spamdyke
+#
+#    Spamdyke logs expected to be inside /var/log/mail.info
+#    logtail must be installed 
+#    Plugin state stored in /var/lib/munin/plugin-state
+#      (statedir as defined in munin debian packages)
+# 
+#    You may override spamdyke logfile in plugin-conf.d/munin-node, and
+#    give the user/group with enough rights to read your logs (group
+#    adm on stock debian works fine)
+#
+#    [spamdyke]
+#    env.logfile /var/log/maillog
+#    group adm
+#
+# 
+#
+# Parameters understood:
+#
+# 	config   (required)
+# 	autoconf (optional)
+#
+
+mktempfile () {
+mktemp -t 
+}       
+
+MAIL_LOG=${logfile:-/var/log/mail.info}
+LOGTAIL=${logtail:-`which logtail`}
+STATEFILE=$MUNIN_PLUGSTATE/spamdyke.offset
+
+if [ "$1" = "autoconf" ]; then
+        if [ -f "${MAIL_LOG}" -a -n "${LOGTAIL}" -a -x "${LOGTAIL}" ] ; then
+		echo yes
+		exit 0
+	else
+		echo no
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title spamdyke filtering'
+	echo 'graph_category mail'
+	echo 'graph_vlabel Count'
+	echo 'graph_args --base 1000 -l 0'
+	echo 'graph_total total'
+
+	echo 'allowed.label ALLOWED'
+	echo 'allowed.info The message passed all filters. qmail may still bounce the message for other reasons, however. '
+	echo 'allowed.min 1'
+	echo 'allowedauthenticated.label ALLOWED_AUTHENTICATED'
+	echo 'allowedauthenticated.info The remote client successfully authenticated using SMTP AUTH with spamdyke. If qmail is patched to provide SMTP AUTH, this code will never be used '
+	echo 'allowedauthenticated.min 1'
+	echo 'allowedtls.label ALLOWED_TLS'
+	echo 'allowedtls.info The remote client successfully started a TLS session with spamdyke '
+	echo 'allowedtls.min 1'
+	echo 'timeout.label TIMEOUT'
+	echo 'timeout.info The connection timed out, either in total time ("connection-timeout-secs") or idle time ("idle-timeout-secs"). If the connection was already being blocked for another reason, the code for that error is given as REALCODE '
+	echo 'timeout.min 1'
+	echo 'deniedtoomanyrecipients.label DENIED_TOO_MANY_RECIPIENTS'
+	echo 'deniedtoomanyrecipients.info The recipient was blocked because the limit ("max-recipients") was reached for this connection. The SMTP connection continues after this error occurs'
+	echo 'deniedtoomanyrecipients.min 1'
+	echo 'deniedunqualifiedrecipient.label DENIED_UNQUALIFIED_RECIPIENT'
+	echo 'deniedunqualifiedrecipient.info The recipient was blocked because the address had no domain name. The SMTP connection continues after this error occurs'
+	echo 'deniedunqualifiedrecipient.min 1'
+	echo 'deniedgraylisted.label DENIED_GRAYLISTED'
+	echo 'deniedgraylisted.info  recipient was blocked because the sender/recipient combination was graylisted '
+	echo 'deniedgraylisted.min 1'
+	echo 'deniedrdnsmissing.label DENIED_RDNS_MISSING'
+	echo 'deniedrdnsmissing.info The connection was blocked because the remote server has no rDNS name at all'
+	echo 'deniedrdnsmissing.min 1'
+	echo 'deniedrdnsresolve.label DENIED_RDNS_RESOLVE'
+	echo 'deniedrdnsresolve.info The connection was blocked because the remote servers rDNS name does not resolve '
+	echo 'deniedrdnsresolve.min 1'
+	echo 'deniedipinccrdns.label DENIED_IP_IN_CC_RDNS'
+	echo 'deniedipinccrdns.info The connection was blocked because the remote servers IP address was found in the remote servers rDNS name _and_ the remote servers rDNS name ends in a country code ("reject-ip-in-cc-rdns"). '
+	echo 'deniedipinccrdns.min 1'
+	echo 'deniedipinrdns.label DENIED_IP_IN_RDNS'
+	echo 'deniedipinrdns.info The connection was blocked because the remote servers IP address was found in the remote servers rDNS name _and_ a prohibited keyword was found in the remote servers rDNS name ("ip-in-rdns-keyword-file"). '
+	echo 'deniedipinrdns.min 1'
+	echo 'deniedearlytalker.label DENIED_EARLYTALKER'
+	echo 'deniedearlytalker.info The connection was blocked because the remote server began sending data before the SMTP greeting was issued ("greeting-delay-secs"). '
+	echo 'deniedearlytalker.min 1'
+	echo 'deniedblacklistname.label DENIED_BLACKLIST_NAME'
+	echo 'deniedblacklistname.info The connection was blocked because the base domain of the remote servers rDNS name is blacklisted ("rdns-blacklist-file" or "rdns-blacklist-dir"). '
+	echo 'deniedblacklistname.min 1'
+	echo 'deniedblacklistip.label DENIED_BLACKLIST_IP'
+	echo 'deniedblacklistip.info The connection was blocked because the remote servers IP address is blacklisted ("ip-blacklist-file"). '
+	echo 'deniedblacklistip.min 1'
+	echo 'deniedsenderblacklisted.label DENIED_SENDER_BLACKLISTED'
+	echo 'deniedsenderblacklisted.info The connection was blocked because the senders email address is blacklisted ("sender-blacklist-file"). '
+	echo 'deniedsenderblacklisted.min 1'
+	echo 'deniedrecipientblacklisted.label DENIED_RECIPIENT_BLACKLISTED'
+	echo 'deniedrecipientblacklisted.info The recipient was blocked because the recipient email address is blacklisted ("recipient-blacklist-file"). '
+	echo 'deniedrecipientblacklisted.min 1'
+	echo 'deniedrblmatch.label DENIED_RBL_MATCH'
+	echo 'deniedrblmatch.info The connection was blocked because the remote servers IP address was found on a DNS RBL ("check-dnsrbl"). '
+	echo 'deniedrblmatch.min 1'
+	echo 'deniedrhsblmatch.label DENIED_RHSBL_MATCH'
+	echo 'deniedrhsblmatch.info The connection was blocked because the remote servers reverse DNS name was found on a righthand-side DNS blacklist (RHSBL) OR the connection was blocked because the senders domain name was found on a righthand-side DNS blacklist (RHSBL). '
+	echo 'deniedrhsblmatch.min 1'
+	echo 'deniedsendernomx.label DENIED_SENDER_NO_MX'
+	echo 'deniedsendernomx.info The connection was blocked because the senders domain has no mail exchanger, making the sender address invalid'
+	echo 'deniedsendernomx.min 1'
+	echo 'deniedccessdenied.label DENIED_ACCESS_DENIED'
+	echo 'deniedaccessdenied.info The connection was blocked because the remote servers IP address or rDNS name was found in the access file with a "deny" command ("access-file"). '
+	echo 'deniedccessdenied.min 1'
+	echo 'deniedrelaying.label DENIED_RELAYING'
+	echo 'deniedrelaying.info The recipient was blocked because the recipients domain is not locally hosted ("local-domains-file") and the remote server is not allowed to relay ("access-file"). '
+	echo 'deniedrelaying.min 1'
+	echo 'deniedother.label DENIED_OTHER'
+	echo 'deniedother.info The connection was rejected by qmail (or another downstream filter), not spamdyke. '
+	echo 'deniedother.min 1'
+	echo 'failedauth.label FAILED_AUTH'
+	echo 'failedauth.info The remote server attempted to authenticate but the given username and/or password were incorrect ("smtp-auth-command" or "smtp-auth-command-encryption"). '
+	echo 'failedauth.min 1'
+	echo 'unknownauth.label UNKNOWN_AUTH'
+	echo 'unknownauth.info The remote server requested an authentication method spamdyke doesnt support. This should not happen. '
+	echo 'unknownauth.min 1'
+	echo 'failedtls.label FAILED_TLS'
+	echo 'failedtls.info The remote client attempted to start a TLS session but SSL negotiation failed.'
+	echo 'failedtls.min 1'
+        exit 0
+fi
+
+allowed=u
+allowedauthenticated=u
+allowedtls=u
+timeout=u
+deniedtoomanyrecipients=U
+deniedunqualifiedrecipient=U
+deniedgraylisted=U
+deniedrdnsmissing=U
+deniedrdnsresolve=U
+deniedipinccrdns=U
+deniedipinrdns=U
+deniedearlytalker=U
+deniedblacklistname=U
+deniedblacklistip=U
+deniedsenderblacklisted=U
+deniedrecipientblacklisted=U
+deniedrblmatch=U
+deniedrhsblmatch=U
+deniedsendernomx=U
+deniedccessdenied=U
+deniedrelaying=U
+deniedother=U
+failedauth=U
+unknownauth=U
+failedtls=U
+
+TEMP_FILE=`mktempfile munin.spamdyke.XXXXXX`
+
+if [ -n "$TEMP_FILE" -a -f "$TEMP_FILE" ]
+then
+	$LOGTAIL ${MAIL_LOG} $STATEFILE | grep "spamdyke\[.*\]:" > ${TEMP_FILE}
+
+	allowed=`grep 'spamdyke\[[0-9\]*]: ALLOWED'  ${TEMP_FILE} | wc -l`
+	allowedauthenticated=`grep 'spamdyke\[[0-9]*\]: ALLOWED_AUTHENTICATED'  ${TEMP_FILE} | wc -l`
+	allowedtls=`grep 'spamdyke\[[0-9]\]: ALLOWED_TLS'  ${TEMP_FILE} | wc -l`
+	timeout=`grep 'spamdyke\[[0-9]*\]: TIMEOUT'  ${TEMP_FILE} | wc -l`
+	deniedtoomanyrecipients=`grep 'spamdyke\[[0-9]*\]: DENIED_TOO_MANY_RECIPIENTS' ${TEMP_FILE} | wc -l`
+	deniedunqualifiedrecipient=`grep 'spamdyke\[[0-9]*\]: DENIED_UNQUALIFIED_RECIPIENT' ${TEMP_FILE} | wc -l`
+	deniedgraylisted=`grep 'spamdyke\[[0-9]*\]: DENIED_GRAYLISTED' ${TEMP_FILE} | wc -l`
+	deniedrdnsmissing=`grep 'spamdyke\[[0-9]*\]: DENIED_RDNS_MISSING' ${TEMP_FILE} | wc -l`
+	deniedrdnsresolve=`grep 'spamdyke\[[0-9]*\]: DENIED_RDNS_RESOLVE' ${TEMP_FILE} | wc -l`
+	deniedipinccrdns=`grep 'spamdyke\[[0-9]*\]: DENIED_IP_IN_CC_RDNS' ${TEMP_FILE} | wc -l`
+	deniedipinrdns=`grep 'spamdyke\[[0-9]*\]: DENIED_IP_IN_RDNS' ${TEMP_FILE} | wc -l`
+	deniedearlytalker=`grep 'spamdyke\[[0-9]*\]: DENIED_EARLYTALKER' ${TEMP_FILE} | wc -l`
+	deniedblacklistname=`grep 'spamdyke\[[0-9]*\]: DENIED_BLACKLIST_NAME' ${TEMP_FILE} | wc -l`
+	deniedblacklistip=`grep 'spamdyke\[[0-9]*\]: DENIED_BLACKLIST_IP' ${TEMP_FILE} | wc -l`
+	deniedsenderblacklisted=`grep 'spamdyke\[[0-9]*\]: DENIED_SENDER_BLACKLISTED' ${TEMP_FILE} | wc -l`
+	deniedrecipientblacklisted=`grep 'spamdyke\[[0-9]*\]: DENIED_RECIPIENT_BLACKLISTED' ${TEMP_FILE} | wc -l`
+	deniedrblmatch=`grep 'spamdyke\[[0-9]*\]: DENIED_RBL_MATCH' ${TEMP_FILE} | wc -l`
+	deniedrhsblmatch=`grep 'spamdyke\[[0-9]*\]: DENIED_RHSBL_MATCH' ${TEMP_FILE} | wc -l`
+	deniedsendernomx=`grep 'spamdyke\[[0-9]*\]: DENIED_SENDER_NO_MX' ${TEMP_FILE} | wc -l`
+	deniedccessdenied=`grep 'spamdyke\[[0-9]*\]: DENIED_ACCESS_DENIED' ${TEMP_FILE} | wc -l`
+	deniedrelaying=`grep 'spamdyke\[[0-9]*\]: DENIED_RELAYING' ${TEMP_FILE} | wc -l`
+	deniedother=`grep 'spamdyke\[[0-9]*\]: DENIED_OTHER' ${TEMP_FILE} | wc -l`
+	failedauth=`grep 'spamdyke\[[0-9]*\]: FAILED_AUTH' ${TEMP_FILE} | wc -l`
+	unknownauth=`grep 'spamdyke\[[0-9]*\]: UNKNOWN_AUTH' ${TEMP_FILE} | wc -l`
+	failedtls=`grep 'spamdyke\[[0-9]*\]: FAILED_TLS' ${TEMP_FILE} | wc -l`
+
+	/bin/rm -f $TEMP_FILE
+fi
+
+echo "allowed.value ${allowed}"
+echo "allowedauthenticated.value ${allowedauthenticated}"
+echo "allowedtls.value ${allowedtls}"
+echo "timeout.value ${timeout}"
+echo "deniedtoomanyrecipients.value ${deniedtoomanyrecipients}"
+echo "deniedunqualifiedrecipient.value ${deniedunqualifiedrecipient}"
+echo "deniedgraylisted.value ${deniedgraylisted}"
+echo "deniedrdnsmissing.value ${deniedrdnsmissing}"
+echo "deniedrdnsresolve.value ${deniedrdnsresolve}"
+echo "deniedipinccrdns.value ${deniedipinccrdns}"
+echo "deniedipinrdns.value ${deniedipinrdns}"
+echo "deniedearlytalker.value ${deniedearlytalker}"
+echo "deniedblacklistname.value ${deniedblacklistname}"
+echo "deniedblacklistip.value ${deniedblacklistip}"
+echo "deniedsenderblacklisted.value ${deniedsenderblacklisted}"
+echo "deniedrecipientblacklisted.value ${deniedrecipientblacklisted}"
+echo "deniedrblmatch.value ${deniedrblmatch}"
+echo "deniedrhsblmatch.value ${deniedrhsblmatch}"
+echo "deniedsendernomx.value ${deniedsendernomx}"
+echo "deniedccessdenied.value ${deniedccessdenied}"
+echo "deniedrelaying.value ${deniedrelaying}"
+echo "deniedother.value ${deniedother}"
+echo "failedauth.value ${failedauth}"
+echo "unknownauth.value ${unknownauth}"
+echo "failedtls.value ${failedtls}"

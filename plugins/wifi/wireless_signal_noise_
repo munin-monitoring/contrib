@@ -1,0 +1,172 @@
+#!/bin/sh
+
+: << =cut
+
+=head1 NAME
+
+wireless_signal_noise_ - Show signal strength and noise for all connected peers of wifi interface
+
+=head1 APPLICABLE SYSTEMS
+
+This plugin is suitable for wifi interfaces with a stable selection of peers (e.g. infrastructure).
+It is probably not useful for hotspot-like scenarios.
+
+Information is parsed from the output of the tool "iwinfo" (OpenWrt) or "iw" (most systems,
+incomplete information).
+
+
+=head1 CONFIGURATION
+
+Symlink this plugin with the name of the wifi interface added (e.g. "wlan0").
+
+Root permissions are probably required for accessing "iw".
+
+  [wireless_signal_noise_*]
+  user root
+
+
+=head1 VERSION
+
+  1.1
+
+
+=head1 AUTHOR
+
+Lars Kruse <devel@sumpfralle.de>
+
+
+=head1 LICENSE
+
+GPLv3 or above
+
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf suggest
+
+=cut
+
+
+set -eu
+
+
+SCRIPT_PREFIX="wireless_signal_noise_"
+
+
+# prefer "iwinfo" for information retrieval, if it is available
+if which iwinfo >/dev/null; then
+	# "iwinfo" has a stable output format but is only available on openwrt
+	get_wifi_interfaces() { iwinfo | grep "^[a-zA-Z]" | awk '{print $1}'; }
+	# return MAC of peer and the signal strength
+	get_wifi_peers() { iwinfo "$1" assoclist | grep "^[0-9a-fA-F]" | awk '{print $1,$2}'; }
+	# the noise should be the same for all peers
+	get_wifi_noise() { iwinfo "$1" info | sed -n 's/^.* Noise: \([0-9-]\+\).*/\1/p'; }
+else
+	# "iw" is available everywhere - but its output format is not recommended for non-humans
+	get_wifi_interfaces() { iw dev | awk '{ if ($1 == "Interface") print $2; }'; }
+	get_wifi_peers() { iw dev wlan0 station dump \
+		| awk '{ if ($1 == "Station") mac=$2; if (($1 == "signal") && ($2 == "avg:")) print mac,$3}'; }
+	# TODO: there seems to be no way to retrieve the noise level via "iw"
+	get_wifi_noise() { echo; }
+fi
+if which arp >/dev/null; then
+	# openwrt does not provide 'arp' by default
+	get_arp() { arp -n; }
+else
+	get_arp() { cat /proc/net/arp; }
+fi
+
+
+clean_fieldname() {
+	echo "$1" | sed 's/^\([^A-Za-z_]\)/_\1/; s/[^A-Za-z0-9_]/_/g'
+}
+
+
+get_ip_for_mac() {
+	local ip
+	ip=$(get_arp | grep -iw "$1$" | awk '{print $1}' | sort | head -1)
+	[ -n "$ip" ] && echo "$ip" && return 0
+	# no IP found - return MAC instead
+	echo "$1"
+}
+
+
+get_wifi_device_from_suffix() {
+	local suffix
+	local real_dev
+	# pick the part after the basename of the real file
+	suffix=$(basename "$0" | sed "s/^$SCRIPT_PREFIX//")
+	for real_dev in $(get_wifi_interfaces); do
+		[ "$suffix" != "$(clean_fieldname "$real_dev")" ] || echo "$real_dev"
+	done | head -1
+}
+
+
+do_config() {
+	local wifi
+	wifi=$(get_wifi_device_from_suffix)
+	[ -z "$wifi" ] && echo >&2 "Missing wifi: $wifi" && return 1
+	echo "graph_title Wireless signal quality - $wifi"
+	echo "graph_args --upper-limit 0"
+	echo "graph_vlabel Signal and noise [dBm]"
+	echo "graph_category network"
+	echo "graph_info This graph shows the signal and noise for all wifi peers"
+	echo "noise.label Noise floor"
+	echo "noise.draw LINE"
+	# sub graphs for all peers
+	get_wifi_peers "$wifi" | while read -r mac signal; do
+		fieldname=$(clean_fieldname "peer_${mac}")
+		peer=$(get_ip_for_mac "$mac")
+		echo "signal_${fieldname}.label $peer"
+		echo "signal_${fieldname}.draw LINE"
+	done
+}
+
+
+do_fetch() {
+	local wifi
+	local peer_data
+	local noise
+	wifi=$(get_wifi_device_from_suffix)
+	[ -z "$wifi" ] && echo >&2 "Missing wifi: $wifi" && return 1
+	peer_data=$(get_wifi_peers "$wifi")
+	echo "$peer_data" | while read -r mac signal; do
+		# ignore empty datasets
+		[ -z "$signal" ] && continue
+		fieldname=$(clean_fieldname "peer_${mac}")
+		echo "signal_${fieldname}.value $signal"
+	done
+	noise=$(get_wifi_noise "$wifi")
+	echo "noise.value ${noise:-U}"
+}
+
+
+ACTION="${1:-}"
+
+case "$ACTION" in
+	config)
+		do_config || exit 1
+		if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = "1" ]; then do_fetch; fi
+		;;
+	autoconf)
+		if [ -z "$(get_wifi_interfaces)" ]; then
+			echo "no (no wifi interfaces found)"
+		else
+			echo "yes"
+		fi
+		;;
+	suggest)
+		get_wifi_interfaces | while read -r ifname; do
+			clean_fieldname "$ifname"
+		done
+		;;
+	"")
+		do_fetch
+		;;
+	*)
+		echo >&2 "Invalid action (valid: config / suggest / autoconf / <empty>)"
+		echo >&2
+		exit 2
+		;;
+esac

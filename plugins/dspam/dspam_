@@ -61,7 +61,7 @@ EXAMPLES and USAGE for details).
 Link this plugin to /etc/munin/plugins/ and restart the munin-node. The link
 should be in the format: dspam_<graph>_<target>, where:
 
- graph      - One of: accuracy, processed, processed_abs.
+ graph      - One of: accuracy, processed, absprocessed, relprocessed.
  target     - The uid that DSPAM generates in dspam_stats output,
               but converted to Munin internal name format. Normally
               this means that non-alphabetic and non-numeral characters
@@ -83,12 +83,16 @@ The plugin supports the following graph types:
                 correctly classified messages (both ham and spam) in
                 relation to the number of all processed messages.
 
- absprocessed - Shows the absolute numbers of mesages processed,
+ absprocessed - Shows the absolute numbers of messages processed,
                 sorted by the classification that DSPAM uses. The
                 numbers are stacked, making the height of the column
                 display the increase of processed messages over time.
 
- processed    - Shows the same data as dspam_processed_abs_, but as
+ relprocessed - Shows the same data as dspam_absprocessed_, but as
+                messages per minute instead of ever-growing asolute
+                values.
+
+ processed    - Shows the same data as dspam_absprocessed_, but as
                 percentage of the total amount of processed messages,
                 making it clear to see how the amounts of classified
                 messages are divided.
@@ -211,7 +215,16 @@ file_is_locked() {
 	local file=$1
 	local lock=$1.lock
 
-	[ -f $lock ] && debug file $file is locked && return 0 # EX_OK
+	if [ -f "$lock" ];then
+		debug file $file is locked
+		local pid=$(cat "$lock")
+		if ps h -p "$pid" -o comm=|grep -q dspam_; then
+			return 0 # EX_OK
+		else
+			debug lock for file $file is no longer valid
+			file_remove_lock $file
+		fi
+	fi
 	debug file $file is not locked
 	return 69 # EX_UNAVAILABLE
 }
@@ -234,23 +247,22 @@ update_statefile() {
 
 	debug starting $dspam_stats -t -S
 	local t_start=$(date +%s)
-	$dspam_stats -t -S | while read a b c d e f g h i j k l m x; do
-
+	$dspam_stats -t -S | while IFS=' :' read a b c d e f g h i j k l m x; do
 		# example of output format (3.9.1 rc1) for each user:
 		#username@example.org
 		#    TP:     0 TN:  2147 FP:     0 FN:    53 SC:     0 NC:     0
 		#    SHR:    0.00%       HSR:    0.00%       OCA:   97.59%
 
 		# or for short user names:
-		#vmail    TP:  1141 TN:   459 FP:     0 FN:     5 SC:     0 NC:     0
+		#vmail    TP:80312082 TN:198342928 FP: 82941 FN: 57326 SC: 0 NC: 3498
 		#         SHR:   99.56%       HSR:    0.00%       OCA:   99.69%
 
 		case $a in
-			TP:)
+			TP)
 				# the 2nd line
 				local tp=$b tn=$d fp=$f fn=$h sc=$j nc=$l
 				;;
-			SHR:)
+			SHR)
 				# the 3rd line
 				local shr=$(echo $b | sed 's/%$//g')
 				local hsr=$(echo $d | sed 's/%$//g')
@@ -267,7 +279,7 @@ update_statefile() {
 				# the 1st line
 				local uid=$a
 				# data from 2nd line is also here
-                                [ "$b" = "TP:" ] && local tp=$c tn=$e fp=$g fn=$i sc=$k nc=$m
+                                [ "$b" = "TP" ] && local tp=$c tn=$e fp=$g fn=$i sc=$k nc=$m
 				;;
 		esac
 	done
@@ -332,6 +344,7 @@ print_suggest() {
 	echo accuracy_ALL
 	echo processed_ALL
 	echo absprocessed_ALL
+	echo relprocessed_ALL
 }
 
 #
@@ -368,7 +381,7 @@ print_config() {
 			fi
 
 			echo "graph_title Accuracy for $uid"
-			echo graph_category dspam
+			echo graph_category spamfilter
 			echo graph_args --base 1000 --upper-limit 100 --rigid
 			echo graph_vlabel Accuracy in %
 			echo "graph_info This graph shows the current DSPAM Overall Accuracy for $uid ($uid_count uids). Overall Accuracy is the percentage of messages that is classified correctly as either ham or spam."
@@ -406,7 +419,7 @@ print_config() {
 			fi
 
 			echo "graph_title Processed messages for $uid (%)"
-			echo graph_category dspam
+			echo graph_category spamfilter
 			echo graph_args --base 1000 --upper-limit 100 --rigid
 			echo graph_vlabel Messages in %
 			echo "graph_info This graph shows the messages that DSPAM processed for $uid ($uid_count uids) in percentages of all processed messages. Messages are divided in the following categories: true positives/negatives, false positives/negatives, and corpusfed ham/spam."
@@ -430,7 +443,7 @@ print_config() {
 			echo nc.draw AREASTACK
 			;;
 
-		absprocessed)
+		*processed)
 			if [ -n "$pattern" ]; then
 				debug env.pattern was set, so use it: $pattern
 				local uid=$description
@@ -451,28 +464,36 @@ print_config() {
 			fi
 
 			echo "graph_title Processed messages for $uid"
-			echo graph_category dspam
+			echo graph_category spamfilter
 			echo graph_args --base 1000
-			echo graph_vlabel Messages
+			[ "$graph" = absprocessed ] && echo graph_vlabel Messages
+			[ "$graph" = relprocessed ] && echo graph_vlabel Messages / minute
+			[ "$graph" = relprocessed ] && echo graph_period minute
 			echo graph_total Total
 			echo "graph_info This graph shows the messages that DSPAM processed for $uid ($uid_count uids). Messages are divided in the following categories: true positives/negatives, false positives/negatives, and corpusfed ham/spam."
 			echo tp.label True positives
 			echo tp.info Spam messages correctly classified as spam.
+			[ "$graph" = relprocessed ] && echo tp.type DERIVE
 			echo tp.draw AREASTACK
 			echo tn.label True negatives
 			echo tn.info Ham messages correctly classified as ham.
+			[ "$graph" = relprocessed ] && echo tn.type DERIVE
 			echo tn.draw AREASTACK
 			echo fp.label False positives
 			echo fp.info Ham messages incorrectly classified as spam, but corrected by the user.
+			[ "$graph" = relprocessed ] && echo fp.type DERIVE
 			echo fp.draw AREASTACK
 			echo fn.label False negatives
 			echo fn.info Spam messages incorrectly classified as ham, but corrected by the user.
+			[ "$graph" = relprocessed ] && echo fn.type DERIVE
 			echo fn.draw AREASTACK
 			echo sc.label Corpusfed spam
 			echo sc.info Spam messages from a collected corpus for training purposes.
+			[ "$graph" = relprocessed ] && echo sc.type DERIVE
 			echo sc.draw AREASTACK
 			echo nc.label Corpusfed ham
 			echo nc.info Ham messages from a collected corpus for training purposes.
+			[ "$graph" = relprocessed ] && echo nc.type DERIVE
 			echo nc.draw AREASTACK
 			;;
 
@@ -561,7 +582,7 @@ print_fetch() {
 			echo nc.value $(abs2perc $all_nc $total)
 			;;
 
-		absprocessed)
+		*processed)
 			if [ -n "$pattern" ]; then
 				debug env.pattern was set, so use it: $pattern
 				continue

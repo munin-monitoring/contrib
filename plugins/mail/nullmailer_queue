@@ -1,0 +1,89 @@
+#!/bin/sh
+
+: <<=cut
+
+=head1 NAME
+
+nullmailer_queue - monitor for nullmailer's send queue.
+
+=head1 APPLICABLE SYSTEMS
+
+This plugin is applicable to any system running the nullmailer MTA.
+
+=head1 CONFIGURATION
+
+This plugin needs to be able to read the nullmailer queue, so it
+will need to run as that user or root.
+
+Additionally, the nullmailer queue directory may vary; in that case you
+can specify it with the "queuedir" and "errordir" environment variables.
+
+Example:
+
+[nullmailer_queue]
+user nullmail
+env.queuedir /var/spool/nullmailer/queue
+env.errordir /var/spool/nullmailer/failed
+
+=head1 INTERPRETATION
+
+This plugin will draw a stack of 2: the number of emails in the queue, and
+the number of emails that have permanently failed sending. The latter has
+a warning attached, since those should never happen.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+  1.0.0
+
+=head1 AUTHOR
+
+Bert Peters <bert@bertptrs.nl>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+queuedir=${queuedir:-/var/spool/nullmailer/queue}
+errordir=${errordir:-/var/spool/nullmailer/failed}
+
+case $1 in
+	autoconf)
+		if command -v nullmailer-queue >/dev/null 2>/dev/null; then
+			[ -r "$queuedir" ] && echo yes || echo "no (queue dir not readable)"
+		else
+			echo "no (nullmailer not installed)"
+		fi
+		;;
+
+	config)
+		cat <<-EOF
+graph_args -l 0
+graph_title Nullmailer queue
+graph_vlabel emails
+graph_total total
+graph_category mail
+
+queue.label queued
+queue.draw AREASTACK
+queue.info Number of emails currently in the queue
+
+failed.label failed
+failed.draw AREASTACK
+failed.warning 0:0
+failed.info Number of emails that have permanently failed to send
+EOF
+		;;
+
+	*)
+		echo "queue.value $(find "$queuedir" -type f | wc -l)"
+		# Failed does not exist until there has been a failure, so mute the "file not found"
+		echo "failed.value $(find "$errordir" -type f 2> /dev/null | wc -l)"
+		;;
+esac

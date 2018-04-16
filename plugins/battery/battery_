@@ -1,0 +1,69 @@
+#! /bin/sh
+# Plugin to monitor the battery status via the uevent API
+#
+# (c) 2015 - GPLv2 - steve.schnepp@pwkf.org
+#
+# It is a wildcard plugin, symlink it with the battery directory
+# default is to display charge as mAh, but you can also use percentage if you
+# prefer, by setting the env var "percent" to "yes".
+#
+# [battery_*]
+# env.percent no
+#
+
+battery_name=${0##*_}
+percent=${percent:-"no"}
+
+if [ "$1" = "config" ]
+then
+	echo "graph_title Battery $battery_name"
+  echo "graph_category sensors"
+	if [ "$percent" = "yes" ]
+	then
+		echo "graph_vlabel %"
+	else
+		echo "graph_vlabel mAh"
+	fi
+
+	echo "charge_design.label Design charge"
+	echo "charge_design.draw AREA"
+	[ "$percent" = "yes" ] && echo "charge_design.cdef charge_design,charge_design,/,100,*"
+
+	echo "charge_full.label Full charge"
+	echo "charge_full.draw AREA"
+	[ "$percent" = "yes" ] && echo "charge_full.cdef charge_full,charge_design,/,100,*"
+	echo "charge_now.label Current charge"
+	echo "charge_now.draw AREA"
+	[ "$percent" = "yes" ] && echo "charge_now.cdef charge_now,charge_design,/,100,*"
+
+	exit 0
+fi
+
+# Crudely read all the vars into the current namespace
+. /sys/class/power_supply/$battery_name/uevent
+
+echo "charge_design.value $(( $POWER_SUPPLY_CHARGE_FULL_DESIGN / 1000 )) "
+echo "charge_full.value $(( $POWER_SUPPLY_CHARGE_FULL / 1000 ))"
+echo "charge_now.value $(( $POWER_SUPPLY_CHARGE_NOW / 1000 ))"
+
+exit 0
+
+
+:<< DATA
+cat /sys/class/power_supply/$1/uevent
+POWER_SUPPLY_NAME=CMB1
+POWER_SUPPLY_STATUS=Charging
+POWER_SUPPLY_PRESENT=1
+POWER_SUPPLY_TECHNOLOGY=Li-ion
+POWER_SUPPLY_CYCLE_COUNT=0
+POWER_SUPPLY_VOLTAGE_MIN_DESIGN=10800000
+POWER_SUPPLY_VOLTAGE_NOW=11418000
+POWER_SUPPLY_CURRENT_NOW=2668000
+POWER_SUPPLY_CHARGE_FULL_DESIGN=5200000
+POWER_SUPPLY_CHARGE_FULL=5000000
+POWER_SUPPLY_CHARGE_NOW=100000
+POWER_SUPPLY_CAPACITY=2
+POWER_SUPPLY_CAPACITY_LEVEL=Normal
+POWER_SUPPLY_MODEL_NAME=CP293570
+POWER_SUPPLY_MANUFACTURER=Fujitsu
+DATA

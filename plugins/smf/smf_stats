@@ -1,0 +1,73 @@
+#!/usr/bin/perl
+#
+# Munin plugin for members, messages and topics stats over a SMF forum database
+#
+# Copyright (C) 2013 - digger (http://simplemachines.ru)
+# Based on Rowdy Schwachfer (http://rowdy.nl) 's Spotweb plugin
+#
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+#
+# Configuration example
+#
+#[smf*]
+#env.mysql               /usr/bin/mysql           # MySQL binary (optional)
+#env.db                  smf                      # SMF database (required)
+#env.db_prefix           smf_                     # SMF database prefix(required)
+#env.db_user             myuser                   # SMF database user (required)
+#env.db_password         mypassword               # SMF database password (required)
+
+use strict;
+
+my $MYSQL = $ENV{'mysql'} || "/usr/bin/mysql";
+my $MYSQLOPTS = "-u " . $ENV{'db_user'} . " -p" . $ENV{'db_password'};
+my $DATABASE = $ENV{'db'} || "smf";
+my $PREFIX = $ENV{'db_prefix'} || "smf_";
+
+# Output for config
+if(defined $ARGV[0] && $ARGV[0] eq 'config') {
+    print <<EOC
+graph_title SMF Statistics
+graph_vlabel Number of items
+graph_category forum
+members.label Total members
+graph_scale no
+EOC
+;
+    print <<EOC
+messages.label Total messages
+EOC
+;
+    print <<EOC
+topics.label Total topics
+EOC
+;
+    exit 0;
+}
+
+#Members count
+my $members = `$MYSQL $MYSQLOPTS -e 'SELECT value FROM ${DATABASE}.${PREFIX}settings WHERE variable = "totalMembers"'`;
+$members =~ /(\d+)/; 
+print "members.value ".$1."\n";
+
+#Messages count
+my $messages = `$MYSQL $MYSQLOPTS -e 'SELECT value FROM ${DATABASE}.${PREFIX}settings WHERE variable="totalMessages"'`;
+$messages =~ /(\d+)/; 
+print "messages.value ".$1."\n";
+
+#Topics count
+my $topics = `$MYSQL $MYSQLOPTS -e 'SELECT value FROM ${DATABASE}.${PREFIX}settings WHERE variable="totalTopics"'`;
+$topics =~/(\d+)/;
+print "topics.value ".$1."\n";

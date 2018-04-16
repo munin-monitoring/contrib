@@ -1,0 +1,53 @@
+#!/usr/bin/env perl
+# ex:ts=4
+
+use strict;
+use warnings;
+
+use Cache::Memcached;
+
+# Based on original plugin, extended to unix socket use
+# https://github.com/western, westroads@gmail.com
+
+=head1 example config for /plugin-conf.d/munin-node
+
+[memcached_items_1]
+env.server 127.0.0.1:11211
+env.label "first local server"
+
+[memcached_items_2]
+env.server /var/run/memcached/memcached.sock
+env.label "second local server"
+
+=cut
+
+my $label = exists $ENV{'label'} ? $ENV{'label'} : '';
+unless( $label ){
+	
+	if( $0 =~ /memcached_ext_items_([\w\d]+)$/ ){
+		$label = $1;
+	}
+}
+
+
+my $cmd = shift || '';
+if ($cmd eq 'config') {
+	print "graph_title Memcached cached items on $label\n";
+	print "graph_args --base 1000 -l 0\n";
+	print "graph_vlabel items\n";
+	print "graph_category memory\n";
+	print "graph_info This graph monitors the number of items stored by the memcached server.\n";
+	print "items.label items\n";
+	print "items.info Number of cached items\n";
+	print "items.min 0\n";
+	print "items.draw AREA\n";
+	exit 0;
+}
+
+my $server = exists $ENV{'server'} ? $ENV{'server'} : '127.0.0.1:11211';
+
+my $memd = new Cache::Memcached { 'servers' => [$server] };
+my $memstats = $memd->stats(['misc']);
+
+print "items.value " .
+	$memstats->{hosts}->{$server}->{misc}->{curr_items} . "\n";

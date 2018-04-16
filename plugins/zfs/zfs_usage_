@@ -160,6 +160,10 @@ sub do_collect {
 
     foreach my $line (split(/\n/, `$fsget` )) {
         my ($name, $key, $value, undef ) = (split(/\t/,$line));
+        # try to preserve underscores:
+        #   * duplicate existing ones
+        #   * afterwards replace slashs with single ones
+        ($name =~ s/_/__/g);
         ($name =~ s/\//_/g);
         $filesystems->{$name}->{$key}=$value;
     }
@@ -169,7 +173,11 @@ sub do_collect {
 sub do_config_fs {
     my ($fs) = @_;
     my $fs_slash = ($fs);
+    # try to restore underscores (see "do_collect" for the reverse operation):
+    #   * substitute all underscores with slashs
+    #   * afterwards transform *double* slashs back into a single underscore
     ($fs_slash =~ s/_/\//g);
+    ($fs_slash =~ s/\/\//_/g);
 
     if ( $fs ne $zpool ) {
         printf( "multigraph zfs_usage_%s.%s\n",
@@ -183,7 +191,7 @@ sub do_config_fs {
     }
     print "graph_args --base 1024 --lower-limit 0 --rigid\n";
     print "graph_vlabel bytes \n";
-    print "graph_category filesystem\n";
+    print "graph_category fs\n";
     print "graph_order @order\n";
 
     foreach my $key ( keys %{$filesystems->{$fs}}) {

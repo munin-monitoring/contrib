@@ -1,0 +1,136 @@
+#! /usr/bin/perl
+
+#  Copyright (C) 2008 Joey Schulze <joey@infodrom.org>
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; version 2 dated June, 1991.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program;  if not, write to the Free Software
+#  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111, USA.
+
+# Rewrite of the postfix_mailstats plugin with Munin::Plugin
+
+# Source: http://www.infodrom.org/Infodrom/tools/munin.html
+
+# Supported configuration:
+#
+#   [postfix_mailstats]
+#   user root
+#   group adm
+#   env.logdir /var/log
+#   env.logfile mail.log
+
+use strict;
+use warnings;
+
+use Munin::Plugin;
+
+my $LOGDIR  = $ENV{'logdir'}  || '/var/log';
+my $LOGFILE = $ENV{'logfile'} || 'mail.log';
+my $logfile = $LOGDIR .'/'. $LOGFILE;
+
+my $delivered;
+my %rejects;
+
+sub autoconf
+{
+    if (-d $LOGDIR) {
+	if (-f $logfile) {
+	    if (open(my $f, $logfile)) {
+		while (<$f>) {
+		    if (m,postfix/smtpd\[\d+\]: ,) {
+			close $f;
+			print "yes\n";
+			exit 0;
+		    }
+		}
+		print "no (no smtpd logs in logfile)\n";
+		close $f;
+	    } else {
+		print "no (logfile not readable)\n";
+	    }
+	} else {
+	    print "no (logfile not found)\n";
+	}
+    } else {
+	print "no (could not find logdir)\n";
+    }
+    exit 1;
+}
+
+sub config
+{
+    print "graph_title Postfix message throughput\n";
+    print "graph_args --base 1000 -l 0\n";
+    print "graph_vlabel mails / \${graph_period}\n";
+    print "graph_scale  no\n";
+    print "graph_total  Total\n";
+    print "graph_category mail\n";
+    print "delivered.label delivered\n";
+    print "delivered.type ABSOLUTE\n";
+    print "delivered.draw AREA\n";
+    print "delivered.min 0\n";
+    foreach my $code (sort keys %rejects) {
+	my $name = clean_fieldname('reject ' . $code);
+	printf "%s.label reject %d\n", $name, $code;
+	printf "%s.type ABSOLUTE\n", $name;
+	printf "%s.draw STACK\n", $name;
+	printf "%s.min 0\n", $name;
+    }
+    exit 0;
+}
+
+sub parse
+{
+    my $logfile = shift;
+    my $pos = shift;
+
+    my ($log,$rotated) = tail_open $logfile, $pos;
+
+    while (<$log>) {
+	if (m,.* postfix/smtpd\[\d+\]: NOQUEUE: reject: [^:]+: (\d+) .*,) {
+	    $rejects{$1}++;
+	    next;
+	} elsif (m/qmgr.*from=.*size=[0-9]*/) {
+	    $delivered++;
+	    next;
+	}
+    }
+    return tail_close $log;
+}
+
+autoconf if $#ARGV > -1 && $ARGV[0] eq "autoconf";
+
+my @state_vector = restore_state;
+my $pos = shift @state_vector || 0;
+my $time = shift @state_vector;
+$delivered = shift @state_vector || 0;
+%rejects = @state_vector;
+
+config if $#ARGV > -1 && $ARGV[0] eq "config";
+
+if (defined $time) {
+    if ($time < time-(60*5)+15) {
+	$delivered = 0;
+	$rejects{$_} = 0 foreach keys %rejects;
+	$pos = parse $logfile, $pos;
+	save_state $pos, time, $delivered, %rejects;
+    }
+} else {
+    # Prevent start peak
+    $pos = (stat $logfile)[7];
+    save_state $pos, time, $delivered;
+    exit 0;
+}
+
+printf "delivered.value %d\n", $delivered;
+foreach my $code (sort keys %rejects) {
+    printf "%s.value %d\n", clean_fieldname('reject ' . $code), $rejects{$code};
+}

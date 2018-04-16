@@ -1,0 +1,156 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+upnpc_ - Plugin to monitor routers via UPnP
+
+This plugin uses the upnpc utility (package miniupnpc in Debian), to monitor an
+router using UPnP. It can monitor the following aspects, and plot them as separate graphs:
+* uptime: how long the link has been up;
+* bitrate: the up and downlink bitrate (e.g., sync speed for DSL);
+* traffic: the actual up and downstream traffic rate;
+* pkts: the number of packets coming in and out.
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems with upnpc installed.
+
+=head1 CONFIGURATION
+
+None needed.
+
+=head1 AUTHOR
+
+Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=cut
+
+autoconf() {
+	which upnpc >/dev/null && upnpc -s >/dev/null 2>&1 && echo yes || echo "no (No upnpc or no UPnP router)"
+}
+
+suggest () {
+	upnpc -s | sed -n " \
+		s/.*uptime=.*/uptime/p; \
+		s/.*MaxBitRate.*/bitrate/p; \
+		s/.*Bytes.*/traffic/p; \
+		s/.*Packets.*/pkts/p; \
+			"
+}
+
+config () {
+	case $1 in
+		"uptime")
+			cat << EOF
+graph_title Uplink connection uptime
+graph_args -l 0
+graph_category network
+graph_scale no
+graph_vlabel uptime in hours
+uptime.label uptime
+uptime.draw AREA
+uptime.cdef uptime,3600,/
+EOF
+			;;
+		"bitrate")
+			cat << EOF
+graph_title Uplink bitrate
+graph_args --base 1000 -l 0
+graph_category network
+graph_vlabel bitrate down (-) / up (+)
+down.label bps
+down.warning 4194304:
+down.critical 1048576:
+up.label bps
+up.warning 524288:
+up.critical 131072:
+down.graph no
+up.negative down
+EOF
+			;;
+		"traffic")
+			cat << EOF
+graph_title Uplink traffic
+graph_args --base 1024 -l 0
+graph_category network
+graph_vlabel bytes in (-) / out (+) per ${graph_period}
+down.label Bps
+down.type DERIVE
+down.min 0
+up.label Bps
+up.type DERIVE
+up.min 0
+down.graph no
+up.negative down
+EOF
+			;;
+		"pkts")
+			cat << EOF
+graph_title Uplink packets
+graph_args --base 1000 -l 0
+graph_category network
+graph_vlabel packets in (-) / out (+) per ${graph_period}
+down.label pps
+down.type DERIVE
+down.min 0
+up.label pps
+up.type DERIVE
+up.min 0
+down.graph no
+up.negative down
+EOF
+			;;
+		"*")
+			echo "$0: unknown mode '$1'" >&2
+			exit 1
+	esac	
+}
+
+fetch () {
+	case $1 in
+		"uptime")
+		upnpc -s | sed -n "s/.*uptime=\([0-9]\+\)s.*/uptime.value \1/p"
+			;;
+		"bitrate")
+		upnpc -s | sed -n "s/^MaxBitRateDown : \([0-9]\+\) bps.*MaxBitRateUp \([0-9]\+\) bps.*/down.value \1\nup.value \2/p"
+			;;
+		"traffic")
+		upnpc -s | sed -n "s/^Bytes:\s*Sent:\s*\([0-9]\+\).*Recv:\s*\([0-9]\+\).*/up.value \1\ndown.value \2/p"
+			;;
+		"pkts")
+		upnpc -s | sed -n "s/^Packets:\s*Sent:\s*\([0-9]\+\).*Recv:\s*\([0-9]\+\).*/up.value \1\ndown.value \2/p"
+			;;
+		"*")
+			echo "$0: unknown mode '$1'" >&2
+			exit 1
+	esac	
+}
+
+mode=`echo $0 | sed 's/.*_//'`
+
+case $1 in
+	"autoconf")
+		autoconf
+		;;
+	"suggest")
+		suggest
+		;;
+	"config")
+		config $mode
+		;;
+	*)
+		fetch $mode
+		;;
+esac

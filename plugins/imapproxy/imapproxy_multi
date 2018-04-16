@@ -1,0 +1,127 @@
+#!/usr/bin/env python
+
+"""=cut
+=head1 NAME 
+
+ imapproxy  - Munin multigraph plugin to monitor imapproxy using pimpstat
+
+=head1 CONFIGURATION
+
+ This plugin should require no addition configuration.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 Author
+
+Niall Donegan <github@nialldonegan.me>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut"""
+
+import sys
+import os
+import re
+from subprocess import Popen,PIPE
+
+
+def print_autoconf():
+    which = Popen("which pimpstat", shell=True, stdout=PIPE)
+    which.communicate()
+    if not bool(which.returncode):
+        print "yes"
+    else:
+        print "no (pimpstat not found)"
+    sys.exit(0)
+
+
+def print_config():
+    print "multigraph imapproxy_cache"
+    print "graph_title Cache Statistics For ImapProxy"
+    print "graph_args -l 0 --base 1000"
+    print "graph_total total"
+    print "graph_vlabel Cache Connections / ${graph_period}"
+    print "graph_category mail"
+    print "cache_hits.draw AREA"
+    print "cache_hits.type DERIVE"
+    print "cache_hits.label Cache Hits"
+    print "cache_hits.min 0"
+    print "cache_misses.draw STACK"
+    print "cache_misses.type DERIVE"
+    print "cache_misses.label Cache Misses"
+    print "cache_misses.min 0"
+    print 
+    print "multigraph imapproxy_connections"
+    print "graph_title Connection Statistics For ImapProxy"
+    print "graph_args -l 0 --base 1000"
+    print "graph_total total"
+    print "graph_vlabel Connections / ${graph_period}"
+    print "graph_category mail"
+    print "connections_reused.draw AREA"
+    print "connections_reused.type DERIVE"
+    print "connections_reused.label Reused Connections"
+    print "connections_reused.min 0"
+    print "connections_created.draw STACK"
+    print "connections_created.type DERIVE"
+    print "connections_created.label Created Connections"
+    print "connections_created.min 0"
+    sys.exit(0)
+
+
+def print_fetch():
+    cache_hits = 0
+    cache_misses = 0
+    connections_created = 0
+    connections_reused = 0
+    connections = Popen(
+        "pimpstat -c | egrep '(Total (Reused|Created)|Cache (Hits|Misses))'", 
+        shell=True,
+        stdout=PIPE
+    )
+    for line in connections.stdout:
+        if re.search(r'Hits', line):
+            cache_hits = line.split()[0]
+        if re.search(r'Misses', line):
+            cache_misses = line.split()[0]
+        if re.search(r'Created', line):
+            connections_created = line.split()[0]
+        if re.search(r'Reused', line):
+            connections_reused = line.split()[0]
+    print "multigraph imapproxy_cache"
+    print "cache_hits.value %s" % cache_hits
+    print "cache_misses.value %s" % cache_misses
+    print
+    print "multigraph imapproxy_connections"
+    print "connections_created.value %s" % connections_created
+    print "connections_reused.value %s" % connections_reused
+
+    sys.exit(0)
+
+def main():
+    if len(sys.argv) > 1:
+        command = sys.argv[1]
+    else:
+        command = "fetch"
+
+    if command not in ["autoconf","config","fetch"]:
+        print >> sys.stderr, "Command %s not known, please use either autoconf or suggest" % command
+        sys.exit(1)
+
+
+    if command == "autoconf":
+        print_autoconf()
+    elif command == "config":
+        print_config()
+    else:
+        print_fetch()
+
+
+if __name__ == '__main__':
+    main()
+
+# vim:syntax=python

@@ -1,0 +1,82 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+openvpn_as_time -Indicate the medium time of the logged users.
+
+=head1 CONFIGURATION
+
+Require jsonpipe software:
+https://github.com/dvxhouse/jsonpipe
+
+[openvpn_*]
+user root
+
+=head1 AUTHOR
+
+Ricardo Fraile <rfrail3@yahoo.es>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGICK MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+
+
+
+if [ "$1" = "autoconf" ]; then
+	echo yes 
+	exit 0
+fi
+
+SUM=0
+NOW=`date +%s`
+# Script folder
+D_BIN="/usr/local/openvpn_as/scripts"
+
+# List with users time
+LIST1=`$D_BIN/sacli VPNStatus | tr '/' - |  jsonpipe  | grep "/openvpn_[0-9]/client_list/[0-9]/6" | tr -d '"'  | awk '{print $2} '`
+# Count users listed
+TOTU=`$D_BIN/sacli VPNStatus | tr '/' - |  jsonpipe  | grep "/openvpn_[0-9]/client_list/[0-9]/6" | tr -d '"'  | awk '{print $2} ' | wc -l`
+
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title OpenVPN Users medium time'
+	echo 'graph_args --base 1000 -l 0 '
+	echo 'graph_vlabel Time in minutes'
+	echo 'graph_scale no'
+	echo 'graph_category network'
+	echo 'graph_info Indicate the medium time of the logged users.'
+
+        echo "time.label Users"
+        echo "time.type GAUGE"
+        echo "time.min 0"
+	
+	exit 0
+fi
+
+# Sum all times (times are the time request minus epoch date at now)
+for i in $LIST1; do
+        SUM=`expr $SUM + $((NOW - $i))`
+done
+
+# If TOTU is 0, change to 1 for avoid problem in the division
+if [ "$TOTU" = "0" ]; then
+        TOTU=1
+fi
+
+# Total is total time between number of users between 60 for give it in minutes
+echo "time.value $(($(($SUM / $TOTU)) / 60))"
+	
+

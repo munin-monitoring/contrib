@@ -1,0 +1,47 @@
+#!/bin/bash
+
+i=0
+VMX[0]='/var/lib/vmware/Virtual Machines/<VM Name>/Other Linux.vmx';
+VMX[1]='another VM';
+VMX[2]='and one more :)';
+VMX[3]='add as much as you like!';
+
+if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+        echo 'graph_title VMware CPU-Load'
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_vlabel Load of VMware VMs'
+              echo 'graph_category cpu'
+        
+	while [ $i -lt ${#VMX[*]} ]
+	do
+
+	NAME=`vmware-cmd "${VMX[i]}" getconfig displayName |sed 's!getconfig(displayName) = !!' | sed 's! !!g' | sed 's!-!_!g'`
+	echo $NAME.label $NAME
+	
+	i=`expr $i + 1`
+	done
+        exit 0
+fi
+
+i=0
+
+while [ $i -lt ${#VMX[*]} ]
+do
+
+PID=`vmware-cmd "${VMX[$i]}" getpid | sed 's!getpid() = !!'`
+NAME=`vmware-cmd "${VMX[i]}" getconfig displayName |sed 's!getconfig(displayName) = !!' | sed 's! !!g' | sed 's!-!_!g'`
+CPU=`ps -o %cpu -p $PID --no-header`
+
+echo $NAME."value" $CPU
+
+
+i=`expr $i + 1`
+
+done
+

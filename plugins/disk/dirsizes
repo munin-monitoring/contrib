@@ -16,7 +16,7 @@
 #  env.watchdirs /var/www,/tmp
 #
 # Change the env.watchdirs-variable according to your wishes.
-# DONT FORGET TO RUN AS ROOT!
+# DON'T FORGET TO RUN AS ROOT!
 #
 # You can test this plugin by calling it with params "test" and your  watchdirs:
 # ./dirsizes test /dir1,/tmp/dir2
@@ -26,6 +26,7 @@
 #
 
 use strict;
+use Munin::Plugin;
 my @watchdirs;
 
 if ( exists $ARGV[0] and $ARGV[0] eq "test" ) {
@@ -59,8 +60,7 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
     foreach my $dir (@watchdirs) {
 
         # Remove illegal characters
-        my $label = $dir;
-        $label =~ s@[\/-]@_@g;
+        my $label = clean_fieldname($dir);
 
         # Print name
         print "dir", $label, ".label ", $dir, "\n";
@@ -72,16 +72,11 @@ else {
 
     # All available directories
     foreach my $dir (@watchdirs) {
-
         # Remove illegal characters
-        my $label = $dir;
-        $label =~ s@[\/-]@_@g;
+        my $label = clean_fieldname($dir);
 
         # Get the dirsize
         my $dirsize = getSize($dir);
-
-        # Get the label
-        my $label = niceLabelname($dir);
 
         # Print name
         print "dir", $label, ".value ", $dirsize, ".0\n";
@@ -95,14 +90,6 @@ sub getSize {
     # Get the size via `du`
     my @dirsize = split( ' ', `du -cb $dir | grep "total" |  tail -1 ` );
     return @dirsize[0];
-}
-
-# Remove illegal characters
-sub niceLabelname {
-    my ($label) = @_;
-
-    $label =~ s@[\/-]@_@g;
-    return $label;
 }
 
 exit 0;

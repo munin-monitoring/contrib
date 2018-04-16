@@ -1,0 +1,134 @@
+#!/usr/bin/perl
+
+# +----------------------------------------------------------------------+
+# |              A Munin Graph Plugin for ASSP                           |
+# |           [ assp-smtp-connection-statistics ]                        |
+# +----------------------------------------------------------------------+
+# |        Author: Enrico Labedzki                                       |
+# |        Email: enrico.labdzki@brodos.de                               |
+# |        Last Modified: 2010-02-22                                     |
+# |        Licence: GPLv3 http://www.gnu.org/licenses/gpl-3.0.txt        |
+# +----------------------------------------------------------------------+
+
+use strict;
+use warnings;
+use File::Basename;
+use LWP;
+use Mail::Sendmail;
+
+# -------------------------- DEBUG VARS ---------------------------------
+my $DEBUG = 0;														# for debugging purpose
+my $EMAILDEBUG = 0;													# for email debugging
+my $pluginname = &basename( "$0" );									# get the basename of the plugin
+my @to = qw( webmaster@guel.info );									# the list of admins receivced messages on an error
+my $from = "$pluginname-at-host\@guel.info";						# the host from where it comes
+my $muninnodename = "mail.guel.info";		        				# the Node from where it comes
+my $smtp = "mail.guel.info";										# the smtp relay to send the mail
+
+# ------------------------- GLOBAL VARS ---------------------------------
+my $version = "1.0";												# UA Version
+my $agentname = "$pluginname Munin Plugin V$version";				# UA String
+my $url = "http://localhost:55553/";							# (defaults to localhost)
+my $response = 0;													# the server output
+my @content = ();													# the content we're retrive from $response
+my %index = (		# for Version 2
+		'from'	=> 25,												# <-- index frame from ( a tweak for other ASSP Versions )
+		'to'	=> 38												# <-- index frame to ( "" )
+);
+
+# -----------------------------------------------------------------------
+my @muninlabel = (
+	# SMTP Connection Statistics --> index 25..38
+	"Accepted Logged SMTP Connections",
+	"SSL SMTP Connections",
+	"TLS SMTP Connections",
+	"Not Logged SMTP Connections",
+	"SMTP Connection Limits",
+	"Overall Limits",
+	"By IP Limits",
+	"By IP Frequency Limits",
+	"By Domain IP Limits",
+	"SMTP Connections Timeout",
+	"SMTP SSL-Connections Timeout",
+	"SMTP TLS-Connections Timeout",
+	"Denied SMTP Connections",
+	"SMTP damping"
+);
+
+# ============= SANITY CHECKS ================
+unless( defined(@ARGV) ){
+	$ARGV[0] = "";
+}
+
+# =============== THE GET ====================
+if( $ARGV[0] eq "" ){
+	my $agent = LWP::UserAgent->new();
+	$agent->agent("$agentname");	
+	$response = $agent->get( $url );
+	&response_error() unless $response->is_success;
+	@content = split( /\n/, $response->content );
+
+	my $line = "";
+	my $count = $index{from};	
+	my $label;
+	my( $key, $value, $last );
+	while( 1 ){
+		&finish() if( $count > $index{to} );
+		$line = $content[$count];
+		$count++;
+		chomp( $line );
+		next if $line eq "";										# no empty lines
+		next if $line =~ /^\n$/;									# no newlines
+		next if $line =~ /^\r$/;									# or else
+		next if $line =~ /^\r\n$/;									# http specific
+		( $key, $value, $last) = split( /\|/, $line );				# split up to three values
+		$key =~ s/^\s//g; 	$key =~ s/\s$//g;						# no spaces at the end and the beginning
+		$value =~ s/^\s//g;	$value =~ s/\s$//g;
+		$value =~ s/(\d*)\s*.*/$1/g;								# remove more than one values from splited data
+		$value =~ s/[a-zA-Z\(\)\%]//g;								# and not alphanummeric glyphs
+		$last =~ s/^\s//g;	$last =~ s/\s$//g;
+
+		$label = $key;
+		$label =~ s/\s/\_/g;										# generate a label
+		$label =~ s/\-/\_/g;										# the subs glyph to underline
+		$label =~ s/[\(\)]//g;										# no special glyphs feel free to add more
+		print "$label.value $value\n";								# print the result to the label
+	}
+}
+
+# =============== FUNCTIONS ==================
+sub finish{
+	exit 0;
+}
+sub response_error{
+	if( $DEBUG ){
+		foreach my $admin ( @to ){
+			my %mail = ( smtp => "$smtp", To => "$admin", From => "$from", Subject => "Munin Plugin $pluginname", Message => "ERROR: $agentname at $muninnodename\n" );
+			&sendmail(%mail) or die "ERROR: $Mail::Sendmail::error\n";
+
+			if( $EMAILDEBUG ){
+				print "OK. Log says:\n$Mail::Sendmail::log\n";
+			}
+		}
+	}
+	exit 1;	# if no admin exists
+}
+
+# ============== MUNIN GRAPHER COINFIG =======
+
+if( $ARGV[0] eq "config" ){
+	print "graph_title ASSP - SMTP Connection Statistics\n";
+	print "graph_vlabel Counter in k,m\n";
+	print "graph_category spamfilter\n";
+
+	my $label;
+	foreach my $key ( @muninlabel ){
+		$label = $key;
+		$label =~ s/\s/\_/g;
+		$label =~ s/\-/\_/g;
+		$label =~ s/[\(\)]//g;
+		print "$label.label $key\n";
+	}
+	exit 0;
+}
+

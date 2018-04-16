@@ -1,0 +1,93 @@
+#!/bin/bash
+#
+# Plugin to monitor Bind9 Name Server Resolver Stats
+#
+# Author:
+#    Dave Fennell <dave@microtux.co.uk>
+#
+# Created:
+#    20th December 2012
+#
+# License:
+#    GPLv2
+#
+# Usage:
+#    Place in /etc/munin/plugins/ (or link it there using ln -s)
+#
+
+# change those to reflect your bind configuration (use plugin configuration)
+# stat file
+if [ "$stat_file" = "" ]; then
+	stat_file="/var/cache/bind/named.stats"
+fi
+
+# rndc path
+if [ "$rndc" = "" ]; then
+	rndc="/usr/sbin/rndc"
+fi
+
+# Blank the stats file (else stats are appended not replaced)
+rm ${stat_file}
+
+# Ask to bind to build new one
+${rndc} stats
+
+# The section we are looking for in the stats.
+section="Resolver Statistics"
+
+# Get all the lines in the section:
+# - cat the file
+# - use sed to get lines after (and excluding) the section start tag
+# - use sed to get lines up to (and excluding) the next section start tag
+# - use grep to remove any lines starting with a [
+cmd='cat "/var/cache/bind/named.stats" | sed "0,/^\+\+ '${section}' \+\+/d" | sed -e "/^\+\+/,\$d" | grep -v "^\["'
+
+# Config mode.
+if [ "$1" = "config" ]; then
+	echo 'graph_args --lower-limit 0'
+	echo 'graph_category dns'
+	echo 'graph_info '${section}' for the Bind9 Name Server'
+	echo 'graph_scale no'
+	echo 'graph_title Bind9 '${section}
+	echo 'graph_vlabel requests/${graph_period}'
+
+	# Output the stat configs.
+	eval ${cmd} | while read num name
+	do
+		# Shorten some names.
+		label=${name//queries with /}
+		label=${label//</below}
+		label=${label//>/above}
+
+		# All lowercase.
+		label=$(echo "$label" | tr 'A-Z' 'a-z')
+
+		# Now change names to all have no spaces.
+		key=${label//[ -]/_}
+
+		echo ${key}.label ${label}
+		echo ${key}.info ${name}
+		echo ${key}.type COUNTER
+	done
+
+	# If dirty config capability is enabled then fall through
+	# to output the data with the config information.
+	if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" != "1" ]; then exit 0; fi
+fi
+
+# Output the stats.
+eval ${cmd} | while read num name
+do
+	# Shorten some names.
+	label=${name//queries with /}
+	label=${label//</below}
+	label=${label//>/above}
+
+	# All lowercase.
+	label=$(echo "$label" | tr 'A-Z' 'a-z')
+
+	# Now change names to all have no spaces.
+	key=${label//[ -]/_}
+
+	echo ${key}.value ${num}
+done

@@ -1,0 +1,97 @@
+#!/usr/bin/perl
+#
+# Copyright (C) 2006-2007 Rodolphe Quiedeville <rodolphe@quiedeville.org>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; version 2 dated June,
+# 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+# $Log$
+# Revision 1.0  2007/01/17 15:57:19  rodo
+# Add total and correct family
+#
+# Revision 1.0  2006/04/30 22:44:19  rodo
+# Created by Rodolphe Quiedeville
+#
+# Need to be run as root, add the following lines ...
+#
+# [mailman_subscribers]
+# user root
+#
+# to /etc/munin/plugin-conf.d/munin-node
+#
+# Magic markers (optinal - used by munin-config and some installation
+# scripts):
+#
+#%# family=manual
+#%# capabilities=autoconf
+
+use strict;
+my ($list,$desc,%lists,$label);
+
+my $list_lists = "/usr/sbin/list_lists";
+(-x $list_lists) || die "Can't exec $list_lists\n";
+
+my $list_members = "/usr/sbin/list_members";
+(-x $list_members) || die "Can't exec $list_members\n";
+
+open(LL, "$list_lists|") or exit 4;
+while (<LL>)
+{
+    ($list, $desc) = (/^\s+(.*?)\s-\s(.*)$/);
+    $lists{$list} = $desc if ($list);
+}
+close(LL);
+
+if ($ARGV[0] and $ARGV[0] eq "config" ){
+    print "graph_title Mailman subscribers\n";
+    print "graph_args --base 1000 -l 0\n";
+    print "graph_scale yes\n";
+    print "graph_vlabel subscribers\n";
+    print "graph_category mailinglist\n";
+    print "graph_total Total\n";
+    print 'graph_info Plugin available at <a href="http://rodolphe.quiedeville.org/hack/munin/mailman/">http://rodolphe.quiedeville.org/hack/munin/mailman/</a>'."\n";
+  
+    my $num =0;
+    while (($list,$desc) = each(%lists)) {
+	$label=$list;
+	$list=clean_name($list);
+	print("$list.label $label\n");
+	print("$list.info $desc\n");
+	($num > 0) ? print("$list.draw STACK\n") : print("$list.draw AREA\n");
+	$num++;
+    }
+    exit 0;
+}
+
+while (($list,$desc) = each(%lists)) {
+    my $num = 0;
+    open(LM, "$list_members $list|") or exit 4;
+    while (<LM>)
+    {
+	$num++;
+    }
+    close(LL);
+
+    $list=clean_name($list);
+    print("$list.value $num\n");
+}
+
+sub clean_name
+{
+    # http://munin-monitoring.org/wiki/notes_on_datasource_names
+    my $list = shift(@_);
+    $list=~s/^[^A-Za-z_]/_/;
+    $list=~s/[^A-Za-z0-9_]/_/g;
+    return $list;
+}

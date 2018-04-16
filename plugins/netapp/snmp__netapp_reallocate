@@ -1,0 +1,239 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+# vim: ft=perl
+
+=head1 NAME
+
+
+=head1 APPLICABLE SYSTEMS
+
+
+=head1 CONFIGURATION
+
+You have to setup ssh with public key authentication for this plugin
+SNMP is only used for getting the hostname
+
+   [snmp_$host_netapp_diskbusy]
+    env.ssh /usr/bin/ssh (default)
+    env.sshuser munin (default)
+    env.sshopts -i /home/munin/.ssh/id_rsa -o UserKnownHostsFile=/home/munin/.ssh/known_hosts (no default)
+    env.spares 2 (no default)
+
+Number of spares is only used for total diskusage.
+
+=head1 INTERPRETATION
+
+This plugin only prints the disk busy status at check time. There is no
+average calculated, but it still gives a goood overview if all disk are
+used equally or you have got a single hot disk.
+
+=head1 AUTHOR
+
+2013, Claudius Herder
+
+=head1 LICENSE
+
+GPLv2.
+
+=cut
+
+use strict;
+use Munin::Plugin;
+use Munin::Plugin::SNMP;
+need_multigraph();
+
+my %vols;
+
+sub do_collect
+{
+    my $input;
+    my @tmp;
+    my $ssh = $ENV{'ssh'} || '/usr/bin/ssh';
+    my $sshuser = $ENV{'sshuser'} || $ENV{'USER'};
+    my $sshopts = $ENV{'sshopts'} || "";
+    my ($host, undef, undef, undef) = Munin::Plugin::SNMP->config_session();
+
+    $input=`$ssh $sshopts $sshuser\@$host reallocate status`;
+
+    my $hit=0;
+    my $key="";
+    my $value=0;
+
+    foreach my $line (split(/\n/, $input))
+    {
+        if (($line =~ m/^\/vol/  || ($line =~ m/^aggr/ ) && !$hit))
+        {
+            ($key= "$line") =~ s/(\/vol\/|^)(.*?)\:\ /$2/;
+            $hit=1;
+        }
+        if ($line =~ m/State/ && $hit )
+        {
+            @tmp = split(/:/, $line);
+            if ( $tmp[1] =~ "Idle")
+            {
+                $value = 0;  #reallocate idle initialising
+            }
+            elsif ( $tmp[1] =~ "Reallocating" )
+            {
+                $value = 1;  #reallocate active
+            }
+            elsif ( $tmp[1] =~ "Redirect" )
+            {
+                $value = 2; #redirect active
+            }
+            elsif ( $tmp[1] =~ "Quiesce" )
+            {
+                $value = 3; #quiesce reallocate paused
+            }
+            else
+            {
+                $value = 5;
+            }
+            $hit=0;
+            $vols{$key} = $value;
+        }
+    }
+}
+
+sub do_config_vol
+{
+    my ($host,$vol) = @_;
+    if ( ! $vol )
+    {
+        print "multigraph reallocate_status\n";
+        print "graph_title $host Reallocation status\n";
+        print "graph_info This graph shows the reallocation status for $host\n";
+    }
+    else
+    {
+        print "multigraph reallocate_status.$vol\n";
+        print "graph_title reallocate_status status for vol $vol\n";
+        print "graph_info This graph shows reallocate_status status for $vol\n";
+    }
+    print "graph_args --base 1000 --lower-limit 0 --rigid\n";
+    print "graph_vlabel reallocate_status status\n";
+    print "graph_category fs\n";
+    foreach my $state ("reallocating", "redirecting", "quiesce", "debug")
+    {
+        print "$state.label $state\n";
+        print "$state.min 0\n";
+        print "$state.draw AREASTACK\n";
+        print "$state.type GAUGE\n";
+        if ( $vol )
+        {
+            print "$state.info This is the $state status of $vol.\n";
+        }
+    }
+
+}
+
+
+sub do_fetch_root
+{
+    my $status = 0;
+    my $reallocating = 0;
+    my $redirecting = 0;
+    my $quiesce = 0;
+    my $debug = 0;
+
+    foreach my $vol (keys %vols)
+    {
+        $status=$vols{$vol};
+        if ($status == 0)
+        {
+            #reallocate idle
+        }
+        elsif ($status == 1)
+        {
+            $reallocating++;
+        }
+        elsif ($status == 2)
+        {
+            $redirecting++;
+        }
+        elsif ($status == 3)
+        {
+            $quiesce++;
+        }
+        else
+        {
+            $debug++;
+        }
+    }
+    print "multigraph reallocate_status\n";
+    print "reallocating.value $reallocating\n";
+    print "redirecting.value $redirecting\n";
+    print "quiesce.value $quiesce\n";
+    print "debug.value $debug\n";
+}
+
+sub do_fetch_vol
+{
+    my($vol) = @_;
+    my $status = 0;
+    my $reallocating = 0;
+    my $redirecting = 0;
+    my $quiesce = 0;
+    my $debug = 0;
+
+    $status = $vols{$vol};
+    if ($status == 0)
+    {
+        #reallocate idle
+    }
+    elsif ($status == 1)
+    {
+        $reallocating = 1;
+    }
+    elsif ($status == 2)
+    {
+        $redirecting = 1;
+    }
+    elsif ($status == 3)
+    {
+       $quiesce = 1;
+    }
+    else
+    {
+        $debug = 1;
+    }
+    print "multigraph reallocate_status.$vol\n";
+    print "reallocating.value $reallocating\n";
+    print "redirecting.value $redirecting\n";
+    print "quiesce.value $quiesce\n";
+    print "debug.value $debug\n";
+}
+
+sub do_config
+{
+    my ($host, undef, undef, undef) = Munin::Plugin::SNMP->config_session();
+    print "host_name $host\n" unless $host eq 'localhost';
+    foreach my $vol (sort keys %vols)
+    {
+        do_config_vol($host,$vol);
+    }
+    do_config_vol($host);
+}
+
+sub do_fetch
+{
+    foreach my $vol (sort  keys %vols)
+    {
+        do_fetch_vol($vol);
+    }
+    do_fetch_root();
+}
+
+do_collect();
+
+if ($ARGV[0] and $ARGV[0] eq "config")
+{
+    do_config();
+    exit 0;
+}
+
+do_fetch();
+
+exit 0;
+
+__END__

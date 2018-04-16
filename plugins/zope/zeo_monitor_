@@ -1,0 +1,283 @@
+#!/usr/bin/perl -Tw
+
+# Plugin to monitor ZEO connected clients, reads, writes and errors/conflicts
+#
+# Author: Terry Burton <tez@terryburton.co.uk>
+#
+# Revisions:
+#
+# 1.0  2010/07/08  First version
+# 1.1  2010/07/09  Split load into reads and writes
+#                  Reads has logarithmic scale
+#                  Adjust some scaling factors
+#                  Support for INET connections, the new default
+# 
+# Invoke using symlinks to zeo_monitor_ in the form zeo_monitor_{clients,reads,writes,errors}_<storage_name>
+#
+# This plugin can be configured manually or by autoconf (provided that the ZEO
+# monitor runs on the default port 8091.)
+#
+# root@munin:~ munin-node-configure --shell
+# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_clients_1
+# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_clients_temp
+# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_errors_1
+# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_errors_temp
+# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_reads_1
+# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_reads_temp
+# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_writes_1
+# ln -s /usr/share/munin/plugins/zeo_monitor_ /etc/munin/plugins/zeo_monitor_writes_temp
+#  
+#
+# Configuration variables:
+#
+#       zeomonitoraddr - address:port of the zeo monitor server socket (default 127.0.0.1:8091)
+#       zeomonitorsock - path to the zeo monitor server socket
+#
+#   Note: This plugin will attempt to attach to the network socket given by
+#         zeomonitoraddr unless the path to a Unix domain socket is given with
+#         zeomonitorsock
+#
+# Parameters:
+#
+#       config
+#       autoconf
+#       suggest
+#
+# Configuration examples:
+#
+#   Connect to the monitor server running on TCP/4567
+#
+#       [zeo_monitor_*]
+#       user root
+#       env.zeomonitoraddr 127.0.0.1:4567
+#
+#   Connect to the monitor server running on a Unix domain socket
+#
+#       [zeo_monitor_*]
+#       user root
+#       env.zeomonitorsock /var/run/zeo/zeo-monitor.sock
+#
+# Magic markers (optional - used by munin-config and installation
+# scripts):
+#
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+use strict;
+
+# Need to use eval EXPR here. "-T" is used on the command line, and
+# munin is not installable in a reasonable way for automated testing.
+eval 'use Munin::Plugin; 1;' or die 'Please install Munin::Plugin';
+
+use File::Basename;
+use IO::Socket::UNIX qw(SOCK_STREAM);
+
+my $zeomonitoraddr = exists $ENV{'zeomonitoraddr'} ? $ENV{'zeomonitoraddr'} : '127.0.0.1:8091';
+($zeomonitoraddr)=$zeomonitoraddr=~/(.*)/;
+my $zeomonitorsock = exists $ENV{'zeomonitorsock'} ? $ENV{'zeomonitorsock'} : '';
+($zeomonitorsock)=$zeomonitorsock=~/(.*)/;
+
+if (basename($0) !~ /^zeo_monitor_/) {
+    die qq(Please ensure that the name of the script and it's symlinks starts with "zeo_monitor_"\n);
+}
+
+
+############
+# autoconf #
+############
+
+if (defined $ARGV[0] && $ARGV[0] eq 'autoconf') {
+
+    # Capture any croaks on the way
+
+    eval { parse_zeo_monitor(); };
+
+    if ( !$@ ) {
+        print "yes\n";
+        exit 0;
+    }
+
+    chomp $@;
+    print "no ($@)\n";
+    exit 0;
+
+}
+
+
+###########
+# suggest #
+###########
+
+if (defined $ARGV[0] and $ARGV[0] eq 'suggest') {
+
+    my @storage_names;
+
+    eval { @storage_names=parse_zeo_monitor(); };
+    exit 0 if ( $@ );
+
+    print "clients_$_\nreads_$_\nwrites_$_\nerrors_$_\n" foreach @storage_names;
+    exit 0;
+
+}
+
+
+# From now on we require the mode and storage name to be given
+(my $mode,my $storage_name)=$0=~/zeo_monitor_(.+)_(.+)$/;
+die qq(Symlink to this script by appending a mode and storage name such as "zeo_monitor_load_temp"\n) unless defined $storage_name;
+
+
+##########
+# config #
+##########
+
+if ( $ARGV[0] and $ARGV[0] eq "config") {
+  
+  print <<"EOF";
+graph_title ZEO $mode for storage $storage_name
+graph_args --base 1000 --lower-limit 0
+graph_vlabel events per \${graph_period}
+graph_category appserver
+graph_info ZEO performance monitoring
+EOF
+
+if ($mode eq 'clients') {
+  print <<EOF;
+clients.label Clients
+clients.type GAUGE
+EOF
+}
+
+if ($mode eq 'reads') {
+  print <<EOF;
+graph_args --logarithmic --lower-limit 1
+loads.label Loads
+loads.type DERIVE
+loads.min 0
+EOF
+}
+
+if ($mode eq 'writes') {
+  print <<EOF;
+commits.label Commits (x10)
+commits.type DERIVE
+commits.min 0
+commits.cdef commits,10,*
+stores.label Stores
+stores.type DERIVE
+stores.min 0
+EOF
+}
+
+if ($mode eq 'errors') {
+  print <<EOF;
+aborts.label Aborts (x10)
+aborts.type DERIVE
+aborts.min 0
+aborts.cdef aborts,10,*
+conflicts.label Conflicts (x10)
+conflicts.type DERIVE
+conflicts.min 0
+conflicts.cdef conflicts,10,*
+conflictsres.label Conflicts Resolved
+conflictsres.type DERIVE
+conflictsres.min 0
+EOF
+}
+
+  exit 0;
+
+}
+
+
+########
+# main #
+########
+
+my %stats=parse_zeo_monitor($storage_name);
+
+if ($mode eq 'clients') {
+  print <<"EOF";
+clients.value $stats{clients}
+EOF
+}
+
+if ($mode eq 'reads') {
+  print <<"EOF";
+loads.value $stats{loads}
+EOF
+}
+
+if ($mode eq 'writes') {
+  print <<"EOF";
+commits.value $stats{commits}
+stores.value $stats{stores}
+EOF
+}
+
+if ($mode eq 'errors') {
+  print <<"EOF";
+aborts.value $stats{aborts}
+conflicts.value $stats{conflicts}
+conflictsres.value $stats{conflictsres}
+EOF
+}
+
+exit 0;
+
+
+####
+
+# Read the zeo-monitor socket and parse the result. If a storage name is given
+# then return the stats for it. Otherwise return a list of available storage
+# names.
+
+sub parse_zeo_monitor {
+
+  my $storage_name=shift;
+
+  my $socket;
+  if ($zeomonitorsock ne '') {
+    $socket=IO::Socket::UNIX->new(Type=>SOCK_STREAM,Peer=>$zeomonitorsock) or die("Can't connect to socket: $!\n");
+  } else {
+    $socket=IO::Socket::INET->new(Proto=>"tcp",PeerAddr=>$zeomonitoraddr) or die("Can't connect to port: $!\n");
+  }
+  my $response=join('',<$socket>);
+  close $socket;
+
+  # If no storage name is given then return list of all storage names
+  if (!defined $storage_name) {
+    return map {/: (.*)/} (grep /^Storage: /, split(/\n/,$response));
+  }
+
+  # Otherwise, read the stats for the given storage name
+  (my $stats)=$response=~/
+    (
+      Storage:\ $storage_name\n
+      .*?
+      \n
+    )
+    \n
+  /sx;
+  
+  my %name_var=(
+    'Clients'               => 'clients',
+    'Commits'               => 'commits',
+    'Aborts'                => 'aborts',
+    'Loads'                 => 'loads',
+    'Stores'                => 'stores',
+    'Conflicts'             => 'conflicts',
+    'Conflicts resolved'    => 'conflictsres',
+  );
+  
+  my %stats=();
+  foreach (split /\n/, $stats) {
+    (my $name,my $value)=split ': ',$_,2;
+    my $var=$name_var{$name};
+    next unless $var;
+    $stats{$var}=$value;
+  }
+  
+  return %stats;
+
+}
+

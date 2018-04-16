@@ -1,0 +1,44 @@
+#!/usr/bin/env python
+# -*- coding: utf-8
+# Python Plugin for Munin
+# Copyright (C) 2010 Natenom (Natenom@googlemail.com)
+# This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 3 of the License, or (at your option) any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+# You should have received a copy of the GNU General Public License along with this program; if not, see <http://www.gnu.org/licenses/>.
+#Version: 0.0.1
+#2010-02-09
+
+#Path to Murmur.ice
+iceslice='/usr/share/slice/Murmur.ice'
+
+#Murmur-Port (not needed to work, only for display purposes)
+serverport=64738
+
+#Port where ice listen
+iceport=6502
+
+
+import Ice, sys
+Ice.loadSlice('', ['-I' + Ice.getSliceDir(), iceslice])
+ice = Ice.initialize()
+import Murmur
+
+if (sys.argv[1:]):
+  if (sys.argv[1] == "config"):
+    print 'graph_title Murmur (Port %s)' % (serverport)
+    print 'graph_category voip'
+    print 'graph_vlabel Count'
+    print 'users.label Users'
+    print 'uptime.label Uptime in days'
+    print 'chancount.label Channelcount/10'
+    print 'bancount.label Bans on server'
+    sys.exit(0)
+
+meta = Murmur.MetaPrx.checkedCast(ice.stringToProxy("Meta:tcp -h 127.0.0.1 -p %s" % (iceport)))
+server=meta.getServer(1)
+print "users.value %i" % (len(server.getUsers()))
+print "uptime.value %.2f" % (float(meta.getUptime())/60/60/24)
+print "chancount.value %.1f" % (len(server.getChannels())/10)
+print "bancount.value %i" % (len(server.getBans()))
+
+ice.shutdown() 

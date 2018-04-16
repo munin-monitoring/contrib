@@ -1,0 +1,240 @@
+#!/usr/bin/perl -w
+
+=head1 NAME
+
+Munin plugin snmp__sentry is written to monitor the Sentry line of Power Distribution Units (PDU) offered by Server Technology.
+
+This plugin currently assumes a 3-phase PDU.
+
+=head1 AUTHOR
+
+Danny Howard <dannyman@toldme.com>
+
+This plugin was created on the behalf of Quantifind, Inc.  http://www.quantifind.com
+
+=head1 LICENSE
+
+BSD
+
+=head1 MAGIC MARKERS
+
+  #%# family=snmpauto
+  #%# capabilities=snmpconf
+
+=head1 EXAMPLE MIB
+
+$ wget ftp://ftp.servertech.com/pub/SNMP/sentry3/Sentry3.mib
+$ snmpwalk -c public -v 2c -M +. -m +Sentry3-MIB 192.168.whatevs .1.3.6.1.4.1.1718.3.2.2
+Sentry3-MIB::infeedID.1.1 = STRING: AA
+Sentry3-MIB::infeedID.1.2 = STRING: AB
+Sentry3-MIB::infeedID.1.3 = STRING: AC
+Sentry3-MIB::infeedName.1.1 = STRING: Master_X
+Sentry3-MIB::infeedName.1.2 = STRING: Master_Y
+Sentry3-MIB::infeedName.1.3 = STRING: Master_Z
+Sentry3-MIB::infeedCapabilities.1.1 = BITS: C6 00 onSense(0) loadSense(1) voltageSense(5) powerSense(6) 
+Sentry3-MIB::infeedCapabilities.1.2 = BITS: C6 00 onSense(0) loadSense(1) voltageSense(5) powerSense(6) 
+Sentry3-MIB::infeedCapabilities.1.3 = BITS: C6 00 onSense(0) loadSense(1) voltageSense(5) powerSense(6) 
+Sentry3-MIB::infeedStatus.1.1 = INTEGER: on(1)
+Sentry3-MIB::infeedStatus.1.2 = INTEGER: on(1)
+Sentry3-MIB::infeedStatus.1.3 = INTEGER: on(1)
+Sentry3-MIB::infeedLoadStatus.1.1 = INTEGER: normal(0)
+Sentry3-MIB::infeedLoadStatus.1.2 = INTEGER: normal(0)
+Sentry3-MIB::infeedLoadStatus.1.3 = INTEGER: normal(0)
+Sentry3-MIB::infeedLoadValue.1.1 = INTEGER: 717 hundredth Amps
+Sentry3-MIB::infeedLoadValue.1.2 = INTEGER: 708 hundredth Amps
+Sentry3-MIB::infeedLoadValue.1.3 = INTEGER: 787 hundredth Amps
+Sentry3-MIB::infeedLoadHighThresh.1.1 = INTEGER: 16 Amps
+Sentry3-MIB::infeedLoadHighThresh.1.2 = INTEGER: 16 Amps
+Sentry3-MIB::infeedLoadHighThresh.1.3 = INTEGER: 16 Amps
+Sentry3-MIB::infeedOutletCount.1.1 = INTEGER: 10
+Sentry3-MIB::infeedOutletCount.1.2 = INTEGER: 10
+Sentry3-MIB::infeedOutletCount.1.3 = INTEGER: 10
+Sentry3-MIB::infeedCapacity.1.1 = INTEGER: 20 Amps
+Sentry3-MIB::infeedCapacity.1.2 = INTEGER: 20 Amps
+Sentry3-MIB::infeedCapacity.1.3 = INTEGER: 20 Amps
+Sentry3-MIB::infeedVoltage.1.1 = INTEGER: 2055 tenth Volts
+Sentry3-MIB::infeedVoltage.1.2 = INTEGER: 2034 tenth Volts
+Sentry3-MIB::infeedVoltage.1.3 = INTEGER: 2052 tenth Volts
+Sentry3-MIB::infeedPower.1.1 = INTEGER: 726 Watts
+Sentry3-MIB::infeedPower.1.2 = INTEGER: 809 Watts
+Sentry3-MIB::infeedPower.1.3 = INTEGER: 874 Watts
+Sentry3-MIB::infeedApparentPower.1.1 = INTEGER: 793 Volt-Amps
+Sentry3-MIB::infeedApparentPower.1.2 = INTEGER: 876 Volt-Amps
+Sentry3-MIB::infeedApparentPower.1.3 = INTEGER: 941 Volt-Amps
+Sentry3-MIB::infeedPowerFactor.1.1 = INTEGER: 92 hundredths
+Sentry3-MIB::infeedPowerFactor.1.2 = INTEGER: 92 hundredths
+Sentry3-MIB::infeedPowerFactor.1.3 = INTEGER: 93 hundredths
+Sentry3-MIB::infeedCrestFactor.1.1 = INTEGER: 18 tenths
+Sentry3-MIB::infeedCrestFactor.1.2 = INTEGER: 17 tenths
+Sentry3-MIB::infeedCrestFactor.1.3 = INTEGER: 17 tenths
+Sentry3-MIB::infeedEnergy.1.1 = INTEGER: 762 tenth Kilowatt-Hours
+Sentry3-MIB::infeedEnergy.1.2 = INTEGER: 913 tenth Kilowatt-Hours
+Sentry3-MIB::infeedEnergy.1.3 = INTEGER: 928 tenth Kilowatt-Hours
+Sentry3-MIB::infeedReactance.1.1 = INTEGER: capacitive(1)
+Sentry3-MIB::infeedReactance.1.2 = INTEGER: capacitive(1)
+Sentry3-MIB::infeedReactance.1.3 = INTEGER: capacitive(1)
+Sentry3-MIB::infeedPhaseVoltage.1.1 = INTEGER: 2055 tenth Volts
+Sentry3-MIB::infeedPhaseVoltage.1.2 = INTEGER: 2034 tenth Volts
+Sentry3-MIB::infeedPhaseVoltage.1.3 = INTEGER: 2052 tenth Volts
+Sentry3-MIB::infeedPhaseCurrent.1.1 = INTEGER: 386 hundredth Amps
+Sentry3-MIB::infeedPhaseCurrent.1.2 = INTEGER: 431 hundredth Amps
+Sentry3-MIB::infeedPhaseCurrent.1.3 = INTEGER: 459 hundredth Amps
+Sentry3-MIB::infeedCapacityUsed.1.1 = INTEGER: 358 tenth percentage
+Sentry3-MIB::infeedCapacityUsed.1.2 = INTEGER: 354 tenth percentage
+Sentry3-MIB::infeedCapacityUsed.1.3 = INTEGER: 393 tenth percentage
+Sentry3-MIB::infeedLineID.1.1 = STRING: A:X
+Sentry3-MIB::infeedLineID.1.2 = STRING: A:Y
+Sentry3-MIB::infeedLineID.1.3 = STRING: A:Z
+Sentry3-MIB::infeedLineToLineID.1.1 = STRING: A:X-Y
+Sentry3-MIB::infeedLineToLineID.1.2 = STRING: A:Y-Z
+Sentry3-MIB::infeedLineToLineID.1.3 = STRING: A:Z-X
+Sentry3-MIB::infeedPhaseID.1.1 = STRING: A:X-Y
+Sentry3-MIB::infeedPhaseID.1.2 = STRING: A:Y-Z
+Sentry3-MIB::infeedPhaseID.1.3 = STRING: A:Z-X
+
+=cut
+
+use strict;
+use Munin::Plugin::SNMP;
+
+if (defined $ARGV[0] and $ARGV[0] eq "snmpconf") {
+        print "require 1.3.6.1.4.1.1718.3.2.2.1\n";
+        exit 0;
+}
+
+my $session = Munin::Plugin::SNMP->session(-translate =>
+                                           [ -timeticks => 0x0 ]);
+
+my $sentry_h = $session->get_hash (
+	-baseoid	=> ".1.3.6.1.4.1.1718.3.2.2.1",
+	-cols		=> {
+# maxcols 16 I guess
+#				2	=> 'infeedID',
+				3	=> 'infeedName',
+#				4	=> 'infeedCapabilities',
+#				5	=> 'infeedStatus',
+#				6	=> 'infeedLoadStatus',
+				7	=> 'infeedLoadValue',
+				8	=> 'infeedLoadHighThresh',
+#				9	=> 'infeedOutletCount',
+				10	=> 'infeedCapacity',
+#				11	=> 'infeedVoltage',
+#				12	=> 'infeedPower',
+#				13	=> 'infeedApparentPower',
+				14	=> 'infeedPowerFactor',
+				15	=> 'infeedCrestFactor',
+#				16	=> 'infeedEnergy',
+#				17	=> 'infeedReactance',
+#				18	=> 'infeedPhaseVoltage',
+#				19	=> 'infeedPhaseCurrent',
+#				20	=> 'infeedCapacityUsed',
+#				21	=> 'infeedLineID',
+#				22	=> 'infeedLineToLineID',
+#				23	=> 'infeedPhaseID',
+
+			}
+	);
+
+if (defined $ARGV[0] and $ARGV[0] eq "config") {
+    my ($host) = Munin::Plugin::SNMP->config_session();
+	print "host_name $host\n" unless $host eq 'localhost';
+	print "
+multigraph power_amps_drawn
+graph_title Power Draw in Amps
+graph_args --lower-limit 0
+graph_vlabel Amps
+graph_category sensors
+graph_scale no
+graph_info This shows the amperage drawn on your PDU. Per NEC, a PDU should not sustain 80% of its maximum circuit capacity for more than three hours.
+
+";
+
+    foreach my $k ( keys %{$sentry_h} ) {
+    	my $infeedName = $sentry_h->{$k}->{'infeedName'};
+    	my $critical	= ($sentry_h->{$k}->{'infeedCapacity'})*.9;	# 90% of capacity
+    	my $warning	= $sentry_h->{$k}->{'infeedLoadHighThresh'};	# 80% of capacity
+    	
+    	print "$infeedName.critical $critical\n";
+    	print "$infeedName.draw LINE1\n";
+    	print "$infeedName.label $infeedName\n";
+    	print "$infeedName.min 0\n";
+    	print "$infeedName.type GAUGE\n";
+    	print "$infeedName.warning $warning\n";
+    }
+
+        print "
+multigraph power_power_factor
+graph_title Power Factor
+graph_args --lower-limit 0
+graph_vlabel Power Factor
+graph_category sensors
+graph_scale no
+graph_info Power factor represents the efficiency of the components connected to the circuit. Power factor declines as components age, increasing the overall load on the circuit.
+
+";
+
+    foreach my $k ( keys %{$sentry_h} ) {
+    	my $infeedName = $sentry_h->{$k}->{'infeedName'};
+    	
+    	print "$infeedName.draw LINE1\n";
+    	print "$infeedName.label $infeedName\n";
+    	print "$infeedName.type GAUGE\n";
+    }
+
+        print "
+multigraph power_crest_factor
+graph_title Crest Factor
+graph_args --lower-limit 0
+graph_vlabel Crest Factor
+graph_category sensors
+graph_scale no
+graph_info Crest factor relates the peak value of a signal to its root mean square value. For three-phase AC, a crest factor of 1.732 is expected. Low crest factor may indicate UPS overclipping and crest factors over 5 degrade monitoring accuracy.
+
+";
+
+    foreach my $k ( keys %{$sentry_h} ) {
+    	my $infeedName = $sentry_h->{$k}->{'infeedName'};
+    	
+    	print "$infeedName.draw LINE1\n";
+    	print "$infeedName.label $infeedName\n";
+    	print "$infeedName.type GAUGE\n";
+    }
+
+    exit 0;
+}
+
+print "multigraph power_amps_drawn\n";
+foreach my $k ( keys %{$sentry_h} ) {
+	my $infeedName = $sentry_h->{$k}->{'infeedName'};
+	my $amps = $sentry_h->{$k}->{'infeedLoadValue'};
+	if ( $amps ) {
+		$amps = $amps * .01;
+	} else {
+		$amps = 'U';
+	}
+	print "$infeedName.value $amps\n";
+}
+
+print "multigraph power_power_factor\n";
+foreach my $k ( keys %{$sentry_h} ) {
+	my $infeedName = $sentry_h->{$k}->{'infeedName'};
+	my $pf = $sentry_h->{$k}->{'infeedPowerFactor'};
+	if ( $pf ) {
+		$pf = $pf * .01;
+	} else {
+		$pf = 'U';
+	}
+	print "$infeedName.value $pf\n";
+}
+
+print "multigraph power_crest_factor\n";
+foreach my $k ( keys %{$sentry_h} ) {
+	my $infeedName = $sentry_h->{$k}->{'infeedName'};
+	my $crest = $sentry_h->{$k}->{'infeedCrestFactor'};
+	if ( $crest ) {
+		$crest = $crest * .1;
+	} else {
+		$crest = 'U';
+	}
+	print "$infeedName.value $crest\n";
+}

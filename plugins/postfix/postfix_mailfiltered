@@ -1,0 +1,84 @@
+#!/bin/bash
+#
+# Plugin to monitor incoming Postfix mail.
+#
+# Parameters understood:
+#
+# 	config   (required)
+# 	autoconf (optional)
+#
+
+
+mktempfile () {
+mktemp -t 
+}       
+
+MAIL_LOG=${logfile:-/var/log/mail.log}
+LOGTAIL=${logtail:-`which logtail`}
+STATEFILE=$MUNIN_PLUGSTATE/postfix_mailfiltered.offset
+
+if [ "$1" = "autoconf" ]; then
+        if [ -f "${MAIL_LOG}" -a -n "${LOGTAIL}" -a -x "${LOGTAIL}" ] ; then
+		echo yes
+		exit 0
+	else
+		echo no
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title Postfix daily filtering'
+	echo 'graph_order relay rbl helo client sender recipient'
+	echo 'graph_category mail'
+	echo 'graph_vlabel Count'
+	echo 'graph_args --base 1000 -l 0'
+	echo 'graph_total total'
+
+	echo 'relay.label Relay denied'
+	echo 'relay.min 1'
+	echo 'rbl.label RBL blocked'
+	echo 'rbl.min 1'
+	echo 'helo.label HELO rejected'
+	echo 'helo.min 1'
+	echo 'client.label Client rejected'
+	echo 'client.min 1'
+	echo 'sender.label Sender rejected'
+	echo 'sender.min 1'
+	echo 'recipient.label Recipient unknown'
+	echo 'recipient.min 1'
+        exit 0
+fi
+
+
+relay=u
+rbl=U
+helo=U
+client=U
+sender=U
+recipient=U
+
+TEMP_FILE=`mktempfile munin-postfix_filtered.XXXXXX`
+
+if [ -n "$TEMP_FILE" -a -f "$TEMP_FILE" ]
+then
+	$LOGTAIL ${MAIL_LOG} $STATEFILE | grep "postfix\/smtpd\[[0-9]*\]: NOQUEUE: reject:" > ${TEMP_FILE}
+
+	relay=`grep 'Relay access denied' ${TEMP_FILE} | wc -l`
+	rbl=`grep 'blocked using' ${TEMP_FILE} | wc -l`
+	helo=`grep 'Helo command rejected' ${TEMP_FILE} | wc -l`
+	client=`grep 'Client host rejected' ${TEMP_FILE} | wc -l`
+        sender=`grep 'Sender address rejected' ${TEMP_FILE} | wc -l`
+	recipient=`grep 'Recipient address rejected' ${TEMP_FILE} | grep -v "Greylisted" | wc -l`
+
+	/bin/rm -f $TEMP_FILE
+fi
+
+echo "relay.value ${relay}"
+echo "rbl.value ${rbl}"
+echo "helo.value ${helo}"
+echo "client.value ${client}"
+echo "sender.value ${sender}"
+echo "recipient.value ${recipient}"
+
+

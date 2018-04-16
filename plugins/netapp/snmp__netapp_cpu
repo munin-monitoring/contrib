@@ -1,0 +1,47 @@
+#!/usr/bin/env python
+"""Thomas R. N. Jansson (tjansson@tjansson.dk)
+16-MAY-2010
+"""
+
+# The SNMP traps for the NetApp filer can be found in
+# /net/netappfiler/vol0/etc/mib/traps.dat if the filer is 
+# NFS automounted mounted on server.
+# Example: the SNMP id for cpuBusyTimePerCent is
+# snmp.1.3.6.1.4.1.789.1.2.1.3.0 
+# and retrival of this value is done by 
+# snmpget -v 1 -c public netappfiler 1.3.6.1.4.1.789.1.2.1.3.0
+#
+# Requires snmpget and assumes public community.  
+
+import commands
+import sys
+
+# Provided a servername and a snmpid it returns the value stripped of bogus information.
+def snmpget(iservername,isnmpid):
+    runcmd = 'snmpget -v 1 -c public ' + iservername + ' ' + isnmpid
+    output = commands.getoutput(runcmd)
+    return output.split()[3]
+
+snmpid      = "1.3.6.1.4.1.789.1.2.1.3.0"
+warning     = 80
+critical    = 95 
+servername  = sys.argv[0].split('_')[1]
+
+if len(sys.argv) == 2 and sys.argv[1]  == "config":
+    print 'graph_title CPU usage on', servername
+    print 'graph_args --base 1000 -r --lower-limit 0 --upper-limit 100'
+    print 'graph_vlabel %'
+    print 'graph_scale no'
+    print 'graph_info This graph shows how CPU time is spent.'
+    print 'graph_period second'
+    print 'graph_category cpu'
+
+    print 'usage.label cpu_usage '
+    print 'usage.draw STACK'
+    print 'usage.warning ', warning
+    print 'usage.critical ', critical
+    print 'usage.info CPU time spent by normal programs and daemons'
+    sys.exit(0)
+
+# Gathers info from the servers and gathers data
+print 'usage.value '+snmpget(servername,snmpid)

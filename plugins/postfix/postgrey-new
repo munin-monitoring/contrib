@@ -1,0 +1,160 @@
+#! /usr/bin/perl
+###################################################################
+# Munins Plugin to monitor actions of postgrey greylisting daemon #
+# Version 0.1                                                     #
+###################################################################
+
+######################### Configuration ###########################
+# Usually this plugin will look in /var/log/mail.log for the      #
+# output of postgrey. You can change that by setting  env.logfile #
+# The state file is /var/lib/munin/plugin-state/postgrey-new.state#
+# This can be changed by setting env.statefile                    #
+# Keep in  mind to grant enough rigths in order to open the       #
+# logfiles etc.                                                   #
+# Parameters understood by this plugin                            #
+#                                                                 #
+#   config   (required)                                           #
+#   autoconf (optional)                                           #
+#                                                                 #
+###################################################################
+# This plgin works with postgrey 1.31 but should also do with 1.32#
+# Tested under Debian lenny                                       #
+###################################################################
+
+
+### Author Rico Sagner hellriegel@sund-xplosion.de
+### Please send bug reports  to this address
+
+use strict;
+use warnings;
+
+my $maillog= $ENV{'logfile'} || "/var/log/mail.log";
+my $statefile= $ENV{'statefile'} || "$ENV{MUNIN_PLUGSTATE}/postgrey-new.state";
+
+my $greylisted=0;
+my $greylisted_old=0;
+my $passes=0;
+my $passes_old=0;
+my $passes_white=0;
+my $passes_white_old=0;
+my $retry=0;
+my $retry_old=0;
+my $grey_new=0;
+my $pass_new=0;
+my $retry_new=0;
+my $passes_white_new=0;
+
+if(defined $ARGV[0] and $ARGV[0] eq "autoconf") {
+ if ( -f $maillog) {
+	print "yes\n";
+	exit 0;
+	}
+ else {
+	print "no\n";
+	exit 1
+ }
+}
+
+
+if(defined $ARGV[0] and $ARGV[0] eq "config") {
+	print "graph_title Postgrey Actions\n";
+	print "graph_order greylisted retry_early passed passed_w\n";
+	print "graph_category mail\n";
+	print "graph_vlabel Count\n";
+	print "graph_scale no\n";
+	
+	print "greylisted.label greylisted_reason_new\n";
+	print "greylisted.type GAUGE\n";
+	print "greylisted.draw AREA\n";
+	print "greylisted.min 0\n";
+	print "retry_early.label greylisted_retry_early\n";
+	print "retry_early.type GAUGE\n";
+	print "retry_early.draw AREA\n";
+	print "retry_early.min 0\n";
+	print "passed.label passed_found\n";
+	print "passed.type GAUGE\n";
+	print "passed.draw AREA\n";
+	print "passed.min 0\n";
+	print "passed_w.label passed_whitelisted\n";
+	print "passed_w.type GAUGE\n";
+	print "passed_w.draw AREA\n";
+	print "passed_w.min 0\n";
+	exit 0;
+}
+
+if( -f $statefile) {
+ open ( STATE ,"<$statefile");
+ defined($greylisted_old=<STATE>) or $greylisted_old=0;
+ defined($passes_old=<STATE>) or $passes_old=0;
+ defined($retry_old=<STATE>) or $retry_old=0;
+ defined($passes_white_old=<STATE>) or $passes_white_old=0;
+ chomp($greylisted_old);
+ chomp($passes_old);
+ chomp($retry_old);
+ chomp($passes_white_old);
+ close STATE;
+} 
+
+
+
+open (LOG ,"<$maillog") or die "Cannot open Maillog";
+while(my $line = <LOG>)
+{
+	if($line=~m/postgrey\[/)
+	{
+		if($line=~m/action=greylist/) {
+			if($line=~m/reason=new/)
+			{
+				$greylisted++;
+			}
+			elsif($line=~m/reason=early-retry/)
+			{
+				$retry++;
+			}
+		}
+		elsif($line=~m/action=pass/)  {
+			if($line=~m/reason=triplet/)
+			{
+				$passes++;
+			}
+			elsif($line=~m/reason=client/)
+			{
+				$passes_white++;
+			}
+		}
+		
+
+	}
+}
+close(LOG);
+
+
+open (STATE2,">$statefile");
+print STATE2 "$greylisted\n";
+print STATE2 "$passes\n";
+print STATE2 "$retry\n";
+print STATE2 "$passes_white\n";
+close STATE2;
+
+if($greylisted_old>$greylisted) { $grey_new=$greylisted; }
+elsif($greylisted_old eq $greylisted) { $grey_new=0;}
+else { $grey_new=$greylisted-$greylisted_old; }
+
+if($passes_old>$passes) { $pass_new=$passes;}
+elsif( $passes_old eq $passes) { $pass_new=0; }
+else { $pass_new=$passes-$passes_old; }
+
+if($retry_old>$retry) { $retry_new=$retry;}
+elsif($retry_old eq $retry) { $retry_new=0;}
+else { $retry_new=$retry-$retry_old; }
+
+if($passes_white_old>$passes_white) { $passes_white_new=$passes_white;}
+elsif($passes_white_old eq $passes_white) { $passes_white_new=0;}
+else { $passes_white_new=$passes_white-$passes_white_old; }
+
+print "greylisted.value $grey_new\n";
+print "retry_early.value $retry_new\n";
+print "passed.value $pass_new\n";
+print "passed_w.value $passes_white_new\n";
+
+exit 0;

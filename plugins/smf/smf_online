@@ -1,0 +1,84 @@
+#!/usr/bin/perl
+#
+# Munin plugin for online users stats over a SMF forum database
+#
+# Copyright (C) 2013 - digger (http://simplemachines.ru)
+# Based on Rowdy Schwachfer (http://rowdy.nl) 's Spotweb plugin
+#
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+#
+# Configuration example
+#
+#[smf*]
+#env.mysql               /usr/bin/mysql           # MySQL binary (optional)
+#env.db                  smf                      # SMF database (required)
+#env.db_prefix           smf_                     # SMF database prefix(required)
+#env.db_user             myuser                   # SMF database user (required)
+#env.db_password         mypassword               # SMF database password (required)
+
+use strict;
+
+my $MYSQL = $ENV{'mysql'} || "/usr/bin/mysql";
+my $MYSQLOPTS = "-u " . $ENV{'db_user'} . " -p" . $ENV{'db_password'};
+my $DATABASE = $ENV{'db'} || "smf";
+my $PREFIX = $ENV{'db_prefix'} || "smf_";
+
+# Output for config
+if(defined $ARGV[0] && $ARGV[0] eq 'config') {
+    print <<EOC
+graph_title SMF Users Online
+graph_vlabel Number of sessions
+graph_category forum
+guests.label Guests
+graph_scale no
+all.warning  1000
+all.critical 10000
+EOC
+;
+    print <<EOC
+users.label Registered Users
+EOC
+;
+    print <<EOC
+spiders.label Spiders
+EOC
+;
+    print <<EOC
+all.label All
+EOC
+;
+    exit 0;
+}
+
+#Guests count
+my $guests = `$MYSQL $MYSQLOPTS -e 'SELECT COUNT(*) FROM ${DATABASE}.${PREFIX}log_online WHERE id_member = 0 AND id_spider = 0'`;
+$guests =~ /(\d+)/; 
+print "guests.value ".$1."\n";
+
+#Spiders count
+my $spiders = `$MYSQL $MYSQLOPTS -e 'SELECT COUNT(*) FROM ${DATABASE}.${PREFIX}log_online WHERE id_spider > 0'`;
+$spiders =~ /(\d+)/; 
+print "spiders.value ".$1."\n";
+
+#Users count
+my $users = `$MYSQL $MYSQLOPTS -e 'SELECT COUNT(*) FROM ${DATABASE}.${PREFIX}log_online WHERE id_member > 0'`;
+$users =~/(\d+)/;
+print "users.value ".$1."\n";
+
+#All count
+my $all = `$MYSQL $MYSQLOPTS -e 'SELECT COUNT(*) FROM ${DATABASE}.${PREFIX}log_online'`;
+$all =~/(\d+)/;
+print "all.value ".$1."\n";

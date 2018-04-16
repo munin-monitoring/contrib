@@ -1,0 +1,171 @@
+#!/bin/sh
+# -*- sh -*-
+: <<=cut
+=head1 NAME
+syncthing_ - Plugin to monitor Syncthing server
+
+=head1 DESCRIPTION
+This plugin gathers metrics from a Syncthing server.
+
+This plugin requires the jq utility : https://stedolan.github.io/jq/
+This plugin requires the cURL utility : https://curl.haxx.se/
+
+Available plugins :
+syncthing_cpu       # 
+syncthing_mem       #
+syncthing_goroutine #
+syncthing_transfer  #
+syncthing_uptime    #
+
+=head1 CONFIGURATION
+To make the plugin connect to the Syncthing server one has to use this type of 
+configuration
+[syncthing_*]
+
+env.syncthing_apikey myapikey0123456789
+env.syncthing_host 127.0.0.1
+env.syncthing_port 8384
+env.syncthing_proto http
+
+=head1 AUTHOR
+Pierre-Alain TORET <pierre-alain.toret@protonmail.com>
+
+=head1 LICENSE
+MIT
+=cut
+
+syncthing_apikey=${syncthing_apikey:-}
+syncthing_proto=${syncthing_proto:-}
+syncthing_host=${syncthing_host:-}
+syncthing_port=${syncthing_port:-}
+
+getstatus() {
+    "$CURL" -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto://$syncthing_host:$syncthing_port/rest/system/status"
+}
+
+cpu() {
+    case $1 in
+        config)
+            cat <<'EOM'
+graph_title Syncthing server cpu usage
+graph_args -u 100
+graph_vlabel %
+graph_category network
+syncthing_cpu.label cpu
+EOM
+            exit 0;;
+        *)
+            STATUS=$(getstatus)
+			CPU=$(echo "$STATUS" | "$JQ" '.cpuPercent')
+            printf "syncthing_cpu.value %s\n" "$CPU"
+    esac
+}
+
+mem() {
+    case $1 in
+        config)
+            cat <<'EOM'
+graph_title Syncthing server memory
+graph_category network
+graph_order syncthing_mem_all syncthing_mem_sys
+graph_args --base 1000
+graph_vlabel bits
+syncthing_mem_all.label allocated
+syncthing_mem_all.cdef syncthing_mem_all,8,*
+syncthing_mem_sys.label obtained
+syncthing_mem_sys.cdef syncthing_mem_sys,8,*
+EOM
+            exit 0;;
+	    *)
+            STATUS=$(getstatus)
+            ALL=$(echo "$STATUS" | "$JQ" '.alloc')
+            SYS=$(echo "$STATUS" | "$JQ" '.sys')
+            printf "syncthing_mem_all.value %s\n" "$ALL"
+            printf "syncthing_mem_sys.value %s\n" "$SYS"
+    esac
+}
+
+uptime() {
+    case $1 in
+        config)
+            cat <<'EOM'
+graph_title Syncthing server uptime
+graph_vlabel uptime in seconds
+graph_category network
+syncthing_uptime.label uptime
+EOM
+            exit 0;;
+        *)
+            STATUS=$(getstatus)
+            UPTIME=$(echo "$STATUS" | "$JQ" '.uptime')
+            printf "syncthing_uptime.value %s\n" "$UPTIME"
+    esac
+}
+
+goroutine() {
+    case $1 in
+        config)
+            cat <<'EOM'
+graph_title Syncthing server go routines
+graph_vlabel number of go routines
+graph_category network
+syncthing_goroutine.label routines 
+EOM
+            exit 0;;
+        *)
+            STATUS=$(getstatus)
+            GOROUTINES=$(echo "$STATUS" | "$JQ" '.goroutines')
+            printf "syncthing_goroutine.value %s\n" "$GOROUTINES"
+    esac
+}
+
+transfer() {
+    case $1 in
+        config)
+            cat <<'EOM'
+graph_title Syncthing server total transfer
+graph_category network
+graph_order syncthing_transfer_down syncthing_transfer_up
+graph_args --base 1000
+graph_vlabel bits in (-) / out (+) per ${graph_period}
+syncthing_transfer_down.label received
+syncthing_transfer_down.type COUNTER
+syncthing_transfer_down.graph no
+syncthing_transfer_down.cdef syncthing_transfer_down,8,*
+syncthing_transfer_up.label bps
+syncthing_transfer_up.type COUNTER
+syncthing_transfer_up.negative syncthing_transfer_down
+syncthing_transfer_up.cdef syncthing_transfer_up,8,*
+EOM
+            exit 0;;
+	    *)
+            CONNECTIONS=$("$CURL" -s -X GET -H "X-API-Key: $syncthing_apikey" "$syncthing_proto://$syncthing_host:$syncthing_port/rest/system/connections")
+            IBT=$(echo "$CONNECTIONS" | "$JQ" '.total | .inBytesTotal')
+            OBT=$(echo "$CONNECTIONS" | "$JQ" '.total | .outBytesTotal')
+            printf "syncthing_transfer_up.value %s\n" "$IBT"
+            printf "syncthing_transfer_down.value %s\n" "$OBT"
+    esac
+}
+
+cd "$(dirname "$0")" || exit
+
+CURL=$(which curl)
+JQ=$(which jq)
+
+case $(basename "$0") in 
+    syncthing_cpu)
+	cpu "$1"
+	exit 0;;
+    syncthing_mem)
+	mem "$1"
+	exit 0;;
+    syncthing_uptime)
+	uptime "$1"
+	exit 0;;
+    syncthing_goroutine)
+	goroutine "$1"
+	exit 0;;
+    syncthing_transfer)
+	transfer "$1"
+	exit 0;;
+esac

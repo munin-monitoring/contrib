@@ -1,0 +1,72 @@
+#!/bin/sh
+#
+# Plugin to monitor auth.log for sshd server events.
+#
+# Require read permitions for $LOG
+#  (set in /etc/munin/plugin-conf.d/munin-node on debian)
+# On busy servers you can change value type to COUNTER and set min to 0 to avoid minus peaks at logrotate
+#
+# $Log$
+# Revision 1.2  2010/03/19 15:03:00  pmoranga
+# Revision 1.1  2009/04/26 23:28:00  ckujau
+# Revision 1.0  2009/04/22 22:00:00  zlati
+# Initial revision
+#
+# Parameters:
+#
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+#
+# Magick markers (optional):
+#%# family=auto
+#%# capabilities=autoconf
+
+# config example for /etc/munin/plugin-conf.d/munin-node
+#[sshd_log]
+#user root
+#group root
+#env.logfile /var/log/messages
+#env.category users
+#
+
+LOG=${logfile:-/var/log/secure}
+
+
+if [ "$1" = "autoconf" ]; then
+        if [ -r "$LOG" ]; then
+                echo yes
+                exit 0
+        else
+                echo no
+                exit 1
+        fi
+fi
+
+if [ "$1" = "config" ]; then
+
+        echo 'graph_title SSHD login stats from' $LOG
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_vlabel logins'
+        echo 'graph_category' security
+
+        echo 'LogPass.label Successful password logins'
+        echo 'LogPassPAM.label Successful login via PAM'
+        echo 'LogKey.label Successful PublicKey logins'
+        echo 'NoID.label No identification from user'
+        echo 'rootAttempt.label Root login attempts'
+        echo 'InvUsr.label Invalid user login attepmts'
+        echo 'NoRDNS.label No reverse DNS for peer'
+        echo 'Breakin.label Potential Breakin Attempts'
+        exit 0
+fi
+
+awk 'BEGIN{c["LogPass"]=0;c["LogKey"]=0;c["NoID"]=0;c["rootAttempt"]=0;c["InvUsr"]=0;c["LogPassPAM"]=0;c["Breakin"]=0;c["NoRDNS"]=0; }
+     /sshd\[.*Accepted password for/{c["LogPass"]++}
+     /sshd\[.*Accepted publickey for/{c["LogKey"]++}
+     /sshd\[.*Did not receive identification string/{c["NoID"]++}
+     /sshd\[.*Failed password for root/{c["rootAttempt"]++}
+     /sshd\[.*Invalid user/{c["InvUsr"]++}
+     /sshd\[.*POSSIBLE BREAK-IN ATTEMPT!/{c["Breakin"]++}
+     /sshd\[.*keyboard-interactive\/pam/{c["LogPassPAM"]++}
+     /sshd\[.*reverse mapping checking getaddrinfo/{c["NoRDNS"]++}a
+     END{for(i in c){print i".value " c[i]} }' < $LOG

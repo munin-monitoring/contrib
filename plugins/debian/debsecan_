@@ -1,0 +1,189 @@
+#!/bin/sh
+
+: << =cut
+
+=head1 NAME
+
+debsecan - Plugin to monitor the number of CVE vulnerabilities present on a Debian-ish
+system (using debsecan). This plugin can either report the sum of vulnerabilities present in each packages ('pkg' mode, default), or the number of unique CVEs affecting the system ('cve' mode).
+
+The 'cve' mode is a better indication of the risk level of the system (as
+multiple packages with the same vulnerable source get counted repeatedly), but
+the 'pkg' provides valuable information to identify packages with high number
+of vulnerabilities that should be considered for deletion.
+
+Simply symlink this plugin into your Munin plugins directory as
+- debsecan_pkg (the extra_info will list the number of CVE affecting each package)
+- debsecan_cve (the extra_info will list the number of packages affected by each CVE)
+
+For backward compatibility, a symlink without a mode will default to 'pkg'.
+
+=head1 CONFIGURATION
+
+The default configuration is as follows.
+
+    [debsecan]
+    env.suite jessie
+    env.fixed_warn 1
+    env.fixed_critical 1000
+    env.remote_warn 1
+    env.remote_critical 10
+
+The name of the group needs to match the name of the symlink to be applied.
+Shell globbing patterns are allowed.
+
+=head1 AUTHORS
+
+* Nicolas BOUTHORS <nbouthors@nbi.fr> http://nbi.fr/, Inspiration of the moment 10/10/2007
+* Olivier Mehani <shtrom+munin@ssji.net>, 2016
+
+=head1 LICENSE
+
+Public Domain
+
+=head1 MAGIC MARKERS
+
+%# family=auto
+%# capabilities=autoconf
+
+=cut
+
+# Auto enable if we have debsecan only
+if [ "$1" = "autoconf" ] ; then
+  if [ -x /usr/bin/debsecan ]; then
+    echo yes
+  else
+    echo 'no (/usr/bin/debsecan not found)'
+  fi
+  exit 0
+fi
+
+# Fail if we don't have debsecan
+if [ ! -x /usr/bin/debsecan ]; then
+  echo 'error: /usr/bin/debsecan not found' >&2
+  exit 1
+fi
+
+SUITE=${suite:-sid}
+FIXEDWARN=${fixed_warning:-1}
+FIXEDCRIT=${fixed_critical:-1000}
+REMOTEWARN=${remote_warning:-1}
+REMOTECRIT=${remote_critical:-10}
+
+MODE=$(echo "$0" | sed 's/.*_//')
+case "${MODE}" in
+	'cve')
+		TITLE_ADD="unique "
+		FIELD=1
+		;;
+	'pkg' | *)
+		TITLE_ADD="package "
+		FIELD=2
+		;;
+esac
+
+if [ "$1" = "config" ] ; then
+  cat <<EOF_
+graph_title DebSecan: ${TITLE_ADD}vulnerabilities for ${SUITE}
+graph_args -l 0 --base 1000
+graph_vlabel number of CVE
+graph_category system
+graph_period second
+graph_info This graph show the number of known ${TITLE_ADD}vulnerabilities present on your system. Use debsecan to see details.
+remote.label remote
+remote.colour FF0000
+remote.type GAUGE
+remote.draw AREASTACK
+remote.min 0
+remote.info The number of ${TITLE_ADD}remotely exploitable CVEs with any priority
+remote.warning ${REMOTEWARN}
+remote.critical ${REMOTECRIT}
+high.label high
+high.colour DD2200
+high.type GAUGE
+high.draw AREASTACK
+high.min 0
+high.info The number of ${TITLE_ADD}CVEs marked high priority
+medium.label medium
+medium.colour FFAA00
+medium.type GAUGE
+medium.draw AREASTACK
+medium.min 0
+medium.info The number of ${TITLE_ADD}CVEs marked medium priority
+low.label low
+low.colour 0000FF
+low.type GAUGE
+low.draw AREASTACK
+low.min 0
+low.info The number of ${TITLE_ADD}CVEs marked low priority
+other.label other
+other.colour 00AAFF
+other.type GAUGE
+other.draw AREASTACK
+other.min 0
+other.info The number of ${TITLE_ADD}CVEs with unspecified priority
+fixed.label fixed
+fixed.type GAUGE
+fixed.draw LINE2
+fixed.min 0
+fixed.info The number of ${TITLE_ADD}CVEs fixed by available updates
+fixed.warning ${FIXEDWARN}
+fixed.critical ${FIXEDCRIT}
+EOF_
+  exit 0
+fi
+
+ALL=$(debsecan --suite "${SUITE}" 2> /dev/null)
+REMOTE=$(echo "$ALL" | grep -w 'remotely')
+NONREMOTE=$(echo "$ALL" | grep -wv 'remotely')
+
+HIGH=$(echo "${NONREMOTE}" | grep -w 'high urgency')
+MEDIUM=$(echo "${NONREMOTE}" | grep -w 'medium urgency')
+LOW=$(echo "${NONREMOTE}" | grep -w 'low urgency')
+OTHER=$(echo "${NONREMOTE}" | grep -wv 'urgency')
+FIXED=$(echo "${ALL}" | grep -w '(fixed')
+
+# Arguments: Field offset to aggregate by
+count_entries() {
+	CUT_FIELD="${1}"
+	cut -f "${CUT_FIELD}" -d " "| sort | uniq -c
+}
+
+case "${MODE}" in
+	'cve')
+		remote_count=$(echo "${REMOTE}" | count_entries "${FIELD}" | wc -l)
+		high_count=$(echo "${HIGH}" | count_entries "${FIELD}" | wc -l)
+		medium_count=$(echo "${MEDIUM}" | count_entries "${FIELD}" | wc -l)
+		low_count=$(echo "${LOW}" | count_entries "${FIELD}" | wc -l)
+		other_count=$(echo "${OTHER}" | count_entries "${FIELD}" | wc -l)
+		fixed_count=$(echo "${FIXED}" | count_entries "${FIELD}" | wc -l)
+		;;
+	'pkg' | *)
+		remote_count=$(echo "${REMOTE}" | wc -l)
+		high_count=$(echo "${HIGH}" | wc -l)
+		medium_count=$(echo "${MEDIUM}" | wc -l)
+		low_count=$(echo "${LOW}" | wc -l)
+		other_count=$(echo "${OTHER}" | wc -l)
+		fixed_count=$(echo "${FIXED}" | wc -l)
+		;;
+esac
+
+# Reformat the output of the cut|sort|uniq... to a more human-friendly "item (count)" format
+CVECOUNTRE="s/^ *\([0-9]\+\) \+\([^ ]\+\)/\2 (\1)/"
+
+# shellcheck disable=SC2005 disable=SC2046
+# The nested $(echo ...)s are needed to yet the newlines
+cat <<EOF
+remote.value $remote_count
+remote.extinfo $(echo $(echo "${REMOTE}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}"))
+high.value $high_count
+high.extinfo $(echo $(echo "${HIGH}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}"))
+medium.value $medium_count
+medium.extinfo $(echo $(echo "${MEDIUM}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}"))
+low.value $low_count
+low.extinfo $(echo $(echo "${LOW}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}"))
+other.value $other_count
+other.extinfo $(echo $(echo "${OTHER}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}"))
+fixed.value $fixed_count
+fixed.extinfo $(echo $(echo "${FIXED}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}"))
+EOF

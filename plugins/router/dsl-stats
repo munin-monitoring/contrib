@@ -1,0 +1,57 @@
+#!/bin/bash
+
+case $1 in
+   config)
+        cat <<'EOM'
+graph_order snrdown snrup pwrdown pwrup
+graph_title dsl stats
+graph_args --base 1000
+graph_category network
+graph_scale no
+graph_vlabel DSL SNR and Power
+attndown.label Down Attenuation
+attndown.type GAUGE
+attnup.label Up Attenuation
+attnup.type GAUGE
+snrdown.label Down SNR
+snrdown.type GAUGE
+snrup.label Up SNR
+snrup.type GAUGE
+pwrup.label Up Power
+pwrup.type GAUGE
+pwrdown.label Down Power
+pwrdown.type GAUGE
+pwrdown.cdef pwrdown,10,/
+pwrup.cdef pwrup,10,/
+graph_info Graph of DSL Connection Stats
+EOM
+        exit 0;;
+esac
+
+
+# verify we have the IP for the modem
+if [[ "$DSLMODEMIP" == "" ]]
+then
+	echo "DSLMODEMIP variable must be set!"
+	exit 1
+fi
+
+
+# create temp file for storing wget output
+TMPFILE=$(mktemp)
+
+
+# if we have auth variables then add them to 
+# wget cmdline
+if [[ "$DSLUSER" != ""  && "$DSLPASS" != "" ]]
+then
+	AUTH_OPT="--user=$DSLUSER --password='$DSLPASS' "
+fi
+
+# get wan stats page and store it to temp file
+wget $AUTH_OPT --tries=1 --timeout=10 -q -O $TMPFILE http://$DSLMODEMIP/modemstatus_wanstatus.html
+# parse the javascript on the page to get the info we need and print it
+cat $TMPFILE | grep  'dslstatus = '| sed -e "s/['; ]//g" | head -n 1 | awk -F '[|/]' '{print "snrdown.value "$5"\nsnrup.value "$6"\nattndown.value "$7"\nattnup.value "$8"\npwrup.value "$29"\npwrdown.value "$30}'
+
+#remove temp file
+rm $TMPFILE

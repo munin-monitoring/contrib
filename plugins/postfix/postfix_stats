@@ -1,0 +1,158 @@
+#!/bin/sh
+# -*- sh -*-
+
+: <<=cut
+
+=head1 NAME
+
+postfix_stats - Munin plugin to monitor postfix statistics.
+
+=head1 APPLICABLE SYSTEMS
+
+Any system where pflogsumm script can be executed.
+
+=head1 CONFIGURATION
+
+There is no default configuration. This is an example config for Ubuntu:
+
+  [postfix_stats*]
+   group adm
+   env.logfiles /var/log/mail.log /var/log/mail.log.1
+   env.pflogsumm pflogsumm
+
+env.logfiles contains space separated syslog logfiles, usually current log
+and previous log. You can add more log files if you want, but this may 
+increase the time required for analysis.
+
+env.pflogsumm The "pflogsumm" script, can be pflogsumm.pl if it was manually
+downloaded and installed, or "pflogsumm" if it was installed by a package 
+manager (like apt-get).
+
+Use the last part of the symlink name for filtering by hostname from logfile,
+which contains logs from multiple hosts (e.g. received via rsyslog from remote
+hosts).
+
+For example:
+
+  cd /etc/munin/plugins
+  ln -s /path/to/postfix_stats postfix_stats_HOSTNAME
+
+=head1 INTERPRETATION
+
+This plugin displays the messages: received, delivered, rejected...
+Average per minute is made and it shows the total message count.
+It is useful to know the load and messages being processed.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+  0.3 support for hostname grep (useful when multiple hosts in one log)
+  0.2 plugin completely rewritten
+  0.1 first release.
+
+=head1 BUGS
+
+None known
+
+=head1 AUTHOR
+
+Originally: David Obando (david@cryptix.de)
+Modified by: github.com/cristiandeluxe
+Modified by: github.com/4nd3r
+Thanks to: sumpfralle
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+#set -xv
+MAIL_LOG="${logfiles:-/var/log/mail.log /var/log/mail.log.1}"
+
+FILTER_HOSTNAME=$(basename "$0" | sed -r 's/postfix_stats_?//')
+
+# shellcheck disable=SC2154
+PFLOGSUMM="${pflogsum}"
+[ -z "$PFLOGSUMM" ] && PFLOGSUMM="$(which pflogsumm pflogsumm.pl | head -1)"
+
+# Fields (Array to avoid code duplication) must be space separated
+FIELDS_ARR="received delivered forwarded deferred bounced rejected held discarded"
+
+#
+# Autoconf Section
+#
+if [ "$1" = 'autoconf' ]; then
+	# Check if pflogsumm exist
+	if [ -z "${PFLOGSUMM}" ]
+		then
+		echo 'no (pflogsum not found in your system)'
+	else
+		echo 'yes'
+	fi
+	exit 0
+fi
+
+#
+# Config Section
+#
+if [ "$1" = 'config' ]; then
+	if [ -n "${FILTER_HOSTNAME}" ]; then
+		echo "graph_title Postfix statistics for ${FILTER_HOSTNAME}"
+	else
+		echo 'graph_title Postfix statistics'
+	fi
+	echo 'graph_vlabel Postfix statistics'
+	echo 'graph_category mail'
+	echo 'graph_scale no'
+	echo 'graph_period minute'
+	echo 'graph_total Total'
+
+	# Generate config for each field
+	for i in $FIELDS_ARR; do
+		echo "${i}.label ${i}"
+		echo "${i}.type DERIVE"
+		echo "${i}.min 0"
+		echo "${i}.draw AREASTACK"
+	done
+
+	exit 0
+fi
+
+#
+# Plugin Script
+#
+
+# Variable to store the pflogsumm result.
+if [ -n "${FILTER_HOSTNAME}" ]; then
+	# shellcheck disable=SC2086
+	TMP_RAW=$(grep -Fh " ${FILTER_HOSTNAME} postfix/" ${MAIL_LOG} | "${PFLOGSUMM}" -d today --detail 0 --zero-fill)
+else
+	# shellcheck disable=SC2086
+	TMP_RAW=$("${PFLOGSUMM}" -d today --detail 0 --zero-fill ${MAIL_LOG})
+fi
+
+# Parse value from Raw result
+# 
+# Return digit if regex are parsed correctly
+#
+# Return U (undefined) if any error occurs
+#
+parseValue() {
+	# shellcheck disable=SC2155
+	local TMP_RETURN=$(echo "${TMP_RAW}" | grep -Ei "^[[:space:]]+[[:digit:]]+[[:space:]]+${1}.*$" | grep -oEi '[[:digit:]]+[[:space:]]+' | head -n 1 | sed 's: ::g')
+	if [ -z "${TMP_RETURN}" ]; then
+		echo 'U'
+	else
+		echo "${TMP_RETURN}"
+	fi
+}
+
+# Print results
+for i in $FIELDS_ARR; do
+	printf "%s.value " "${i}"
+	parseValue "${i}"
+done

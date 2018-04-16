@@ -1,0 +1,361 @@
+#!/bin/bash
+
+: << =cut
+
+=head1 NAME
+
+  zfs_arcstats - Munin multi-graph plugin to monitor ZFS ARC statistics
+
+  These functions are implemented:
+    size     : to monitor ARC size
+    activity : to monitor ARC activities
+    actlist  : to monitor ARC activities by cache list (MFU/MRU)
+    actdata  : to monitor ARC activities by data type (Demand/Prefetch)
+    hitratio : to monitor ARC hit ratio
+
+  Tested with Solaris 10 and 11, OpenIndiana Hipster, FreeBSD 11, CentOS 7
+  This plugin is inspired by arcstat.pl [https://github.com/mharsch/arcstat]
+
+=head1 CONFIGURATION
+
+  Make symlink:
+    cd /path/to/munin/etc/plugins
+    ln -s /path/to/munin/lib/plugins/zfs_arcstats .
+
+  For FreeBSD, it should be necessary to change shebang /bin/bash -> /usr/local/bin/bash
+
+=head1 ENVIRONMENT VARIABLES
+ 
+  None
+
+=head1 AUTHOR
+
+  K.Cima https://github.com/shakemid
+
+=head1 LICENSE
+
+  GPLv2
+
+=head1 Magic markers
+
+  #%# family=contrib
+  #%# capabilities=autoconf
+
+=cut
+
+# Include plugin.sh
+. "${MUNIN_LIBDIR:-}/plugins/plugin.sh"
+is_multigraph "$@"
+
+# Shell options
+set -o nounset
+
+# Set global variables
+plugin_name=zfs_arcstats
+functions='size activity actlist actdata hitratio'
+
+# Functions
+
+get_osname() {
+    local osname osver
+
+    osname=$( uname -s )
+    osver=$( uname -v )
+
+    case $osname in
+    SunOS)
+        case $osver in
+        illumos*)
+            osname=illumos 
+        ;;
+        esac
+    ;;
+    esac
+
+    echo "$osname"
+}
+
+preconfig() {
+    local func=$1
+
+    # data_attr format: field type draw label
+    #   label can contain white-spaces.
+
+    case $func in
+    size)
+        global_attr="
+            graph_title ZFS ARC - Size 
+            graph_category fs
+            graph_args --base 1024 --lower-limit 0
+            graph_vlabel Bytes
+            graph_info ZFS ARC - Size
+        "
+        case $osname in
+        SunOS)
+            # For Solaris 10,11
+            data_attr="
+                data_size          GAUGE AREASTACK Data size
+                prefetch_meta_size GAUGE AREASTACK Prefetch meta size
+                buf_size           GAUGE AREASTACK Buf size
+                other_size         GAUGE AREASTACK Other size
+            "
+            ;;
+        *)
+            # For illumos, FreeBSD, Linux (OpenZFS)
+            data_attr="
+                data_size     GAUGE AREASTACK Data size
+                metadata_size GAUGE AREASTACK Metadata size
+                hdr_size      GAUGE AREASTACK Hdr size
+                other_size    GAUGE AREASTACK Other size
+                mru_size      GAUGE LINE      MRU size
+                mfu_size      GAUGE LINE      MFU size
+            "
+            ;;
+        esac
+        data_attr="
+            $data_attr
+            size GAUGE LINE ARC size
+            c    GAUGE LINE Target size
+            p    GAUGE LINE Target MRU size
+        "
+        ;;
+    activity)
+        global_attr="
+            graph_title ZFS ARC - Activities
+            graph_category fs
+            graph_args --base 1000 --lower-limit 0
+            graph_vlabel misses (-) / hits (+) per second
+            graph_info ZFS ARC - Activities
+
+            hits.negative misses
+            l2_hits.negative l2_misses
+        "
+        data_attr="
+            misses    DERIVE LINE dummy
+            hits      DERIVE LINE ARC
+            l2_misses DERIVE LINE dummy
+            l2_hits   DERIVE LINE L2ARC
+        "
+        ;;
+    actlist)
+        global_attr="
+            graph_title ZFS ARC - Activities by cache list
+            graph_category fs
+            graph_args --base 1000 --lower-limit 0
+            graph_vlabel ghost hits (-) / hits (+) per second
+            graph_info ZFS ARC - Activities by cache list
+
+            mfu_hits.negative mfu_ghost_hits
+            mru_hits.negative mru_ghost_hits
+        "
+        data_attr="
+            mfu_ghost_hits DERIVE LINE dummy
+            mfu_hits       DERIVE LINE MFU 
+            mru_ghost_hits DERIVE LINE dummy
+            mru_hits       DERIVE LINE MRU
+        "
+        ;;
+    actdata)
+        global_attr="
+            graph_title ZFS ARC - Activities by data type
+            graph_category fs
+            graph_args --base 1000 --lower-limit 0
+            graph_vlabel misses (-) / hits (+) per second
+            graph_info ZFS ARC - Activities by data type
+
+            demand_data_hits.negative demand_data_misses
+            demand_metadata_hits.negative demand_metadata_misses
+            prefetch_data_hits.negative prefetch_data_misses
+            prefetch_metadata_hits.negative prefetch_metadata_misses
+        "
+        data_attr="
+            demand_data_misses       DERIVE LINE dummy
+            demand_data_hits         DERIVE LINE D data
+            demand_metadata_misses   DERIVE LINE dummy
+            demand_metadata_hits     DERIVE LINE D meta
+            prefetch_data_misses     DERIVE LINE dummy
+            prefetch_data_hits       DERIVE LINE P data
+            prefetch_metadata_misses DERIVE LINE dummy
+            prefetch_metadata_hits   DERIVE LINE P meta
+        "
+        ;;
+    hitratio)
+        global_attr="
+            graph_title ZFS ARC - Hit ratio
+            graph_category fs
+            graph_args --base 1000 --lower-limit 0 --upper-limit 100 --rigid
+            graph_vlabel % hits
+            graph_info ZFS ARC - Hit ratio - The graph shows cache hit ratio between munin-update intervals (usually 5 minutes).
+
+            hitratio.cdef                   hits,DUP,misses,+,/,100,*
+            l2_hitratio.cdef                l2_hits,DUP,l2_misses,+,/,100,*
+            demand_data_hitratio.cdef       demand_data_hits,DUP,demand_data_misses,+,/,100,*
+            demand_metadata_hitratio.cdef   demand_metadata_hits,DUP,demand_metadata_misses,+,/,100,*
+            prefetch_data_hitratio.cdef     prefetch_data_hits,DUP,prefetch_data_misses,+,/,100,*
+            prefetch_metadata_hitratio.cdef prefetch_metadata_hits,DUP,prefetch_metadata_misses,+,/,100,*
+        "
+        data_attr="
+            hits                       DERIVE LINE  dummy
+            misses                     DERIVE LINE  dummy
+            l2_hits                    DERIVE LINE  dummy
+            l2_misses                  DERIVE LINE  dummy
+            demand_data_hits           DERIVE LINE  dummy
+            demand_data_misses         DERIVE LINE  dummy
+            demand_metadata_hits       DERIVE LINE  dummy
+            demand_metadata_misses     DERIVE LINE  dummy
+            prefetch_data_hits         DERIVE LINE  dummy
+            prefetch_data_misses       DERIVE LINE  dummy
+            prefetch_metadata_hits     DERIVE LINE  dummy
+            prefetch_metadata_misses   DERIVE LINE  dummy
+            hitratio                   GAUGE  LINE2 ARC hits
+            l2_hitratio                GAUGE  LINE  L2ARC hits
+            demand_data_hitratio       GAUGE  LINE  Demand data hits
+            demand_metadata_hitratio   GAUGE  LINE  Demand metadata hits
+            prefetch_data_hitratio     GAUGE  LINE  Prefetch data hits
+            prefetch_metadata_hitratio GAUGE  LINE  Prefetch metadata hits
+        "
+        ;;
+    *)
+        echo "Unknown function: $func"
+        exit 1
+        ;;
+    esac 
+}
+
+do_config() {
+    local func=$1
+    local label_max_length=45 
+    local field type draw label
+
+    preconfig "$func"
+    echo "multigraph ${plugin_name}_${func}"
+
+    # print global attributes
+    echo "$global_attr" | sed -e 's/^  *//' -e '/^$/d'
+
+    # print data source attributes
+    echo "$data_attr" | while read -r field type draw label
+    do
+        [ -z "$field" ] && continue
+
+        echo "${field}.type ${type}"
+        echo "${field}.draw ${draw}"
+        echo "${field}.label ${label:0:${label_max_length}}"
+        if [ "$type" = 'DERIVE' ]; then
+            echo "${field}.min 0"
+        fi
+        if [ "$label" = 'dummy' ]; then
+            echo "${field}.graph no"
+        fi
+    done
+
+    echo
+}
+
+get_stats() {
+    local arcstats stat value
+    
+    case $osname in
+    SunOS|illumos)
+        arcstats=$( kstat -p 'zfs:0:arcstats' | sed -e 's/:/ /g' | awk '{ print $4,$5 }' )
+        # kstat output example:
+        #   $ kstat -p zfs:0:arcstats
+        #   zfs:0:arcstats:c        4135233544
+        #   ...
+        ;;
+    *BSD)
+        arcstats=$( /sbin/sysctl -a | sed -n -e 's/^kstat\.zfs\.misc\.arcstats\.//p' | awk -F: '{ print $1,$2 }' )
+        # sysctl output example:
+        #   $ sysctl -a
+        #   ...
+        #   kstat.zfs.misc.arcstats.c: 632540160
+        #   ...
+        ;;
+    Linux)
+        arcstats=$( sed '1,2d' /proc/spl/kstat/zfs/arcstats | awk '{ print $1,$3 }' )
+        # proc file output example:
+        #   $ cat /proc/spl/kstat/zfs/arcstats
+        #   ...
+        #   name        type  data
+        #   hits        4     62
+        #   ...
+        ;;
+    *)
+        echo "Unsupported OS: $osname"
+        exit 1
+    esac
+
+    while read -r stat value
+    do 
+        printf -v "arcstats_${stat}" "%s" "$value" 
+        # printf -v means indirect variable assignment (similar to eval)
+    done <<< "$arcstats"
+}
+
+do_fetch() {
+    local func=$1
+    local field type draw label value ref
+
+    preconfig "$func"
+    echo "multigraph ${plugin_name}_${func}"
+
+    echo "$data_attr" | while read -r field type draw label
+    do
+        [ -z "$field" ] && continue
+
+        ref="arcstats_${field}" 
+        value=${!ref:-0} 
+        # ${!varname} means indirect evaluation (similar to eval)
+
+        echo "${field}.value ${value}"
+    done
+
+    echo
+}
+
+autoconf() {
+    if [ -x /sbin/zfs ]; then
+        echo yes
+    else
+        echo "no (ZFS looks unavailable)"
+    fi
+}
+
+config() {
+    local func
+
+    for func in $functions
+    do
+        do_config "$func"
+    done
+}
+
+fetch() {
+    local func
+
+    get_stats
+
+    for func in $functions
+    do
+        do_fetch "$func"
+    done
+}
+
+# Main
+
+osname=$( get_osname )
+
+case ${1:-} in
+autoconf)
+    autoconf
+    ;;
+config)
+    config
+    if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = "1" ]; then fetch; fi
+    ;;
+*)
+    fetch
+    ;;
+esac
+
+exit 0

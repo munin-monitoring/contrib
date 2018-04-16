@@ -1,0 +1,22 @@
+#!/bin/sh
+
+
+if [ "$1" = "config" ]; then
+    cat <<EOF
+graph_title ip6tables bites ipv6
+graph_vlabel bites numbers
+graph_scale no
+graph_category network
+graph_args -l 0
+graph_info ip6tables bites ipv6
+EOF
+ip6tables -vx -w -L | grep -E 'ACC|REJ'|grep -v ^Chain|sed -e 's/dpt://g' -e 's/ .*://g'|awk '{print $NF"-"$4".label", $NF" "$4"\n",$NF"-"$4".min", 0}'|sed 's/^\s*//g'
+exit 0
+fi
+if [ "$1" = "autoconf" ]; then
+    echo yes
+    exit 0
+fi
+
+ip6tables -vx -w -L | grep -E 'ACC|REJ'|grep -v ^Chain|awk '{print $NF"-"$4".value", $2}'|sed 's/^dpt://'
+

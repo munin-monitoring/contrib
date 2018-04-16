@@ -1,0 +1,160 @@
+#!/bin/bash
+#
+# Plugin to monitor incoming Postfix mail.
+#
+# Parameters understood:
+#
+# 	config   (required)
+# 	autoconf (optional)
+#
+
+
+
+# If you are using a postfix policy daemon (such as policyd) to track certain block conditions, place a line
+# in your /etc/munin/plugin-conf.d/munin-node like:
+#
+# [postfix*]
+# env.policy my policy string
+#
+# When env.policy is set, this plugin will match the string you supply as env.policy and return the number of instances
+# of that string as an output called "policy.value". 
+#
+# If you are NOt using a postfix policy daemon, as above, use the line 
+#
+# [postfix*]
+# env.policy none
+#
+# and this plugin will suppress output of policy.value
+
+
+
+
+POLICY=${policy} 
+
+if [ "$POLICY" = "none" ]
+then POLICY=""
+fi
+
+
+LOGDIR=${logdir:-/var/log/mail}
+MAIL_LOG=$LOGDIR/${logfile:-info}
+LOGTAIL=${logtail:-`which logtail`}
+STATEFILE=$MUNIN_PLUGSTATE/postfix_mailfiltered.offset
+
+if [ "$1" = "autoconf" ]; then
+        if [ -f "${MAIL_LOG}" -a -n "${LOGTAIL}" -a -x "${LOGTAIL}" ] ; then
+		echo yes
+		exit 0
+	else
+		echo no
+		exit 1
+	fi
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title Postfix message filtering'
+
+	if [ -z "$POLICY" ]
+		then
+			echo 'graph_order allowed rbl helo client sender recipient relay'
+		else
+			echo 'graph_order allowed rbl policy helo client sender recipient relay'
+	fi
+	echo 'graph_category mail'
+	echo 'graph_vlabel Mails per second'
+	echo 'graph_args --base 1000 -l 0'
+
+	echo 'allowed.label Allowed'
+	echo 'allowed.min 0'
+	echo 'allowed.type ABSOLUTE'
+	
+	echo 'rbl.label RBL blocked'
+	echo 'rbl.min 0'
+	echo 'rbl.type ABSOLUTE'
+	
+	if [ -z "$POLICY" ]
+		then
+			echo "empty" > /dev/null
+		else
+			echo 'policy.label Policy blocked'
+			echo 'policy.min 0'
+			echo 'policy.type ABSOLUTE'
+	fi
+
+	echo 'helo.label HELO rejected'
+	echo 'helo.min 0'
+	echo 'helo.type ABSOLUTE'
+	
+	echo 'client.label Client rejected'
+	echo 'client.min 0'
+	echo 'client.type ABSOLUTE'
+	
+	echo 'sender.label Sender rejected'
+	echo 'sender.min 0'
+	echo 'sender.type ABSOLUTE'
+	
+	echo 'recipient.label Recipient unknown'
+	echo 'recipient.min 0'
+	echo 'recipient.type ABSOLUTE'
+
+	echo 'relay.label Relay denied'
+	echo 'relay.min 0'
+	echo 'relay.type ABSOLUTE'
+
+        exit 0
+fi
+
+if [ -z "$POLICY" ]
+then
+
+result=`$LOGTAIL ${MAIL_LOG} $STATEFILE \
+	| egrep "postfix\/smtpd?\[[0-9]*\]: ([NOQUA-F]+:|[A-F0-9]+:) " \
+	| grep -v "Server configuration problem" \
+	| grep -v "Data command rejected" \
+	| grep -v " client=" \
+	| sed -e "s/.*\(Relay access denied\|blocked using\|Helo command rejected\|Client host rejected\|Sender address rejected\|Recipient address rejected\|queued as\).*/\1/g" \
+		| sort | uniq -c \
+			| sed -e "s/ *\([0-9]\+\) queued as/value.allowed \1/" \
+			| sed -e "s/ *\([0-9]\+\) Relay access denied/value.relay \1/" \
+			| sed -e "s/ *\([0-9]\+\) blocked using/value.rbl \1/" \
+			| sed -e "s/ *\([0-9]\+\) Helo command rejected/value.helo \1/" \
+			| sed -e "s/ *\([0-9]\+\) Client host rejected/value.client \1/" \
+			| sed -e "s/ *\([0-9]\+\) Sender address rejected/value.sender \1/" \
+			| sed -e "s/ *\([0-9]\+\) Recipient address rejected/value.recipient \1/" `
+
+else
+
+
+result=`$LOGTAIL ${MAIL_LOG} $STATEFILE \
+	| egrep "postfix\/smtpd?\[[0-9]*\]: ([NOQUA-F]+:|[A-F0-9]+:) " \
+	| grep -v "Server configuration problem" \
+	| grep -v " client=" \
+	| sed -e "s/.*\(Relay access denied\|blocked using\|Helo command rejected\|Client host rejected\|Sender address rejected\|Recipient address rejected\|$POLICY\|queued as\).*/\1/g" \
+		| sort | uniq -c \
+			| sed -e "s/ *\([0-9]\+\) queued as/value.allowed \1/" \
+			| sed -e "s/ *\([0-9]\+\) Relay access denied/value.relay \1/" \
+			| sed -e "s/ *\([0-9]\+\) blocked using/value.rbl \1/" \
+			| sed -e "s/ *\([0-9]\+\) Helo command rejected/value.helo \1/" \
+			| sed -e "s/ *\([0-9]\+\) Client host rejected/value.client \1/" \
+			| sed -e "s/ *\([0-9]\+\) Sender address rejected/value.sender \1/" \
+			| sed -e "s/ *\([0-9]\+\) Recipient address rejected/value.recipient \1/" \
+			| sed -e "s/ *\([0-9]\+\) $POLICY/value.policy \1/" `
+
+fi
+
+
+(echo $result | sed -e "s/value/\nvalue/g" | sed -e "s/value.allowed/allowed.value/"     | grep "allowed"    ) || echo "allowed.value 0"
+(echo $result | sed -e "s/value/\nvalue/g" | sed -e "s/value.rbl/rbl.value/"             | grep "rbl"        ) || echo "rbl.value 0"
+
+if [ -z "$POLICY" ]
+then
+	echo "empty" > /dev/null
+else
+	(echo $result | sed -e "s/value/\nvalue/g" | sed -e "s/value.policy/policy.value/"       | grep "policy"     ) || echo "policy.value 0"
+fi
+(echo $result | sed -e "s/value/\nvalue/g" | sed -e "s/value.helo/helo.value/"           | grep "helo"       ) || echo "helo.value 0"
+(echo $result | sed -e "s/value/\nvalue/g" | sed -e "s/value.client/client.value/"       | grep "client"     ) || echo "client.value 0"
+(echo $result | sed -e "s/value/\nvalue/g" | sed -e "s/value.sender/sender.value/"       | grep "sender"     ) || echo "sender.value 0"
+(echo $result | sed -e "s/value/\nvalue/g" | sed -e "s/value.recipient/recipient.value/" | grep "recipient"  ) || echo "recipient.value 0"
+(echo $result | sed -e "s/value/\nvalue/g" | sed -e "s/value.relay/relay.value/"         | grep "relay"      ) || echo "relay.value 0"
+

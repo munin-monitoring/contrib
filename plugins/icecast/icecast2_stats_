@@ -1,0 +1,182 @@
+#!/usr/bin/python3
+#
+# This plugin shows the statistics of every source currently connected to the Icecast2 server.
+# See the Icecast2_ plugin for collecting data of specific mountpoints.
+#
+# An icecast server v2.4 or later is required for this module since it uses the status-json.xsl
+# output (see http://www.icecast.org/docs/icecast-2.4.1/server-stats.html).
+#
+# The following data for each source is available:
+#  * listeners: current count of listeners
+#  * duration: the age of the stream/source
+#
+# Additionally the Icecast service uptime is available.
+#
+# This plugin requires Python 3 (e.g. for urllib instead of urllib2).
+#
+#
+# Environment variables:
+#  * status_url: defaults to "http://localhost:8000/status-json.xsl"
+#
+#
+# Copyright (C) 2015 Lars Kruse <devel@sumpfralle.de>
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+#
+# Magic markers
+#%# capabilities=autoconf suggest
+#%# family=auto
+
+
+import datetime
+import json
+import os
+import urllib.request
+import sys
+
+
+status_url = os.getenv("status_url", "http://localhost:8000/status-json.xsl")
+PLUGIN_SCOPES = ("sources_listeners", "sources_duration", "service_uptime")
+PLUGIN_NAME_PREFIX = "icecast2_stats_"
+
+
+def clean_fieldname(name):
+    """ see http://munin-monitoring.org/wiki/notes_on_datasource_names
+
+    This function is a bit clumsy as it tries to avoid using a regular
+    expression for the sake of micropython compatibility.
+    """
+    def get_valid(char, position):
+        if char == '_':
+            return '_'
+        elif 'a' <= char.lower() <= 'z':
+            return char
+        elif (position > 0) and ('0' <= char <= '9'):
+            return char
+        else:
+            return '_'
+    return "".join([get_valid(char, position) for position, char in enumerate(name)])
+
+
+def parse_iso8601(datestring):
+    """ try to avoid using an external library for parsing an ISO8601 date string """
+    if datestring.endswith("Z"):
+        timestamp_string = datestring[:-1]
+        time_delta = datetime.timedelta(minutes=0)
+    else:
+        # the "offset_text" is something like "+0500" or "-0130"
+        timestamp_string, offset_text = datestring[:-5], datestring[-5:]
+        offset_minutes = int(offset_text[1:3]) * 60 + int(offset_text[3:])
+        if offset_text.startswith("+"):
+            pass
+        elif offset_text.startswith("-"):
+            offset_minutes *= -1
+        else:
+            # invalid format
+            return None
+        time_delta = datetime.timedelta(minutes=offset_minutes)
+    local_time = datetime.datetime.strptime(timestamp_string, "%Y-%m-%dT%H:%M:%S")
+    return local_time + time_delta
+
+
+def get_iso8601_age_days(datestring):
+    now = datetime.datetime.now()
+    timestamp = parse_iso8601(datestring)
+    if timestamp:
+        return (now - timestamp).total_seconds() / (24 * 60 * 60)
+    else:
+        return None
+
+
+def _get_json_statistics():
+    with urllib.request.urlopen(status_url) as conn:
+        json_body = conn.read()
+    return json.loads(json_body.decode("utf-8"))
+
+
+def get_sources():
+    sources = []
+    for source in _get_json_statistics()["icestats"]["source"]:
+        path_name = source["listenurl"].split("/")[-1]
+        sources.append({"name": path_name,
+                            "fieldname": clean_fieldname(path_name),
+                            "listeners": source["listeners"],
+                            "duration_days": get_iso8601_age_days(source["stream_start_iso8601"])})
+    sources.sort(key=lambda item: item["name"])
+    return sources
+
+
+def get_server_uptime_days():
+    return get_iso8601_age_days(_get_json_statistics()["icestats"]["server_start_iso8601"])
+
+
+def get_scope():
+    called_name = os.path.basename(sys.argv[0])
+    if called_name.startswith(PLUGIN_NAME_PREFIX):
+        scope = called_name[len(PLUGIN_NAME_PREFIX):]
+        if not scope in PLUGIN_SCOPES:
+            print("Invalid scope requested: {0} (expected: {1})".format(scope, "/".join(PLUGIN_SCOPES)), file=sys.stderr)
+            sys.exit(2)
+    else:
+        print("Invalid filename - failed to discover plugin scope", file=sys.stderr)
+        sys.exit(2)
+    return scope
+
+
+if __name__ == "__main__":
+    action = sys.argv[1] if (len(sys.argv) > 1) else None
+    if action == "autoconf":
+        try:
+            get_sources()
+            print("yes")
+        except OSError:
+            print("no")
+    elif action == "suggest":
+        for scope in PLUGIN_SCOPES:
+            print(scope)
+    elif action == "config":
+        scope = get_scope()
+        if scope == "sources_listeners":
+            print("graph_title Total number of listeners")
+            print("graph_vlabel listeners")
+            print("graph_category streaming")
+            for index, source in enumerate(get_sources()):
+                print("{0}.label {1}".format(source["fieldname"], source["name"]))
+                print("{0}.draw {1}".format(source["fieldname"], ("AREA" if (index == 0) else "STACK")))
+        elif scope == "sources_duration":
+            print("graph_title Duration of sources")
+            print("graph_vlabel duration in days")
+            print("graph_category streaming")
+            for source in get_sources():
+                print("{0}.label {1}".format(source["fieldname"], source["name"]))
+        elif scope == "service_uptime":
+            print("graph_title Icecast service uptime")
+            print("graph_vlabel uptime in days")
+            print("graph_category streaming")
+            print("uptime.label service uptime")
+    elif action is None:
+        scope = get_scope()
+        if scope == "sources_listeners":
+            for source in get_sources():
+                print("{0}.value {1}".format(source["fieldname"], source["listeners"]))
+        elif scope == "sources_duration":
+            for source in get_sources():
+                print("{0}.value {1}".format(source["fieldname"], source["duration_days"] or 0))
+        elif scope == "service_uptime":
+            print("uptime.value {0}".format(get_server_uptime_days()))
+    else:
+        print("Invalid argument given: {0}".format(action), file=sys.stderr)
+        sys.exit(1)
+    sys.exit(0)

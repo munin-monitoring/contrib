@@ -1,0 +1,64 @@
+#!/bin/sh
+
+# Graphs the number of running and waiting jobs, as well as when they
+# are submitted.
+#
+# Tested with Son of Gridengine.
+
+: <<=cut
+
+=head1 NAME
+
+sge_job_stats - Munin plugin to monitor jobs submitted and executed on a Grid
+Engine installation
+
+=head1 APPLICABLE SYSTEMS
+
+Any system with a qstat command that behaves like the one found in Son of
+GridEngine.
+
+=head1 CONFIGURATION
+
+The environment variable SGE_SETTINGS can be set to point to an SGE
+"settings.sh" file. It defaults to /opt/sge/default/common/settings.sh.
+
+=head1 AUTHOR
+
+Wouter Verhelst <w@uter.be>
+
+=cut
+
+if [ "$1" = "config" ]
+then
+	echo graph_title SGE gridengine jobs
+	echo graph_vlabel count
+	echo graph_category htc
+	echo running.label Running jobs
+	echo running.type GAUGE
+	echo running.draw AREA
+	echo waiting.label Queued jobs
+	echo waiting.type GAUGE
+	echo waiting.draw STACK
+	echo maxnum.label Submitted jobs
+	echo maxnum.type DERIVE
+	echo maxnum.draw LINE2
+	echo maxnum.min 0
+
+	exit 0
+fi
+
+SGE_SETTINGS=${SGE_SETTINGS:-/opt/sge/default/common/settings.sh}
+
+. $SGE_SETTINGS
+
+qstat -u '*' | awk '
+	BEGIN{maxnum = 0; running = 0; waiting = 0}
+	/^ /{
+		maxnum = (maxnum > $1 ? maxnum : $1);
+		if ( $5 == "r" ) {
+			running += 1;
+		} else {
+			waiting += 1;
+		}
+	}
+	END { printf("running.value %d\nwaiting.value %d\nmaxnum.value %d\n", running, waiting, maxnum); }'

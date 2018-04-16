@@ -24,7 +24,7 @@ function SplitTwice($content,$first,$second) {
 if ($argv[1]=='config'){
     print "graph_title Rackspace CDN storage usage\n";
     print "graph_vlabel CDN storage usage\n";
-    print "graph_category rackspace\n";
+    print "graph_category cloud\n";
     print "usage.label storage usage\n";
     print "graph_args --base 1024\n";
 

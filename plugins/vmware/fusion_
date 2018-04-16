@@ -1,0 +1,201 @@
+#!/usr/bin/env perl
+# -*- perl -*-
+
+=head1 NAME
+
+fusion_ a Plugin for displaying VMWare Fusion Stats
+
+=head1 INTERPRETATION
+
+This plugin displays the following charts:
+
+1) pcpu
+2) pmem
+3) mem
+
+You can set the modes with naming the softlink:
+
+1) fusion_pcpu
+2) fusion_pmem
+3) fusion_mem
+
+This Plugin uses ps for gaining the data:
+
+> ps -A -c -o pcpu,pmem,rss=,comm,args -r | grep vmware-vmx
+5,0 19,5   3271768 innoq-winxp.vmx 		vmware-vmx
+4,6 10,7   1801768 Gateway.vmx           vmware-vmx
+2,3  5,8   976288 Jenkins.vmx            vmware-vmx
+2,0 22,6   3784144 Mac_OS_X_10.9.vmx     vmware-vmx
+0,0  0,0   620 grep vmware-vmx           grep
+
+So the Output should be pretty standard about all MacOS/Fusion Versions.
+
+=head1 CONFIGURATION
+
+No Configuration necessary!
+
+TODO:
+still a bug with getting pcpu,pmem,rss=,comm as an output, have filter it with if( $vm[3] =~ /(?<!comm)$/)
+
+=head1 AUTHOR
+
+Philipp Haussleiter <philipp@haussleiter.de> (email)
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+# MAIN
+use warnings;
+use strict;
+use File::Basename;
+
+# pcpu, pmem, mem
+my $type = basename($0);
+$type =~ s/fusion_//;
+
+my $cmd = "ps -A -c -o pcpu,pmem,rss=,args,comm -r | grep vmware-vmx";
+my $output = `$cmd`;
+my @lines=split(/\n/,$output);
+
+if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
+	my $lcount = 0;
+	my $base_config = "graph_category virtualization\n";
+	
+	if( $type eq "pcpu" ) {
+		print $base_config;
+		print "graph_args --base 1000 -l 0 -u 100 -r\n";	
+		print "graph_scale no\n";		
+		print "graph_title CPU usage in % per VM\n";
+		print "graph_vlabel % of CPU usage\n";
+		print "graph_info The Graph shows the CPU usage in % per VM\n";	
+		foreach my $line(@lines) {
+			if( $line  =~ /(?<!grep)$/) {	
+				my @vm = ();
+				my $count = 0;
+				my @array=split(/ /,$line);	
+				foreach my $entry(@array) {
+					if( length($entry) > 2 ){
+						$vm[$count]=$entry;
+						$count++;
+					}
+				}	
+				$vm[3] =~ s/\.vmx//;
+				my $cat = clean_vmname($vm[3]);			
+				if( $cat =~ /(?<!comm)$/)	{
+	                if( $lcount > 0 ){
+	                	print $cat,"_pcpu.draw STACK\n";
+	                } else {
+	                	print $cat,"_pcpu.draw AREA\n";
+	                }
+	                $lcount++;						
+					print $cat,"_pcpu.label $vm[3]\n";
+					print $cat,"_pcpu.type GAUGE\n";
+				}				
+			}
+		}
+	}
+
+	if( $type eq "pmem" ) {
+		print $base_config;
+		print "graph_args --base 1000 -l 0 -u 100 -r\n";
+		print "graph_scale no\n";
+		print "graph_title Memory usage in % per VM\n";
+		print "graph_vlabel % of Memory usage\n";
+		print "graph_info The Graph shows the Memory usage in % per VM\n";	
+		foreach my $line(@lines) {
+			if( $line  =~ /(?<!grep)$/ ) {	
+				my @vm = ();
+				my $count = 0;
+				my @array=split(/ /,$line);	
+				foreach my $entry(@array) {
+					if( length($entry) > 2 ){
+						$vm[$count]=$entry;
+						$count++;
+					}
+				}	
+				$vm[3] =~ s/\.vmx//;
+                my $cat = clean_vmname($vm[3]);				
+				if( $cat =~ /(?<!comm)$/)	{
+	                if( $lcount > 0 ){
+	                	print $cat,"_pmem.draw STACK\n";
+	                } else {
+	                	print $cat,"_pmem.draw AREA\n";
+	                }
+	                $lcount++;					
+					print $cat,"_pmem.label $vm[3]\n";
+					print $cat,"_pmem.type GAUGE\n";
+				}	
+			}
+		}			
+	}
+
+	if( $type eq "mem" ) {
+		print $base_config;
+		print "graph_args --base 1024 -r --lower-limit 0\n";	
+		print "graph_title absolute Memory usage per VM\n";
+		print "graph_vlabel Memory usage\n";
+		print "graph_info The Graph shows the absolute Memory usage per VM\n";	
+		foreach my $line(@lines) {
+			if( $line  =~ /(?<!grep)$/ ) {	
+				my @vm = ();
+				my $count = 0;
+				my @array=split(/ /,$line);	
+				foreach my $entry(@array) {
+					if( length($entry) > 2 ){
+						$vm[$count]=$entry;
+						$count++;
+					}
+				}
+				$vm[3] = clean_vmname($vm[3]);	
+				if( $vm[3] =~ /(?<!comm)$/)	{			
+					if( $lcount > 0 ){
+						print "$vm[3]_mem.draw STACK\n";
+					} else {
+						print "$vm[3]_mem.draw AREA\n";
+					}
+					print "$vm[3]_mem.label $vm[3]\n";
+					print "$vm[3]_mem.type GAUGE\n";			
+					$lcount++;		
+				}			
+			}
+		}						
+	}
+
+} else {
+	foreach my $line(@lines) {
+		if( $line  =~ /(?<!grep)$/ ) {
+			my @vm = ();
+			my $count = 0;
+			my @array=split(/ /,$line);	
+			foreach my $entry(@array) {
+				if( length($entry) > 2 ){
+					$vm[$count]=$entry;
+					$count++;
+				}
+			}
+			$vm[3] = clean_vmname($vm[3]);
+			if( $vm[3] =~ /(?<!comm)$/)	{	
+				if( $type eq "pcpu" ) {
+					print "$vm[3]_pcpu.value $vm[0]\n";
+				}
+				if( $type eq "pmem" ) {
+					print "$vm[3]_pmem.value $vm[1]\n";
+				}
+				if( $type eq "mem" ) {
+					my $value =  ($vm[2]*1024);
+					print "$vm[3]_mem.value $value\n";
+				}
+			}
+		}
+	}	
+}
+
+sub clean_vmname {
+    my $vm_name = $_[0];
+    $vm_name =~ s/\.vmx//;
+    $vm_name =~ s/\./\_/g;
+    return $vm_name;
+}

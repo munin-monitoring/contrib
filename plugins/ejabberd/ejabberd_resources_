@@ -1,0 +1,314 @@
+#!/usr/bin/env bash
+
+# Tested with ejabberd 2.1.x
+#
+# This plugin is capable to show:
+# - ejabberd memory usage (RSS, VSZ, erlang internal)
+# - ejabberd ports/processes usage
+# - online/registered users by vhost
+# - mnesia table sizes and location
+#
+# Required permissions:
+# - read ejabberdctl configuration file
+# - connect to a running ejabberd node
+#
+# OS: *NIX
+# Requires lsof/fstat for open_files.
+#
+# Author: Artem Sheremet <dot.doom@gmail.com>
+#
+# Configuration:
+# - set env.ejabberdctl_cfg to ejabberdctl.cfg path if not in /etc
+# - or set env.ERLANG_NODE, env.EJABBERD_PID_PATH to proper values manually
+# - set erl_call_path to unregular erl_call location
+# - set env.ejabberdctl to ejabberdctl script path if not on PATH
+
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+EJABBERDCTL_CFG=${ejabberdctl_cfg:-/etc/ejabberd/ejabberdctl.cfg}
+source $EJABBERDCTL_CFG 2>/dev/null
+source $MUNIN_LIBDIR/plugins/plugin.sh
+
+EJABBERDCTL=${ejabberdctl:-$(which ejabberdctl)}
+
+ERLANG_HOST=${ERLANG_NODE/*@/}
+ERLANG_MUNIN_NODE=munin
+
+if [ -n "$erl_path" ] && [ -z "$erl_call_path" ]; then
+	erl_call_path="$erl_path"_call
+fi
+
+ERL_CALL=${erl_call_path:-$(which erl_call)}
+
+function ejabberd_exec() {
+	echo "$1" | su - ejabberd -c "$ERL_CALL -e -n $ERLANG_NODE" | sed -re 's/^\{ok, (.*)\}$/\1/'
+}
+
+SCRIPT_NAME=$(basename $0)
+RESOURCE_TYPE="${SCRIPT_NAME/ejabberd_resources_/}"
+RESOURCE_BASE=1000
+[ "$RESOURCE_TYPE" = "memory" ] && RESOURCE_BASE=1024
+
+function hosts_list() {
+	ejabberd_exec 'ejabberd_config:get_global_option(hosts).' | tr '[]",' ' '
+}
+
+function ejabberd_report_online_users() {
+	[ "$1" = "config" ] && echo 'graph_vlabel users'
+	for host in $(hosts_list); do
+		local clean_host=$(clean_fieldname $host)
+		local ejabberd_command="length(ejabberd_sm:get_vh_session_list(\"$host\"))"
+		if [ "$1" = "config" ]; then
+			cat <<CONFIG
+${clean_host}.draw AREASTACK
+${clean_host}.label $host
+${clean_host}.info $ejabberd_command
+CONFIG
+		else
+			echo "$clean_host.value $(ejabberd_exec ${ejabberd_command}.)"
+		fi
+	done
+}
+
+function ejabberd_report_registered_users() {
+	[ "$1" = "config" ] && echo 'graph_vlabel users'
+	for host in $(hosts_list); do
+		local clean_host=$(clean_fieldname $host)
+		local ejabberd_command="ejabberd_auth:get_vh_registered_users_number(\"$host\")"
+		if [ "$1" = "config" ]; then
+			cat <<CONFIG
+${clean_host}.draw AREASTACK
+${clean_host}.label $host
+${clean_host}.info $ejabberd_command
+CONFIG
+		else
+			echo "$clean_host.value $(ejabberd_exec ${ejabberd_command}.)"
+		fi
+	done
+}
+
+
+function ejabberd_report_memory() {
+	if [ "$1" = "config" ]; then
+		cat <<CONFIG
+graph_vlabel bytes
+rss.draw LINE2
+rss.label rss
+rss.info Resident set size
+vsz.draw LINE2
+vsz.label vsz
+vsz.info Virtual memory size
+CONFIG
+		for memory_type in total processes system atom binary code ets; do
+			cat <<CONFIG
+$memory_type.draw LINE2
+$memory_type.label $memory_type
+CONFIG
+		done
+		cat <<INFO_FROM_DOC
+total.info The total amount of memory currently allocated, which is the same as the sum of memory size for processes and system.
+processes.info The total amount of memory currently allocated by the Erlang processes.
+system.info The total amount of memory currently allocated by the emulator that is not directly related to any Erlang process. Memory presented as processes is not included in this memory.
+atom.info The total amount of memory currently allocated for atoms. This memory is part of the memory presented as system memory.
+binary.info The total amount of memory currently allocated for binaries. This memory is part of the memory presented as system memory.
+code.info The total amount of memory currently allocated for Erlang code. This memory is part of the memory presented as system memory.
+ets.info The total amount of memory currently allocated for ets tables. This memory is part of the memory presented as system memory.
+INFO_FROM_DOC
+	else
+		local pid=$(<$EJABBERD_PID_PATH)
+		for memory_type in rss vsz; do
+			memory_value=$(ps -p $pid -o $memory_type=)
+			let memory_value=$memory_value*1024
+			echo "$memory_type.value $memory_value"
+		done
+		ejabberd_exec 'io_lib:format("~p", [erlang:memory()]).' | grep -Eo '"[a-z_0-9]+"' |
+		  sed -re 'N;s/"(.*)"\n"(.*)"/\1.value \2/' | grep -Fv _used
+	fi
+}
+
+function ejabberd_report_ports() {
+	local limit=$(ejabberd_exec 'os:getenv("ERL_MAX_PORTS").' | tr '"' ' ')
+	# string "false" indicates that this variable is not defined, thus a default of 1024
+	[ $limit = false ] && limit=1024
+	if [ "$1" = "config" ]; then
+		cat <<CONFIG
+graph_vlabel ports
+open.draw LINE
+open.label open
+open.info length(erlang:ports())
+limit.draw LINE2
+limit.label limit
+limit.info ERL_MAX_PORTS environment variable inside ejabberd
+CONFIG
+		warning='80%' critical='90%' print_adjusted_thresholds open $limit
+		[ -n "$ERL_MAX_PORTS" ] && cat <<CONFIG_CONFIGURED
+configured.draw LINE
+configured.label configured
+configured.info Configuration file value ERL_MAX_PORTS
+CONFIG_CONFIGURED
+	else
+		local open=$(ejabberd_exec 'length(erlang:ports()).')
+		cat <<DATA
+open.value $open
+limit.value $limit
+DATA
+		[ -n "$ERL_MAX_PORTS" ] && echo "configured.value $ERL_MAX_PORTS"
+	fi
+}
+
+function ejabberd_report_mnesia() {
+	local draw sed_re long_bits
+
+	sed_re='([a-z_]+) *: with ([0-9]+) +records occupying ([0-9]+) +([a-z]+) o[fn] ([a-z]+)'
+	# 1 = table_name
+	# 2 = records number
+	# 3 = bytes/words number
+	# 4 = unit (bytes or words)
+	# 5 = storage (disc or mem)
+
+	if [ "$1" = config ]; then
+		echo "graph_vlabel $2"
+		draw=LINE2
+		[ "$2" = bytes ] && draw=AREASTACK
+
+		$EJABBERDCTL mnesia info | sed -re 's/'"$sed_re"'/\1 \5/;tx;d;:x' |
+			while read table_name table_storage; do
+				echo "${table_name}_${table_storage}.draw $draw"
+				echo "${table_name}_${table_storage}.label $table_name ($table_storage)"
+			done
+	else
+		if [ "$2" = recs ]; then
+			$EJABBERDCTL mnesia info | sed -re 's/'"$sed_re"'/\1_\5.value \2/;tx;d;:x'
+		else
+			long_bits=$(getconf LONG_BIT)
+			$EJABBERDCTL mnesia info |
+				sed -re 's/'"$sed_re"'/\1_\5.value \3 \4/;tx;d;:x' |
+				awk "
+					/ words\$/ {
+						print \$1, \$2 * $long_bits / 8
+					}
+					/ bytes\$/ {
+						print \$1, \$2
+					}
+				"
+		fi
+	fi
+}
+
+function ejabberd_report_mnesia_bytes() {
+	ejabberd_report_mnesia "$1" bytes
+}
+
+function ejabberd_report_mnesia_recs() {
+	ejabberd_report_mnesia "$1" recs
+}
+
+function ejabberd_report_process_links() {
+	ejabberd_exec "
+		lists:filtermap(
+			fun(Name) ->
+				case whereis(Name) of
+					Pid when is_pid(Pid) ->
+						{links, Links} = erlang:process_info(Pid, links),
+						{true, {Name, length(Links)}};
+					_ ->
+						false
+			end,
+			registered())"
+}
+
+function open_files_counter_util() {
+	if hash lsof &>/dev/null; then
+		echo lsof
+		return 0
+	elif hash fstat &>/dev/null; then
+		echo fstat
+		return 0
+	fi
+	return 1
+}
+
+function open_files_number() {
+	echo $[$($(open_files_counter_util) -np $(<$EJABBERD_PID_PATH) | wc -l)-1]
+}
+
+function ejabberd_report_open_files() {
+	# this spawns a child process, but in most cases the open files limit is inherited
+	local limit=$(ejabberd_exec 'os:cmd("ulimit -n").' | tr '"\\n' ' ')
+	if [ "$1" = "config" ]; then
+		cat <<CONFIG
+graph_vlabel open files
+open.draw LINE
+open.label open
+open.info number of open files as reported by $(open_files_counter_util)
+limit.draw LINE2
+limit.label limit
+limit.info "ulimit -n" from inside of ejabberd
+CONFIG
+		warning='80%' critical='90%' print_adjusted_thresholds open $limit
+	else
+		cat <<DATA
+open.value $(open_files_number)
+limit.value $limit
+DATA
+	fi
+}
+
+function ejabberd_report_processes() {
+	local limit=$(ejabberd_exec 'erlang:system_info(process_limit).')
+	if [ "$1" = "config" ]; then
+		cat <<CONFIG
+graph_vlabel processes
+active.draw LINE
+active.label active
+active.info erlang:system_info(process_count)
+limit.draw LINE2
+limit.label limit
+limit.info erlang:system_info(process_limit)
+CONFIG
+		warning='80%' critical='90%' print_adjusted_thresholds active $limit
+		[ -n "$ERL_PROCESSES" ] && cat <<CONFIG_CONFIGURED
+configured.draw LINE
+configured.label configured
+configured.info Configuration file value ERL_PROCESSES
+CONFIG_CONFIGURED
+	else
+		local active=$(ejabberd_exec 'erlang:system_info(process_count).')
+		cat <<DATA
+active.value $active
+limit.value $limit
+DATA
+		[ -n "$ERL_PROCESSES" ] && echo "configured.value $ERL_PROCESSES"
+	fi
+}
+
+case $1 in
+	autoconf)
+		[ -r "$EJABBERDCTL_CFG" ] && echo yes || echo no
+		exit 0
+		;;
+	suggest)
+		cat <<SUGGESTIONS
+memory
+processes
+ports
+process_links
+online_users
+registered_users
+mnesia_recs
+mnesia_bytes
+SUGGESTIONS
+		open_files_counter_util &>/dev/null && echo open_files
+		exit 0
+		;;
+	config)
+		cat <<CONFIG
+graph_title ejabberd resources - ${RESOURCE_TYPE//_/ }
+graph_args --base $RESOURCE_BASE --lower-limit 0
+graph_category chat
+CONFIG
+		;;
+esac
+
+ejabberd_report_${RESOURCE_TYPE} $1

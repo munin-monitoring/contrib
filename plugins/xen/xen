@@ -1,0 +1,77 @@
+#!/bin/sh
+#
+# Script to monitor CPU usage of Xen domains
+#
+# Author: unknown
+# Modifications: Sebastian Wyder <sebastian.wyder@me.com>, Matthias Pfafferodt, syntron@web.de, Roland Mohrbacher
+# License: GPL v. 2
+#
+# Parameters understood:
+#
+#     conifg    (required)
+#     autoconf  (optional - used by munin-config)
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+# statefile: name of seen xen domains
+statefile="$MUNIN_PLUGSTATE/munin-plugin-xen.state"
+
+if [ "$1" = "autoconf" ]; then
+        if which xm > /dev/null ; then
+                echo yes
+                exit 0
+        fi
+        echo "no (xm not found)"
+        exit 1
+fi
+
+if [ "$1" = "config" ]; then
+
+	if [ ! -e $statefile ]; then
+		touch $statefile
+	fi
+
+        echo 'graph_title Xen Domain Utilisation'
+        echo 'graph_args --base 1000 -l 0 --upper-limit 100 --rigid'
+        echo 'graph_scale no'
+        echo 'graph_vlabel %'
+        echo 'graph_category Virtualization'
+        echo 'graph_info This graph shows how many percent of the CPU time was used by each domain'
+
+	xm list | grep -v "^Name .* Time(s)$" | \
+        while read name domid mem cpu state time console; do
+                name=`echo $name | sed -e"s/[-.]/_/g"`
+		TEST=`less $statefile | grep "^${name}$" | wc -l`
+		if [ $TEST -ne 1 ]; then
+		    echo "$name" >> $statefile
+		fi
+	done
+
+	FIRST=1
+	cat $statefile | sort | \
+        while read name; do
+                echo "$name.label $name"
+                echo "$name.type COUNTER"
+		if [ $FIRST -eq 1 ]; then
+            	    echo "$name.draw AREA"
+		    FIRST=0
+		else
+            	    echo "$name.draw STACK"
+		fi
+                echo "$name.min 0"
+                echo "$name.max 100"
+                echo "$name.info % of the CPU time spent for $name"
+        done
+        exit 0
+fi
+
+xm list | grep -v "^Name .* Time(s)$" | \
+while read name domid mem cpu state time console; do
+        name=`echo $name | sed -e "s/[-.]/_/g"`
+	# only seconds
+        time=`echo $time | sed -e "s/\..//"`
+	# scale 60s/60s => 100%/60s
+	time=`echo "$time*100/60" | bc`
+        echo "$name.value $time"
+done

@@ -4,10 +4,13 @@ This is the repository for all user contributed stuff
 
 **This is usually where you want to begin your journey.**
 
-Here you'll find all the plugins coming from http://exchange.munin-monitoring.org/. 
-That web site is for the time being disabled, new updates are done here.
+Here you find a plethora of plugins for the most diverse topics. Please take a look and
+improve existing or propose new plugins.
 
-If a dedicated website comes back alive, its plugin backend will be this git repo.
+Please read the [hints for plugin contributions](./plugins#contributed-munin-plugins).
+
+See the [gallery](http://gallery.munin-monitoring.org/) for a browsable overview of these plugins.
+
 
 # contrib/templates/ -  3rd-party templates
 

@@ -1,0 +1,56 @@
+#!/bin/bash
+#
+#
+# Munin plugin to show the up- / download stream of the actual 
+# internet connection by reading the top_status.htm from the 
+# Speedport 300
+#
+#
+# Don't forget zu fill in the following lines into the munin-node
+# - ormally at /etc/muni/plugin-conf.d/ - an than restart munin
+#
+#   [speedport_300]
+#   user root
+#                                     Jo Hartmann (Version 08.0912)
+
+# Personal config Section Begin ##
+  router="192.168.0.111"
+# Personal config section End ####
+
+# Standard Config Section Begin ##
+  if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+  fi
+
+  if [ "$1" = "config" ]; then
+
+       echo 'graph_title DSL Up- / Downstream'
+       echo 'graph_args --base 1000 -l 0'
+       echo 'graph_scale no'
+       echo 'graph_vlabel Up- / Downstream in kBit/s'
+       echo 'graph_category network'
+       echo 'download.label Downstream'
+       echo 'upload.label Upstream'
+       echo 'graph_info Information from the top_status.htm of the Speedport 300'
+       exit 0
+  fi
+# Standard Config Section End ####
+
+# Measure Section Begin ##########
+  up_down=($(wget -q -O - $router/top_status.htm | grep "+'kBit" | awk -F"(" '{print $2}'))
+  down=${up_down[0]%+*}
+  up=${up_down[1]%+*}
+
+  if [ "$down" = "" ]; then
+     echo download.value  0
+  else
+     echo download.value  ${up_down[0]%+*}
+  fi
+
+  if [ "$up" = "" ]; then
+     echo upload.value    0
+  else
+     echo upload.value    ${up_down[1]%+*}
+  fi
+# Measure Section End ############

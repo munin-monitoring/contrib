@@ -1,0 +1,119 @@
+#!/bin/sh
+
+: <<=cut
+
+=head1 NAME
+
+parse Chrony Tracking output for timeserver status information
+
+=head1 APPLICABLE SYSTEMS
+
+Any system with a local chronyd service.
+
+=head1 CONFIGURATION
+
+No configuration.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+Revision 0.1 2008/08/23 13:06:00 joti
+
+  First version only chronyc tracking, autodetection included.
+
+Revision 0.2 2008/10/11 16:09:00 joti
+
+  Added scaling of other values to match with frequency, added more description to fields
+
+Revision 0.3 2014/02/16 zjttoefs
+
+  reduce forking by using awk
+  do not limit output precision
+  add stratum monitoring
+  detect slow/fast time or freqency and adjust sign of value accordingly
+  remove commented out code
+
+Revision 0.4 2016/11/10 Lars Kruse
+
+  rewrite field handling
+  use "which" for "chronyc" location
+  switch from "bash" to "sh"
+  fix exit code of failing "autoconf"
+
+=head1 AUTHOR
+
+  joti
+  zjttoefs
+  Lars Kruse <devel@sumpfralle.de>
+
+=cut
+
+CHRONYC="$(which chronyc | head -1)"
+
+# Frequency has extremely higher values than other. Therefore they are fitted by scaling via suitable factors.
+# field definitions:
+#   - munin fieldname
+#   - factor for graph visualization (all values are supposed to reach a similar dimension)
+#   - regular expression of the chrony output line (may not contain whitespace, case insensitive)
+#   - label (may include "%d" for including the factor; may contain whitespace)
+fields="stratum		1	^Stratum		Stratum
+	systime		1000	^System.time		System Time (x%d)
+	frequency	1	^Frequency		Frequency (ppm)
+	residualfreq	100	^Residual.freq		Residual Freq (ppm, x%d)
+	skew		100	^Skew			Skew (ppm, x%d)
+	rootdelay	1000	^Root.delay		Root delay (seconds, x%d)
+	rootdispersion	1000	^Root.dispersion	Root dispersion (seconds, x%d)"
+
+# chrony example output (v2.4.1):
+#   Reference ID    : 131.188.3.221 (ntp1.rrze.uni-erlangen.de)
+#   Stratum         : 2
+#   Ref time (UTC)  : Thu Nov 10 22:39:50 2016
+#   System time     : 0.000503798 seconds slow of NTP time
+#   Last offset     : +0.000254355 seconds
+#   RMS offset      : 0.002186779 seconds
+#   Frequency       : 17.716 ppm slow
+#   Residual freq   : +0.066 ppm
+#   Skew            : 4.035 ppm
+#   Root delay      : 0.042980 seconds
+#   Root dispersion : 0.005391 seconds
+#   Update interval : 258.4 seconds
+#   Leap status     : Normal
+
+
+if [ "$1" = "autoconf" ]; then
+	if [ -n "$CHRONYC" ] && [ -x "$CHRONYC" ]; then
+		echo yes
+	else
+		echo "no (missing 'chronyc' executable)"
+	fi
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title Chrony Tracking Stats'
+	echo 'graph_args --base 1000 -l 0'
+	echo 'graph_vlabel (seconds,ppm)'
+	echo 'graph_category time'
+	echo "$fields" | while read fieldname factor regex label; do
+		# insert the factor, if "%d" is part of the label
+		printf "${fieldname}.label $label\n" "$factor"
+		echo "${fieldname}.type GAUGE"
+	done
+	exit 0
+fi
+
+chrony_status="$("$CHRONYC" tracking)"
+echo "$fields" | while read fieldname factor regex label; do
+	status_line="$(echo "$chrony_status" | grep -i -- "$regex " | cut -d ":" -f 2-)"
+	if [ -z "$status_line" ]; then
+		value="U"
+	else
+		# the keyword "slow" indicates negative values
+		value="$(echo "$status_line" | awk '{ /slow/ ? SIGN=-1 : SIGN=1; print $1 * SIGN * '"$factor"' }')"
+	fi
+	echo "${fieldname}.value $value"
+done

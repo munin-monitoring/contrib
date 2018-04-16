@@ -1,0 +1,343 @@
+#!/usr/bin/perl -w
+# 
+# Plugin to monitor apcupsd via apcaccess
+#
+# Version 1.3
+# 
+# Copyright (C) 2005-2008 Behan Webster <behanw AT websterwood DOT com>
+# Licenced under GPL 2.0
+#
+# Written by: Behan Webster <behanw AT websterwood DOT com>
+# German translation by: Bianco Veigel <bianco.veigel AT zivillian DOT de>
+# 
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use warnings;
+use vars qw(%attrs %data %num);
+
+my $apcaccess='/sbin/apcaccess';
+#$apcaccess='/home/behanw/bin/apcaccess';
+my $config='/etc/munin/plugin-conf.d/apcupsd_ww';
+
+my $language = $ENV{LANG} || 'en';
+
+# Example apcaccess output
+# KEY      : VALUE
+#
+# UPSNAME  : Elfhild
+# MODEL    : SMART-UPS 1400 RM XL
+# STATUS   : ONLINE 
+# LINEV    : 123.5 Volts
+# LOADPCT  :  24.9 Percent Load Capacity
+# BCHARGE  : 100.0 Percent
+# TIMELEFT :  63.0 Minutes
+# OUTPUTV  : 123.5 Volts
+# ITEMP    : 39.1 C Internal
+# BATTV    : 54.5 Volts
+# NOMOUTV  : 115 Volts
+# NOMBATTV :  48.0 Volts
+
+# Possible values to graph in munin
+# Only the ones which are available will be graphed
+%attrs = (
+#	APCACCESS_KEY => {
+#		name => 'attribute_name',
+#		label => {
+#			en => 'English title',
+#                       de => 'Titel in Deutsch',
+#			fr => 'titre en Francais',
+#		},
+#		type => 'name_of_functio_for_type', # Default is 'num'
+#		# Can use one value, or list of values. If the first value can't be used, try the next.
+#		#   KEY          Key from apcaccess
+#		#   num,num,num  Specify a list of possible nominal values to guess from
+#		#   num          Specify fixed nominal value
+#		nominal => [ 'KEY', '100' ],
+#		#   KEY          Key from apcaccess
+#		#   +-num%       Calculate percentage min:max from nominal value
+#		#   +-num        Calculate min:max from nominal value
+#		#   -num:+num    Calculate min:max from nominal value
+#		#   num:num      Specify fixed min:max values
+#		#   num or :num  Specify fixed max value
+#		#   num:         Specify fixed min value
+#		warning => [ 'KEY:KEY', '+-10%', '-10:+15' ],
+#		critical => [ 'KEY:KEY', '+-10%', '-10:+15' ],
+#	},
+	BCHARGE	=> {	# BCHARGE  : 100.0 Percent
+		name => 'battery',
+		label => {
+			en => 'Percent battery charge',
+			de => 'Batterieladung in Prozent',
+		},
+		warning  => '33:',	# %
+		critical => '5:',	# %
+	},
+	LOADPCT => {	 # LOADPCT  :  28.6 Percent Load Capacity
+		name => 'upsload',
+		label => {
+			en => 'Percent load capacity',
+			de => 'Auslastung in Prozent',
+		},
+		warning  => '75',	# %
+		critical => '90',	# %
+	},
+	TIMELEFT => {	# TIMELEFT :  17.0 Minutes
+		name => 'timeleft',
+		label => {
+			en => 'Minutes of run time',
+			de => 'Akkulaufzeit in Minuten',
+		},
+		warning  => '5:',	# mins
+		critical => [ 'DLOWBATT:', '2:' ],	# DLOWBATT : 02 Minutes
+	},
+	LINEV => {	# LINEV    : 121.5 Volts
+		name => 'linevolts',
+		label => {
+			en => 'Line voltage',
+			de => 'Eingangsspannung',
+		},
+		nominal => [ 'NOMINV', 'NOMOUTV', '115,230' ], # NA=115V, Europe=230V
+		warning  => [ '+-10%', '108:128' ],
+		critical => [ 'LOTRANS:HITRANS', '+-15%', '104:132' ],
+	},
+	BATTV => {	# BATTV    : 27.7 Volts
+		name => 'batteryvolts',
+		label => {
+			en => 'Battery voltage',
+			de => 'Batteriespannung',
+		},
+		nominal => [ 'NOMBATTV', '12,24,48' ],	# NOMBATTV :  48.0 Volts
+		warning =>  '-5%:+15%',
+		critical => '-10%:+25%',
+	},
+	OUTPUTV => {	# OUTPUTV  : 122.2 Volts
+		name => 'outputvolts',
+		label => {
+			en => 'Output voltage',
+			de => 'Ausgangsspannung',
+		},
+		nominal => [ 'NOMOUTV',	'115,230' ], # NOMOUTV  : 115 Volts
+		warning =>  [ '+-10%', '108:128' ],
+		critical => [ 'LOTRANS:HITRANS', '+-15%', '104:132' ],
+	},
+	ITEMP => {	# ITEMP    : 44.1 C Internal
+		name => 'temperature',
+		label => {
+			en => 'UPS temperature',
+			de => 'USV Temperatur',
+		},
+		warning => 50,	# C
+		critical => 60,	# C
+	},
+	LINEFAIL => {	# LINEFAIL : OK
+		name => 'linefail',
+		label => {
+			en => 'Line voltage status',
+			de => 'Status Eingangsspannung',
+		},
+		type => 'bool',
+		critical => '0:',	# Failed
+	},
+	BATTSTAT => {	# BATTSTAT : OK
+		name => 'battstat',
+		label => {
+			en => 'Battery status',
+			de => 'Batteriestatus',
+		},
+		type => 'bool',
+		critical => '0:',	# Failed
+	},
+	MAINS => {	# MAINS    : OK
+		name => 'mains',
+		label => {
+			en => 'Mains status',
+			de => 'Status Eingangsspannung',
+		},
+		type => 'bool',
+		critical => '0:',	# Failed
+	},
+	#STATUS => {	# STATUS   : ONLINE
+	#	name => 'status',
+	#	label => {
+	#		en => 'Status',
+	#	},
+	#	type => 'status',
+	#	critical => 0,
+	#},
+);
+
+# Read config file
+# Can be used to override settings in %attrs
+if (-f $config) {
+	require $config;
+}
+
+# Determine plugin capabilities
+if (defined $ARGV[0] && $ARGV[0] =~ /autoconf|detect/) {
+	if (-x $apcaccess) {
+		print "yes\n";
+		exit 0;
+	} else {
+		print "no (apcaccess not found)\n";
+		exit 1;
+	}
+}
+
+# Read info from apcupsd using apcaccess
+die "$apcaccess: not found\n" unless -x $apcaccess;
+open (APCACCESS, "$apcaccess 2>&1 |") || die "$apcaccess: $!\n";
+while (<APCACCESS>) {
+	chomp;
+	die "$apcaccess: $_\n" if /Error contacting apcupsd/;
+	$data{$1} = $2 if /^(\S+?)\s*:\s+(.+?)$/;
+	$num{$1} = $2 if /^(\S+?)\s*:\s+([\d.x]+)/;
+}
+close APCACCESS;
+
+# Auto-configure plugin
+if (defined $ARGV[0] && $ARGV[0] eq 'config') {
+	if (defined $data{UPSNAME}) {
+		print "graph_title $data{UPSNAME} ($data{MODEL})\n";
+	} else {
+		print "graph_title $data{MODEL}\n";
+	}
+	#print "graph_vlabel Units\n";
+	print "graph_category sensors\n";
+	print "graph_info This graph shows information about your APC uninterruptible power supply.\n";
+
+	foreach my $what (sort keys %attrs) {
+		&label("$what");
+	}
+
+# Print current values
+} else {
+	foreach my $what (sort keys %attrs) {
+		next unless defined $data{$what};
+		my $func = $attrs{$what}{type} || 'num';
+		my $value = eval "\&$func('$what')";
+		print "$attrs{$what}{name}.value $value\n";
+	}
+}
+
+exit 0;
+
+##############################################################################
+# Print label/title for value
+sub label {
+	my $what = shift;
+	return unless defined $data{$what};
+
+	my $attr = $attrs{$what};
+
+	# Determine language to use for labels
+	my $lang = $language;
+	$lang =~ s/_.*$// unless defined $attr->{label}{$lang};
+	# Failback to english if translation isn't available
+	$lang = 'en' unless defined $attr->{label}{$lang};
+
+	print "$attr->{name}.label $attr->{label}{$lang}\n";
+	&info($what, 'warning');
+	&info($what, 'critical');
+}
+
+##############################################################################
+# Makes a scalar or array into an array (used in &info)
+sub list {
+	return (ref($_[0]) eq 'ARRAY') ? @{$_[0]} : @_;
+}
+
+##############################################################################
+# Used to setup warning or critical levels for munin
+sub info {
+	my $what = shift;
+	my $level = shift;	# 'warning' or 'critical'
+
+	my $attr = $attrs{$what};
+	return unless defined $attr->{$level};
+
+	# Determine nominal value for info calculation
+	my $nom = undef;
+	if (defined $attr->{nominal}) {
+		for my $n (&list($attr->{nominal})) {
+			# Guess list: compare guesses to value of $num{$what}
+			if ($n =~ /,/) {
+				my $fitness = ~0;
+				next unless $num{$what};
+				foreach my $possibility (split /[,\s]+/, $n) {
+					my $diff = abs($num{$what} - $possibility);
+					($nom, $fitness) = ($possibility, $diff) if $fitness >= $diff;
+				}
+
+			# Absolute nominal value
+			} elsif ($n =~ /^[\d.]+$/) {
+				$nom = $n;
+				last;
+
+			# Lookup nominal value as an APCUPSD key
+			} elsif (defined $num{$n}) {
+				$nom = $num{$n};
+				last;
+			}
+		}
+	}
+
+	# Calculate info value for $level
+	foreach my $value (&list($attr->{$level})) {
+		$value =~ s/([^:]+)/&calc($1,$nom)/eg;
+		if ($value =~ /^[\d.:]+$/) {
+			print "$attr->{name}.$level $value\n";
+			return;
+		}
+	}
+}
+
+##############################################################################
+# Change warning/critical ranges into numbers for munin
+sub calc {
+	my $v = shift;
+	my $nom = shift;
+
+	return $v if $v =~ /^[\d.]+$/;
+	return $num{$v} if defined $num{$v};
+	return '' unless defined $nom;
+	if ($v =~ /^\+-([\d.]+)%$/) {
+		return sprintf "%.0f:%.0f", (100 - $1) * $nom / 100, (100 + $1) * $nom / 100;
+	} elsif ($v =~ /^([-+][\d.]+)%$/) {
+		return sprintf "%.0f", (100 + $1) * $nom / 100;
+	} elsif ($v =~ /^\+-([\d.]+)$/) {
+		return sprintf "%d:%d", $nom - $1, $nom + $1;
+	} elsif ($v =~ /^([-+][\d.]+)$/) {
+		return $nom + $1;
+	} elsif ($v =~ /^\*([\d.]+)$/) {
+		return $nom * $1;
+	} elsif ($v =~ /^\/([\d.]+)$/) {
+		return sprintf "%.0f", $nom / $1;
+	}
+	return '';
+}
+
+##############################################################################
+# Default "type" routine to display values
+sub num {
+	my $what = shift;
+	return $num{$what};
+}
+
+##############################################################################
+# "type" routine to change Ok/Not Ok into 1/0
+sub bool {
+	my $what = shift;
+	return $num{$what} eq "OK" ? "1" : "0";
+}
+
+#sub status {
+#	my $what = shift;
+#	return unless defined $data{$what};
+#	print "$attrs{$what}{name}.value ";
+#	print $num{$what} eq "ONLINE" ? "1" : "0";
+#	print "\n";
+#}
+
+# vim: sw=4 ts=4

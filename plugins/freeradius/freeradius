@@ -1,0 +1,79 @@
+#!/bin/sh
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+#
+# Written by Daniele Albrizio <daniele@albrizio.dyndns.org> maj 2007
+# Based upon Lasse Karstensen <lkarsten@hyse.org> june 2006 bash plugin foor the main structure and
+# mike@gaertner.cc 2006 perl plugin for the "total requests graph" idea
+#
+####
+# Shell plugin to graph the daily amount of per second or per minute freeradius login requests.
+#
+# Plugin Configuration for your munin plugins conf (/etc/munin/plugin-conf.d/munin-node in Debian)
+#
+# [freeradius]
+# user <a user that can read freeradius logfiles>
+# env.radius_log=/where/your/freeradius/log.is (if not set defaults to syslog)
+# env.graph_period=<minute|second> (if not set defaults to second)
+#
+#
+# Magic markers - optional - used by installation scripts and
+# munin-config:
+#
+#%# family=manual
+#%# capabilities=autoconf
+
+if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title freeradius requests'
+        echo 'graph_args --base 1000 -l 0 '
+        if [ -n ${graph_period} ]; then 
+                echo 'graph_period '${graph_period}
+        fi
+        echo 'graph_vlabel requests / ${graph_period}'
+        echo 'graph_category auth'
+
+        echo 'requests.label Authentication requests'
+        echo 'requests.info freeRADIUS authentication requests'
+        echo 'requests.type DERIVE'
+        echo 'requests.min 0'
+
+        echo 'success.label Login OK'
+        echo 'success.info Successful freeRADIUS authentications'
+        echo 'success.type DERIVE'
+        echo 'success.min 0'
+
+        echo 'failed.label Login FAILED'
+        echo 'failed.info Failed freeRADIUS authentications'
+        echo 'failed.type DERIVE'
+        echo 'failed.min 0'
+
+        exit 0
+fi
+
+
+if [ -z ${radius_log} ]; then
+        echo -n "requests.value " && egrep "`date +%b\ %e`.*radiusd.*Login"           /var/log/messages|wc -l
+        echo -n "success.value "  && egrep "`date +%b\ %e`.*radiusd.*Login OK"        /var/log/messages|wc -l
+        echo -n "failed.value "   && egrep "`date +%b\ %e`.*radiusd.*Login incorrect" /var/log/messages|wc -l
+else
+        echo -n "requests.value " && egrep "`date +%b\ %e`.*Login"           ${radius_log}|wc -l
+        echo -n "success.value "  && egrep "`date +%b\ %e`.*Login OK"        ${radius_log}|wc -l
+        echo -n "failed.value "   && egrep "`date +%b\ %e`.*Login incorrect" ${radius_log}|wc -l
+fi
+

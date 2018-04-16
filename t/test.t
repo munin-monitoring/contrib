@@ -48,7 +48,14 @@ sub process_file {
     my ( $file, $filename, $interpreter, $arguments ) = @_;
     use v5.10.1;
 
-    if ( $interpreter =~ m{/bin/sh} ) {
+    if ( ! -x $file ) {
+        # missing executable flag
+        diag(
+            sprintf("\nFile '%s' lacks executable permission bits. Maybe try 'chmod +x $file'?\n",
+                    $file)
+        );
+    }
+    elsif ( $interpreter =~ m{/bin/sh} ) {
         subtest $filename => sub {
             plan tests => 2;
             run_check(
@@ -56,25 +63,55 @@ sub process_file {
                     description => 'sh syntax check'
                 }
             );
+            my $checkbashisms_location = `command -v checkbashisms 2>/dev/null`;
+            chomp($checkbashisms_location);
+            my $command;
+            if ($checkbashisms_location ne "") {
+                # monkey-patch "checkbashisms" in order to allow "command -v"
+                # see https://unix.stackexchange.com/a/85250: "command -v" vs. which/hash/...
+                # see https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=733511
+                my $run_modified_checkbashisms = q/sed 's#command\\\s+-\[\^p\]#command\s+-[^pvV]#'/
+                    . " '$checkbashisms_location' | perl - '$file'";
+                $command = [ 'sh', '-c', $run_modified_checkbashisms ];
+            } else {
+                # make sure that the non-confusing "checkbashisms not found" message is displayed
+                $command = [ 'checkbashisms', $file ];
+            }
             run_check(
-                {   command     => [ 'checkbashisms', $file ],
+                {   command     => $command,
                     description => 'checkbashisms'
                 }
             );
         };
     }
     elsif ( $interpreter =~ m{/bin/ksh} ) {
-        run_check(
-            {   command     => [ 'ksh', '-n', $file ],
-                description => 'ksh syntax check',
-                filename    => $filename
-            }
-        );
+        subtest $filename => sub {
+            plan tests => 2;
+            run_check(
+                {   command     => [ 'ksh', '-n', $file ],
+                    description => 'ksh syntax check',
+                    filename    => $filename
+                }
+            );
+            run_check(
+                {   command     => [ 'shellcheck', $file ],
+                    description => 'shellcheck'
+                }
+            );
+        }
     }
     elsif ( $interpreter =~ m{bash} ) {
         run_check(
             {   command     => [ 'bash', '-n', $file ],
                 description => 'bash syntax check',
+                filename    => $filename
+            }
+        );
+    }
+    elsif ( $interpreter =~ m{/bin/zsh} ) {
+        run_check(
+            {   command     => [ 'zsh', '-n', $file ],
+                description => 'zsh syntax check',
                 filename    => $filename
             }
         );

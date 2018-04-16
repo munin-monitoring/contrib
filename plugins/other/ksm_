@@ -19,66 +19,71 @@
 # Magic markers - optional - used by installation scripts and
 # munin-config:
 #
-#%# capabilities=autoconf suggest
-#%# family=auto
-
-###########################################################
-category = 'system' # 'upgrades'
-title = 'Kernel Samepage Merging' # 'Upgradeable packages'
-###########################################################
+#  #%# capabilities=autoconf suggest
+#  #%# family=auto
 
 import os
 import sys
-import warnings
+import warnings  # noqa
+
+#################################
+title = 'Kernel Samepage Merging'
+#################################
+
 
 def autoconf():
     if os.path.exists('/sys/kernel/mm/ksm/run'):
         for line in open('/sys/kernel/mm/ksm/run'):
             if line.strip() == '1':
-               print 'yes'
-               sys.exit(0)
-    print 'no (/sys/kernel/mm/ksm/run must be present and value must be 1)'
+                print('yes')
+                break
+        else:
+            print('no (/sys/kernel/mm/ksm/run does not contain "1")')
+    else:
+        print('no (/sys/kernel/mm/ksm/run not found)')
     sys.exit(0)
 
+
 def suggest():
-    print 'pages_absolute'
-    print 'pages_relative'
-    print 'full_scans'
+    print('pages_absolute')
+    print('pages_relative')
+    print('full_scans')
     sys.exit(0)
 
 
 def config():
-    if('ksm_pages_absolute' in sys.argv[0]): 
-        print 'graph_category %s' % (category)
-        print 'graph_title %s Pages Absolute' % (title)
-        print 'graph_order pages_unshared pages_volatile pages_shared pages_sharing'
-        print 'pages_shared.info how many shared pages are being used'
-        print 'pages_sharing.info how many more sites are sharing them i.e. how much saved'
-        print 'pages_unshared.info how many pages unique but repeatedly checked for merging'
-        print 'pages_volatile.info how many pages changing too fast to be placed in a tree'
-        print 'pages_shared.label pages_shared'
-        print 'pages_sharing.label pages_sharing'
-        print 'pages_unshared.label pages_unshared'
-        print 'pages_volatile.label pages_volatile'
-        print 'pages_shared.draw AREASTACK'
-        print 'pages_sharing.draw AREASTACK'
-        print 'pages_unshared.draw AREASTACK'
-        print 'pages_volatile.draw AREASTACK'
+    if('ksm_pages_absolute' in sys.argv[0]):
+        print('graph_category system')
+        print('graph_title %s Pages Absolute' % (title))
+        print('graph_order pages_unshared pages_volatile pages_shared pages_sharing')
+        print('pages_shared.info how many shared pages are being used')
+        print('pages_sharing.info how many more sites are sharing them i.e. how much saved')
+        print('pages_unshared.info how many pages unique but repeatedly checked for merging')
+        print('pages_volatile.info how many pages changing too fast to be placed in a tree')
+        print('pages_shared.label pages_shared')
+        print('pages_sharing.label pages_sharing')
+        print('pages_unshared.label pages_unshared')
+        print('pages_volatile.label pages_volatile')
+        print('pages_shared.draw AREASTACK')
+        print('pages_sharing.draw AREASTACK')
+        print('pages_unshared.draw AREASTACK')
+        print('pages_volatile.draw AREASTACK')
     elif('ksm_pages_relative' in sys.argv[0]):
-        print 'graph_category %s' % (category)
-        print 'graph_title %s Pages Relative' % (title)
-        print 'pages_sharing_shared.info ratio of sharing to shared pages'
-        print 'pages_unshared_sharing.info ratio of unshared to sharing pages'
-        print 'pages_sharing_shared.label pages_sharing_shared'
-        print 'pages_unshared_sharing.label pages_unshared_sharing'
-        print 'pages_sharing_shared.cdef pages_sharing_shared,100,*'
-        print 'pages_unshared_sharing.cdef pages_unshared_sharing,100,*'
+        print('graph_category system')
+        print('graph_title %s Pages Relative' % (title))
+        print('pages_sharing_shared.info ratio of sharing to shared pages')
+        print('pages_unshared_sharing.info ratio of unshared to sharing pages')
+        print('pages_sharing_shared.label pages_sharing_shared')
+        print('pages_unshared_sharing.label pages_unshared_sharing')
+        print('pages_sharing_shared.cdef pages_sharing_shared,100,*')
+        print('pages_unshared_sharing.cdef pages_unshared_sharing,100,*')
     elif('ksm_full_scans' in sys.argv[0]):
-        print 'graph_category %s' % (category)
-        print 'graph_title %s Full Scans' % (title)
-        print 'full_scans.info how many times all mergeable areas have been scanned'
-        print 'full_scans.label full_scans'
+        print('graph_category system')
+        print('graph_title %s Full Scans' % (title))
+        print('full_scans.info how many times all mergeable areas have been scanned')
+        print('full_scans.label full_scans')
     sys.exit(0)
+
 
 if len(sys.argv) > 1:
     if sys.argv[1] == 'autoconf':
@@ -91,19 +96,21 @@ if len(sys.argv) > 1:
         print('unknown argument "' + sys.argv[1] + '"')
         sys.exit(1)
 
-pages_shared=int(open('/sys/kernel/mm/ksm/pages_shared').read())
-pages_sharing=int(open('/sys/kernel/mm/ksm/pages_sharing').read())
-pages_unshared=int(open('/sys/kernel/mm/ksm/pages_unshared').read())
-pages_volatile=int(open('/sys/kernel/mm/ksm/pages_volatile').read())
-full_scans=int(open('/sys/kernel/mm/ksm/full_scans').read())
+pages_shared = int(open('/sys/kernel/mm/ksm/pages_shared').read())
+pages_sharing = int(open('/sys/kernel/mm/ksm/pages_sharing').read())
+pages_unshared = int(open('/sys/kernel/mm/ksm/pages_unshared').read())
+pages_volatile = int(open('/sys/kernel/mm/ksm/pages_volatile').read())
+full_scans = int(open('/sys/kernel/mm/ksm/full_scans').read())
 
-if('ksm_pages_absolute' in sys.argv[0]): 
-    print 'pages_shared.value %i' % pages_shared
-    print 'pages_sharing.value %i' % pages_sharing
-    print 'pages_unshared.value %i' % pages_unshared
-    print 'pages_volatile.value %i' % pages_volatile
-elif('ksm_pages_relative' in sys.argv[0]): 
-    print 'pages_sharing_shared.value %f' % (float(pages_sharing)/float(pages_shared) if pages_shared>0 else 0)
-    print 'pages_unshared_sharing.value %f' % (float(pages_unshared)/float(pages_sharing) if pages_sharing>0 else 0)
-elif('ksm_full_scans' in sys.argv[0]): 
-    print 'full_scans.value %i' % full_scans
+if('ksm_pages_absolute' in sys.argv[0]):
+    print('pages_shared.value %i' % pages_shared)
+    print('pages_sharing.value %i' % pages_sharing)
+    print('pages_unshared.value %i' % pages_unshared)
+    print('pages_volatile.value %i' % pages_volatile)
+elif('ksm_pages_relative' in sys.argv[0]):
+    print('pages_sharing_shared.value %f'
+          % (float(pages_sharing) / float(pages_shared) if pages_shared > 0 else 0))
+    print('pages_unshared_sharing.value %f'
+          % (float(pages_unshared) / float(pages_sharing) if pages_sharing > 0 else 0))
+elif('ksm_full_scans' in sys.argv[0]):
+    print('full_scans.value %i' % full_scans)

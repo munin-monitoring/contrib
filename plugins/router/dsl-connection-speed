@@ -1,0 +1,48 @@
+#!/bin/bash
+
+case $1 in
+   config)
+        cat <<'EOM'
+graph_order downspeed upspeed
+graph_title DSL Connection Speed
+graph_args --base 1000 -l 1000 --upper-limit 42000
+graph_category network
+graph_scale no
+graph_vlabel DSL up / down speed
+downspeed.label Down speed
+downspeed.type GAUGE
+upspeed.label Up speed
+upspeed.type GAUGE
+graph_info Graph of DSL Connection Speed
+EOM
+        exit 0;;
+esac
+
+# verify we have the IP for the modem
+if [[ "$DSLMODEMIP" == "" ]]
+then
+	echo "DSLMODEMIP variable must be set!"
+	exit 1
+fi
+
+# create temp file for storing wget output
+TMPFILE=$(mktemp)
+
+# if we have auth variables then add them to 
+# wget cmdline
+if [[ "$DSLUSER" != ""  && "$DSLPASS" != "" ]]
+then
+	AUTH_OPT="--user=$DSLUSER --password='$DSLPASS' "
+fi
+
+# get wan stats page and store it to temp file
+wget $AUTH_OPT --tries=1 --timeout=10 -q -O $TMPFILE http://$DSLMODEMIP/modemstatus_wanstatus.html
+# parse tempfile to get connection speeds
+DOWNRATE=$(cat $TMPFILE | grep downrate= | sed -e "s/var.*downrate='\(.*\)';.*/\1/g" | sed -e 's/\s//g' | tail -n 1)
+UPRATE=$(cat $TMPFILE | grep uprate= | sed -e "s/var.*uprate='\(.*\)';.*/\1/g" | sed -e 's/\s//g' | tail -n 1)
+# done with the temp file, remove
+rm $TMPFILE
+
+# done, output speeds
+echo "upspeed.value $UPRATE"
+echo "downspeed.value $DOWNRATE"

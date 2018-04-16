@@ -1,0 +1,80 @@
+#!/usr/local/bin/ruby
+# Plugin to monitor the number of invalid access to sshd per country
+#
+# Require read permitions for SYSLOG
+#    ref) ls -l /var/log/secure
+# Require geoip rubygem
+#    ref) http://geoip.rubyforge.org/
+# Require GeoIP-database for searching ip or host for the country
+#    ref) http://www.maxmind.com/app/geoip_country
+#
+# Parameters:
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+#
+# $Log$
+# Revision 1.0  2010/12/25 11:56:12 hirata yoshiyuki
+#     released.
+#
+# Magick markers (optional):
+#%# family=auto
+#%# capabilities=autoconf
+#
+# config example for /etc/munin/plugin-conf.d/munin-node
+#[sshd_invalid_countries_ruby]
+#user root
+#group root
+#env.logfile /var/log/secure
+#env.geoip /home/you/GeoIP.dat
+#env.loadpath /usr/local/lib/ruby/gems/1.9.1/gems/geoip-0.8.8/lib/
+
+require (ENV['loadpath'] || '') + 'geoip'
+
+SYSLOG   = ENV['syslog'] || '/var/log/secure'
+GEOIP_DB = ENV['geoip']  || '/var/www/conf/bbs/GeoIP.dat'
+AWK_CMD  = 'awk \'/sshd\[.*Did not receive identification string/{print $12} ' +
+                 '/sshd\[.*Failed password for (root|ROOT)/{print $11} ' +
+                 '/sshd\[.*Invalid user/{print $10}a\' < ' + SYSLOG
+
+def getInvalids
+  c={}
+  wholeips = `#{AWK_CMD}`.split("\n")
+  uniqueips = wholeips.inject({}) do |hash, key|
+    hash.include?(key) ? hash[key] += 1 : hash[key] = 1;
+    hash
+  end
+  geoip = GeoIP.new(GEOIP_DB)
+  uniqueips.each do |ip,cnt|
+    begin
+      country = geoip.country(ip)[5]
+      c[country] = c[country] ? c[country] + cnt : cnt
+    rescue
+      c['Unknown'] = c['Unknown'] ? c['Unknown'] + cnt : cnt
+    end
+  end
+  c = c.to_a.sort {|a,b| a[0] <=> b[0]}
+  c
+end
+
+case ARGV[0]
+when 'autoconf'
+  begin
+    fh = open(SYSLOG, 'r')
+  rescue
+    puts 'no'
+    exit 1
+  else
+    puts 'yes'
+    exit 0
+  end
+when 'config'
+  puts 'graph_title SSHD invalid countries from ' + SYSLOG
+  puts 'graph_args --base 1000 -l 0'
+  puts 'graph_vlabel number of invalid access per country'
+  puts 'graph_category security'
+  puts 'graph_info This graph shows the countries of invalid access to sshd.'
+  getInvalids.each {|k,v| puts k + '.label ' + k}
+  exit 0
+else
+  getInvalids.each {|k,v| puts k + '.value ' + v.to_s}
+end

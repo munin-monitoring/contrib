@@ -1,0 +1,232 @@
+#!/usr/bin/perl
+use IO::Socket::UNIX;
+use Munin::Plugin;
+use strict;
+use warnings;
+use v5.10;
+
+=head1 NAME
+
+bird - Munin multigraph plugin to monitor BIRD routing daemon activity
+
+=head1 APPLICABLE SYSTEMS
+
+Every system with running bird
+
+=head1 CONFIGURATION
+
+The plugin must run with a user or group that could connect to bird
+control socket.
+
+This configuration snipplet is an example with the defaults:
+
+  [bird]
+    user root
+    protocols BGP
+    socket /var/run/bird.ctl
+
+=head1 USAGE
+
+Link this plugin to /etc/munin/plugins/ and restart the munin-node.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 BUGS
+
+Not known
+
+=head1 AUTHOR
+
+Luben Karavelov (karavelov at mail.bg)
+
+=head1 LICENSE
+
+Same as perl
+
+=cut
+
+need_multigraph();
+my $protocols = [ split(/ /, $ENV{'protocols'} || 'BGP') ];
+my $socket    = $ENV{'socket'} || '/var/run/bird.ctl';
+
+sub get_stats {
+    state $stats;
+    return $stats if defined $stats;
+
+    my $bird_ctl = IO::Socket::UNIX->new(
+            Type => SOCK_STREAM,
+            Peer => $socket
+        ) or die $!;
+
+    my ($protocol,$name);
+    while (<$bird_ctl>) {
+        given($_) {
+            when (/1002-(\w+)\s+(\w+)\s+.*/) {
+                ($name, $protocol) = ($1,$2);
+                next unless $protocol ~~ $protocols;
+                $stats->{$name}->{protocol} = $protocol;
+            }
+            when (/^0001 /) {
+                print $bird_ctl "show protocols all\n";
+                next;
+            }
+            when (/^0000 /) {
+                last;
+            }
+            when (/^1002- /) {
+                print;
+            }
+            when (/^1006-\s+Description:\s+(.+)$/){
+                next unless $protocol ~~ $protocols;
+                $stats->{$name}->{title} = $1;
+            }
+            when (/^\s+Routes:\s+(\d+)\s+imported,\s+(\d+)\s+exported,\s+(\d+)\s+preferred$/){
+                next unless $protocol ~~ $protocols;
+                $stats->{$name}->{imported} = $1;
+                $stats->{$name}->{exported} = $2;
+                $stats->{$name}->{preferred} = $3;
+            }
+            # received   rejected   filtered    ignored   accepted
+            when (/^\s+(Import|Export)\s(updates|withdraws):\s+(\d+|-+)\s+(\d+|-+)\s+(\d+|-+)\s+(\d+|-+)\s+(\d+|-+)$/){
+                next unless $protocol ~~ $protocols;
+                $stats->{$name}->{ lc("$1_$2_received") } = $3;
+                $stats->{$name}->{ lc("$1_$2_rejected") } = $4;
+                $stats->{$name}->{ lc("$1_$2_filtered") } = $5;
+                $stats->{$name}->{ lc("$1_$2_ignored" ) } = $6;
+                $stats->{$name}->{ lc("$1_$2_accepted") } = $7;
+            }
+            when (/^$/) {
+                undef $protocol;
+                undef $name;
+            }
+        }
+    }
+    $bird_ctl->close;
+    return $stats;
+}
+
+sub autoconf {
+    if (-S $socket) {
+        say 'yes';
+        exit 0;
+    } else {
+        say 'no';
+        exit 1;
+    }
+}
+
+sub config {
+    my $stats = get_stats;
+    while ( my ($name,$proto) = each %$stats) {
+        print <<HEREDOC;
+multigraph ${name}_routes
+graph_title $proto->{title} routes
+graph_args --base 1000
+graph_vlabel routes
+graph_category network
+exported.label Exported routes
+exported.type GAUGE
+exported.info Exported routes
+exported.min 0
+exported.draw LINE1
+imported.label Imported routes
+imported.type GAUGE
+imported.info Impored routes
+imported.min 0
+imported.draw LINE1
+preferred.label Preferred routes
+preferred.type GAUGE
+preferred.info Preferred routes
+preferred.min 0
+preferred.draw LINE1
+multigraph ${name}_activity
+graph_title $proto->{title} activity
+graph_args --base 1000
+graph_vlabel routes per second
+graph_category network
+import_updates_received.label Import updates received
+import_updates_received.type DERIVE
+import_updates_received.draw LINE1
+import_updates_rejected.label Import updates rejected
+import_updates_rejected.type DERIVE
+import_updates_rejected.draw LINE1
+import_updates_filtered.label Import updates filtered
+import_updates_filtered.type DERIVE
+import_updates_filtered.draw LINE1
+import_updates_ignored.label Import updates ignored
+import_updates_ignored.type DERIVE
+import_updates_ignored.draw LINE1
+import_updates_accepted.label Import updates accepted
+import_updates_accepted.type DERIVE
+import_updates_accepted.draw LINE1
+import_withdraws_received.label Import withdraws_received
+import_withdraws_received.type DERIVE
+import_withdraws_received.draw LINE1
+import_withdraws_rejected.label Import withdraws rejected
+import_withdraws_rejected.type DERIVE
+import_withdraws_rejected.draw LINE1
+import_withdraws_ignored.label Import withdraws ignored
+import_withdraws_ignored.type DERIVE
+import_withdraws_ignored.draw LINE1
+import_withdraws_accepted.label Import withdraws accepted
+import_withdraws_accepted.type DERIVE
+import_withdraws_accepted.draw LINE1
+export_updates_received.label Export updates received
+export_updates_received.type DERIVE
+export_updates_received.draw LINE1
+export_updates_rejected.label Export updates rejected
+export_updates_rejected.type DERIVE
+export_updates_rejected.draw LINE1
+export_updates_filtered.label Export updates filtered
+export_updates_filtered.type DERIVE
+export_updates_filtered.draw LINE1
+export_updates_accepted.label Export updates accepted
+export_updates_accepted.type DERIVE
+export_updates_accepted.draw LINE1
+export_withdraws_received.draw LINE1
+export_withdraws_received.label Export withdraws received
+export_withdraws_received.type DERIVE
+export_withdraws_accepted.label Export withdraws accepted
+export_withdraws_accepted.type DERIVE
+export_withdraws_accepted.draw LINE1
+HEREDOC
+    }
+}
+
+sub fetch {
+    my $stats = get_stats;
+    while ( my ($name,$proto) = each %$stats) {
+        print <<HEREDOC;
+multigraph ${name}_routes
+exported.value $proto->{exported}
+imported.value $proto->{imported}
+preferred.value $proto->{preferred}
+multigraph ${name}_activity
+import_updates_received.value $proto->{import_updates_received}
+import_updates_rejected.value $proto->{import_updates_rejected}
+import_updates_filtered.value $proto->{import_updates_filtered}
+import_updates_ignored.value $proto->{import_updates_ignored}
+import_updates_accepted.value $proto->{import_updates_accepted}
+import_withdraws_received.value $proto->{import_withdraws_received}
+import_withdraws_rejected.value $proto->{import_withdraws_rejected}
+import_withdraws_ignored.value $proto->{import_withdraws_ignored}
+import_withdraws_accepted.value $proto->{import_withdraws_accepted}
+export_updates_received.value $proto->{export_updates_received}
+export_updates_rejected.value $proto->{export_updates_rejected}
+export_updates_filtered.value $proto->{export_updates_filtered}
+export_updates_accepted.value $proto->{export_updates_accepted}
+export_withdraws_received.value $proto->{export_withdraws_received}
+export_withdraws_accepted.value $proto->{export_withdraws_accepted}
+HEREDOC
+    }
+}
+
+given ($ARGV[0]) {
+    when ('autoconf') { autoconf }
+    when ('config')   { config   }
+    default           { fetch    }
+}
+

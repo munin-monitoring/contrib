@@ -1,0 +1,131 @@
+#!/bin/sh
+#################################################################
+#
+# Script to monitor eaccelerator usage
+# This code works only with mod_php or PHP in fastcgi, read here why in Requirements section : http://eaccelerator.net/wiki/InstallFromSource
+#
+#################################################################
+#
+# Parameters understood:
+#
+# 	config   (required)
+# 	autoconf (optional - used by munin-config)
+#
+#################################################################
+#
+# Requirements
+# - web server with PHP and eaccelerator enabled
+# - php file placed on web server , paste there below code (strip hash files first)
+#
+#   <?php
+#   $error_reporting(E_NONE); 
+#   // notice keys orders is very important 
+#   $keys  = array("memorySize"=>0,"memoryAvailable"=>0,"memoryAllocated"=>0,"cachedScripts"=>0,"removedScripts"=>0,"cachedKeys"=>0);
+#   if(!function_exists("eaccelerator_info"))
+#      $info = $keys;
+#   else
+#      $info = eaccelerator_info();
+#   foreach($keys as $key => $val) echo strtolower($key).".value ".$info[$key]."\n";
+#   ?>
+#
+# - name that file eaccelerator_status.php, will be easier, file should be at least accesible from the address that runs this script (usually localhost)
+#   you can make this file accessible globally, it just displays the memor usage by eaccelerator, thats all.
+#   usually you can put it to the /var/www/ (but it depends on the server configuration etc)
+# - check if you can see the output of the file, for example if you placed file in the DocumentRoot then it should be available from
+#   http://localhost/eaccelerator_status.php
+#   if you see the plain text with values then its working ok!
+#   if you see the plain text and all values are zero then probalby eaccelerator is not enabled.
+# - installed wget 
+#
+#################################################################
+#
+# Configuration section
+#
+# URL to the script to check eaccelerator status
+URL="http://localhost/eaccelerator_status.php";
+#
+WGET=`which wget`;
+WGET_FLAGS="-Yoff"; # refer to wget manual, you may set extra parameters like disable proxy
+#
+#
+#################################################################
+#
+# Changelog
+#
+# Revision 0.1 Tue 03 Feb 2009 02:16:02 PM CET _KaszpiR_
+# - initial release, 
+# 
+#################################################################
+
+
+
+
+#################################################################
+#################################################################
+# Settigs required for autoconf
+#%# family=manual
+#%# capabilities=autoconf
+
+
+
+if [ "$1" = "autoconf" ]; then
+	echo no
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+
+	echo 'graph_title Eaccelerator usage '
+	echo 'graph_args -l 0'
+	echo 'graph_category webserver'
+	echo 'graph_info This graph shows performance of the eaccelerator module on WWW server.'
+	
+	echo 'memorysize.label total'
+	echo 'memorysize.draw AREA'
+	echo 'memorysize.min 0'
+	echo 'memorysize.info Total memory allocated by eaccelerator.'
+
+	echo 'memoryallocated.label allocated'
+	echo 'memoryallocated.draw AREA'
+	echo 'memoryallocated.min 0'
+#	echo "memoryallocated.warning 92"
+#	echo "memoryallocated.critical 98"
+	echo 'memoryallocated.info Memory allocated .'
+				
+	echo 'memoryavailable.label available'
+	echo 'memoryavailable.min 0'
+	echo 'memoryavailable.info Memory available .'
+
+	echo 'cachedscripts.label cached scripts'
+	echo 'cachedscripts.min 0'
+	echo 'cachedscripts.info Scripts cached.'
+
+	echo 'removedscripts.label removed scripts'
+	echo 'removedscripts.min 0'
+	echo 'removedscripts.info Scripts removed.'
+
+	echo 'cachedkeys.label cached keys'
+	echo 'cachedkeys.min 0'
+	echo 'cachedkeys.info Scripts removed.'
+
+
+
+#	for key in $KEYS_WARN; do
+#	echo "$key.warning 92"
+#	echo "$key.critical 98"
+#	exit 0
+fi
+
+
+
+#################################################################
+# run the sript
+    if [ -x $WGET ]; then
+#            quiet                 output to stdout
+	wget -q $WGET_FLAGS "$URL" -O -
+	exit 0
+    fi
+
+exit 0
+
+# end of file

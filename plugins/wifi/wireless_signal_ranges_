@@ -1,0 +1,160 @@
+#!/bin/sh
+
+: << =cut
+
+=head1 NAME
+
+wireless_signal_ranges_ - Group and count all connected wifi peers by signal strength ranges
+
+
+=head1 APPLICABLE SYSTEMS
+
+Information is parsed from the output of the tool "iwinfo" (OpenWrt) or "iw" (most systems).
+
+This plugin is suitable for wifi interfaces with a variable selection of peers (e.g. mobile
+clients).
+
+
+=head1 CONFIGURATION
+
+Symlink this plugin with the name of the wifi interface added (e.g. "wlan0").
+
+Root permissions are probably required for accessing "iw".
+
+  [wireless_signal_ranges_*]
+  user root
+
+
+=head1 VERSION
+
+  1.1
+
+
+=head1 AUTHOR
+
+Lars Kruse <devel@sumpfralle.de>
+
+
+=head1 LICENSE
+
+GPLv3 or above
+
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf suggest
+
+=cut
+
+set -eu
+
+
+SCRIPT_PREFIX="wireless_signal_ranges_"
+
+# thresholds for signal quality ranges: ascending values
+SIGNAL_THRESHOLDS="-88 -80 -60 0"
+
+
+# prefer "iwinfo" for information retrieval, if it is available
+if which iwinfo >/dev/null; then
+	# "iwinfo" has a stable output format but is only available on openwrt
+	get_wifi_interfaces() { iwinfo | grep "^[a-zA-Z]" | awk '{print $1}'; }
+	# return MAC of peer and the signal strength
+	get_wifi_peers() { iwinfo "$1" assoclist | grep "^[0-9a-fA-F]" | awk '{print $2}'; }
+else
+	# "iw" is available everywhere - but its output format is not recommended for non-humans
+	get_wifi_interfaces() { iw dev | awk '{ if ($1 == "Interface") print $2; }'; }
+	get_wifi_peers() { iw dev wlan0 station dump \
+		| awk '{ if (($1 == "signal") && ($2 == "avg:")) print $3}'; }
+fi
+
+
+clean_fieldname() {
+	echo "$1" | sed 's/^\([^A-Za-z_]\)/_\1/; s/[^A-Za-z0-9_]/_/g'
+}
+
+
+get_level_fieldname() {
+	echo "range_${1#-}"
+}
+
+
+get_wifi_device_from_suffix() {
+	local suffix
+	local real_dev
+	# pick the part after the basename of the real file
+	suffix=$(basename "$0" | sed "s/^$SCRIPT_PREFIX//")
+	for real_dev in $(get_wifi_interfaces); do
+		[ "$suffix" != "$(clean_fieldname "$real_dev")" ] || echo "$real_dev"
+	done | head -1
+}
+
+
+do_config() {
+	local wifi
+	local lower
+	wifi=$(get_wifi_device_from_suffix)
+	[ -z "$wifi" ] && echo >&2 "Missing wifi: $wifi" && return 1
+	echo "graph_title Wireless signal quality ranges - $wifi"
+	echo "graph_args --upper-limit 0"
+	echo "graph_vlabel Signal ranges"
+	echo "graph_category network"
+	echo "graph_info This graph shows numbers of peers with defined wifi signal ranges"
+	lower="noise"
+	for level in $SIGNAL_THRESHOLDS; do
+		fieldname=$(get_level_fieldname "$level")
+		echo "${fieldname}.label $lower...$level"
+		echo "${fieldname}.draw AREASTACK"
+		lower="$level"
+	done
+}
+
+
+do_fetch() {
+	local wifi
+	local peer_data
+	local previous_count
+	local current_count
+	local fieldname
+	wifi=$(get_wifi_device_from_suffix)
+	[ -z "$wifi" ] && echo >&2 "Missing wifi: $wifi" && return 1
+	peer_data=$(get_wifi_peers "$wifi")
+	previous_count=0
+	for level in $SIGNAL_THRESHOLDS; do
+		current_count=$(echo "$peer_data" | awk '
+			BEGIN { count=0; }
+			{ if (($1 != "") && ($1 <= '"$level"')) count++; }
+			END { print count; }')
+		fieldname=$(get_level_fieldname "$level")
+		echo "${fieldname}.value $((current_count - previous_count))"
+		previous_count="$current_count"
+	done
+}
+
+
+ACTION="${1:-}"
+
+case "$ACTION" in
+	config)
+		do_config || exit 1
+		if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = "1" ]; then do_fetch; fi
+		;;
+	autoconf)
+		[ -z "$(get_wifi_interfaces)" ] && echo "no (no wifi interfaces found)" && exit 1
+		echo "yes"
+		;;
+	suggest)
+		get_wifi_interfaces | while read -r ifname; do
+			clean_fieldname "$ifname"
+		done
+		;;
+	"")
+		do_fetch
+		;;
+	*)
+		echo >&2 "Invalid action (valid: config / autoconf / suggest / <empty>)"
+		echo >&2
+		exit 2
+		;;
+esac
