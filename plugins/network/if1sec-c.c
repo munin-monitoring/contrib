@@ -120,7 +120,12 @@ int acquire() {
 	/* fork ourselves if not asked otherwise */
 	char* no_fork = getenv("no_fork");
 	if (! no_fork || strcmp("1", no_fork)) {
-		if (fork()) return 0;
+		pid_t child_pid = fork();
+		if (child_pid) {
+			printf("# acquire() launched as PID %d\n", child_pid);
+			return 0;
+		}
+
 		// we are the child, complete the daemonization
 
 		/* Close standard IO */
@@ -146,7 +151,7 @@ int acquire() {
 	/* open the spoolfile */
 	int cache_file = open(cache_filename, O_CREAT | O_APPEND | O_WRONLY, S_IRUSR | S_IWUSR);
 	if ( cache_file == -1 ) {
-		return fail("cannot open the spoolfile");
+		return fail("# cannot open cache_file");
 	}
 
 	/* loop each second */
@@ -220,7 +225,7 @@ int acquire() {
 int fetch() {
 	FILE* cache_file = fopen(cache_filename, "r+");
 	if ( !cache_file ) {
-		return fail("cannot open cache file");
+		return acquire();
 	}
 
 	/* lock */
