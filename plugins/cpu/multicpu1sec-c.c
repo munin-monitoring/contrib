@@ -122,7 +122,7 @@ int acquire() {
 	/* open the spoolfile */
 	FILE* cache_file = fopen(cache_filename, "a");
 	if (!cache_file) {
-		return acquire();
+		return fail("cannot create cache_file");
 	}
 
 	int cache_file_fd = fileno(cache_file);
