@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# Munin plugin for ILIAS
+
+: << =cut
+
+=head1 NAME
+
+ilias_session - Munin plugin to monitor L<ILIAS|https://ilias.de/> open source
+learning management system's sessions
+
+=head1 DESCRIPTION
+
+Reads session and user statistcs from any ILIAS MySQL/MariaDB database.
+
+https://ilias.de/ | http://gallery.munin-monitoring.org/contrib/cms-index.html
+
+Requirements:
+
+bash version 4 is required for associative array support.
+This plugin requires mysql CLI or a compatible client being available.
+
+In order to get precise results, please ensure your MySQL server has the same
+time as your ILIAS application server. Timezone does not matter.
+
+=head1 CONFIGURATION
+
+The plugin needs the following configuration settings e.g. in
+/etc/munin/plugin-conf.d/ilias.conf
+
+    [ilias_session]
+        env.ildbuser ilias
+        env.ildbpassword youriliaspasword
+        env.ildb ilias
+        env.ildbhost localhost
+        env.ildbport 3306
+
+WARNING: Setting env.ildbpassword will possibly expose the database password
+to other processes and might be insecure.
+
+=head1 AUTHOR
+
+Copyright 2018 L<Felix Pahlow|https://wohlpa.de/>
+               (L<email|mailto:felix.pahlow@wohlpa.de>)
+
+=head1 LICENSE
+
+Licensed under the MIT license:
+https://opensource.org/licenses/MIT
+
+=head1 CONTRIBUTE
+
+Find this plugin on L<GitHub
+|https://github.com/munin-monitoring/contrib/tree/master/plugins/ilias>
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=head1 VERSION
+
+    2.0
+
+=head1 CHANGELOG
+
+=head2 2.0 - 2018/04/20
+
+    first sh release
+
+=head2 1.0 - 2018/03/19
+
+    first release
+
+=cut
+
+# Include plugin.sh
+# shellcheck source=/dev/null
+. "${MUNIN_LIBDIR:-}/plugins/plugin.sh"
+
+# Shell options
+set -o nounset  # Like perl use strict;
+
+# Graph settings
+global_attr="
+    graph_title ILIAS session and logins
+    graph_category cms
+    graph_args --lower-limit 0
+    graph_vlabel occurences
+    graph_info Number of active ILIAS user sessions and logins
+"
+
+declare -A d_attr=( \
+    [0,field]=iltotal1day \
+    [0,type]=GAUGE \
+    [0,draw]=LINE \
+    [0,label]='users logged in within day' \
+    [0,sql]="SELECT COUNT( usr_id ) AS C
+           FROM \`usr_data\`
+           WHERE last_login >= DATE_SUB( NOW( ) , INTERVAL 1 DAY )
+    " \
+    [1,field]=ilsessions \
+    [1,type]=GAUGE \
+    [1,draw]=LINE \
+    [1,label]='active sessions' \
+    [1,sql]="SELECT COUNT( user_id ) AS C
+           FROM usr_session
+           WHERE \`expires\` > UNIX_TIMESTAMP( NOW( ) ) AND user_id != 0
+    " \
+    [2,field]=il60minavg \
+    [2,type]=GAUGE \
+    [2,draw]=LINE \
+    [2,label]='sessions created/updated within 1h' \
+    [2,sql]="SELECT COUNT( user_id ) AS C
+           FROM usr_session
+           WHERE 60 * 60 > UNIX_TIMESTAMP( NOW( ) ) - ctime AND user_id != 0
+    " \
+    [3,field]=il5minavg \
+    [3,type]=GAUGE \
+    [3,draw]=LINE \
+    [3,label]='sessions created/updated within 5min' \
+    [3,sql]="SELECT COUNT( user_id ) AS C
+           FROM usr_session
+           WHERE 5 * 60 > UNIX_TIMESTAMP( NOW( ) ) - ctime AND user_id != 0
+    " \
+)
+
+# Read the environment and apply defaults
+DB_CLI_TOOL="${ildbcli:-mysql}"
+DB_CLI_CMD="$(command -v "${DB_CLI_TOOL}")"
+DB_HOST="${ildbhost:-localhost}"
+DB_PORT="${ildbport:-3306}"
+DB="${ildb:-ilias}"
+DB_USER="${ildbuser:-root}"
+DB_PASSWORD="${ildbpassword:-}"
+
+# Functions
+
+autoconf() {
+    if command -v "${DB_CLI_TOOL}" >/dev/null ; then
+        echo yes
+    else
+        echo "no (failed to find executable '${DB_CLI_TOOL}')"
+    fi
+}
+
+config() {
+    local label_max_length=45
+    local i=0
+
+    # print global attributes
+    echo "$global_attr" | sed -e 's/^  *//' -e '/^$/d'
+
+    i=0
+    # -v varname
+    # True if the shell variable varname is set (has been assigned a value).
+    # https://stackoverflow.com/a/45385463/2683737
+    while [[ -v d_attr[$i,field] ]]; do
+       field=${d_attr[$i,field]}
+       echo "$field.type ${d_attr[$i,type]}"
+       echo "$field.draw ${d_attr[$i,draw]}"
+       echo "$field.label ${d_attr[$i,label]:0:${label_max_length}}"
+       echo "$field.min 0"
+       ((++i))
+    done
+}
+
+# Join a bash array $1 is the glue
+join_by() {
+    local d=$1
+    shift
+    echo -n "$1"
+    shift
+    printf "%s" "${@/#/$d}"
+}
+
+fetch() {
+    local i=0
+    local query=()
+    local query_string=""
+    declare -a results
+
+    # create an array of queries
+    i=0
+    while [[ -v d_attr[$i,field] ]]; do
+        query+=("${d_attr[$i,sql]}")
+        ((++i))
+    done
+
+    # build query by joining the array elements
+    query_string=$(join_by " UNION ALL " "${query[@]}")
+
+    # obtain result using CLI call; don't supply password through
+    # command line; note that MySQL considers it insecure using
+    # an environment variable:
+    # >This method of specifying your MySQL password must
+    # >be considered extremely insecure and should not be used.
+    # >Some versions of ps include an option to display the
+    # >environment of running processes. [...]
+    result=$(MYSQL_PWD="$DB_PASSWORD" \
+             "$DB_CLI_CMD" \
+            --skip-column-names \
+            -h "$DB_HOST" \
+            -u "$DB_USER" \
+            -P "$DB_PORT" \
+            "$DB" \
+            -e "$query_string" )
+
+    # initialize array
+    mapfile -t results  <<< "$result"
+
+    # extract result and echo it to stdout, which is
+    # captured by Munin
+    i=0
+    while [[ -v d_attr[$i,field] ]]; do
+        echo "${d_attr[$i,field]}.value ${results[$i]}"
+        ((++i))
+    done
+}
+
+
+# Main
+case ${1:-} in
+autoconf)
+    autoconf
+    ;;
+config)
+    config
+    [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ] && fetch
+    ;;
+*)
+    fetch
+    ;;
+esac
+
+exit 0
+
