@@ -23,6 +23,9 @@ The following environment variables are used by this plugin:
                   journalctl to get the sshd logs.
                   default: _COMM=sshd
 
+ type - "GAUGE" or "DERIVE"
+         default: GAUGE
+
 If the "logfile" environment variable is set to "journald" the sshd
 logs are read from journald, filtering on program "sshd". The filtering
 may be changed using "journalctlargs".
@@ -48,6 +51,13 @@ Config example with journald on the sshd.service unit only:
       env.logfile journald
       env.journalctlargs --unit=sshd.service
 
+Config example with journald and type DERIVE:
+
+  [sshd_log]
+      group systemd-journal
+      env.logfile journald
+      env.type DERIVE
+
 =head1 MAGIC MARKERS
 
   #%# family=auto
@@ -71,6 +81,10 @@ Revision 1.0  2009/04/22 22:00:00  zlati
 
 LOG=${logfile:-/var/log/secure}
 JOURNALCTL_ARGS=${journalctlargs:-_COMM=sshd}
+TYPE=${type:-GAUGE}
+if [ "$LOG" = "journald" -a "$TYPE" = "DERIVE" ]; then
+        TYPE=ABSOLUTE
+fi
 
 
 if [ "$1" = "autoconf" ]; then
@@ -92,13 +106,6 @@ if [ "$1" = "autoconf" ]; then
 fi
 
 if [ "$1" = "config" ]; then
-
-        if [ "$LOG" = "journald" ]; then
-                TYPE=ABSOLUTE
-        else
-                TYPE=DERIVE
-        fi
-
         echo 'graph_title SSHD login stats from' "$LOG"
         echo 'graph_args --base 1000 -l 0'
         echo 'graph_vlabel logins'
@@ -139,7 +146,7 @@ if [ "$1" = "config" ]; then
         exit 0
 fi
 
-if [ "$LOG" = "journald" ]; then
+if [ "$LOG" = "journald" -a "$TYPE" = "ABSOLUTE" ]; then
         CURSOR_FILE="$MUNIN_STATEFILE"
         # read cursor
         # format: "journald-cursor <cursor>"
@@ -153,7 +160,11 @@ fi
 
 if [ "$LOG" = "journald" ]; then
         # shellcheck disable=SC2086
-        journalctl --no-pager --quiet --show-cursor ${CURSOR:+"--after-cursor=$CURSOR"} $JOURNALCTL_ARGS
+        if [ "$TYPE" = "ABSOLUTE" ]; then
+                journalctl --no-pager --quiet --show-cursor ${CURSOR:+"--after-cursor=$CURSOR"} $JOURNALCTL_ARGS
+        else
+                journalctl --no-pager --quiet --since=$(date -dlast-sunday +%Y-%m-%d) $JOURNALCTL_ARGS
+        fi
 else
         cat "$LOG"
 fi | \
