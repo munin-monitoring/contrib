@@ -25,7 +25,7 @@ The following environment variables are used by this plugin:
 
 If the "logfile" environment variable is set to "journald" the sshd
 logs are read from journald, filtering on program "sshd". The filtering
-may be changed using "journalctlarg".
+may be changed using "journalctlargs".
 
 
 Config examples for /etc/munin/plugin-conf.d/munin-node:
@@ -46,7 +46,7 @@ Config example with journald on the sshd.service unit only:
   [sshd_log]
       group systemd-journal
       env.logfile journald
-      env.journalctlarg --unit=sshd.service
+      env.journalctlargs --unit=sshd.service
 
 =head1 MAGIC MARKERS
 
@@ -70,15 +70,16 @@ Revision 1.0  2009/04/22 22:00:00  zlati
 
 
 LOG=${logfile:-/var/log/secure}
-JOURNALCTL_ARG=${journalctlarg:-_COMM=sshd}
+JOURNALCTL_ARGS=${journalctlargs:-_COMM=sshd}
 
 
 if [ "$1" = "autoconf" ]; then
         if [ "$LOG" = "journald" ]; then
-                if journalctl --no-pager --quiet --lines=1 "$JOURNALCTL_ARG" | read -r DUMMY; then
+                # shellcheck disable=SC2086,SC2034
+                if journalctl --no-pager --quiet --lines=1 $JOURNALCTL_ARGS | read -r DUMMY; then
                         echo "yes"
                 else
-                        echo "no (journald empty log for '$JOURNALCTL_ARG' not found)"
+                        echo "no (journald empty log for '$JOURNALCTL_ARGS' not found)"
                 fi
         else
                 if [ -r "$LOG" ]; then
@@ -151,7 +152,8 @@ else
 fi
 
 if [ "$LOG" = "journald" ]; then
-        journalctl --no-pager --quiet --show-cursor ${CURSOR:+"--after-cursor=$CURSOR"} "$JOURNALCTL_ARG"
+        # shellcheck disable=SC2086
+        journalctl --no-pager --quiet --show-cursor ${CURSOR:+"--after-cursor=$CURSOR"} $JOURNALCTL_ARGS
 else
         cat "$LOG"
 fi | \
