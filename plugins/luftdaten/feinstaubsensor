@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""
+
+=head1 NAME
+
+feinstaubsensor - Plugin to monitor one or more environmental sensors
+
+
+=head1 APPLICABLE SYSTEMS
+
+The "Feinstaubsensor" was developed by the OK Lab Stuttgart and is part of the
+Citizen Science Project "luftdaten.info" (http://luftdaten.info).
+
+Data is retrieved via HTTP requests from the sensors itself.
+
+
+=head1 CONFIGURATION
+
+Place a configuration entry somewhere below /etc/munin/plugin-conf.d/:
+
+      [feinstaubsensor]
+      env.sensor_hosts foo=192.168.1.4 [fe80::1:2:3:4%eth0] bar=sensor2.lan
+
+The <sensor_hosts> environment variable is a space separated list of <token>.
+Each <token> can be either a <host> or a combination of label and <host> (separated by the
+character "=").
+A <host> may be an IPv4 address, an IPv6 address (enclosed in square brackets) or a name to be
+resolved via DNS.
+
+Examples for <token>:
+  * 192.168.1.4
+  * foo=192.168.1.4
+  * [fe80::1a:2b:3c:cafe]
+  * bar=[fe80::1a:2b:3c:cafe]
+  * feinstaubsensor-12345.local
+  * baz=feinstaubsensor-12345.local
+
+
+=head1 AUTHOR
+
+  Lars Kruse <devel@sumpfralle.de>
+
+
+=head1 LICENSE
+
+  GPLv3
+
+
+=head1 MAGIC MARKERS
+
+  #%# family=manual
+
+"""
+
+import collections
+import functools
+import json
+import os
+import re
+import sys
+import urllib.request
+
+
+graphs = [
+    {
+        "name": "wireless_signal",
+        "graph_title": "Feinstaub Wifi Signal",
+        "graph_vlabel": "%",
+        "graph_args": "-l 0",
+        "graph_info": "Wifi signal strength",
+        "api_value_name": "signal",
+        "value_type": "GAUGE",
+    }, {
+        "name": "feinstaub_samples",
+        "graph_title": "Feinstaub Sample Count",
+        "graph_vlabel": "#",
+        "graph_info": "Number of samples since bootup",
+        "api_value_name": "samples",
+        "value_type": "DERIVE",
+    }, {
+        "name": "feinstaub_humidity",
+        "graph_title": "Feinstaub Humidity",
+        "graph_vlabel": "% humidity",
+        "graph_info": "Weather information: air humidity",
+        "api_value_name": "humidity",
+        "value_type": "GAUGE",
+    }, {
+        "name": "feinstaub_temperature",
+        "graph_title": "Feinstaub Temperature",
+        "graph_vlabel": "°C",
+        "graph_info": "Weather information: temperature",
+        "api_value_name": "temperature",
+        "value_type": "GAUGE",
+    }, {
+        "name": "feinstaub_particles_pm10",
+        "graph_title": "Feinstaub Particle Measurement P10",
+        "graph_vlabel": "µg / m³",
+        "graph_info": "Concentration of particles with a size between 2.5µm and 10µm",
+        "api_value_name": "SDS_P1",
+        "value_type": "GAUGE",
+    }, {
+        "name": "feinstaub_particles_pm2_5",
+        "graph_title": "Feinstaub Particle Measurement P2.5",
+        "graph_vlabel": "µg / m³",
+        "graph_info": "Concentration of particles with a size up to 2.5µm",
+        "api_value_name": "SDS_P2",
+        "value_type": "GAUGE",
+    }]
+
+
+SensorHost = collections.namedtuple("SensorHost", ("host", "label", "fieldname"))
+
+
+def clean_fieldname(text):
+    if text == "root":
+        # "root" is a magic (forbidden) word
+        return "_root"
+    else:
+        return re.sub(r"(^[^A-Za-z_]|[^A-Za-z0-9_])", "_", text)
+
+
+def parse_sensor_hosts_from_description(hosts_description):
+    """ parse sensor list from the environment variable 'sensor_hosts' and retrieve their data """
+    sensors = []
+    for token in hosts_description.split():
+        if "=" in token:
+            label, host = token.strip().split("=", 1)
+        else:
+            host = token.strip()
+            label = host
+        fieldname = clean_fieldname("value_" + host)
+        sensors.append(SensorHost(host, label, fieldname))
+    sensors.sort(key=lambda item: item.fieldname)
+    return sensors
+
+
+@functools.lru_cache()
+def get_sensor_data(host):
+    """ request the data from a sensor and return a dict (value_type -> value)
+
+    The result is cached - thus we do not need to take care for efficiency.
+
+    Example dataset returned by the sensor:
+        {"software_version": "NRZ-2017-099", "age":"88", "sensordatavalues":[
+        {"value_type":"SDS_P1","value":"27.37"},{"value_type":"SDS_P2","value":"13.53"},
+        {"value_type":"temperature","value":"23.70"},{"value_type":"humidity","value":"69.20"},
+        {"value_type":"samples","value":"626964"},{"value_type":"min_micro","value":"225"},
+        {"value_type":"max_micro","value":"887641"},{"value_type":"signal","value":"-47"}]}
+
+    """
+    try:
+        with urllib.request.urlopen("http://{}/data.json".format(host)) as request:
+            body = request.read()
+    except IOError as exc:
+        print("Failed to retrieve data from '{}': {}".format(host, exc), file=sys.stderr)
+        return None
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except ValueError as exc:
+        print("Failed to parse data from '{}': {}".format(host, exc), file=sys.stderr)
+        return None
+    return {item["value_type"]: item["value"] for item in data["sensordatavalues"]}
+
+
+def print_graph_section(graph_description, hosts, include_config, include_values):
+    print("multigraph {}".format(graph_description["name"]))
+    if include_config:
+        # graph configuration
+        print("graph_category sensors")
+        for key in ("graph_title", "graph_vlabel", "graph_args", "graph_info"):
+            if key in graph_description:
+                print("{} {}".format(key, graph_description[key]))
+        for host_info in hosts:
+            print("{}.label {}".format(host_info.fieldname, host_info.label))
+            print("{}.type {}".format(host_info.fieldname, graph_description["value_type"]))
+    if include_values:
+        for host_info in hosts:
+            # We cannot distinguish between fields that are not supported by the sensor (most are
+            # optional) and missing data. Thus we cannot handle online/offline sensor data fields,
+            # too.
+            data = get_sensor_data(host_info.host)
+            if data is not None:
+                value = data.get(graph_description["api_value_name"])
+                if value is not None:
+                    print("{}.value {}".format(host_info.fieldname, value))
+    print()
+
+
+action = sys.argv[1] if (len(sys.argv) > 1) else ""
+sensor_hosts = parse_sensor_hosts_from_description(os.getenv("sensor_hosts", ""))
+if not sensor_hosts:
+    print("ERROR: undefined or empty environment variable 'sensor_hosts'.", file=sys.stderr)
+    sys.exit(1)
+
+
+if action == "config":
+    is_dirty_config = (os.getenv("MUNIN_CAP_DIRTYCONFIG") == "1")
+    for graph in graphs:
+        print_graph_section(graph, sensor_hosts, True, is_dirty_config)
+elif action == "":
+    for graph in graphs:
+        print_graph_section(graph, sensor_hosts, False, True)
+else:
+    print("ERROR: unsupported action requested ('{}')".format(action), file=sys.stderr)
+    sys.exit(2)
