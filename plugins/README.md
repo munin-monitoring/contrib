@@ -14,7 +14,7 @@ This repository of contributed plugin strives to achieve the following goals:
 * simplify cooperative maintenance of plugins
 
 Contributed plugins are maintained primarily by their authors.
-You may file bug reports for plugin issue here in this repository (`munin-contrib`), but please do not forget to notify the author the plugin, as well.
+You may file bug reports for plugin issue here in this repository (`munin-contrib`), but please do not forget to notify the author of the plugin (see the plugin's documentation), too.
 
 Please note, that this repository is not supposed to be a dumping site for random plugins of low quality. The related infrastructure (e.g the [gallery](http://gallery.munin-monitoring.org/) or automated tests) require a certain level of quality. Please see below for details.
 
