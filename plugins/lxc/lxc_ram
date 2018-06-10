@@ -60,16 +60,17 @@ guest_names="$active"
 
 f_comm='lxc-cgroup  '
 
-if [ "$1" = "autoconf" ]; then
+
+do_autoconf() {
     if [ -r /proc/stat ]; then
         echo yes
     else
         echo "no (no /proc/stat)"
     fi
-    exit 0
-fi
+}
 
-if [ "$1" = "config" ]; then
+
+do_config() {
     echo 'graph_title Memory '
     echo 'graph_args -l 0 --base 1024'
     echo 'graph_vlabel byte'
@@ -105,22 +106,32 @@ if [ "$1" = "config" ]; then
             echo "mem_inactive_$guest.type GAUGE"
         done
     fi
-    exit 0
+}
+
+
+do_fetch() {
+    for guest_name in $guest_names; do
+        guest="$(clean_fieldname "$guest_name")"
+
+        value=$($f_comm -n "$guest_name" memory.usage_in_bytes)
+        echo "mem_usage_$guest.value $value"
+
+        value=$($f_comm -n "$guest_name" memory.stat | grep total_cache | awk '{print($2)}')
+        echo "mem_cache_$guest.value $value"
+
+        value=$($f_comm -n "$guest_name" memory.stat | grep total_active_anon | awk '{print($2)}')
+        echo "mem_active_$guest.value $value"
+
+        value=$($f_comm -n "$guest_name" memory.stat | grep total_inactive_anon | awk '{print($2)}')
+        echo "mem_inactive_$guest.value $value"
+    done
+}
+
+
+if [ "$1" = "autoconf" ]; then
+    do_autoconf
+elif [ "$1" = "config" ]; then
+    do_config
+else
+    do_fetch
 fi
-
-
-for guest_name in $guest_names; do
-    guest="$(clean_fieldname "$guest_name")"
-
-    value=$($f_comm -n "$guest_name" memory.usage_in_bytes)
-    echo "mem_usage_$guest.value $value"
-
-    value=$($f_comm -n "$guest_name" memory.stat | grep total_cache | awk '{print($2)}')
-    echo "mem_cache_$guest.value $value"
-
-    value=$($f_comm -n "$guest_name" memory.stat | grep total_active_anon | awk '{print($2)}')
-    echo "mem_active_$guest.value $value"
-
-    value=$($f_comm -n "$guest_name" memory.stat | grep total_inactive_anon | awk '{print($2)}')
-    echo "mem_inactive_$guest.value $value"
-done
