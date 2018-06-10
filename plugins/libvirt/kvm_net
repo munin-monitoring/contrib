@@ -1,141 +1,234 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
-# vim: set fileencoding=utf-8
-#
-# Munin plugin to show the network I/O per vm
-#
-# Copyright Igor Borodikhin
-#
-# License : GPLv3
-#
-#
-# parsed environment variables:
-# vmsuffix: part of vm name to be removed
-#
-#%# capabilities=autoconf
-#%# family=contrib
+#!/usr/bin/python3
+"""
 
-import re, os, sys
+=head1 NAME
+
+kvm_net - Munin plugin to show the network I/O per VM
+
+
+=head1 APPLICABLE SYSTEMS
+
+Virtualization server with VMs based on KVM may be able to track the network
+traffic of their VMs, if the KVM processes are started in a specific way.
+
+Probably proxmox-based virtualization hosts fit into this category.
+
+You can easily check if your KVM processes are started in the expected way, by
+running the following command:
+
+  ps -ef | grep "netdev.*ifname="
+
+The plugin can be used, if the above command outputs one line for every
+currently running VM.
+
+In all other cases you need to use other munin plugins instead, e.g. "libvirt".
+
+
+=head1 CONFIGURATION
+
+parsed environment variables:
+
+  * vmsuffix: part of vm name to be removed
+
+
+=head1 AUTHOR
+
+Copyright (C) 2012 - Igor Borodikhin
+Copyright (C) 2018 - Lars Kruse <devel@sumpfralle.de>
+
+
+=head1 LICENSE
+
+GPLv3
+
+
+=head1 MAGIC MARKERS
+
+ #%# capabilities=autoconf
+ #%# family=contrib
+
+=cut
+"""
+
+import os
+import re
 from subprocess import Popen, PIPE
+import sys
+
+
+VM_NAME_REGEX = re.compile("^.*\x00-{arg_name}\x00(.+)\x00.*$")
+KVM_INTERFACE_NAME_REGEX = re.compile("(?:^|,)ifname=([^,]+)(?:,|$)")
+
 
 def config(vm_names):
-    ''' Print the plugin's config
+    """ Print the plugin's config
+
     @param vm_names : a list of "cleaned" vms' name
-    '''
-    base_config = """graph_title KVM Network I/O
-graph_vlabel Bytes rx(-)/tx(+) per second
-graph_category Virtualization
-graph_info This graph shows the network I/O of the virtual machines
-graph_args --base 1024
     """
-    print base_config
+    print("graph_title KVM Network I/O")
+    print("graph_vlabel Bytes rx(-)/tx(+) per second")
+    print("graph_category virtualization")
+    print("graph_args --base 1024")
+    print("graph_info This graph shows the network I/O of the virtual "
+          "machines. It is only usable for VMs that were started in a very "
+          "specific way. If you see no values in the diagrams, then you "
+          "should check, if the command \"ps -ef | grep 'netdev.*ifname='\" "
+          "returns one line of output for every running VM. If there is no "
+          "output, then you need to change the setup of your VMs or you need "
+          "to use a different munin plugin for monitoring the network traffic "
+          "(e.g. 'libvirt').")
+    print()
     for vm in vm_names:
-        print "%s_in.label %s" % (vm, vm)
-        print "%s_in.type COUNTER" % vm
-        print "%s_in.min 0" % vm
-        print "%s_in.draw LINE2" % vm
-        print "%s_out.negative %s_in" % (vm, vm)
-        print "%s_out.label %s" % (vm, vm)
-        print "%s_out.type COUNTER" % vm
-        print "%s_out.min 0" % vm
-        print "%s_out.draw LINE2" % vm
+        print("%s_in.label %s" % (vm, vm))
+        print("%s_in.type COUNTER" % vm)
+        print("%s_in.min 0" % vm)
+        print("%s_in.draw LINE2" % vm)
+        print("%s_out.negative %s_in" % (vm, vm))
+        print("%s_out.label %s" % (vm, vm))
+        print("%s_out.type COUNTER" % vm)
+        print("%s_out.min 0" % vm)
+        print("%s_out.draw LINE2" % vm)
+
 
 def clean_vm_name(vm_name):
-    ''' Replace all special chars
+    """ Replace all special chars
+
     @param vm_name : a vm's name
     @return cleaned vm's name
-    '''
+    """
     # suffix part defined in conf
-    suffix = os.getenv('vmsuffix')
+    suffix = os.getenv("vmsuffix")
     if suffix:
-        vm_name = re.sub(suffix,'',vm_name)
-
+        vm_name = re.sub(suffix, "", vm_name)
     return re.sub(r"[^a-zA-Z0-9_]", "_", vm_name)
-    
+
+
 def fetch(vms):
-    ''' Fetch values for a list of pids
+    """ Fetch values for a list of pids
+
     @param dictionnary {kvm_pid: cleaned vm name}
-    '''
-    res = {}
-    for pid in vms:
-        tap = get_vm_mac(pid)
-        try:
-            f = open("/proc/net/dev", "r")
-            for line in f.readlines():
-                if tap in line:
-                    print "%s_in.value %s" % (vms[pid], line.split()[1])
-                    print "%s_out.value %s" % (vms[pid], line.split()[9])
-                    break
-        except Exception as inst:
-            print inst
-            continue
+    """
+    for pid, vm_data in vms.items():
+        vm_interface_names = get_vm_network_interface_names(pid)
+        sum_incoming = 0
+        sum_outgoing = 0
+        interface_found = False
+        with open("/proc/net/dev", "r") as net_file:
+            for line in net_file.readlines():
+                tokens = line.split()
+                current_interface_name = tokens[0].rstrip(":").strip()
+                if current_interface_name in vm_interface_names:
+                    sum_incoming += int(tokens[1])
+                    sum_outgoing += int(tokens[9])
+                    interface_found = True
+            if not interface_found:
+                # we want to distinguish "no traffic" from "not found"
+                sum_incoming = "U"
+                sum_outgoing = "U"
+            print("%s_in.value %s" % (vm_data, sum_incoming))
+            print("%s_out.value %s" % (vm_data, sum_outgoing))
+
+
+def get_vm_network_interface_names(pid):
+    """ return the MAC addresses configured for network interfacs of a PID """
+    result = set()
+    for netdev_description in _get_kvm_process_arguments(pid, "netdev"):
+        match = KVM_INTERFACE_NAME_REGEX.search(netdev_description)
+        if match:
+            result.add(match.groups()[0])
+    return result
+
 
 def detect_kvm():
-    ''' Check if kvm is installed
-    '''
-    kvm = Popen("which kvm", shell=True, stdout=PIPE)
+    """ Check if kvm is installed """
+    kvm = Popen(["which", "kvm"], stdout=PIPE)
     kvm.communicate()
-    return not bool(kvm.returncode)
+    return kvm.returncode == 0
+
 
 def find_vm_names(pids):
-    '''Find and clean vm names from pids
+    """Find and clean vm names from pids
+
     @return a dictionnary of {pids : cleaned vm name}
-    '''
+    """
     result = {}
     for pid in pids:
-        cmdline = open("/proc/%s/cmdline" % pid, "r")
-        result[pid] = clean_vm_name(re.sub(r"^.*-name\x00([a-zA-Z0-9.-_-]*)\x00\-.*$",r"\1", cmdline.readline()))        
+        name = None
+        name_arg_values = _get_kvm_process_arguments(pid, "name")
+        if name_arg_values:
+            name_arg_value = name_arg_values[0]
+            if "," in name_arg_value:
+                # the modern parameter format may look like this:
+                #    guest=foo,debug-threads=on
+                for index, token in enumerate(name_arg_value.split(",")):
+                    if (index == 0) and ("=" not in token):
+                        # the first item may the plain name
+                        name = value
+                    elif "=" in token:
+                        key, value = token.split("=", 1)
+                        if key == "guest":
+                            name = value
+                    else:
+                        # unknown format (no "mapping")
+                        pass
+            else:
+                name = name_arg_value
+        if name is None:
+            print("Failed to parse VM name from commandline of process: {}"
+                  .format(name_arg_values), file=sys.stderr)
+        else:
+            result[pid] = clean_vm_name(name)
     return result
-    
-def get_vm_mac(pid):
-    '''Find and clean vm names from pids
-    @return the mac address for a specified pid
-    '''
-    cmdline = open("/proc/%s/cmdline" % pid, "r")
-    line = cmdline.readline()
-    mac = re.sub(r"^.*ifname=(tap[^,]+),.*$",r"\1", line)
-    return mac
+
+
+def _get_kvm_process_arguments(pid, arg_name):
+    """ parse all value with the given name from the process identified by PID
+
+    The result is a list of tokens, that follow this argument name. The result
+    is empty in case of problems.
+    """
+    # the "cmdline" (e.g. /proc/self/cmdline) is a null-separated token list
+    try:
+        with open("/proc/%s/cmdline" % pid, "r") as cmdline_file:
+            cmdline = cmdline_file.read()
+    except IOError:
+        # the process seems to have died meanwhile
+        return []
+    is_value = False
+    result = []
+    for arg_token in cmdline.split("\0"):
+        if is_value:
+            # the previous token was our argument name
+            result.append(arg_token)
+            is_value = False
+        elif arg_token == "-{}".format(arg_name):
+            # this is our argument name - we want to store the next value
+            is_value = True
+        else:
+            # any other irrelevant value
+            pass
+    return result
+
 
 def list_pids():
-    ''' Find the pid of kvm processes
-    @return a list of pids from running kvm
-    '''
-    pid = Popen("pidof qemu-kvm qemu-system-x86_64 kvm", shell=True, stdout=PIPE)
-    return pid.communicate()[0].split()
+    """ Find the pid of kvm processes
 
-def find_vms_tap():
-    ''' Check if kvm is installed
     @return a list of pids from running kvm
-    '''
-    result = []
-    tap = ""
-    mac = ""
-    kvm = Popen("ip a | grep -A 1 tap | awk '{print $2}' | grep -v '^$'", shell=True, stdout=PIPE)
-    res = kvm.communicate()[0].split('\n')
-    for line in res:
-        try:
-            if len(line) > 0:
-                if re.match(r"^tap.*", line):
-                    tap = re.sub(r"(tap[^:]+):", r"\1", line)
-                else:
-                    result.append(tap)
-        except Exception as inst:
-            continue
+    """
+    pid = Popen(["pidof", "qemu-kvm", "qemu-system-x86_64", "kvm"], stdout=PIPE)
+    return pid.communicate()[0].decode().split()
 
-    return result
-    
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        if sys.argv[1] in ['autoconf', 'detect']:
-            if detect_kvm():
-                print "yes"
-            else:
-                print "no"
-        elif sys.argv[1] == "config":
-            config(find_vm_names(list_pids()).values())
+    action = sys.argv[1] if len(sys.argv) > 1 else None
+    if action == "autoconf":
+        if detect_kvm():
+            print("yes")
         else:
-            fetch(find_vm_names(list_pids()))
+            print("no")
+    elif action == "config":
+        vm_data = find_vm_names(list_pids())
+        config(vm_data.values())
     else:
-        fetch(find_vm_names(list_pids()))
-
-
+        vm_data = find_vm_names(list_pids())
+        fetch(vm_data)
