@@ -38,6 +38,9 @@ from subprocess import Popen, PIPE
 import sys
 
 
+VM_NAME_REGEX = re.compile("^.*\x00-{arg_name}\x00(.+)\x00.*$")
+
+
 def config(vm_names):
     """ Print the plugin's config
 
@@ -106,11 +109,33 @@ def find_vm_names(pids):
 
     @return a dictionnary of {pids : cleaned vm name}
     """
-    vm_name_regex = re.compile(r"^.*-name\x00([a-zA-Z0-9.-_-]*)\x00\-.*$")
     result = {}
     for pid in pids:
-        cmdline = open("/proc/%s/cmdline" % pid, "r")
-        result[pid] = clean_vm_name(vm_name_regex.sub(r"\1", cmdline.readline()))
+        name = None
+        name_arg_values = _get_kvm_process_arguments(pid, "name")
+        if name_arg_values:
+            name_arg_value = name_arg_values[0]
+            if "," in name_arg_value:
+                # the modern parameter format may look like this:
+                #    guest=foo,debug-threads=on
+                for index, token in enumerate(name_arg_value.split(",")):
+                    if (index == 0) and ("=" not in token):
+                        # the first item may the plain name
+                        name = value
+                    elif "=" in token:
+                        key, value = token.split("=", 1)
+                        if key == "guest":
+                            name = value
+                    else:
+                        # unknown format (no "mapping")
+                        pass
+            else:
+                name = name_arg_value
+        if name is None:
+            print("Failed to parse VM name from commandline of process: {}"
+                  .format(name_arg_values), file=sys.stderr)
+        else:
+            result[pid] = clean_vm_name(name)
     return result
 
 
@@ -123,6 +148,35 @@ def get_vm_mac(pid):
     line = cmdline.readline()
     mac = re.sub(r"^.*ifname=(tap[^,]+),.*$", r"\1", line)
     return mac
+
+
+def _get_kvm_process_arguments(pid, arg_name):
+    """ parse all value with the given name from the process identified by PID
+
+    The result is a list of tokens, that follow this argument name. The result
+    is empty in case of problems.
+    """
+    # the "cmdline" (e.g. /proc/self/cmdline) is a null-separated token list
+    try:
+        with open("/proc/%s/cmdline" % pid, "r") as cmdline_file:
+            cmdline = cmdline_file.read()
+    except IOError:
+        # the process seems to have died meanwhile
+        return []
+    is_value = False
+    result = []
+    for arg_token in cmdline.split("\0"):
+        if is_value:
+            # the previous token was our argument name
+            result.append(arg_token)
+            is_value = False
+        elif arg_token == "-{}".format(arg_name):
+            # this is our argument name - we want to store the next value
+            is_value = True
+        else:
+            # any other irrelevant value
+            pass
+    return result
 
 
 def list_pids():
