@@ -24,7 +24,8 @@
 dbserver='localhost'
 dbuser='postgres'
 
-if [ "$1" = "config" ]; then
+
+do_config() {
    echo 'graph_args --base 1000 --lower-limit 0'
    echo 'graph_category db'
    echo 'graph_info Shows summarized commits and rollbacks in transactions on the PostgreSQL Server.'
@@ -40,6 +41,17 @@ if [ "$1" = "config" ]; then
    echo 'rollbacks.min 0'
    echo 'rollbacks.type DERIVE'
    echo 'rollbacks.info Number of transaction rollbacks per second.'
-   exit 0
+}
+
+
+do_fetch() {
+   psql -h "$dbserver" -U "$dbuser" -tc "SELECT 'commits.value '||SUM(xact_commit)::TEXT||E'\\nrollbacks.value '||SUM(xact_rollback)::TEXT FROM pg_stat_database;" --no-align
+}
+
+
+if [ "$1" = "config" ]; then
+   do_config
+   if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = "1" ]; then do_fetch; fi
+else
+   do_fetch
 fi
-psql -h "$dbserver" -U "$dbuser" -tc "SELECT 'commits.value '||SUM(xact_commit)::TEXT||E'\\nrollbacks.value '||SUM(xact_rollback)::TEXT FROM pg_stat_database;" --no-align
