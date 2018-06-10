@@ -51,84 +51,76 @@ areastack=${areastack:-false}
 
 guest_names=$(lxc-ls | sort -u)
 for guest in $guest_names; do
- if lxc-info -n "$guest" 2>&1 | grep -qs RUNNING ; then
-  active="$active $guest"
- fi
+    if lxc-info -n "$guest" 2>&1 | grep -qs RUNNING ; then
+        active="$active $guest"
+    fi
 done
 guest_names="$active"
-                
+
 
 f_comm='lxc-cgroup  '
 
 if [ "$1" = "autoconf" ]; then
-	if [ -r /proc/stat ]; then
-		echo yes
-	else
-		echo "no (no /proc/stat)"
-	fi
-	exit 0
+    if [ -r /proc/stat ]; then
+        echo yes
+    else
+        echo "no (no /proc/stat)"
+    fi
+    exit 0
 fi
 
 if [ "$1" = "config" ]; then
+    echo 'graph_title Memory '
+    echo 'graph_args -l 0 --base 1024'
+    echo 'graph_vlabel byte'
+    echo 'graph_category memory'
 
- echo 'graph_title Memory '
- echo 'graph_args -l 0 --base 1024'
- echo 'graph_vlabel byte'
- echo 'graph_category memory'
+    if [ "$areastack" = "true" ]; then
+        for guest_name in $guest_names; do
+            guest="$(clean_fieldname "$guest_name")"
+            echo "mem_usage_$guest.label $guest_name: Mem usage"
+            echo "mem_usage_$guest.type GAUGE"
+            echo "mem_usage_$guest.draw AREASTACK"
+        done
 
- if [ "$areastack" = "true" ]; then
-  for guest_name in $guest_names; do
-    guest="$(clean_fieldname "$guest_name")"
-
-    echo "mem_usage_$guest.label $guest_name: Mem usage"
-    echo "mem_usage_$guest.type GAUGE"
-    echo "mem_usage_$guest.draw AREASTACK"
-  done
-  
-  for guest_name in $guest_names; do
-    guest="$(clean_fieldname "$guest_name")"
-
-   echo "mem_cache_$guest.label $guest_name: Cache"
-   echo "mem_cache_$guest.type GAUGE"
-   echo "mem_active_$guest.label $guest_name: Active"
-   echo "mem_active_$guest.type GAUGE"
-   echo "mem_inactive_$guest.label $guest_name: Inactive"
-   echo "mem_inactive_$guest.type GAUGE"
-
-  done
- else
-  for guest_name in $guest_names;
-   do
-    guest="$(clean_fieldname "$guest_name")"
-
-    echo "mem_usage_$guest.label $guest_name: Mem usage"
-    echo "mem_usage_$guest.type GAUGE"
-    echo "mem_cache_$guest.label $guest_name: Cache"
-    echo "mem_cache_$guest.type GAUGE"
-    echo "mem_active_$guest.label $guest_name: Active"
-    echo "mem_active_$guest.type GAUGE"
-    echo "mem_inactive_$guest.label $guest_name: Inactive"
-    echo "mem_inactive_$guest.type GAUGE"
-
-   done
- fi
- 
- exit 0
+        for guest_name in $guest_names; do
+            guest="$(clean_fieldname "$guest_name")"
+            echo "mem_cache_$guest.label $guest_name: Cache"
+            echo "mem_cache_$guest.type GAUGE"
+            echo "mem_active_$guest.label $guest_name: Active"
+            echo "mem_active_$guest.type GAUGE"
+            echo "mem_inactive_$guest.label $guest_name: Inactive"
+            echo "mem_inactive_$guest.type GAUGE"
+        done
+    else
+        for guest_name in $guest_names; do
+            guest="$(clean_fieldname "$guest_name")"
+            echo "mem_usage_$guest.label $guest_name: Mem usage"
+            echo "mem_usage_$guest.type GAUGE"
+            echo "mem_cache_$guest.label $guest_name: Cache"
+            echo "mem_cache_$guest.type GAUGE"
+            echo "mem_active_$guest.label $guest_name: Active"
+            echo "mem_active_$guest.type GAUGE"
+            echo "mem_inactive_$guest.label $guest_name: Inactive"
+            echo "mem_inactive_$guest.type GAUGE"
+        done
+    fi
+    exit 0
 fi
 
 
 for guest_name in $guest_names; do
-   guest="$(clean_fieldname "$guest_name")"
+    guest="$(clean_fieldname "$guest_name")"
 
-   value=$($f_comm -n "$guest_name" memory.usage_in_bytes)
-   echo "mem_usage_$guest.value $value"
-   
-   value=$($f_comm -n "$guest_name" memory.stat | grep total_cache | awk '{print($2)}')
-   echo "mem_cache_$guest.value $value"
-   
-   value=$($f_comm -n "$guest_name" memory.stat | grep total_active_anon | awk '{print($2)}')
-   echo "mem_active_$guest.value $value"
-   
-   value=$($f_comm -n "$guest_name" memory.stat | grep total_inactive_anon | awk '{print($2)}')
-   echo "mem_inactive_$guest.value $value"
+    value=$($f_comm -n "$guest_name" memory.usage_in_bytes)
+    echo "mem_usage_$guest.value $value"
+
+    value=$($f_comm -n "$guest_name" memory.stat | grep total_cache | awk '{print($2)}')
+    echo "mem_cache_$guest.value $value"
+
+    value=$($f_comm -n "$guest_name" memory.stat | grep total_active_anon | awk '{print($2)}')
+    echo "mem_active_$guest.value $value"
+
+    value=$($f_comm -n "$guest_name" memory.stat | grep total_inactive_anon | awk '{print($2)}')
+    echo "mem_inactive_$guest.value $value"
 done
