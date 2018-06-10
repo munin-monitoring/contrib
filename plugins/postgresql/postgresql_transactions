@@ -1,43 +1,71 @@
-#!/bin/bash
-#
-# Plugin to monitor PostgreSQL Commits and Rollbacks in Transactions
-#
-# Author:
-#    Guilherme Augusto da Rocha Silva <gars.dba@gmail.com>
-#
-# Created:
-#    9th of november 2007
-#
-# Usage:
-#    Place in /etc/munin/plugins/ (or link it there using ln -s)
-#
-# Parameters:
-#    config   (required)
-#
-# General info:
-#    Require permission for database access and read (no writes are processed).
-#    Recommended user is PostgreSQL database owner (default: postgres).
-#
-# Log info:
-#
+#!/bin/sh
 
-dbserver='localhost'
-dbuser='postgres'
+: <<=cut
 
-if [ "$1" = "config" ]; then
+=head1 NAME
+
+postgresql_transactions - Plugin to monitor PostgreSQL Commits and Rollbacks in Transactions
+
+
+=head1 USAGE
+
+Usage:
+   Place in /etc/munin/plugins/ (or link it there using ln -s)
+
+General info:
+   Requires permission for database read access (no writes are processed).
+   Recommended user is PostgreSQL database owner (default: postgres).
+
+
+=head1 CONFIGURATION
+
+The following configuration directives may be placed below /etc/munin/plugin-conf.d/ (optional):
+
+   [postgresql_transactions]
+   user postgres
+   env.dbuser postgres
+   env.dbhost localhost
+
+
+=head1 AUTHOR
+
+   Guilherme Augusto da Rocha Silva <gars.dba@gmail.com>
+
+   Copyright (C) 2007 Guilherme Augusto da Rocha Silva <gars.dba@gmail.com>
+
+=cut
+
+dbhost=${dbhost:-localhost}
+dbuser=${dbuser:-postgres}
+
+
+do_config() {
    echo 'graph_args --base 1000 --lower-limit 0'
    echo 'graph_category db'
    echo 'graph_info Shows summarized commits and rollbacks in transactions on the PostgreSQL Server.'
    echo 'graph_title PostgreSQL Transactions'
-   echo 'graph_vlabel Number of Commits and Rollbacks'
+   echo 'graph_vlabel Commits and Rollbacks per second'
 
    echo 'commits.label commits'
    echo 'commits.min 0'
-   echo 'commits.info Number of transaction commits.'
+   echo 'commits.type DERIVE'
+   echo 'commits.info Number of transaction commits per second.'
 
    echo 'rollbacks.label rollbacks'
    echo 'rollbacks.min 0'
-   echo 'rollbacks.info Number of transaction rollbacks.'
-   exit 0
+   echo 'rollbacks.type DERIVE'
+   echo 'rollbacks.info Number of transaction rollbacks per second.'
+}
+
+
+do_fetch() {
+   psql -h "$dbhost" -U "$dbuser" -tc "SELECT 'commits.value '||SUM(xact_commit)::TEXT||E'\\nrollbacks.value '||SUM(xact_rollback)::TEXT FROM pg_stat_database;" --no-align
+}
+
+
+if [ "$1" = "config" ]; then
+   do_config
+   if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = "1" ]; then do_fetch; fi
+else
+   do_fetch
 fi
-psql -h ${dbserver} -U ${dbuser} -tc "SELECT 'commits.value '||SUM(xact_commit)::TEXT||E'\nrollbacks.value '||SUM(xact_rollback)::TEXT FROM pg_stat_database;" --no-align
