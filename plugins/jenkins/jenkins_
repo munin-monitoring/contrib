@@ -107,9 +107,7 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 		print "build_stable.label stable\n";
 		print "build_stable.type GAUGE\n";
 		print "build_stable.colour 294D99\n";
-		exit;
-	}
-	if( $type eq "queue" ) {
+	} elsif( $type eq "queue" ) {
 		print "graph_args --base 1000 -l 0\n";
 		print "graph_title Jenkins Queue Length\n";
 		print "graph_vlabel Number of Jobs in Queue\n";
@@ -117,9 +115,7 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 		print "graph_info The Graph shows the Number of Jobs in the Build Queue\n";
 		print "build_count.label Jobs in Queue\n";
 		print "build_count.type GAUGE\n";
-		exit;
-	}
-	if( $type eq "running" ) {
+	} elsif( $type eq "running" ) {
 		print "graph_args --base 1000 -l 0\n";
 		print "graph_title Jenkins Builds Running\n";
 		print "graph_vlabel Builds currently running\n";
@@ -127,7 +123,8 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 		print "graph_info The Graph shows the Number of Builds, currently running\n";
 		print "build_running.label running Builds\n";
 		print "build_running.type GAUGE\n";
-		exit;
+	} else {
+		warn "Unknown mode requested: $type\n";
 	}
 } else {
 	my $cmd = "$wgetBin $auth -qO- $url:$port$context";
@@ -145,22 +142,17 @@ if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
 		foreach my $status (keys %{$counts}) {
 			print "build_$status.value $counts->{$status}\n";
 		}
-		exit;
-	}
-
-	if( $type eq "running" ) {
+	} elsif( $type eq "running" ) {
 		my $result = `$cmd'/api/json?depth=$jobDepth&tree=$tree'`;
 		my $parsed = decode_json($result);
 		my $count = parse_running_builds($parsed->{'jobs'});
 		print "build_running.value ", $count, "\n";
-		exit;
-	}
-
-	if( $type eq "queue" ) {
+	} elsif( $type eq "queue" ) {
 		my $result = `$cmd/queue/api/json`;
 		my $parsed = decode_json($result);
 		print "build_count.value ", scalar( @{$parsed->{'items'}} ), "\n";
-		exit;
+	} else {
+		warn "Unknown mode requested: $type\n";
 	}
 }
 
