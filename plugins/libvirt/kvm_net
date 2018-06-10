@@ -6,6 +6,24 @@
 kvm_net - Munin plugin to show the network I/O per VM
 
 
+=head1 APPLICABLE SYSTEMS
+
+Virtualization server with VMs based on KVM may be able to track the network
+traffic of their VMs, if the KVM processes are started in a specific way.
+
+Probably proxmox-based virtualization hosts fit into this category.
+
+You can easily check if your KVM processes are started in the expected way, by
+running the following command:
+
+  ps -ef | grep "netdev.*ifname="
+
+The plugin can be used, if the above command outputs one line for every
+currently running VM.
+
+In all other cases you need to use other munin plugins instead, e.g. "libvirt".
+
+
 =head1 CONFIGURATION
 
 parsed environment variables:
@@ -39,6 +57,7 @@ import sys
 
 
 VM_NAME_REGEX = re.compile("^.*\x00-{arg_name}\x00(.+)\x00.*$")
+KVM_INTERFACE_NAME_REGEX = re.compile("(?:^|,)ifname=([^,]+)(?:,|$)")
 
 
 def config(vm_names):
@@ -83,18 +102,35 @@ def fetch(vms):
 
     @param dictionnary {kvm_pid: cleaned vm name}
     """
-    for pid in vms:
-        tap = get_vm_mac(pid)
-        try:
-            f = open("/proc/net/dev", "r")
-            for line in f.readlines():
-                if tap in line:
-                    print("%s_in.value %s" % (vms[pid], line.split()[1]))
-                    print("%s_out.value %s" % (vms[pid], line.split()[9]))
-                    break
-        except Exception as inst:
-            print(inst)
-            continue
+    for pid, vm_data in vms.items():
+        vm_interface_names = get_vm_network_interface_names(pid)
+        sum_incoming = 0
+        sum_outgoing = 0
+        interface_found = False
+        with open("/proc/net/dev", "r") as net_file:
+            for line in net_file.readlines():
+                tokens = line.split()
+                current_interface_name = tokens[0].rstrip(":").strip()
+                if current_interface_name in vm_interface_names:
+                    sum_incoming += int(tokens[1])
+                    sum_outgoing += int(tokens[9])
+                    interface_found = True
+            if not interface_found:
+                # we want to distinguish "no traffic" from "not found"
+                sum_incoming = "U"
+                sum_outgoing = "U"
+            print("%s_in.value %s" % (vm_data, sum_incoming))
+            print("%s_out.value %s" % (vm_data, sum_outgoing))
+
+
+def get_vm_network_interface_names(pid):
+    """ return the MAC addresses configured for network interfacs of a PID """
+    result = set()
+    for netdev_description in _get_kvm_process_arguments(pid, "netdev"):
+        match = KVM_INTERFACE_NAME_REGEX.search(netdev_description)
+        if match:
+            result.add(match.groups()[0])
+    return result
 
 
 def detect_kvm():
@@ -137,17 +173,6 @@ def find_vm_names(pids):
         else:
             result[pid] = clean_vm_name(name)
     return result
-
-
-def get_vm_mac(pid):
-    """Find and clean vm names from pids
-
-    @return the mac address for a specified pid
-    """
-    cmdline = open("/proc/%s/cmdline" % pid, "r")
-    line = cmdline.readline()
-    mac = re.sub(r"^.*ifname=(tap[^,]+),.*$", r"\1", line)
-    return mac
 
 
 def _get_kvm_process_arguments(pid, arg_name):
