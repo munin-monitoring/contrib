@@ -40,11 +40,18 @@ Unknown license
 
 =cut
 
-. $MUNIN_LIBDIR/plugins/plugin.sh
 
-guest_names=`lxc-ls | sort -u`
+# configurable: true/false
+areastack=${areastack:-false}
+
+
+# shellcheck disable=SC1090
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+
+guest_names=$(lxc-ls | sort -u)
 for guest in $guest_names; do
- if lxc-info -n $guest 2>&1 | grep -qs RUNNING ; then
+ if lxc-info -n "$guest" 2>&1 | grep -qs RUNNING ; then
   active="$active $guest"
  fi
 done
@@ -56,11 +63,10 @@ f_comm='lxc-cgroup  '
 if [ "$1" = "autoconf" ]; then
 	if [ -r /proc/stat ]; then
 		echo yes
-		exit 0
 	else
 		echo "no (no /proc/stat)"
-		exit 0
 	fi
+	exit 0
 fi
 
 if [ "$1" = "config" ]; then
@@ -72,7 +78,7 @@ if [ "$1" = "config" ]; then
 
  if [ "$areastack" = "true" ]; then
   for guest_name in $guest_names; do
-    guest="$(clean_fieldname $guest_name)"
+    guest="$(clean_fieldname "$guest_name")"
 
     echo "mem_usage_$guest.label $guest_name: Mem usage"
     echo "mem_usage_$guest.type GAUGE"
@@ -80,7 +86,7 @@ if [ "$1" = "config" ]; then
   done
   
   for guest_name in $guest_names; do
-    guest="$(clean_fieldname $guest_name)"
+    guest="$(clean_fieldname "$guest_name")"
 
    echo "mem_cache_$guest.label $guest_name: Cache"
    echo "mem_cache_$guest.type GAUGE"
@@ -93,7 +99,7 @@ if [ "$1" = "config" ]; then
  else
   for guest_name in $guest_names;
    do
-    guest="$(clean_fieldname $guest_name)"
+    guest="$(clean_fieldname "$guest_name")"
 
     echo "mem_usage_$guest.label $guest_name: Mem usage"
     echo "mem_usage_$guest.type GAUGE"
@@ -111,23 +117,18 @@ if [ "$1" = "config" ]; then
 fi
 
 
- for guest_name in $guest_names;
-  do
-   guest="$(clean_fieldname $guest_name)"
+for guest_name in $guest_names; do
+   guest="$(clean_fieldname "$guest_name")"
 
-   tmp_v=`$f_comm -n $guest_name memory.usage_in_bytes`
-   echo "mem_usage_$guest.value $tmp_v"
+   value=$($f_comm -n "$guest_name" memory.usage_in_bytes)
+   echo "mem_usage_$guest.value $value"
    
-   tmp_g=`$f_comm -n $guest_name memory.stat | grep total_cache`
-   tmp_v=`echo $tmp_g | awk '{print($2)}'`
-   echo "mem_cache_$guest.value $tmp_v"
+   value=$($f_comm -n "$guest_name" memory.stat | grep total_cache | awk '{print($2)}')
+   echo "mem_cache_$guest.value $value"
    
-   tmp_g=`$f_comm -n $guest_name memory.stat | grep total_active_anon`
-   tmp_v=`echo $tmp_g | awk '{print($2)}'`
-   echo "mem_active_$guest.value $tmp_v"
+   value=$($f_comm -n "$guest_name" memory.stat | grep total_active_anon | awk '{print($2)}')
+   echo "mem_active_$guest.value $value"
    
-   tmp_g=`$f_comm -n $guest_name memory.stat | grep total_inactive_anon`
-   tmp_v=`echo $tmp_g | awk '{print($2)}'`
-   echo "mem_inactive_$guest.value $tmp_v"
-
-  done
+   value=$($f_comm -n "$guest_name" memory.stat | grep total_inactive_anon | awk '{print($2)}')
+   echo "mem_inactive_$guest.value $value"
+done
