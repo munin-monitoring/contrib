@@ -12,9 +12,17 @@ lxc_ram - Plugin to monitor LXC memory usage.
   [lxc_*]
     user root
 
+  [lxc_ram]
+    env.areastack true
+
 =head1 INTERPRETATION
 
 This plugin needs root privilege.
+
+If env.areastack is set to true, all memory usages of containers will be
+ drawn as stacked area charts.
+This option changes graph order, all of 'Mem usage' comes first and then others.
+(default: false)
 
 =head1 AUTHOR
 
@@ -62,13 +70,18 @@ if [ "$1" = "config" ]; then
  echo 'graph_vlabel byte'
  echo 'graph_category memory'
 
+ if [ "$areastack" = "true" ]; then
+  for guest_name in $guest_names; do
+    guest="$(clean_fieldname $guest_name)"
 
- for guest_name in $guest_names;
-  do
-   guest="$(clean_fieldname $guest_name)"
+    echo 'mem_usage_'$guest'.label '$guest_name': Mem usage'
+    echo 'mem_usage_'$guest'.type GAUGE'
+    echo 'mem_usage_'$guest'.draw AREASTACK'
+  done
+  
+  for guest_name in $guest_names; do
+    guest="$(clean_fieldname $guest_name)"
 
-   echo 'mem_usage_'$guest'.label '$guest_name': Mem usage'
-   echo 'mem_usage_'$guest'.type GAUGE'
    echo 'mem_cache_'$guest'.label '$guest_name': Cache'
    echo 'mem_cache_'$guest'.type GAUGE'
    echo 'mem_active_'$guest'.label '$guest_name': Active'
@@ -77,6 +90,22 @@ if [ "$1" = "config" ]; then
    echo 'mem_inactive_'$guest'.type GAUGE'
 
   done
+ else
+  for guest_name in $guest_names;
+   do
+    guest="$(clean_fieldname $guest_name)"
+
+    echo 'mem_usage_'$guest'.label '$guest_name': Mem usage'
+    echo 'mem_usage_'$guest'.type GAUGE'
+    echo 'mem_cache_'$guest'.label '$guest_name': Cache'
+    echo 'mem_cache_'$guest'.type GAUGE'
+    echo 'mem_active_'$guest'.label '$guest_name': Active'
+    echo 'mem_active_'$guest'.type GAUGE'
+    echo 'mem_inactive_'$guest'.label '$guest_name': Inactive'
+    echo 'mem_inactive_'$guest'.type GAUGE'
+
+   done
+ fi
  
  exit 0
 fi
