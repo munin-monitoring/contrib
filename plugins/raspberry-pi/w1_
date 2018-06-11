@@ -52,7 +52,7 @@ esac
 
 if [ "$1" = "suggest" ]; then
     if [ -r /sys/bus/w1/devices ]; then
-        ls /sys/bus/w1/devices|head -n -1
+        ls /sys/bus/w1/devices|grep -v bus_master
     fi
     exit 0
 fi
@@ -71,7 +71,7 @@ if [ "$1" = "config" ]; then
         echo graph_title Temperature Sensor $sensor_id
         echo 'graph_args --base 1000 -l 0'
         echo 'graph_vlabel temperature (°C)'
-        echo 'graph_category temperature'
+        echo 'graph_category sensors'
         echo 'graph_info This graph shows 1-wire sensor temperature.'
         echo "w1.label $sensor_id"
         echo "w1.info Temperature at $sensor_id."
@@ -81,4 +81,4 @@ if [ "$1" = "config" ]; then
 fi
 
 
-sed  -n '/t=/ s/.*t=//p' /sys/bus/w1/devices/$sensor_id/w1_slave | perl -e '$l=<STDIN>;print "w1.value ", $l/1000 , "\n";'
+sed  -n '/t=/ s/.*t=//p' /sys/bus/w1/devices/$sensor_id/w1_slave | awk '{print "w1.value", $1/1000}'
