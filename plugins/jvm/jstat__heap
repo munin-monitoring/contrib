@@ -69,109 +69,89 @@ chk_version()
   fi
 }
 
-config_common()
-{
-  echo "graph_title Heap Usage" $graphtitle
-  echo "graph_args --base 1024 -l 0"
-  echo "graph_vlabel Heap Usage(Bytes)"
-  echo "graph_info Heap Usage"
-  echo "graph_category virtualization"
+print_config() {
+    echo "graph_title Heap Usage" $graphtitle
+    echo "graph_args --base 1024 -l 0"
+    echo "graph_vlabel Heap Usage(Bytes)"
+    echo "graph_info Heap Usage"
+    echo "graph_category virtualization"
+
+    if [ "${JDK_TYPE}" == "bea" ]; then
+        echo "NurserySize.label NurserySize"
+        echo "HeapSize.label HeapSize"
+        echo "UsedHeapSize.label UsedHeapSize"
+        echo "NurserySize.draw AREA"
+        echo "HeapSize.draw STACK"
+        echo "UsedHeapSize.draw STACK"
+    else
+        echo "Eden_Used.label Eden_Used"
+        echo "Eden_Free.label Eden_Free"
+        echo "Survivor0_Used.label Survivor0_Used"
+        echo "Survivor0_Free.label Survivor0_Free"
+        echo "Survivor1_Used.label Survivor1_Used"
+        echo "Survivor1_Free.label Survivor1_Free"
+        echo "Old_Used.label Old_Used"
+        echo "Old_Free.label Old_Free"
+        echo "Permanent_Used.label Permanent_Used"
+        echo "Permanent_Free.label Permanent_Free"
+        echo "Eden_Used.draw AREA"
+        echo "Eden_Free.draw STACK"
+        echo "Survivor0_Used.draw STACK"
+        echo "Survivor0_Free.draw STACK"
+        echo "Survivor1_Used.draw STACK"
+        echo "Survivor1_Free.draw STACK"
+        echo "Old_Used.draw STACK"
+        echo "Old_Free.draw STACK"
+        echo "Permanent_Used.draw STACK"
+        echo "Permanent_Free.draw STACK"
+    fi
 }
 
-config_sun_jdk()
-{
-  config_common
 
-  echo "Eden_Used.label Eden_Used"
-  echo "Eden_Free.label Eden_Free"
-  echo "Survivor0_Used.label Survivor0_Used"
-  echo "Survivor0_Free.label Survivor0_Free"
-  echo "Survivor1_Used.label Survivor1_Used"
-  echo "Survivor1_Free.label Survivor1_Free"
-  echo "Old_Used.label Old_Used"
-  echo "Old_Free.label Old_Free"
-  echo "Permanent_Used.label Permanent_Used"
-  echo "Permanent_Free.label Permanent_Free"
-  echo "Eden_Used.draw AREA"
-  echo "Eden_Free.draw STACK"
-  echo "Survivor0_Used.draw STACK"
-  echo "Survivor0_Free.draw STACK"
-  echo "Survivor1_Used.draw STACK"
-  echo "Survivor1_Free.draw STACK"
-  echo "Old_Used.draw STACK"
-  echo "Old_Free.draw STACK"
-  echo "Permanent_Used.draw STACK"
-  echo "Permanent_Free.draw STACK"
+print_stats() {
+    local pid_num="$1"
+    local awk_script
+    if [ "${JDK_TYPE}" == "bea" ]; then
+        # shellcheck disable=SC2016
+        awk_script='{
+            HeapSize = $1;
+            NurserySize = $2;
+            UsedHeapSize = $3;
+            print "NurserySize.value " NurserySize * 1024;
+            print "HeapSize.value " HeapSize * 1024;
+            print "UsedHeapSize.value " UsedHeapSize * 1024; }'
+    else
+        # shellcheck disable=SC2016
+        awk_script='{
+            S0C = $1;
+            S1C = $2;
+            S0U = $3;
+            S1U = $4;
+            EC  = $5;
+            EU  = $6;
+            OC  = $7;
+            OU  = $8;
+            PC  = $9;
+            PU  = $10;
+            S0F = S0C - S0U;
+            S1F = S1C - S1U;
+            EF  = EC  - EU;
+            OF  = OC  - OU;
+            PF  = PC  - PU;
+            print "Eden_Used.value " EU * 1024;
+            print "Eden_Free.value " EF * 1024;
+            print "Survivor0_Used.value " S0U * 1024;
+            print "Survivor0_Free.value " S0F * 1024;
+            print "Survivor1_Used.value " S1U * 1024;
+            print "Survivor1_Free.value " S1F * 1024;
+            print "Old_Used.value " OU * 1024;
+            print "Old_Free.value " OF * 1024;
+            print "Permanent_Used.value " PU * 1024;
+            print "Permanent_Free.value " PF * 1024; }'
+    fi
+    "${JAVA_HOME}/bin/jstat" -gc "$pid_num" | tail -1 | awk "$awk_script"
 }
 
-config_bea_jdk()
-{
-  config_common
-
-  echo "NurserySize.label NurserySize"
-  echo "HeapSize.label HeapSize"
-  echo "UsedHeapSize.label UsedHeapSize"
-  echo "NurserySize.draw AREA"
-  echo "HeapSize.draw STACK"
-  echo "UsedHeapSize.draw STACK"
-}
-
-print_sun_stats()
-{
-${JAVA_HOME}/bin/jstat -gc ${PidNum} | tail -1 | awk \
-'{\
-	S0C = $1; \
-	S1C = $2; \
-	S0U = $3; \
-	S1U = $4; \
-	EC  = $5; \
-	EU  = $6; \
-	OC  = $7; \
-	OU  = $8; \
-	PC  = $9; \
-	PU  = $10; \
-	\
-	S0F = S0C - S0U; \
-	S1F = S1C - S1U; \
-	EF  = EC  - EU;  \
-	OF  = OC  - OU;  \
-	PF  = PC  - PU;  \
-	\
-	print "Eden_Used.value " EU * 1024; \
-	print "Eden_Free.value " EF * 1024; \
-	print "Survivor0_Used.value " S0U * 1024; \
-	print "Survivor0_Free.value " S0F * 1024; \
-	print "Survivor1_Used.value " S1U * 1024; \
-	print "Survivor1_Free.value " S1F * 1024; \
-	print "Old_Used.value " OU * 1024; \
-	print "Old_Free.value " OF * 1024; \
-	print "Permanent_Used.value " PU * 1024; \
-	print "Permanent_Free.value " PF * 1024; \
-}'
-}
-
-print_bea_stats()
-{
-${JAVA_HOME}/bin/jstat -gc ${PidNum} | tail -1 | awk \
-'{\
-	HeapSize = $1; \
-	NurserySize = $2; \
-	UsedHeapSize = $3; \
-	YC = $4; \
-	OC = $5; \
-	YCTime = $6; \
-	OCTime = $7; \
-	GCTime = $8; \
-	YCPauseTime = $9; \
-	OCPauseTime = $10; \
-	PauseTime = $11; \
-	Finalizers = $12; \
-	\
-	print "NurserySize.value " NurserySize * 1024; \
-	print "HeapSize.value " UsedHeapSize * 1024; \
-	print "UsedHeapSize.value " UsedHeapSize * 1024; \
-}'
-}
 
 #
 # common for all argument
@@ -204,25 +184,8 @@ if [ "$1" = "autoconf" ]; then
 fi
 
 
-#
-# config
-#
 if [ "$1" = "config" ]; then
-  if [ "${JDK_TYPE}" == "bea" ]; then
-    config_bea_jdk
-  else
-    config_sun_jdk
-  fi
-  exit 0
+    print_config
 fi
 
-#
-# Main
-#
-PidNum=`cat ${pidfilepath}`
-
-if [ "${JDK_TYPE}" == "bea" ]; then
-  print_bea_stats
-else
-  print_sun_stats
-fi
+print_stats "$(cat "$pidfilepath")"
