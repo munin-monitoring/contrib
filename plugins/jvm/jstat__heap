@@ -22,9 +22,10 @@
 #
 # Target:
 #
-#	Target Java Virtual Machine to monitor are:
-#	  Sun JDK 5.0 (http://java.sun.com/javase/) (default)
-#	  BEA JRockit 5.0 (http://dev2dev.bea.com/jrockit/)
+#       Target Java Virtual Machine to monitor are:
+#         Sun JDK 5.0 (http://java.sun.com/javase/)
+#         Sun JDK 8.0 (http://java.sun.com/javase/)
+#         BEA JRockit 5.0 (http://dev2dev.bea.com/jrockit/)
 #
 # Parameters:
 #
@@ -46,28 +47,21 @@ JAVA_HOME=${javahome:-$default_java_home}
 
 export JAVA_HOME
 
-#
-# Functions
-#
-chk_jdk()
-{
-  isJRockit=`${JAVA_HOME}/bin/java -version 2>&1 | egrep -i 'jrockit'`
-  if [ -n "${isJRockit}" ]; then
-    JDK_TYPE="bea"
-  else
-    JDK_TYPE="sun"
+
+get_jdk_type() {
+    local version
+    if "${JAVA_HOME}/bin/java" -version 2>&1 | grep -qi 'jrockit'; then
+        echo "bea"
+    else
+        version=$("${JAVA_HOME}/bin/java" -version 2>&1 | grep '^java version' | awk '{print $3}' | sed -e 's/\"//g' | cut -d'_' -f 1)
+        if echo "$version" | grep -q '^1\.5\.'; then
+            echo "sun15"
+        else
+            echo "sun"
+        fi
   fi
 }
 
-chk_version()
-{
-  Version=`${JAVA_HOME}/bin/java -version 2>&1 | egrep '^java version' | awk '{print $3}' | sed -e 's/\"//g' | cut -d'_' -f 1`
-  if [ "${Version}" != "1.5.0" ]; then
-    return 1
-  else
-    return 0
-  fi
-}
 
 print_config() {
     echo "graph_title Heap Usage" $graphtitle
@@ -120,7 +114,7 @@ print_stats() {
             print "NurserySize.value " NurserySize * 1024;
             print "HeapSize.value " HeapSize * 1024;
             print "UsedHeapSize.value " UsedHeapSize * 1024; }'
-    else
+    elif [ "${JDK_TYPE}" = "sun15" ]; then
         # shellcheck disable=SC2016
         awk_script='{
             S0C = $1;
@@ -148,15 +142,38 @@ print_stats() {
             print "Old_Free.value " OF * 1024;
             print "Permanent_Used.value " PU * 1024;
             print "Permanent_Free.value " PF * 1024; }'
+    else
+        # shellcheck disable=SC2016
+        awk_script='{
+            S0C = $1;
+            S1C = $2;
+            S0U = $3;
+            S1U = $4;
+            EC  = $5;
+            EU  = $6;
+            OC  = $7;
+            OU  = $8;
+            MC  = $9;
+            MU  = $10;
+            S0F = S0C - S0U;
+            S1F = S1C - S1U;
+            EF  = EC  - EU;
+            OF  = OC  - OU;
+            MF  = MC  - MU;
+            print "Eden_Used.value " EU * 1024;
+            print "Eden_Free.value " EF * 1024;
+            print "Survivor0_Used.value " S0U * 1024;
+            print "Survivor0_Free.value " S0F * 1024;
+            print "Survivor1_Used.value " S1U * 1024;
+            print "Survivor1_Free.value " S1F * 1024;
+            print "Old_Used.value " OU * 1024;
+            print "Old_Free.value " OF * 1024;
+            print "Permanent_Used.value " PU * 1024;
+            print "Permanent_Free.value " MF * 1024; }'
     fi
     "${JAVA_HOME}/bin/jstat" -gc "$pid_num" | tail -1 | awk "$awk_script"
 }
 
-
-#
-# common for all argument
-#
-chk_jdk
 
 #
 # autoconf
@@ -168,12 +185,6 @@ if [ "$1" = "autoconf" ]; then
     exit 1
   fi
 
-  chk_version
-  if [ $? != 0 ]; then
-    echo "no (Java version is invalid)"
-    exit 1
-  fi
-
   if [ ! -f "${pidfilepath}" -o ! -r "${pidfilepath}" ]; then
     echo "no (No such file ${pidfilepath} or cannot read ${pidfilepath}"
     exit 1
@@ -182,6 +193,9 @@ if [ "$1" = "autoconf" ]; then
   echo "yes"
   exit 0
 fi
+
+
+JDK_TYPE=$(get_jdk_type)
 
 
 if [ "$1" = "config" ]; then
