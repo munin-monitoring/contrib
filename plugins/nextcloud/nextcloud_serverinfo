@@ -5,11 +5,11 @@
 
 =head1 NAME
 
-nextcloud-serverinfo - Plugin to monitor Nextcloud's serverinfo statut
+nextcloud_serverinfo - Plugin to monitor Nextcloud's serverinfo statut
 
 =head1 CONFIGURATION
 
-  [nextcloud-serverinfo]
+  [nextcloud_serverinfo]
     env.serverinfo_url https://cloud.example.net/ocs/v2.php/apps/serverinfo/api/v1/info
     env.serverinfo_login LOGIN
     env.serverinfo_password APP_PASSWORD
@@ -152,7 +152,7 @@ metric_report() {
 		if echo "${value}" | grep -q '^[0-9]\+\(\.[0-9]*\)\?$'; then
 			printf "%s.value %s\\n" "${fieldname}" "${value}"
 		else
-			printf "%s.extrainfo %s\\n" "${fieldname}" "${value}"
+			printf "%s.extinfo %s\\n" "${fieldname}" "${value}"
 		fi
 	done
 }
@@ -161,7 +161,7 @@ case $1 in
     config)
 	base_url=$(echo "${serverinfo_url}" | sed 's^/ocs/.*^^')
 
-	echo "multigraph nextcloud-serverinfo"
+	echo "multigraph nextcloud_serverinfo"
 	echo "graph_title Nextcloud serverinfo for ${base_url}"
 	echo 'graph_category nextcloud'
 	echo 'graph_args --logarithmic'
@@ -170,7 +170,7 @@ case $1 in
 
 	for category in $CATEGORIES; do
 		echo
-		echo "multigraph nextcloud-serverinfo.$category"
+		echo "multigraph nextcloud_serverinfo.$category"
 		echo "graph_title Nextcloud ${category} for ${base_url}"
 		echo 'graph_category nextcloud'
 		metric_config $(metrics_for_category ${category})
@@ -182,11 +182,11 @@ esac
 
 DATA="$(echo "user=${serverinfo_login}:${serverinfo_password}" | curl -s -K - "${serverinfo_url}")"
 
-echo "multigraph nextcloud-serverinfo"
+echo "multigraph nextcloud_serverinfo"
 metric_report $(metrics_for_category main)
 
 for category in $CATEGORIES; do
 	echo
-	echo "multigraph nextcloud-serverinfo.$category"
+	echo "multigraph nextcloud_serverinfo.$category"
 	metric_report $(metrics_for_category ${category})
 done
