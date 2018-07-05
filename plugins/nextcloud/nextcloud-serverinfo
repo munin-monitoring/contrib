@@ -1,0 +1,192 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+nextcloud-serverinfo - Plugin to monitor Nextcloud's serverinfo statut
+
+=head1 CONFIGURATION
+
+  [nextcloud-serverinfo]
+    env.serverinfo_url https://cloud.example.net/ocs/v2.php/apps/serverinfo/api/v1/info
+    env.serverinfo_login LOGIN
+    env.serverinfo_password APP_PASSWORD
+
+=head1 AUTHOR
+
+Olivier Mehani
+
+Copyright (C) 2018 Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+GPLv3+
+
+=cut
+
+# shellcheck disable=SC1090
+. "${MUNIN_LIBDIR}/plugins/plugin.sh"
+
+if [ "${MUNIN_DEBUG}" = 1 ]; then
+    set -x
+fi
+
+if ! which curl >/dev/null; then
+	echo "curl not found" >&2
+	exit 1
+fi
+if ! which xpath >/dev/null; then
+	echo "xpath (Perl XML::LibXML) not found" >&2
+	exit 1
+fi
+
+CATEGORIES="
+activeusers
+database
+php
+shares
+storage
+system
+"
+
+activeusers_METRICS="
+/ocs/data/activeUsers/last5minutes
+/ocs/data/activeUsers/last1hour
+/ocs/data/activeUsers/last24hours
+"
+database_METRICS="
+/ocs/data/server/database/type
+/ocs/data/server/database/version
+/ocs/data/server/database/size
+"
+php_METRICS="
+/ocs/data/server/webserver
+/ocs/data/server/php/version
+/ocs/data/server/php/memory_limit
+/ocs/data/server/php/max_execution_time
+/ocs/data/server/php/upload_max_filesize
+"
+shares_METRICS="
+/ocs/data/nextcloud/shares/num_shares
+/ocs/data/nextcloud/shares/num_shares_user
+/ocs/data/nextcloud/shares/num_shares_groups
+/ocs/data/nextcloud/shares/num_shares_link
+/ocs/data/nextcloud/shares/num_shares_link_no_password
+/ocs/data/nextcloud/shares/num_fed_shares_sent
+/ocs/data/nextcloud/shares/num_fed_shares_received
+"
+storage_METRICS="
+/ocs/data/nextcloud/storage/num_users
+/ocs/data/nextcloud/storage/num_files
+/ocs/data/nextcloud/storage/num_storages_local
+/ocs/data/nextcloud/storage/num_storages_home
+/ocs/data/nextcloud/storage/num_storages_other
+"
+system_METRICS="
+/ocs/data/nextcloud/system/version
+/ocs/data/nextcloud/system/freespace
+/ocs/data/nextcloud/system/cpuload/element[1]
+/ocs/data/nextcloud/system/mem_total
+/ocs/data/nextcloud/system/mem_free
+/ocs/data/nextcloud/system/swap_total
+/ocs/data/nextcloud/system/swap_free
+"
+main_METRICS="
+/ocs/data/nextcloud/storage/num_users
+/ocs/data/nextcloud/storage/num_files
+/ocs/data/activeUsers/last24hours
+/ocs/data/server/database/size
+"
+
+short_metric() {
+	metric="${1}"
+	echo "${metric}" | sed 's^.*/^^'
+}
+
+metric_config() {
+	for metric in $*; do
+		fieldname="$(clean_fieldname "$(short_metric "${metric}")")"
+		label="$(echo "${metric}" | sed 's^/ocs/data^^')"
+		echo "${fieldname}.label ${label}"
+	done
+}
+
+# uses global: $*_METRICS
+metrics_for_category() {
+	category=$1
+	case $category in
+		"activeusers")
+			echo ${activeusers_METRICS}
+			;;
+		"database")
+			echo ${database_METRICS}
+			;;
+		"main")
+			echo ${main_METRICS}
+			;;
+		"php")
+			echo ${php_METRICS}
+			;;
+		"shares")
+			echo ${shares_METRICS}
+			;;
+		"storage")
+			echo ${storage_METRICS}
+			;;
+		"system")
+			echo ${system_METRICS}
+			;;
+	esac
+}
+
+# uses global: $DATA
+metric_report() {
+	for metric in $*; do
+		fieldname="$(clean_fieldname "$(short_metric "${metric}")")"
+		value=$(echo "${DATA}" | \
+			xpath -q -n -e "${metric}" | \
+			sed 's/<\([^>]*\)>\([^<]*\)<[^>]*>/\2/')
+
+		if echo "${value}" | grep -q '^[0-9]\+\(\.[0-9]*\)\?$'; then
+			printf "%s.value %s\\n" "${fieldname}" "${value}"
+		else
+			printf "%s.extrainfo %s\\n" "${fieldname}" "${value}"
+		fi
+	done
+}
+
+case $1 in
+    config)
+	base_url=$(echo "${serverinfo_url}" | sed 's^/ocs/.*^^')
+
+	echo "multigraph nextcloud-serverinfo"
+	echo "graph_title Nextcloud serverinfo for ${base_url}"
+	echo 'graph_category nextcloud'
+	echo 'graph_args --logarithmic'
+
+	metric_config $(metrics_for_category main)
+
+	for category in $CATEGORIES; do
+		echo
+		echo "multigraph nextcloud-serverinfo.$category"
+		echo "graph_title Nextcloud ${category} for ${base_url}"
+		echo 'graph_category nextcloud'
+		metric_config $(metrics_for_category ${category})
+	done
+
+	exit 0
+	;;
+esac
+
+DATA="$(echo "user=${serverinfo_login}:${serverinfo_password}" | curl -s -K - "${serverinfo_url}")"
+
+echo "multigraph nextcloud-serverinfo"
+metric_report $(metrics_for_category main)
+
+for category in $CATEGORIES; do
+	echo
+	echo "multigraph nextcloud-serverinfo.$category"
+	metric_report $(metrics_for_category ${category})
+done
