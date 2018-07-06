@@ -22,9 +22,10 @@
 #
 # Configurable variables
 #
-#	src		"socket" when using scgi_socket, or anything else when using scgi_port
-#	socket		rTorrent's rpc socket (scgi_local)	- using scgi_local	- needed, when "src" is set to "socket"
-#	category        Change graph category
+#	src           "socket" when using scgi_socket, or anything else when using scgi_port
+#	socket        rTorrent's rpc socket (scgi_local)	- using scgi_local	- needed, when "src" is set to "socket"
+#	category      Change graph category
+# api           use 'legacy' (pre 0.9.0) or current (0.9.0+) API calls
 #
 # Configuration example
 #
@@ -33,6 +34,7 @@
 #       env.src socket
 #       env.socket /home/user/torrent/.socket/rpc.socket,/home/user/torrent/.socket/rpc.socket
 #       env.category Category
+#       env.api current
 #
 #       [rtom_allsessions_*]
 #       user username
@@ -76,11 +78,17 @@ my $src         = $ENV{"src"} || "";
 my @sockets     = split /,/, $ENV{"socket"} || "";
 my $ip          = $ENV{"ip"} || "127.0.0.1";
 my @ports       = split /,/, $ENV{"port"} || "";
+my $api         = $ENV{"api"} || "legacy";
 
 my $pattern	= qr/<value><(int|i4|i8|ex\.i8)>(\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
 my $tpattern	= qr/[0-9A-F]{20}/;
 
-my $line	= "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>d.multicall</methodName><params><param><value><string>main</string></value></param><param><value><string>d.get_hash=</string></value></param><param><value><string>p.multicall=,p.is_encrypted=,p.is_incoming=</string></value></param></params></methodCall>";
+my $line        = "";
+if ($api =~ /legacy/) {
+  $line         = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>d.multicall</methodName><params><param><value><string>main</string></value></param><param><value><string>d.get_hash=</string></value></param><param><value><string>p.multicall=,p.is_encrypted=,p.is_incoming=</string></value></param></params></methodCall>";
+} else {
+  $line         = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>d.multicall2</methodName><params><param><value><string></string></value></param><param><value><string>main</string></value></param><param><value><string>d.hash=</string></value></param><param><value><string>p.multicall=,p.is_encrypted=,p.is_incoming=</string></value></param></params></methodCall>";
+}
 my $llen	= length $line;
 my $header	= "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
 my $hlen	= length $header;
@@ -119,10 +127,10 @@ if ( ( defined $src ) && ( $src eq "socket" ) ) {
 				close (SOCK);
 				$out = $out + $tot - $inc;
 				$pla = $pla + $tot - $enc;
-        }        
+        }
 } else {
         for $port (@ports)
-        { 
+        {
                 socket( SOCK, PF_INET, SOCK_STREAM, getprotobyname( "tcp" ) );
                 connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
                 my $line = "${hlen}:${header},${line}";
