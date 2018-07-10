@@ -36,7 +36,7 @@
 #       src             "socket" when using scgi_socket, or anything else when using scgi_port
 #       socket          rTorrent's rpc socket (scgi_local)      - using scgi_local      - needed, when "src" is set to "socket"
 #       diff            "yes" for using bps for upload and Bps for download, or anything else for using Bps for both
-#       api             use 'legacy' (pre 0.9.0) or current (0.9.0+) API calls
+#       api             use 'pre09' (pre 0.9.0) or 'current' (0.9.0+) API calls
 #
 #
 # Configuration example
@@ -46,7 +46,7 @@
 #       env.src socket
 #       env.socket /home/user/torrent/.socket/rpc.socket,/home/user/torrent/.socket/rpc.socket
 #       env.category Category
-#       env.api current
+#       env.api pre09
 #
 #       [rtom_allsessions_*]
 #       user username
@@ -57,34 +57,34 @@
 
 
 if ( $ARGV[0] and $ARGV[0] eq "autoconf" ) {
-        exit 1;
+  exit 1;
 }
 
 if ( $ARGV[0] and $ARGV[0] eq "config" ) {
-        my $diff = $ENV{"diff"} || "";
-        my $category = $ENV{"category"} || "";
-        print "graph_order down up\n";
-        print "graph_title rTorrent speeds\n";
-        print "graph_args --base 1024\n";
-        print "graph_vlabel Bytes per \${graph_period}\n";
-        print "graph_category filetransfer".${category}."\n";
-        print "down.label Download B/s\n";
-        print "down.info Download speed in Bytes per seconds\n";
-        print "down.type DERIVE\n";
-        print "down.min 0\n";
-        print "down.draw AREA\n";
-        if ( ( defined $diff ) && ( $diff eq "yes" ) ) {
-                print "up.label Upload b/s\n";
-                print "up.info Upload speed in bits per seconds\n";
-                print "up.cdef up,8,*\n";
-        } else {
-                print "up.label Upload B/s\n";
-                print "up.info Upload speed in Bytes per seconds\n";
-        }
-        print "up.type DERIVE\n";
-        print "up.min 0\n";
-        print "up.draw LINE2\n";
-        exit 0;
+  my $diff = $ENV{"diff"} || "";
+  my $category = $ENV{"category"} || "";
+  print "graph_order down up\n";
+  print "graph_title rTorrent speeds\n";
+  print "graph_args --base 1024\n";
+  print "graph_vlabel Bytes per \${graph_period}\n";
+  print "graph_category filetransfer".${category}."\n";
+  print "down.label Download B/s\n";
+  print "down.info Download speed in Bytes per seconds\n";
+  print "down.type DERIVE\n";
+  print "down.min 0\n";
+  print "down.draw AREA\n";
+  if ( ( defined $diff ) && ( $diff eq "yes" ) ) {
+    print "up.label Upload b/s\n";
+    print "up.info Upload speed in bits per seconds\n";
+    print "up.cdef up,8,*\n";
+  } else {
+    print "up.label Upload B/s\n";
+    print "up.info Upload speed in Bytes per seconds\n";
+  }
+  print "up.type DERIVE\n";
+  print "up.min 0\n";
+  print "up.draw LINE2\n";
+  exit 0;
 }
 
 use IO::Socket;
@@ -92,11 +92,11 @@ my $src         = $ENV{"src"} || "";
 my @sockets     = split /,/, $ENV{"socket"} || "";
 my $ip          = $ENV{"ip"} || "127.0.0.1";
 my @ports       = split /,/, $ENV{"port"} || "";
-my $api         = $ENV{"api"} || "legacy";
+my $api         = $ENV{"api"} || "pre09";
 
 my $pattern     = qr/<value><(int|i4|i8|ex\.i8)>([-]{0,1}\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
 my $line        = "";
-if ($api =~ /legacy/) {
+if ($api =~ /pre09/) {
   $line         = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>system.multicall</methodName><params><param><value><array><data><value><struct><member><name>methodName</name><value><string>get_up_total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_down_total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_upload_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_download_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value></data></array></value></param></params></methodCall>";
 } else {
   $line         = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>system.multicall</methodName><params><param><value><array><data><value><struct><member><name>methodName</name><value><string>throttle.global_up.total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>throttle.global_down.total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>throttle.global_up.max_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>throttle.global_down.max_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value></data></array></value></param></params></methodCall>";
@@ -110,53 +110,53 @@ my $up = -1;
 my $down = -1;
 
 if ( ( defined $src ) && ( $src eq "socket" ) ) {
-        for $socket (@sockets)
-        {
-                socket( SOCK, PF_UNIX, SOCK_STREAM, 0 ) or die;
-                connect( SOCK, sockaddr_un( $socket ) ) or die $!;
-                my $line = "${hlen}:${header},${line}";
-                print SOCK $line;
-                flush SOCK;
-                my $up_tmp = -1;
-                my $down_tmp = -1;
-                while (( $up_tmp == -1 ) && ( $line = <SOCK> ) ) {
-                        if ( $line =~ /$pattern/ ) {
-                                $up_tmp = $2;
-                        }
-                }
-                while (( $down_tmp == -1 ) && ( $line = <SOCK> ) ) {
-                        if ( $line =~ /$pattern/ ) {
-                                $down_tmp = $2;
-                        }
-                }
-                close (SOCK);
-                $up = $up + $up_tmp;
-                $down = $down + $down_tmp;
-        }
+  for $socket (@sockets)
+  {
+    socket( SOCK, PF_UNIX, SOCK_STREAM, 0 ) or die;
+    connect( SOCK, sockaddr_un( $socket ) ) or die $!;
+    my $line = "${hlen}:${header},${line}";
+    print SOCK $line;
+    flush SOCK;
+    my $up_tmp = -1;
+    my $down_tmp = -1;
+    while (( $up_tmp == -1 ) && ( $line = <SOCK> ) ) {
+      if ( $line =~ /$pattern/ ) {
+        $up_tmp = $2;
+      }
+    }
+    while (( $down_tmp == -1 ) && ( $line = <SOCK> ) ) {
+      if ( $line =~ /$pattern/ ) {
+        $down_tmp = $2;
+      }
+    }
+    close (SOCK);
+    $up = $up + $up_tmp;
+    $down = $down + $down_tmp;
+  }
 } else {
-        for $port (@ports)
-        {
-                socket( SOCK, PF_INET, SOCK_STREAM, getprotobyname( "tcp" ) );
-                connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
-                my $line = "${hlen}:${header},${line}";
-                print SOCK $line;
-                flush SOCK;
-                my $up_tmp = -1;
-                my $down_tmp = -1;
-                while (( $up_tmp == -1 ) && ( $line = <SOCK> ) ) {
-                        if ( $line =~ /$pattern/ ) {
-                                $up_tmp = $2;
-                        }
-                }
-                while (( $down_tmp == -1 ) && ( $line = <SOCK> ) ) {
-                        if ( $line =~ /$pattern/ ) {
-                                $down_tmp = $2;
-                        }
-                }
-                close (SOCK);
-                $up = $up + $up_tmp;
-                $down = $down + $down_tmp;
-        }
+  for $port (@ports)
+  {
+    socket( SOCK, PF_INET, SOCK_STREAM, getprotobyname( "tcp" ) );
+    connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
+    my $line = "${hlen}:${header},${line}";
+    print SOCK $line;
+    flush SOCK;
+    my $up_tmp = -1;
+    my $down_tmp = -1;
+    while (( $up_tmp == -1 ) && ( $line = <SOCK> ) ) {
+      if ( $line =~ /$pattern/ ) {
+        $up_tmp = $2;
+      }
+    }
+    while (( $down_tmp == -1 ) && ( $line = <SOCK> ) ) {
+      if ( $line =~ /$pattern/ ) {
+        $down_tmp = $2;
+      }
+    }
+    close (SOCK);
+    $up = $up + $up_tmp;
+    $down = $down + $down_tmp;
+  }
 }
 
 
