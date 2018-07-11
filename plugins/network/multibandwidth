@@ -28,7 +28,7 @@ env.hosts example.org example2.org example3.org
 env.samples 15
 env.small_packet_size 44
 env.big_packet_size 108
-env.max_mbps 15728640
+env.max_valid_bps 15728640
 
 - env.hosts explanation: hostname or IP of the hosts to calculate the bandwidth.
 
@@ -41,7 +41,7 @@ env.max_mbps 15728640
         packets. The default is 108. The size should be chosen so that big packet roundtrip times
         are long enough to be accurately measured.
 
-- env.max_mbps explanation: bing have some random spikes. This variable is used to indicate
+- env.max_valid_bps explanation: bing have some random spikes. This variable is used to indicate
         the maximum value of mbps that can be recorded (in bps).
 
 =head1 MAGIC MARKERS
@@ -112,8 +112,9 @@ for host in $hosts; do
                 RATE="U"
                 echo "Error: no data (timeout)" >&2
         fi
-        if [ "$RATE" -gt "$max_mbps" ]; then
-                RATE="$max_mbps"
+        if [ -n "$max_valid_bps" ] && [ "$RATE" -gt "$max_valid_bps" ]; then
+                # the value is outside of the allowed range; discard it
+                RATE="U"
         fi
         echo "${fieldname}.value $RATE"
 done
