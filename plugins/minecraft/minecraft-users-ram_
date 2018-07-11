@@ -51,15 +51,13 @@ PLAYERCOUNT=$(netstat -tn | grep -i "$MC_PORT" | grep ESTABLISHED | wc -l)
 MC_PID=$(netstat -tlpn | grep "$MC_PORT" | sed -n -e '1p' | awk '{ print $7 }' | cut -d '/' -f1)
 if [ ! -z "${MC_PID}" ]
 then #is running
-    MEMORYRSS=$(ps -p "$MC_PID" -o rss | cut -d '\n' -f2)
-    MEMGiB=$(echo "scale=2;${MEMORYRSS}/1024/1024" | bc -l)
-    CPUPERCENT=$(top -bp "$MC_PID" -n 1 | sed -n '$p' | tr -s ' ' | cut -d ' ' -f10)
-    CPU=$(echo "scale=2;${CPUPERCENT}/100" | bc -l)
+    MEMGiB=$(ps -p "$MC_PID" -o rss | sed -n '2p' | awk '{ print $1 / 1024 / 1024 }')
+    CPU=$(top -bp "$MC_PID" -n 1 | sed -n '$p' | awk '{ print $10 / 100; }')
 else
     MEMGiB=0
     CPU=0
 fi
 
-printf "users.value %i\n" "${PLAYERCOUNT}"
-printf "ramusage.value %3.2f\n" "${MEMGiB}"
-printf "cpuusage.value %3.2f\n" "${CPU}"
+echo "users.value $PLAYERCOUNT"
+echo "ramusage.value $MEMGiB"
+echo "cpuusage.value $CPU"
