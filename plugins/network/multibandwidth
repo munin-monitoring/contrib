@@ -10,7 +10,7 @@ multibandwidth - Plugin to monitor the bandwidth between localhost and serveral 
 
 =head1 APPLICABLE SYSTEMS
 
-All systems with “bash”, and “munin”
+All systems with "bing" installed.
 
 =head1 REQUIREMENTS
 
@@ -20,26 +20,33 @@ You can install bing by using (Ubuntu/Debian): apt-get install bing
 
 =head1 CONFIGURATION
 
-The following is the default configuration
+The following example configuration shows all settings. Only "hosts" is required for
+minimal configuration.
 
 [multibandwidth]
 user root
 env.hosts example.org example2.org example3.org
-env.samples 10
+env.samples 15
 env.small_packet_size 44
 env.big_packet_size 108
+env.max_valid_bps 15728640
 
-- env.hosts explanation: hostname or IP of the hosts to calculate the bandwidth.
+- env.hosts: space separated list of hostnames or IPs of the hosts to calculate the bandwidth.
+        This setting is required.
 
-- env.samples explanation: Reset stats after sending samples ECHO_REQUEST packets.
+- env.samples: Reset stats after sending this number of ECHO_REQUEST packets.
+        Defaults to 15 samples.
 
-- env.small_packet_size explanation: Specifies the number of data bytes to be sent in the small
+- env.small_packet_size: Specifies the number of data bytes to be sent in the small
         packets. The default and minimum value is 44.
 
-- env.big_packet_size explanation: Specifies the number of data bytes to be sent in the big
+- env.big_packet_size: Specifies the number of data bytes to be sent in the big
         packets. The default is 108. The size should be chosen so that big packet roundtrip times
         are long enough to be accurately measured.
 
+- env.max_valid_bps: bing have some random spikes. This variable is used to indicate
+        the maximum value of mbps that can be recorded (in bps).
+        Defaults to the empty string (no validity check).
 
 =head1 MAGIC MARKERS
 
@@ -61,52 +68,63 @@ GPLv2
 =cut
 
 
+hosts=${hosts:-}
+samples=${samples:-15}
+small_packet_size=${small_packet_size:-44}
+big_packet_size=${big_packet_size:-108}
+max_valid_bps=${max_valid_bps:-15728640}
+
 
 case $1 in
    config)
-                echo graph_title MultiBandwidth
-                echo 'graph_vlabel bps'
-                echo 'graph_args --base 1024 -l 0'
-                echo 'graph_scale yes'
-                echo 'graph_category network'
-                echo 'graph_info This graph shows the bandwidth between localhost and serveral hosts'
-                for host in $hosts; do
-                        fieldname="host_$(clean_fieldname "$host")"
-                        echo "$fieldname.label $host"
-                        echo "$fieldname.draw LINE2"
-                        echo "$fieldname.info Bandwidth statistics for $host"
-                done
-        exit 0;;
+        echo graph_title MultiBandwidth
+        echo 'graph_vlabel bps'
+        echo 'graph_args --base 1024 -l 0'
+        echo 'graph_scale yes'
+        echo 'graph_category network'
+        echo 'graph_info This graph shows the bandwidth between localhost and serveral hosts'
+        for host in $hosts; do
+                fieldname="host_$(clean_fieldname "$host")"
+                echo "$fieldname.label $host"
+                echo "$fieldname.draw LINE2"
+                echo "$fieldname.info Bandwidth statistics for $host"
+        done
+        exit 0
+        ;;
     autoconf)
-                if command -v bing >/dev/null 2>&1; then
-                        echo 'yes'
-                        exit 0;
-                else
-                        echo 'no (bing not installed)'
-                        exit 0;
-                fi
-
+        if command -v bing 2>/dev/null; then
+                echo 'yes'
+        else
+                echo 'no (bing not installed)'
+        fi
+        exit 0
+        ;;
 esac
 
 
-#Calculating the bandwidth
+# Calculating the bandwidth
 for host in $hosts; do
         fieldname="host_$(clean_fieldname "$host")"
-        printf "$fieldname.value ";
 
         SPEED=$(timeout 6 bing localhost "$host" -n -c 1 -e "$samples" -s "$small_packet_size" -S "$big_packet_size" 2>/dev/null \
-                |grep "estimated link" -A 2 \
+                | grep "estimated link" -A 2 \
                 | grep bps \
                 | awk '{print $2}' \
                 | cut -d "b" -f1)
 
-        if (echo "$SPEED" | grep -q "M"); then
-                echo "$SPEED" | awk '{a+=$1} END{print a*1000000}'
-        elif (echo "$SPEED" | grep -q "K"); then
-                echo "$SPEED" | awk '{a+=$1} END{print a*1000}'
-        elif (echo "$SPEED" | grep -q "G"); then
-                echo "$SPEED" | awk '{a+=$1} END{print a*1000000000}'
+        if echo "$SPEED" | grep -q "M"; then
+                RATE=$(echo "$SPEED" | awk '{ print int($1 * 1024 * 1024); }')
+        elif echo "$SPEED" | grep -q "K"; then
+                RATE=$(echo "$SPEED" | awk '{ print int($1 * 1024); }')
+        elif echo "$SPEED" | grep -q "G"; then
+                RATE=$(echo "$SPEED" | awk '{ print int($1 * 1024 * 1024 * 1024); }')
         else
+                RATE="U"
                 echo "Error: no data (timeout)" >&2
         fi
+        if [ -n "$max_valid_bps" ] && [ "$RATE" -gt "$max_valid_bps" ]; then
+                # the value is outside of the allowed range; discard it
+                RATE="U"
+        fi
+        echo "${fieldname}.value $RATE"
 done
