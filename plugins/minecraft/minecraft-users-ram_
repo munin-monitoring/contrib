@@ -37,24 +37,23 @@ MC_PORT=${0##*_}
  
 if [ "$1" = "config" ]
 then
-    printf 'graph_title Minecraft-Server (Port %s)\n' ${MC_PORT}
-    printf 'graph_category games'
-    printf 'graph_scale no\n'
-    printf 'graph_vlabel Players / RAM / CPU\n'
-    printf 'users.label Players\n'
-    printf 'ramusage.label RAM usage in GiB\n'
-    printf 'cpuusage.label CPU usage\n'
+    echo "graph_title Minecraft-Server (Port $MC_PORT)"
+    echo 'graph_category games'
+    echo 'graph_scale no'
+    echo 'graph_vlabel Players / RAM / CPU'
+    echo 'users.label Players'
+    echo 'ramusage.label RAM usage in GiB'
+    echo 'cpuusage.label CPU usage'
     exit 0
 fi
 
-PLAYERCOUNT=$(netstat -tn | grep -i ${MC_PORT} | grep ESTABLISHED | wc -l)
-MC_PID=$(netstat -tlpn | grep ${MC_PORT}  | sed -n -e '1p' | awk '{ print $7 }' | cut -d'/' -f1)
+PLAYERCOUNT=$(netstat -tn | grep -i "$MC_PORT" | grep ESTABLISHED | wc -l)
+MC_PID=$(netstat -tlpn | grep "$MC_PORT" | sed -n -e '1p' | awk '{ print $7 }' | cut -d '/' -f1)
 if [ ! -z "${MC_PID}" ]
 then #is running
-    MEMORYRSS=$(ps -p ${MC_PID} -o rss | cut -d'
-' -f2)
+    MEMORYRSS=$(ps -p "$MC_PID" -o rss | cut -d '\n' -f2)
     MEMGiB=$(echo "scale=2;${MEMORYRSS}/1024/1024" | bc -l)
-    CPUPERCENT=$(top -bp ${MC_PID} -n 1 | sed -n '$p' | tr -s ' ' | cut -d ' ' -f10)
+    CPUPERCENT=$(top -bp "$MC_PID" -n 1 | sed -n '$p' | tr -s ' ' | cut -d ' ' -f10)
     CPU=$(echo "scale=2;${CPUPERCENT}/100" | bc -l)
 else
     MEMGiB=0
