@@ -95,7 +95,6 @@ esac
 #Calculating the bandwidth
 for host in $hosts; do
         fieldname="host_$(clean_fieldname "$host")"
-        printf "$fieldname.value ";
 
         SPEED=$(timeout 6 bing localhost "$host" -n -c 1 -e "$samples" -s "$small_packet_size" -S "$big_packet_size" 2>/dev/null \
                 |grep "estimated link" -A 2 \
@@ -103,22 +102,17 @@ for host in $hosts; do
                 | awk '{print $2}' \
                 | cut -d "b" -f1)
 
-        if (echo "$SPEED" | grep -q "M"); then
-                VALUE=`echo "$SPEED" | sed 's/.$//'`
-                RATE=`echo "$VALUE * 1048576" | bc -l`
-
-                if [ `echo "$RATE > $max_mbps" | bc` -eq "1" ]; then
-                        echo "$max_mbps"
-                else
-                        echo "$RATE"
-                fi
-        elif (echo "$SPEED" | grep -q "K"); then
-                VALUE=`echo "$SPEED" | sed 's/.$//'`
-                echo "$VALUE * 1024" | bc -l
-        elif (echo "$SPEED" | grep -q "G"); then
-                VALUE=`echo "$SPEED" | sed 's/.$//'`
-                echo "$VALUE * 1073742000" | bc -l
+        if echo "$SPEED" | grep -q "M"; then
+                RATE=$(echo "$SPEED" | awk '{ print int($1 * 1024 * 1024); }')
+        elif echo "$SPEED" | grep -q "K"; then
+                RATE=$(echo "$SPEED" | awk '{ print int($1 * 1024); }')
+        elif echo "$SPEED" | grep -q "G"; then
+                RATE=$(echo "$SPEED" | awk '{ print int($1 * 1024 * 1024 * 1024); }')
         else
                 echo "Error: no data (timeout)" >&2
         fi
+        if [ "$RATE" -gt "$max_mbps" ]; then
+                RATE="$max_mbps"
+        fi
+        echo "${fieldname}.value $RATE"
 done
