@@ -27,6 +27,7 @@
 #       ip              rTorrent's ip address                   - using scgi_port       - needed, when "src" is NOT set to "socket"
 #       port            rTorrent's scgi port (scgi_port)        - using scgi_port       - needed, when "src" is NOT set to "socket"
 #       category        Change graph category
+#       api             use "pre09" (pre 0.9.0) or "current" (0.9.0+) API calls
 #
 # Configuration example
 #
@@ -35,6 +36,7 @@
 #       env.src socket
 #       env.socket /home/user/torrent/.socket/rpc.socket,/home/user/torrent/.socket/rpc.socket
 #       env.category Category
+#       env.api current
 #
 #       [rtom_allsessions_*]
 #       user username
@@ -45,20 +47,20 @@
 
 
 if ( $ARGV[0] and $ARGV[0] eq "autoconf" ) {
-        exit 1;
+  exit 1;
 }
 
 if ( $ARGV[0] and $ARGV[0] eq "config" ) {
-        my $category = $ENV{"category"} || "";
-        print "graph_title rTorrent memory usage\n";
-        print "graph_args --base 1024 --lower-limit 0\n";
-        print "graph_vlabel Bytes\n";
-        print "graph_category filetransfer".${category}."\n";
-        print "mem.label Memory usage\n";
-        print "mem.info Memory usage of rTorrent\n";
-        print "mem.type GAUGE\n";
-        print "mem.draw LINE2\n";
-        exit 0;
+  my $category = $ENV{"category"} || "";
+  print "graph_title rTorrent memory usage\n";
+  print "graph_args --base 1024 --lower-limit 0\n";
+  print "graph_vlabel Bytes\n";
+  print "graph_category filetransfer".${category}."\n";
+  print "mem.label Memory usage\n";
+  print "mem.info Memory usage of rTorrent\n";
+  print "mem.type GAUGE\n";
+  print "mem.draw LINE2\n";
+  exit 0;
 }
 
 use IO::Socket;
@@ -66,44 +68,50 @@ my $src         = $ENV{"src"} || "";
 my @sockets     = split /,/, $ENV{"socket"} || "";
 my $ip          = $ENV{"ip"} || "127.0.0.1";
 my @ports       = split /,/, $ENV{"port"} || "";
+my $api         = $ENV{"api"} || "current";
 
-my $mem = 0;
+my $mem         = 0;
 my $pattern     = qr/<value><(int|i4|i8|ex\.i8)>(\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
-my $line        = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>get_memory_usage</methodName></methodCall>";
+my $line        = "";
+if ($api =~ /pre09/) {
+  $line         = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>get_memory_usage</methodName></methodCall>";
+} else {
+  $line         = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>pieces.memory.current</methodName></methodCall>";
+}
 my $llen        = length $line;
 my $header      = "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
 my $hlen        = length $header;
 
 if ( ( defined $src ) && ( $src eq "socket" ) ) {
-        for $socket (@sockets)
-        {
-                socket( SOCK, PF_UNIX, SOCK_STREAM, 0 ) or die;
-                connect( SOCK, sockaddr_un( $socket ) ) or die $!;
-                my $line = "${hlen}:${header},${line}";
-                print SOCK $line;
-                flush SOCK;
-                while ( $line = <SOCK> ) {
-                        if ( $line =~ /$pattern/ ) {
-                                $mem = $mem + $2;
-                        }
-                }
-                close (SOCK);
-        }        
+  for $socket (@sockets)
+  {
+    socket( SOCK, PF_UNIX, SOCK_STREAM, 0 ) or die;
+    connect( SOCK, sockaddr_un( $socket ) ) or die $!;
+    my $line = "${hlen}:${header},${line}";
+    print SOCK $line;
+    flush SOCK;
+    while ( $line = <SOCK> ) {
+      if ( $line =~ /$pattern/ ) {
+        $mem = $mem + $2;
+      }
+    }
+    close (SOCK);
+  }
 } else {
-        for $port (@ports)
-        { 
-                socket( SOCK, PF_INET, SOCK_STREAM, getprotobyname( "tcp" ) );
-                connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
-                my $line = "${hlen}:${header},${line}";
-                print SOCK $line;
-                flush SOCK;
-                while ( $line = <SOCK> ) {
-                        if ( $line =~ /$pattern/ ) {
-                                $mem = $mem + $2;
-                        }
-                }
-                close (SOCK);
-        }
+  for $port (@ports)
+  {
+    socket( SOCK, PF_INET, SOCK_STREAM, getprotobyname( "tcp" ) );
+    connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
+    my $line = "${hlen}:${header},${line}";
+    print SOCK $line;
+    flush SOCK;
+    while ( $line = <SOCK> ) {
+      if ( $line =~ /$pattern/ ) {
+        $mem = $mem + $2;
+      }
+    }
+    close (SOCK);
+  }
 }
 
 print "mem.value ${mem}\n";
