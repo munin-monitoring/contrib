@@ -37,8 +37,8 @@ if [ "$1" = "config" ]; then
         echo 'graph_info This graph shows the percentage of processor time spent in kernel mode by the every single VM process.'
         echo 'graph_category Virtualization'
         echo 'graph_period second'
-        vboxmanage list vms | sed -r 's/^\"(.*)\" \{.*\}$/\1/' | while read VM_NAME; do
-                VM_NAME_PRINT=`echo -e "${VM_NAME}" | sed 's/[^A-Za-z0-9_]/_/g'`
+        vboxmanage list vms | sed -r 's/^\"(.*)\" \{.*\}$/\1/' | while read -r VM_NAME; do
+                VM_NAME_PRINT=$(echo -e "${VM_NAME}" | sed 's/[^A-Za-z0-9_]/_/g')
                 echo "${VM_NAME_PRINT}_kernel.label ${VM_NAME}"
         done
         exit 0
@@ -47,8 +47,7 @@ fi
 vboxmanage metrics setup --period 5 --samples 3
 sleep 5
 
-vboxmanage list vms | sed -r 's/^\"(.*)\" \{.*\}$/\1/' | while read VM_NAME; do
-        VM_NAME_PRINT=`echo -e "${VM_NAME}" | sed 's/[^A-Za-z0-9_]/_/g'`
-        vboxmanage metrics query "${VM_NAME}" CPU/Load/Kernel | grep -E "^${VM_NAME}" | sed -r 's/^.*([0-9]+\.[0-9]+)%/'''${VM_NAME_PRINT}'''_kernel.value \1/'
+vboxmanage list vms | sed -r 's/^\"(.*)\" \{.*\}$/\1/' | while read -r VM_NAME; do
+VM_NAME_PRINT=$(echo -e "${VM_NAME}" | sed 's/[^A-Za-z0-9_]/_/g')
+        vboxmanage metrics query "${VM_NAME}" CPU/Load/Kernel | grep -E "^${VM_NAME}" | sed -r 's/^.*([0-9]+\.[0-9]+)%/'"${VM_NAME_PRINT}"'_kernel.value \1/'
 done
-
