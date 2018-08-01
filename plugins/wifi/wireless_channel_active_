@@ -1,0 +1,139 @@
+#!/bin/sh
+
+: << =cut
+
+=head1 NAME
+
+wireless_channel_active - Show currently used channel of wifi enabled devices
+
+=head1 APPLICABLE SYSTEMS
+
+Information is parsed from the output of the tool "iwinfo" (OpenWrt) or "iw" (most systems).
+
+
+=head1 CONFIGURATION
+
+Symlink this plugin with the name of the wifi device added (e.g. "phy0").
+
+Root permissions are probably required for accessing "iw".
+
+  [wireless_channel_active*]
+  user root
+
+
+=head1 VERSION
+
+  1.1
+
+
+=head1 AUTHOR
+
+Lars Kruse <devel@sumpfralle.de>
+
+
+=head1 LICENSE
+
+GPLv3 or above
+
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf suggest
+
+=cut
+
+
+set -eu
+
+if which iwinfo >/dev/null; then
+	# "iwinfo" has a stable output format but is only available on OpenWrt
+	get_physical_interfaces() { iwinfo | sed -n 's/^.*PHY name: \+\(.*\)$/\1/p'; }
+	get_physical_interface_current_channel() { iwinfo "$1" info \
+		| grep Channel | sed 's/^.*Channel: \+\([0-9]\+\) .*$/\1/'; }
+	get_physical_interfaces_channel_descriptions() {
+		# return: CHANNEL CHANNEL_DESCRIPTION
+		# e.g.: "104 5.520 GHz (Channel 104)"
+		iwinfo "$1" freqlist | sed 's/^[^0-9]*//' \
+			| sed 's/^.*Channel \+\([0-9]\+\).*$/\1 \0/'; }
+else
+	# "iw" is available everywhere - but its output format is not recommended for non-humans
+	get_physical_interfaces() { iw list | awk '/^\w/ {print $2}'; }
+	get_physical_interface_current_channel() { iw dev | awk '
+		/^\w+#/ { phy_name=gensub("#", "", 1, $1); }
+		/channel/ { if (phy_name == "phy0") print($2); }'; }
+	get_physical_interfaces_channel_descriptions() {
+		# example input: "* 5680 MHz [136]"
+		# return: CHANNEL CHANNEL_DESCRIPTION
+		# e.g.: "136 5680 MHz [136]"
+		iw phy phy0 channels | awk '
+			/\*/ { chan_num=gensub("^.*\\[", "", 1, gensub("\\].*$", "", 1, $0));
+				print(chan_num, $2, $3, $4); }'; }
+fi
+
+
+get_selected_physical_interface() {
+	# The physical interface name should be safe (phyX) and needs no cleanup.
+	# pick the last segment after the final "_"
+	echo "$0" | sed 's/.*_//'
+}
+
+
+do_config() {
+	local phy
+	phy=$(get_selected_physical_interface)
+	[ -z "$phy" ] && echo >&2 "Missing wireless PHY" && return 1
+	echo "graph_title Wireless channel usage - $phy"
+	echo "graph_args --base 1000 -r --lower-limit 0 --upper-limit 100"
+	echo "graph_vlabel Channel usage by time in percent"
+	echo "graph_category network"
+	echo "graph_info This graph shows the currently used channel of your WiFi device(s)"
+	get_physical_interfaces_channel_descriptions "$phy" | while read -r channel description; do
+		fieldname="channel_${channel}"
+		echo "${fieldname}.label $description"
+		echo "${fieldname}.draw AREASTACK"
+		# percent scaling
+		echo "${fieldname}.cdef 100,${fieldname},*"
+	done
+}
+
+
+do_fetch() {
+	local phy
+	local current_channel
+	phy=$(get_selected_physical_interface)
+	[ -z "$phy" ] && echo >&2 "Missing wireless PHY" && return 1
+	current_channel=$(get_physical_interface_current_channel "$phy")
+	get_physical_interfaces_channel_descriptions "$phy" | while read -r channel description; do
+		[ "$current_channel" = "$channel" ] && value=1 || value=0
+		echo "channel_${channel}.value $value"
+	done
+}
+
+
+ACTION="${1:-}"
+
+case "$ACTION" in
+	config)
+		do_config || exit 1
+		if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = 1 ]; then do_fetch; fi
+		;;
+	autoconf)
+		if [ -z "$(get_physical_interfaces)" ]; then
+			echo "no (no wifi interfaces found)"
+		else
+			echo "yes"
+		fi
+		;;
+	suggest)
+		get_physical_interfaces
+		;;
+	"")
+		do_fetch
+		;;
+	*)
+		echo >&2 "Invalid action (valid: config / autoconf / suggest / <empty>)"
+		echo >&2
+		exit 2
+		;;
+esac
