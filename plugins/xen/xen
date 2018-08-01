@@ -28,9 +28,9 @@ fi
 
 if [ "$1" = "config" ]; then
 
-	if [ ! -e $statefile ]; then
-		touch $statefile
-	fi
+        if [ ! -e "$statefile" ]; then
+                touch "$statefile"
+        fi
 
         echo 'graph_title Xen Domain Utilisation'
         echo 'graph_args --base 1000 -l 0 --upper-limit 100 --rigid'
@@ -39,26 +39,24 @@ if [ "$1" = "config" ]; then
         echo 'graph_category Virtualization'
         echo 'graph_info This graph shows how many percent of the CPU time was used by each domain'
 
-	xm list | grep -v "^Name .* Time(s)$" | \
-        while read name domid mem cpu state time console; do
-                name=`echo $name | sed -e"s/[-.]/_/g"`
-		TEST=`less $statefile | grep "^${name}$" | wc -l`
-		if [ $TEST -ne 1 ]; then
-		    echo "$name" >> $statefile
-		fi
-	done
+        xm list | grep -v "^Name .* Time(s)$" | while read -r name domid mem cpu state time console; do
+                name=$(echo "$name" | sed -e"s/[-.]/_/g")
+                TEST=$(grep "^${name}$" "$statefile" | wc -l)
+                if [ "$TEST" -ne 1 ]; then
+                        echo "$name" >> "$statefile"
+                fi
+       done
 
-	FIRST=1
-	cat $statefile | sort | \
-        while read name; do
+        FIRST=1
+        sort < "$statefile" | while read -r name; do
                 echo "$name.label $name"
                 echo "$name.type COUNTER"
-		if [ $FIRST -eq 1 ]; then
-            	    echo "$name.draw AREA"
-		    FIRST=0
-		else
-            	    echo "$name.draw STACK"
-		fi
+                if [ "$FIRST" -eq 1 ]; then
+                        echo "$name.draw AREA"
+                        FIRST=0
+                else
+                        echo "$name.draw STACK"
+                fi
                 echo "$name.min 0"
                 echo "$name.max 100"
                 echo "$name.info % of the CPU time spent for $name"
@@ -66,12 +64,10 @@ if [ "$1" = "config" ]; then
         exit 0
 fi
 
-xm list | grep -v "^Name .* Time(s)$" | \
-while read name domid mem cpu state time console; do
-        name=`echo $name | sed -e "s/[-.]/_/g"`
-	# only seconds
-        time=`echo $time | sed -e "s/\..//"`
-	# scale 60s/60s => 100%/60s
-	time=`echo "$time*100/60" | bc`
+# shellcheck disable=SC2034
+xm list | grep -v "^Name .* Time(s)$" | while read -r name domid mem cpu state time console; do
+        name=$(echo "$name" | sed -e "s/[-.]/_/g")
+        # scale 60s/60s => 100%/60s
+        time=$(echo "$time" | awk '{print ($1 * 100 / 60) }')
         echo "$name.value $time"
 done
