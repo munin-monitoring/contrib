@@ -41,7 +41,7 @@ env.jmxurl service:jmx:rmi:///jndi/rmi://localhost:1616/jmxrmi
 To check that all installed properly, try invoke plugins from command line, using links like:
 
 root@re:/etc/munin/plugins# ./jmx_java_process_memory config
-graph_category Java
+graph_category appserver
 ...
 root@re:/etc/munin/plugins# ./jmx_java_process_memory
 java_memory_nonheap_committed.value 35291136
