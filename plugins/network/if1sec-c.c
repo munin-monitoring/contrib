@@ -78,7 +78,7 @@ int config() {
 			"down.graph no" "\n"
 			"down.cdef down,8,*" "\n"
 			"down.min 0" "\n"
-					        
+
 			"up.label bps" "\n"
 			"up.type DERIVE" "\n"
 			"up.negative down" "\n"
@@ -186,10 +186,10 @@ int acquire() {
 			char if_id[64];
 			uint_fast64_t r_bytes, r_packets, r_errs, r_drop, r_fifo, r_frame, r_compressed, r_multicast;
 			uint_fast64_t t_bytes, t_packets, t_errs, t_drop, t_fifo, t_frame, t_compressed, t_multicast;
-			sscanf(line, "%s" 
+			sscanf(line, "%s"
 				" "
-				"%llu %llu %llu %llu %llu %llu %llu %llu" 
-				" " 
+				"%llu %llu %llu %llu %llu %llu %llu %llu"
+				" "
 				"%llu %llu %llu %llu %llu %llu %llu %llu"
 				, if_id
 				, &r_bytes, &r_packets, &r_errs, &r_drop, &r_fifo, &r_frame, &r_compressed, &r_multicast
@@ -200,11 +200,11 @@ int acquire() {
 			if_id[strlen(if_id) - 1] = '\0';
 
 			char out_buffer[1024];
-			sprintf(out_buffer, 
+			sprintf(out_buffer,
 				"multigraph if_%s_1sec" "\n"
 				"up.value %ld:%llu" "\n"
 				"down.value %ld:%llu" "\n"
-				, if_id 
+				, if_id
 				, epoch, r_bytes
 				, epoch, t_bytes
 			);
@@ -276,7 +276,7 @@ int main(int argc, char **argv) {
 }
 
 /***** DEMO
- 
+
 /proc/net/dev sample
 
 Inter-|   Receive                                                |  Transmit

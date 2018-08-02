@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-""" 
+"""
 A munin plugin that prints archive and their upgradable packets
 
 TODO: make it usable and readable as commandline tool
@@ -13,18 +13,18 @@ TODO: separate into 2 graphs
    sorting a packet to the newest archive
    (WONTFIX unless someone asks for)
 
-TODO: 
+TODO:
  • addinge alternative names for archives "stable -> squeeze"
-TODO: add gray as 
+TODO: add gray as
       foo.colour 000000
       to 'now', '', '', '', '', 'Debian dpkg status file'
 TODO: update only if system was updated (aptitutde update has been run)
       • check modification date of /var/cache/apt/pkgcache.bin
       • cache file must not be older than mod_date of pkgcache.bin + X
-TODO: shorten ext_info with getShortestConfigOfOptions 
-TODO: check whether cachefile matches the config 
+TODO: shorten ext_info with getShortestConfigOfOptions
+TODO: check whether cachefile matches the config
       • i have no clever idea to do this without 100 lines of code
-BUG: If a package will be upgraded, and brings in new dependencies, 
+BUG: If a package will be upgraded, and brings in new dependencies,
      these new deps will not be counted. WONTFIX
 """
 import sys
@@ -32,7 +32,7 @@ import argparse
 import apt_pkg
 from apt.progress.base import OpProgress
 from time import time, strftime
-import os 
+import os
 import StringIO
 import string
 import re
@@ -41,7 +41,7 @@ from types import StringTypes, TupleType, DictType, ListType, BooleanType
 
 class EnvironmentConfigBroken(Exception): pass
 
-# print environmental things 
+# print environmental things
 # for k,v in os.environ.iteritems(): print >> sys.stderr, "%r : %r" % (k,v)
 
 def getEnv(name, default=None, cast=None):
@@ -68,14 +68,14 @@ MAX_LIST_SIZE_EXT_INFO = getEnv('MAX_LIST_SIZE_EXT_INFO', default=50, cast=int)
 
 STATE_DIR = getEnv('MUNIN_PLUGSTATE', default='.')
 CACHE_FILE = os.path.join(STATE_DIR, "deb_packages.state")
-""" 
+"""
    There is no need to execute this script every 5 minutes.
    The Results are put to this file, next munin-run can read from it
    CACHE_FILE is usually /var/lib/munin/plugin-state/debian_packages.state
 """
 
 CACHE_FILE_MAX_AGE = getEnv('CACHE_FILE_MAX_AGE', default=3540, cast=int)
-""" 
+"""
    Age in seconds an $CACHE_FILE can be. If it is older, the script updates
 """
 
@@ -103,9 +103,9 @@ class Apt(object):
         doc = "apt_pkg.Cache instance, lazy instantiated"
         def fget(self):
             class NullProgress(OpProgress):
-                """ used for do not giving any progress info, 
-                    while doing apt things used, cause documented 
-                    use of None as OpProgress did not worked in 
+                """ used for do not giving any progress info,
+                    while doing apt things used, cause documented
+                    use of None as OpProgress did not worked in
                     python-apt 0.7
                 """
                 def __init__(self):
@@ -119,8 +119,8 @@ class Apt(object):
                 def update(*args,**kwords):
                     pass
 
-            if self._cache is None: 
-                self._cache = apt_pkg.Cache(NullProgress()) 
+            if self._cache is None:
+                self._cache = apt_pkg.Cache(NullProgress())
             return self._cache
         return locals()
 
@@ -129,7 +129,7 @@ class Apt(object):
         doc = "apt_pkg.DepCache object"
 
         def fget(self):
-            if self._depcache is None: 
+            if self._depcache is None:
                 self._depcache = apt_pkg.DepCache(self.cache)
             return self._depcache
 
@@ -180,7 +180,7 @@ apt = Apt()
         apt.installedPackages
         apt.upgradablePackages
 
-    initialisation is lazy 
+    initialisation is lazy
 """
 
 def weightOfPackageFile(detail_tuple, option_tuple):
@@ -214,7 +214,7 @@ def Tree():
 
 class TreeTwig(defaultdict):
     def __init__(self, defaultFactory):
-        super(TreeTwig, self).__init__(defaultFactory) 
+        super(TreeTwig, self).__init__(defaultFactory)
 
     def printAsTree(self, indent=0):
         for k, tree in self.iteritems():
@@ -245,16 +245,16 @@ class TreeTwig(defaultdict):
 
 
 def getShortestConfigOfOptions(optionList = ['label', 'archive', 'site']):
-    """ 
+    """
         tries to find the order to print a tree of the optionList
-        with the local repositories with the shortest line 
+        with the local repositories with the shortest line
         possible options are:
           'component'
           'label'
           'site'
           'archive'
-          'origin' 
-          'architecture' 
+          'origin'
+          'architecture'
         Architecture values are usually the same and can be ignored.
 
         tells you which representation of a tree as line is shortest.
@@ -262,19 +262,19 @@ def getShortestConfigOfOptions(optionList = ['label', 'archive', 'site']):
         to write the shortest readable output.
     """
     l = optionList # just because l is much shorter
-    
+
     # creating possible iterations
     fieldCount = len(optionList)
     if fieldCount == 1:
         selection = l
     elif fieldCount == 2:
-        selection = [(x,y) 
-                     for x in l 
+        selection = [(x,y)
+                     for x in l
                      for y in l if x!=y ]
     elif fieldCount == 3:
-        selection = [(x,y,z) 
-                     for x in l 
-                     for y in l if x!=y 
+        selection = [(x,y,z)
+                     for x in l
+                     for y in l if x!=y
                      for z in l if z!=y and z!=x]
     else:
         raise Exception("NotImplemented for size %s" % fieldCount)
@@ -289,7 +289,7 @@ def getShortestConfigOfOptions(optionList = ['label', 'archive', 'site']):
     r = min( d.items(), key=lambda x: x[1] )
 
     return list(r[0]), r[1]
-    
+
 def getOptionsTree(cache, keys=None):
     """
     t = getOptionsTree(cache, ['archive', 'site', 'label'])
@@ -322,16 +322,16 @@ def createKey(key, file):
     """
     if type(key) in StringTypes:
         return file.__getattribute__(key)
-    elif type(key) in (TupleType, ListType): 
+    elif type(key) in (TupleType, ListType):
         nKey = tuple()
         for pKey in key:
             nKey = nKey.__add__((file.__getattribute__(pKey),))
         return nKey
     else:
-        raise Exception("Not implemented for keytype %s" % type(key)) 
+        raise Exception("Not implemented for keytype %s" % type(key))
 
 def getOptionsTree2(cache, primary=None, secondary=None):
-    """ 
+    """
     primary muss ein iterable oder StringType sein
     secondary muss iterable oder StringType sein
     t1 = getOptionsTree2(apt.cache, 'origin', ['site', 'archive'])
@@ -369,24 +369,24 @@ def getOptionsTree2(cache, primary=None, secondary=None):
                 dKey = file.__getattribute__(sKey)
                 d = d[dKey]
     return t
-    
+
 #def getAttributeSet(iterable, attribute):
 #    return set(f.__getattribute__(attribute) for f in iterable)
 #
 #def getOrigins(cache):
-#    return getAttributeSet(cache.file_list, 'origin') 
+#    return getAttributeSet(cache.file_list, 'origin')
 #
 #def getArchives(cache):
-#    return getAttributeSet(cache.file_list, 'archive') 
+#    return getAttributeSet(cache.file_list, 'archive')
 #
 #def getComponents(cache):
-#    return getAttributeSet(cache.file_list, 'component') 
+#    return getAttributeSet(cache.file_list, 'component')
 #
 #def getLabels(cache):
-#    return getAttributeSet(cache.file_list, 'label') 
+#    return getAttributeSet(cache.file_list, 'label')
 #
 #def getSites(cache):
-#    return getAttributeSet(cache.file_list, 'site') 
+#    return getAttributeSet(cache.file_list, 'site')
 #
 
 class PackageStat(defaultdict):
@@ -397,16 +397,16 @@ class PackageStat(defaultdict):
         with some abilities to print output munin likes
     """
 
-    sortDict = { 'label': defaultdict(   lambda :  20, 
-                                       {'Debian':  90, 
+    sortDict = { 'label': defaultdict(   lambda :  20,
+                                       {'Debian':  90,
                                         ''      :  1,
                                         'Debian Security' : 90,
                                         'Debian Backports': 90}),
                  'archive': defaultdict( lambda :  5,
-                                { 'now':                0, 
+                                { 'now':                0,
                                   'experimental':      10,
-                                  'unstable':          50, 
-                                  'sid':               50, 
+                                  'unstable':          50,
+                                  'sid':               50,
                                   'testing':           70,
                                   'wheezy':            70,
                                   'squeeze-backports': 80,
@@ -426,9 +426,9 @@ class PackageStat(defaultdict):
     }
     """
         Values to sort options (label, archive, origin ...)
-        (0..99) is allowed. 
+        (0..99) is allowed.
         (this is needed for other graphs to calc aggregated weights)
-        higher is more older and more official or better 
+        higher is more older and more official or better
     """
 
     dpkgStatusValue = { 'site': '', 'origin': '', 'label': '', 'component': '', 'archive': 'now' }
@@ -443,7 +443,7 @@ class PackageStat(defaultdict):
                        'component' : 10**2,
     }
     """
-        Dict that stores multipliers 
+        Dict that stores multipliers
         to compile a sorting value for each archivefile
     """
 
@@ -483,7 +483,7 @@ class PackageStat(defaultdict):
     def addPackage(self, sourceFile, package):
         if self.packetHandler.decider(package):
             self.packetHandler.adder(package, self)
-            
+
     @classmethod
     def configD(cls, key, value):
         i = { 'rrdName': cls.generate_rrd_name_from(key),
@@ -514,8 +514,8 @@ class PackageStat(defaultdict):
             print "{rrdName}.draw AREASTACK".format(**i)
 
     def optionIsDpkgStatus(self, details, options=None):
-        """ 
-            give it details and options and it tells you whether the datails looks like they come from 
+        """
+            give it details and options and it tells you whether the datails looks like they come from
             a 'Debian dpkg status file'.
         """
         # setting defaults
@@ -530,7 +530,7 @@ class PackageStat(defaultdict):
         return isNow
 
     def printValues(self):
-        print "\nmultigraph packages_{option}_{type}".format(option=self.generate_rrd_name_from(self.option), 
+        print "\nmultigraph packages_{option}_{type}".format(option=self.generate_rrd_name_from(self.option),
                                                              type=self.packetHandler.type)
         for options, item in self.options_sorted:
             if not self.packetHandler.includeNow and self.optionIsDpkgStatus(details=options):
@@ -555,7 +555,7 @@ packetHandlerD = {}
 
 class PacketHandler(object):
     """
-    Baseclass, that represents the Interface which is used 
+    Baseclass, that represents the Interface which is used
     """
 
     type = None
@@ -591,7 +591,7 @@ class PacketHandler(object):
         return weightOfPackageFile(details, options)
 
 class PacketHandlerUpgradable(PacketHandler):
-    
+
     type='upgradable'
     includeNow = False
     extInfoItemString = "  {i[0].name} <{i[1]} -> {i[2]}>"
@@ -628,7 +628,7 @@ class PacketHandlerInstalled(PacketHandler):
         # this item (as i) is used for input in extInfoItemString
         item = package
         packageStat[keys].append(item)
-        
+
 # registering PackageHandler for Usage
 packetHandlerD[PacketHandlerInstalled.type] = PacketHandlerInstalled
 
@@ -637,7 +637,7 @@ class Munin(object):
     def __init__(self, commandLineArgs=None):
         self.commandLineArgs = commandLineArgs
         self.argParser = self._argParser()
-        self.executionMatrix = { 
+        self.executionMatrix = {
             'config': self.config,
             'run'   : self.run,
             'autoconf' : self.autoconf,
@@ -685,7 +685,7 @@ class Munin(object):
         else:
             raise Exception('DPKG-statusfile %r not found, really strange!!!'%dpkgStatusFile)
         newestFileTimestamp = max(timeL)
-        age = newestFileTimestamp - cacheMTime 
+        age = newestFileTimestamp - cacheMTime
         if age > 0:
             return True
         else:
@@ -709,7 +709,7 @@ class Munin(object):
         #         cacheNeedUpdate = True
 
         if self._cacheIsOutdated() or self.args.nocache:
-            # save stdout 
+            # save stdout
             stdoutDef = sys.stdout
             try:
                 out =  StringIO.StringIO()
@@ -765,7 +765,7 @@ class Munin(object):
     def _argParser(self):
         parser = argparse.ArgumentParser(description="Show some statistics "\
                             "about debian packages installed on system by archive",
-                           ) 
+                           )
         parser.set_defaults(command='run', debug=True, nocache=True)
 
         parser.add_argument('--nocache', '-n', default=False, action='store_true',
@@ -775,7 +775,7 @@ class Munin(object):
             run ........ munin run (writes values)
             autoconf ... writes 'yes'
         """
-        parser.add_argument('command', nargs='?', 
+        parser.add_argument('command', nargs='?',
                             choices=['config', 'run', 'autoconf', 'drun'],
                             help='mode munin wants to use. "run" is default' + helpCommand)
         return parser
@@ -783,10 +783,10 @@ class Munin(object):
     def _envParser(self):
         """
             reads environVars from [deb_packages] and generate
-            a list of dicts, each dict holds a set of settings made in 
+            a list of dicts, each dict holds a set of settings made in
             munin config.
-            [ 
-              { 'type' = 'installed', 
+            [
+              { 'type' = 'installed',
                 'sort_by' = ['label', 'archive'],
                 'show_ext' = ['origin', 'site'],
               },
@@ -816,7 +816,7 @@ class Munin(object):
                 configPart['show_ext'][m.group('optNumber')] = os.getenv(var)
             else:
                 print >> sys.stderr, "configuration option %r was ignored" % (var)
-        # we have now dicts for 'sort_by' and 'show_ext' keys 
+        # we have now dicts for 'sort_by' and 'show_ext' keys
         # changing them to lists
         for graphConfig in config.itervalues():
             graphConfig['sort_by'] = [val for key, val in sorted(graphConfig['sort_by'].items())]
@@ -839,13 +839,13 @@ class Munin(object):
                       "Graph must be sorted by anything"
                 raise EnvironmentConfigBroken("Environment Config broken")
             # check for valid options for sort_by
-            unusableOptions = set(graph['sort_by']) - PackageStat.viewSet 
-            if unusableOptions: 
+            unusableOptions = set(graph['sort_by']) - PackageStat.viewSet
+            if unusableOptions:
                 print >> sys.stderr, \
                       "%r are not valid options for 'sort_by'" % (unusableOptions)
                 raise EnvironmentConfigBroken("Environment Config broken")
             # check for valid options for sort_by
-            unusableOptions = set(graph['show_ext']) - PackageStat.viewSet 
+            unusableOptions = set(graph['show_ext']) - PackageStat.viewSet
             if unusableOptions:
                 print >> sys.stderr, \
                       "%r are not valid options for 'show_ext'" % (x)

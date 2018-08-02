@@ -2,15 +2,15 @@
 Those plugins are used to monitor different projects or vhost (i.e. either different log files or using regular expression as filters) on the same web server.
 
 ## munin_byprojects_access
-Count the number of hits per projects/vhost.  
+Count the number of hits per projects/vhost.
 ![byproject_access](https://www.mantor.org/~northox/misc/munin-plugins/nginx_byprojects_access1-month.png "byproject_access")
 
 ## munin_byprojects_bandwidth
-Count the total bandwidth used by each projects/vhost. [Logtail] (https://www.fourmilab.ch/webtools/logtail/) is required.  
+Count the total bandwidth used by each projects/vhost. [Logtail] (https://www.fourmilab.ch/webtools/logtail/) is required.
 ![byproject_bandwidth](https://www.mantor.org/~northox/misc/munin-plugins/apache_byprojects_bandwidth-month.png "byproject_bandwidth")
 
 ## munin_byprojects_inout_bandwidth
-Counts the in/out bandwidth used by each projects/vhost. [Logtail] (https://www.fourmilab.ch/webtools/logtail/) is required.  
+Counts the in/out bandwidth used by each projects/vhost. [Logtail] (https://www.fourmilab.ch/webtools/logtail/) is required.
 ![byproject_inout_bandwidth](https://www.mantor.org/~northox/misc/munin-plugins/apache_byprojects_inout_bandwidth-month.png "byproject_inout_bandwidth")
 
 ## Installation

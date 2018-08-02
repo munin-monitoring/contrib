@@ -5,7 +5,7 @@
 # Parameters:
 #
 # 	config   (required)
-# 	
+#
 #
 #%# family=manual
 

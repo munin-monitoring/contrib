@@ -2,9 +2,9 @@
 
 : <<=cut
 
-=head1 NAME 
+=head1 NAME
 
- emc_vnx_file_stats - Plugin to monitor Basic, NFSv3 and NFSv4 statistics of 
+ emc_vnx_file_stats - Plugin to monitor Basic, NFSv3 and NFSv4 statistics of
  EMC VNX 5300 Unified Storage system's Datamovers
 
 =head1 AUTHOR
@@ -22,24 +22,24 @@
 
 =head1 DESCRIPTION
 
- The plugin monitors basic statistics of EMC Unified Storage system Datamovers 
- and NFS statistics of EMC VNX5300 Unified Storage system. Probably it can 
+ The plugin monitors basic statistics of EMC Unified Storage system Datamovers
+ and NFS statistics of EMC VNX5300 Unified Storage system. Probably it can
  also be compatible with other Isilon or Celerra systems. It uses SSH to connect
- to Control Stations, then remotely executes '/nas/sbin/server_stats' and 
- fetches and parses data from it. It supports gathering data both from 
- active/active and active/passive Datamover configurations, ignoring offline or 
- standby Datamovers. 
+ to Control Stations, then remotely executes '/nas/sbin/server_stats' and
+ fetches and parses data from it. It supports gathering data both from
+ active/active and active/passive Datamover configurations, ignoring offline or
+ standby Datamovers.
  If all Datamovers are offline or absent, the plugin returns error.
  This plugin also automatically chooses Primary Control Station from the list by
   calling '/nasmcd/sbin/getreason' and '/nasmcd/sbin/t2slot'.
- 
+
  At the moment data is gathered from the following statistics sources:
   * nfs.v3.op - Tons of timings about NFSv3 RPC calls
   * nfs.v4.op - Tons of timings about NFSv4 RPC calls
   * nfs.client - Here new Client addresses are rescanned and added automatically.
   * basic-std Statistics Group - Basic Statistics of Datamovers (eg. CPU, Memory
   etc.)
- 
+
  It's quite easy to comment out unneeded data to make graphs less overloaded or
  to add new statistics sources.
 
@@ -78,48 +78,48 @@
 
 =head1 COMPATIBILITY
 
- The plugin has been written for being compatible with EMC VNX5300 Storage 
+ The plugin has been written for being compatible with EMC VNX5300 Storage
  system, as this is the only EMC storage which i have.
  By the way, i am pretty sure it can also work with other VNX1 storages, like
  VNX5100 and VNX5500.
- About VNX2 series, i don't know whether the plugin will be able to work with 
+ About VNX2 series, i don't know whether the plugin will be able to work with
  them. Maybe it would need some corrections in command-line backend. The same
- situation is with other EMC systems, so i encourage you to try and fix the 
- plugin. 
+ situation is with other EMC systems, so i encourage you to try and fix the
+ plugin.
 
 =head1 CONFIGURATION
 
- The plugin uses SSH to connect to Control Stations. It's possible to use 
+ The plugin uses SSH to connect to Control Stations. It's possible to use
  'nasadmin' user, but it would be better if you create read-only global user by
  Unisphere Client. The user should have only Operator role.
  I created "operator" user but due to the fact that Control Stations already
- had one internal "operator" user, the new one was called "operator1". So be 
+ had one internal "operator" user, the new one was called "operator1". So be
  careful. After that, copy .bash_profile from /home/nasadmin to a newly created
  /home/operator1
- 
+
  On munin-node side choose a user which will be used to connect through SSH.
- Generally user "munin" is ok. Then, execute "sudo su munin -s /bin/bash", 
- "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created 
+ Generally user "munin" is ok. Then, execute "sudo su munin -s /bin/bash",
+ "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created
  user.
- 
- Make a link from /usr/share/munin/plugins/emc_vnx_file_stats to 
- /etc/munin/plugins/. If you want to get NFS statistics, name the link as 
+
+ Make a link from /usr/share/munin/plugins/emc_vnx_file_stats to
+ /etc/munin/plugins/. If you want to get NFS statistics, name the link as
  "emc_vnx_file_nfs_stats_<NAME>", otherwise to get Basic Datamover statistics
  you have to name it "emc_vnx_file_basicdm_stats_<NAME>", where <NAME> is any
- arbitrary name of your storage system. The plugin will return <NAME> in its 
+ arbitrary name of your storage system. The plugin will return <NAME> in its
  answer as "host_name" field.
 
  For example, assume your storage system is called "VNX5300".
- Make a configuration file at 
+ Make a configuration file at
  /etc/munin/plugin-conf.d/emc_vnx_file_stats_VNX5300
- 
- [emc_vnx_file_*]
- user munin				
- env.username operator1				
- env.cs_addr 192.168.1.1 192.168.1.2		
- env.nas_servers server_2 server_3		
 
- Where: 
+ [emc_vnx_file_*]
+ user munin
+ env.username operator1
+ env.cs_addr 192.168.1.1 192.168.1.2
+ env.nas_servers server_2 server_3
+
+ Where:
  user - SSH Client local user
  env.username - Remote user with Operator role
  env.cs_addr - Control Stations addresses
@@ -143,7 +143,7 @@ cs_addr=${cs_addr:=""}
 username=${username:=""}
 nas_servers=${nas_servers:="server_2 server_3"}
 
-# Prints "10" on stdout if found Primary Online control station. "11" - for Secondary Online control station. 
+# Prints "10" on stdout if found Primary Online control station. "11" - for Secondary Online control station.
 ssh_check_cmd() {
 	ssh -q "$username@$1" "/nasmcd/sbin/getreason | grep -w \"slot_\$(/nasmcd/sbin/t2slot)\" | cut -d- -f1 | awk '{print \$1}' "
 
@@ -192,7 +192,7 @@ if [ "$1" = "suggest" ]; then
 fi
 
 STATSTYPE=$(echo "${0##*/}" | cut -d _ -f 1-5)
-if [ "$STATSTYPE" = "emc_vnx_file_nfs_stats" ]; then STATSTYPE=NFS; 
+if [ "$STATSTYPE" = "emc_vnx_file_nfs_stats" ]; then STATSTYPE=NFS;
 elif [ "$STATSTYPE" = "emc_vnx_file_basicdm_stats" ]; then STATSTYPE=BASICDM;
 else echo "Do not know what to do. Name the plugin as 'emc_vnx_file_nfs_stats_<HOSTNAME>' or 'emc_vnx_file_basicdm_stats_<HOSTNAME>'" >&2; exit 1; fi
 
@@ -213,9 +213,9 @@ if [ "$1" = "config" ] ; then
 		run_remote nas_server -i "$server" | grep -q 'type *= nas' || continue
 		nas_server_ok=TRUE
 		filtered_server="$(clean_fieldname "$server")"
-		
+
 		if [ "$STATSTYPE" = "BASICDM" ] ; then
-			cat <<-EOF 
+			cat <<-EOF
 			multigraph emc_vnx_cpu_percent
 			graph_title EMC VNX 5300 Datamover CPU Util %
 			graph_vlabel %
@@ -259,7 +259,7 @@ if [ "$1" = "config" ] ; then
 			${server}_total.label ${server} Total
 			${server}_freebuffer.label ${server} Free Buffer
 			${server}_encumbered.label ${server} Encumbered
-						
+
 			multigraph emc_vnx_filecache
 			graph_title EMC VNX 5300 File Buffer Cache
 			graph_vlabel per second
@@ -272,7 +272,7 @@ if [ "$1" = "config" ] ; then
 			${server}_w_hits.label Watermark Hits
 			${server}_hits.label Hits
 			${server}_lookups.label Lookups
-				
+
 			multigraph emc_vnx_fileresolve
 			graph_title EMC VNX 5300 FileResolve
 			graph_vlabel Entries
@@ -286,8 +286,8 @@ if [ "$1" = "config" ] ; then
 		if [ "$STATSTYPE" = "NFS" ] ; then
 #nfs.v3.op data
 # [nasadmin@mnemonic0 ~]$ server_stats server_2 -info nfs.v3.op
-# server_2 : 
-# 
+# server_2 :
+#
 # name            = nfs.v3.op
 # description     = NFS V3 per operation statistics
 # type            = Set
@@ -296,7 +296,7 @@ if [ "$1" = "config" ] ; then
 # member_of       = nfs.v3
 			member_elements_by_line=$(run_remote server_stats "$server" -info nfs.v3.op | grep member_elements | sed -ne 's/^.*= //p')
 			IFS=',' read -ra graphs <<< "$member_elements_by_line"
-			cat <<-EOF 
+			cat <<-EOF
 			multigraph vnx_emc_v3_calls_s
 			graph_title EMC VNX 5300 NFSv3 Calls per second
 			graph_vlabel Calls
@@ -309,7 +309,7 @@ if [ "$1" = "config" ] ; then
 			done
 
 			cat <<-EOF
-			
+
 			multigraph vnx_emc_v3_usec_call
 			graph_title EMC VNX 5300 NFSv3 uSeconds per call
 			graph_vlabel uSec / call
@@ -362,7 +362,7 @@ if [ "$1" = "config" ] ; then
 				echo "${server}_$field.label $server $field"
 			done
 			cat <<-EOF
-			
+
 			multigraph vnx_emc_v4_op_percent
 			graph_title EMC VNX 5300 NFSv4 Op %
 			graph_vlabel %
@@ -376,7 +376,7 @@ if [ "$1" = "config" ] ; then
 			done
 
 #nfs.client data
-#							 Total    Read     Write   Suspicious   Total    Read     Write      Avg   
+#							 Total    Read     Write   Suspicious   Total    Read     Write      Avg
 #                                                      Ops/s    Ops/s    Ops/s    Ops diff    KiB/s    KiB/s    KiB/s   uSec/call
 			member_elements_by_line=$(run_remote server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no -titles never | sed -ne 's/^.*id=//p' | cut -d' ' -f1)
 			#Somewhy readarray adds extra \n in the end of each variable. So, we use read() with a workaround
@@ -437,8 +437,8 @@ if [ "$1" = "config" ] ; then
 			done
 
 #nfs-std
-# Timestamp     NFS         Read      Read    Read Size     Write      Write   Write Size    Active  
-#              Ops/s       Ops/s      KiB/s     Bytes       Ops/s      KiB/s     Bytes      Threads  
+# Timestamp     NFS         Read      Read    Read Size     Write      Write   Write Size    Active
+#              Ops/s       Ops/s      KiB/s     Bytes       Ops/s      KiB/s     Bytes      Threads
 			cat <<-EOF
 
 			multigraph vnx_emc_nfs_std_nfs_ops
@@ -451,7 +451,7 @@ if [ "$1" = "config" ] ; then
 			echo "${filtered_server}_wops.label $server Write Ops/s"
 			echo "${filtered_server}_wops.draw STACK"
 			echo "${filtered_server}_tops.label $server Total Ops/s"
-			
+
 			cat <<-EOF
 
 			multigraph vnx_emc_nfs_std_nfs_b_s
@@ -465,7 +465,7 @@ if [ "$1" = "config" ] ; then
 			echo "${filtered_server}_wbs.draw STACK"
 			echo "${filtered_server}_tbs.label $server Total B/s"
 			echo "${filtered_server}_tbs.cdef ${filtered_server}_rbs,${filtered_server}_wbs,+"
-			
+
 			cat <<-EOF
 
 			multigraph vnx_emc_nfs_std_nfs_avg
@@ -499,10 +499,10 @@ for server in $nas_servers; do
 
 	if [ "$STATSTYPE" = "BASICDM" ] ; then
 #basicdm data
-# [nasadmin@mnemonic0 ~]$ server_stats server_2 -count 1 -terminationsummary no 
-# server_2   CPU    Network     Network       dVol        dVol   
-# Timestamp  Util      In         Out         Read       Write   
-#             %      KiB/s       KiB/s       KiB/s       KiB/s   
+# [nasadmin@mnemonic0 ~]$ server_stats server_2 -count 1 -terminationsummary no
+# server_2   CPU    Network     Network       dVol        dVol
+# Timestamp  Util      In         Out         Read       Write
+#             %      KiB/s       KiB/s       KiB/s       KiB/s
 # 20:42:26      9       16432        3404        1967       24889
 
 		member_elements_by_line=$(run_remote server_stats "$server" -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
@@ -519,10 +519,10 @@ for server in $nas_servers; do
 		echo "${server}_stor_read.value $((graphs[4] * 1024))"
 		echo "${server}_stor_write.value $((graphs[5] * 1024))"
 
-# [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor kernel.memory -count 1 -terminationsummary no 
-# server_2       Free           Buffer       Buffer   Buffer    Buffer         Buffer       Buffer Cache  Encumbered  FileResolve  FileResolve  FileResolve  Free KiB   Page     Total    Used KiB     Memory  
-# Timestamp     Buffer        Cache High     Cache    Cache      Cache       Cache Low       Watermark      Memory      Dropped        Max         Used                 Size    Memory                  Util   
-#                KiB       Watermark Hits/s  Hit %    Hits/s   Lookups/s  Watermark Hits/s     Hits/s        KiB        Entries       Limit       Entries                KiB      KiB                    %     
+# [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor kernel.memory -count 1 -terminationsummary no
+# server_2       Free           Buffer       Buffer   Buffer    Buffer         Buffer       Buffer Cache  Encumbered  FileResolve  FileResolve  FileResolve  Free KiB   Page     Total    Used KiB     Memory
+# Timestamp     Buffer        Cache High     Cache    Cache      Cache       Cache Low       Watermark      Memory      Dropped        Max         Used                 Size    Memory                  Util
+#                KiB       Watermark Hits/s  Hit %    Hits/s   Lookups/s  Watermark Hits/s     Hits/s        KiB        Entries       Limit       Entries                KiB      KiB                    %
 # 20:44:14        3522944                 0      96     11562      12010                 0             0     3579268            0            0            0    3525848      8    6291456    2765608          44
 
 		member_elements_by_line=$(run_remote server_stats "$server" -monitor kernel.memory -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
@@ -530,7 +530,7 @@ for server in $nas_servers; do
 
 		echo -e "\nmultigraph emc_vnx_memory"
 		#Reserved for math
-		echo "${server}_total.value $((graphs[14] / 1))"	
+		echo "${server}_total.value $((graphs[14] / 1))"
 		echo "${server}_used.value $((graphs[15] / 1))"
 		echo "${server}_free.value $((graphs[12] / 1))"
 		echo "${server}_freebuffer.value $((graphs[1] / 1))"
@@ -553,9 +553,9 @@ for server in $nas_servers; do
 	if [ "$STATSTYPE" = "NFS" ] ; then
 #nfs.v3.op data
 # [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor nfs.v3.op -count 1 -terminationsummary no
-# server_2       NFS Op          NFS      NFS Op     NFS       NFS Op % 
-# Timestamp                       Op      Errors      Op                
-#                              Calls/s     diff   uSec/Call             
+# server_2       NFS Op          NFS      NFS Op     NFS       NFS Op %
+# Timestamp                       Op      Errors      Op
+#                              Calls/s     diff   uSec/Call
 # 22:14:41   v3GetAttr                30       0          23          21
 #            v3Lookup                 40       0       98070          27
 #            v3Access                 50       0          20          34
@@ -571,7 +571,7 @@ for server in $nas_servers; do
 		while IFS=$'\n' read -ra graphs ; do
 			elements_array+=( $graphs )
 		done <<< "$member_elements_by_line"
-		
+
 		if [ "${#elements_array[@]}" -eq "0" ]; then  LINES=0; fi
 
 		echo "multigraph vnx_emc_v3_calls_s"
@@ -593,9 +593,9 @@ for server in $nas_servers; do
 
 #nfs.v4.op data
 # [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor nfs.v4.op -count 1 -terminationsummary no
-# server_2       NFS Op          NFS      NFS Op     NFS       NFS Op % 
-# Timestamp                       Op      Errors      Op                
-#                              Calls/s     diff   uSec/Call             
+# server_2       NFS Op          NFS      NFS Op     NFS       NFS Op %
+# Timestamp                       Op      Errors      Op
+#                              Calls/s     diff   uSec/Call
 # 22:13:14   v4Compound             2315       0        7913          30
 #            v4Access                246       0           5           3
 #            v4Close                 133       0          11           2
@@ -643,9 +643,9 @@ for server in $nas_servers; do
 		elements_array=()
 
 #nfs.client data
-# [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no 
-# server_2                    Client                     NFS      NFS      NFS       NFS        NFS      NFS      NFS       NFS   
-# Timestamp                                             Total    Read     Write   Suspicious   Total    Read     Write      Avg   
+# [nasadmin@mnemonic0 ~]$ server_stats server_2 -monitor nfs.client -count 1 -terminationsummary no
+# server_2                    Client                     NFS      NFS      NFS       NFS        NFS      NFS      NFS       NFS
+# Timestamp                                             Total    Read     Write   Suspicious   Total    Read     Write      Avg
 #                                                       Ops/s    Ops/s    Ops/s    Ops diff    KiB/s    KiB/s    KiB/s   uSec/call
 # 20:26:38   id=192.168.1.223                           2550       20     2196          13     4673      159     4514       1964
 #            id=192.168.1.2                              691        4        5           1     1113      425      688       2404
@@ -687,9 +687,9 @@ for server in $nas_servers; do
 
 #nfs-std
 # bash-3.2$  server_stats server_2 -monitor nfs-std
-# server_2     Total        NFS        NFS     NFS Avg       NFS        NFS     NFS Avg       NFS    
-# Timestamp     NFS         Read      Read    Read Size     Write      Write   Write Size    Active  
-#              Ops/s       Ops/s      KiB/s     Bytes       Ops/s      KiB/s     Bytes      Threads  
+# server_2     Total        NFS        NFS     NFS Avg       NFS        NFS     NFS Avg       NFS
+# Timestamp     NFS         Read      Read    Read Size     Write      Write   Write Size    Active
+#              Ops/s       Ops/s      KiB/s     Bytes       Ops/s      KiB/s     Bytes      Threads
 # 18:14:52          688         105     6396       62652           1      137      174763           3
 		member_elements_by_line=$(run_remote server_stats "$server" -monitor nfs-std -count 1 -terminationsummary no -titles never | grep '^[^[:space:]]')
 		IFS=$' ' read -ra graphs <<< "$member_elements_by_line"
@@ -700,12 +700,12 @@ for server in $nas_servers; do
 		echo "${filtered_server}_rops.value ${graphs[2]}"
 		echo "${filtered_server}_wops.value ${graphs[5]}"
 		echo "${filtered_server}_tops.value ${graphs[1]}"
-				
+
 		echo -e "\nmultigraph vnx_emc_nfs_std_nfs_b_s"
 		echo "${filtered_server}_rbs.value $((graphs[3] * 1024))"
 		echo "${filtered_server}_wbs.value $((graphs[6] * 1024))"
 		echo "${filtered_server}_tbs.value 0"
-				
+
 
 		echo -e "\nmultigraph vnx_emc_nfs_std_nfs_avg"
 		echo "${filtered_server}_avg_readsize.value ${graphs[4]}"

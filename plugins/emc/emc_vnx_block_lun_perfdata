@@ -2,7 +2,7 @@
 
 : <<=cut
 
-=head1 NAME 
+=head1 NAME
 
  emc_vnx_block_lun_perfdata - Plugin to monitor Block statistics of EMC VNX 5300
  Unified Storage Processors
@@ -23,16 +23,16 @@
 =head1 DESCRIPTION
 
  The plugin monitors LUN of EMC Unified Storage FLARE SP's. Probably it can also
- be compatible with  other Clariion systems. It uses SSH to connect to Control 
- Stations, then remotely executes /nas/sbin/navicli and fetches and parses data 
+ be compatible with  other Clariion systems. It uses SSH to connect to Control
+ Stations, then remotely executes /nas/sbin/navicli and fetches and parses data
  from it. Obviously, it's easy to reconfigure plugin not to use Control Stations'
- navicli in favor of using locally installed /opt/Navisphere's cli. There is no 
- difference which Storage Processor to use to gather data, so this plugin tries 
- both of them and uses the first active one. This plugin also automatically 
- chooses Primary Control Station from the list by calling /nasmcd/sbin/getreason 
+ navicli in favor of using locally installed /opt/Navisphere's cli. There is no
+ difference which Storage Processor to use to gather data, so this plugin tries
+ both of them and uses the first active one. This plugin also automatically
+ chooses Primary Control Station from the list by calling /nasmcd/sbin/getreason
  and /nasmcd/sbin/t2slot.
- 
- I left some parts of this plugin as rudimental to make easy to reconfigure it 
+
+ I left some parts of this plugin as rudimental to make easy to reconfigure it
  to draw more (or less) data.
 
  The plugin has been tested in the following Operating Environment (OE):
@@ -41,15 +41,15 @@
 
 =head1 COMPATIBILITY
 
- The plugin has been written for being compatible with EMC VNX5300 Storage 
- system, as this is the only EMC storage which i have. By the way, i am pretty 
- sure it can also work with other VNX1 storages, like VNX5100 and VNX5500, and 
+ The plugin has been written for being compatible with EMC VNX5300 Storage
+ system, as this is the only EMC storage which i have. By the way, i am pretty
+ sure it can also work with other VNX1 storages, like VNX5100 and VNX5500, and
  old-style Clariion systems.
- About VNX2 series, i don't know whether the plugin will be able to work with 
- them. Maybe it would need some corrections in command-line backend. The same 
- situation is with other EMC systems, so i encourage you to try and fix the 
- plugin. 
- 
+ About VNX2 series, i don't know whether the plugin will be able to work with
+ them. Maybe it would need some corrections in command-line backend. The same
+ situation is with other EMC systems, so i encourage you to try and fix the
+ plugin.
+
 =head1 LIST OF GRAPHS
 
  Graph category Disk:
@@ -70,68 +70,68 @@
  First of all, be sure that statistics collection is turned on. You can do this
  by typing:
  navicli -h spa setstats -on
- on your Control Station or locally through /opt/Navisphere 
+ on your Control Station or locally through /opt/Navisphere
 
- Also, the plugin actively uses buggy "cdef" feature of Munin 2.0, and here we 
+ Also, the plugin actively uses buggy "cdef" feature of Munin 2.0, and here we
  can be hit by the following bugs:
- http://munin-monitoring.org/ticket/1017 - Here I have some workarounds in the 
+ http://munin-monitoring.org/ticket/1017 - Here I have some workarounds in the
  plugin, be sure that they are working.
- http://munin-monitoring.org/ticket/1352 - Metrics in my plugin can be much 
+ http://munin-monitoring.org/ticket/1352 - Metrics in my plugin can be much
  longer than 15 characters.
  Without these workarounds "Load" and "Queue Length" would not work.
 
 =head2 Installation
 
- The plugin uses SSH to connect to Control Stations. It's possible to use 
+ The plugin uses SSH to connect to Control Stations. It's possible to use
  'nasadmin' user, but it would be better if you create read-only global user by
- Unisphere Client. The user should have only Operator role. 
- I created "operator" user but due to the fact that Control Stations already 
- had one internal "operator" user, the new one was called "operator1". So be 
+ Unisphere Client. The user should have only Operator role.
+ I created "operator" user but due to the fact that Control Stations already
+ had one internal "operator" user, the new one was called "operator1". So be
  careful. After that, copy .bash_profile from /home/nasadmin to a newly created
  /home/operator1.
- 
- On munin-node side choose a user which will be used to connect through SSH. 
- Generally user "munin" is ok. Then, execute "sudo su munin -s /bin/bash", 
- "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created 
+
+ On munin-node side choose a user which will be used to connect through SSH.
+ Generally user "munin" is ok. Then, execute "sudo su munin -s /bin/bash",
+ "ssh-keygen" and "ssh-copy-id" to both Control Stations with newly created
  user.
- 
- Make a link from /usr/share/munin/plugins/emc_vnx_dm_basic_stats to 
- /etc/munin/plugins/emc_vnx_dm_basic_stats_<NAME>, where <NAME> is any 
- arbitrary name of your storage system. The plugin will return <NAME> in its 
+
+ Make a link from /usr/share/munin/plugins/emc_vnx_dm_basic_stats to
+ /etc/munin/plugins/emc_vnx_dm_basic_stats_<NAME>, where <NAME> is any
+ arbitrary name of your storage system. The plugin will return <NAME> in its
  answer as "host_name" field.
- 
+
  For example, assume your storage system is called "VNX5300".
- Make a configuration file at 
+ Make a configuration file at
  /etc/munin/plugin-conf.d/emc_vnx_block_lun_perfdata_VNX5300. For example:
- 
+
  [emc_vnx_block_lun_perfdata_VNX5300]
- user munin					
+ user munin
  env.username operator1
- env.cs_addr 192.168.1.1 192.168.1.2	
+ env.cs_addr 192.168.1.1 192.168.1.2
 
  or:
 
  [emc_vnx_block_lun_perfdata_VNX5300]
- user munin                                     
+ user munin
  env.username operator1
  env.localcli /opt/Navisphere/bin/naviseccli
  env.sp_addr 192.168.0.3 192.168.0.4
  env.blockpw foobar
 
- Where: 
+ Where:
  user - SSH Client local user
  env.username - Remote user with Operator role for Block or File part
  env.cs_addr - Control Stations addresses for remote (indirect) access.
- env.localcli - Optional. Path of localhost 'Naviseccli' binary. If this 
+ env.localcli - Optional. Path of localhost 'Naviseccli' binary. If this
    variable is set, env.cs_addr is ignored, and local 'navicli' is used.
    Requires env.blockpw variable.
- env.sp_addr - Default is "SPA SPB". In case of "direct" connection to 
+ env.sp_addr - Default is "SPA SPB". In case of "direct" connection to
    Storage Processors, their addresses/hostnames are written here.
  env.blockpw - Password for connecting to Storage Processors
 
 =head1 ERRATA
 
- It counts Queue Length in not fully correct way. We take parameters totally 
+ It counts Queue Length in not fully correct way. We take parameters totally
  from both SP's, but after we divide them independently by load of SPA and SPB.
  Anyway, in most AAA / ALUA cases the formula is correct.
 
@@ -165,7 +165,7 @@ else
 	NAVICLI="/nas/sbin/navicli"
 fi
 
-# Prints "10" on stdout if found Primary Online control station. "11" - for Secondary Online control station. 
+# Prints "10" on stdout if found Primary Online control station. "11" - for Secondary Online control station.
 ssh_check_cmd() {
 		ssh -q "$username@$1" "/nasmcd/sbin/getreason | grep -w \"slot_\$(/nasmcd/sbin/t2slot)\" | cut -d- -f1 | awk '{print \$1}' "
 }
@@ -253,7 +253,7 @@ echo "host_name ${TARGET}"
 echo
 
 if [ "$1" = "config" ] ; then
-	cat <<-EOF 
+	cat <<-EOF
 		multigraph emc_vnx_block_blocks
 		graph_category disk
 		graph_title EMC VNX 5300 LUN Blocks
@@ -263,7 +263,7 @@ if [ "$1" = "config" ] ; then
 
 	while read -r LUN ; do
 		LUN="$(clean_fieldname "$LUN")"
-		cat <<-EOF 
+		cat <<-EOF
 			${LUN}_read.label none
 			${LUN}_read.graph no
 			${LUN}_read.min 0
@@ -304,8 +304,8 @@ if [ "$1" = "config" ] ; then
 		multigraph emc_vnx_block_ticks
 		graph_category disk
 		graph_title EMC VNX 5300 Counted Load per LUN
-		graph_vlabel Load, % * Number of LUNs 
-		graph_args --base 1000 -l 0 -r 
+		graph_vlabel Load, % * Number of LUNs
+		graph_args --base 1000 -l 0 -r
 	EOF
 	echo -n "graph_order "
 	while read -r LUN ; do
@@ -332,7 +332,7 @@ if [ "$1" = "config" ] ; then
 			${LUN}_idleticks_spb.label $LUN Idle Ticks SPB
 			${LUN}_idleticks_spb.type COUNTER
 			${LUN}_idleticks_spb.graph no
-			${LUN}_load_spa.label $LUN load SPA 
+			${LUN}_load_spa.label $LUN load SPA
 			${LUN}_load_spa.draw AREASTACK
 			${LUN}_load_spb.label $LUN load SPB
 			${LUN}_load_spb.draw AREASTACK
@@ -342,7 +342,7 @@ if [ "$1" = "config" ] ; then
 	done <<< "$LUNLIST"
 
 	cat <<-EOF
-		
+
 		multigraph emc_vnx_block_outstanding
 		graph_category disk
 		graph_title EMC VNX 5300 Sum of Outstanding Requests
@@ -351,14 +351,14 @@ if [ "$1" = "config" ] ; then
 	EOF
 	while read -r LUN ; do
 		LUN="$(clean_fieldname "$LUN")"
-		cat <<-EOF 
+		cat <<-EOF
 			${LUN}_outstandsum.label $LUN
 			${LUN}_outstandsum.type COUNTER
 		EOF
 	done <<< "$LUNLIST"
 
 	cat <<-EOF
-		
+
 		multigraph emc_vnx_block_nonzeroreq
 		graph_category disk
 		graph_title EMC VNX 5300 Non-Zero Request Count Arrivals
@@ -392,7 +392,7 @@ if [ "$1" = "config" ] ; then
 
 		multigraph emc_vnx_block_queue
 		graph_category disk
-		graph_title EMC VNX 5300 Counted Block Queue Length 
+		graph_title EMC VNX 5300 Counted Block Queue Length
 		graph_vlabel Length
 	EOF
 	while read -r LUN ; do
@@ -451,10 +451,10 @@ if [ "$1" = "config" ] ; then
 		cat <<-EOF
 			${SPclean}_total_busyticks.label ${SP}
 			${SPclean}_total_busyticks.graph no
-			${SPclean}_total_busyticks.type COUNTER 
+			${SPclean}_total_busyticks.type COUNTER
 			${SPclean}_total_bt.label ${SP}
 			${SPclean}_total_bt.graph no
-			${SPclean}_total_bt.type COUNTER 
+			${SPclean}_total_bt.type COUNTER
 			${SPclean}_total_idleticks.label ${SP}
 			${SPclean}_total_idleticks.graph no
 			${SPclean}_total_idleticks.type COUNTER
@@ -469,8 +469,8 @@ fi
 #BIGCMD="$SSH"
 while read -r LUN ; do
 	FILTERLUN="$(clean_fieldname "$LUN")"
-	BIGCMD+="$NAVICLI lun -list -name $LUN -perfData | 
-		sed -ne 's/^Blocks Read\:\ */${FILTERLUN}_read.value /p; 
+	BIGCMD+="$NAVICLI lun -list -name $LUN -perfData |
+		sed -ne 's/^Blocks Read\:\ */${FILTERLUN}_read.value /p;
 		s/^Blocks Written\:\ */${FILTERLUN}_write.value /p;
 		s/Read Requests\:\ */${FILTERLUN}_readreq.value /p;
 		s/Write Requests\:\ */${FILTERLUN}_writereq.value /p;

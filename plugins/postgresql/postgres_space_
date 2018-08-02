@@ -105,17 +105,17 @@ _EOM
     my $metadatabase_pages = 0;
     my $metadatabase_indexes = 0;
     my @names = $dbh->tables;
-    
+
     # Find relfilenode and relpages from the given table
     my $q_ind = "SELECT relkind, relfilenode, relpages FROM pg_class
                      WHERE relname = ?
                      UNION
                      SELECT relkind, relfilenode, relpages FROM pg_class
-                     WHERE relfilenode IN (SELECT indexrelid FROM pg_index 
+                     WHERE relfilenode IN (SELECT indexrelid FROM pg_index
                      WHERE indrelid IN (SELECT relfilenode FROM pg_class
                      WHERE relname = ?))";
     my $sth = $dbh->prepare ($q_ind) or die $dbh->errstr;
-    
+
     # Iterate over the tables in the database
     foreach my $table (@names) {
         my $meta = 1;
@@ -127,7 +127,7 @@ _EOM
         # "public" tables are the user data
         $meta = 0 if $table =~ /^public\./;
         $table =~ s/^.*\.//;
-        
+
         # Call the query with $table twice for each side of the UNION
         $sth->execute ($table, $table) or die $dbh->errstr;
         while (my ($relkind, $relfilenode, $relpages) = $sth->fetchrow_array) {
@@ -139,8 +139,8 @@ _EOM
                 $metatable_indexes += $relpages if $meta == 1;
             }
             # Define the query
-            my $q2 = "SELECT SUM(relpages) 
-                      FROM pg_class 
+            my $q2 = "SELECT SUM(relpages)
+                      FROM pg_class
                       WHERE relname IN (?, ?)";
             my $sth2 = $dbh->prepare ($q2);
             $sth2->execute ("pg_toast_${relfilenode}",
@@ -159,7 +159,7 @@ _EOM
         $database_indexes     += $table_indexes;
         $metadatabase_pages   += $metatable_pages;
         $metadatabase_indexes += $metatable_indexes;
-    }	    
+    }
     $sth->finish;
     $dbh->disconnect;
     print "size\.value " . $database_pages * 8192 . "\n";

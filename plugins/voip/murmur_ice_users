@@ -2,74 +2,74 @@
 <?php
   /**
 **   =head1 NAME
-** 
+**
 **   murmur_ice_users
-** 
+**
 **   =head1 DESCRIPTION
-** 
+**
 **   This plugin monitors users on a Mumble server (a.k.a. murmur).
 **   It uses PHP and ICE to to query murmur. On debian, you can install mumble-server-web
 **   to get the dependencies installed and set up.
-** 
-** 
+**
+**
 **   =head1 CONFIGURATION
-** 
+**
 **   You can specify a different ip:port in the munin-node config file as follow:
-** 
+**
 **   [murmur_ice_users]
 **   env.host 127.0.0.1
 **   env.port 6502
 **   env.IceProfile xxxxx
 **   env.IceSecret xxxxx
-** 
+**
 **   =head1 AUTHOR
-** 
+**
 **   Original Author Thomas L�veil
 **   Modification by DisasteR - 2011/04/19
-** 
+**
 **   =head1 LICENSE
-** 
+**
 **   Permission to use, copy, and modify this software with or without fee
 **   is hereby granted, provided that this entire notice is included in
 **   all source code copies of any software which is or includes a copy or
 **   modification of this software.
-** 
+**
 **   THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR
 **   IMPLIED WARRANTY. IN PARTICULAR, NONE OF THE AUTHORS MAKES ANY
 **   REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE
 **   MERCHANTABILITY OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR
 **   PURPOSE.
-** 
+**
 **
 **   =head1 MAGIC MARKERS
 **
-**   #%# family=contrib 
+**   #%# family=contrib
 **   #%# capabilities=autoconf
 **
 **
 **   =head1 VERSION
-**   
+**
 **       1.2
-**   
+**
 **   =head1 CHANGELOG
-**   
+**
 **   =head2 1.0 - 2009/05/04
-**   
+**
 **   initial release
-**   
+**
 **   =head2 1.1 - 2011/01/13
-**   
+**
 **   fix to make it work with murmur v1.2.2
-**   
+**
 **   =head3 1.2 - 2011/04/19
 **
 **   Code cleaning and refactoring
 **   Stats for root server and Virtual Servers
-**       
+**
 **   =cut
 */
-    
-    
+
+
 $host = "127.0.0.1";
 $port = "6502";
 $IceProfile = 'Murmur123';
@@ -82,18 +82,18 @@ if (isset($_ENV['IceScret'])) $IceSecret = array( 'secret' => $_ENV['IceScret'] 
 
 if (count($argv)==1) {
   do_count();
- } 
+ }
 
-switch ($argv[1]) 
+switch ($argv[1])
   {
   case 'autoconf':
     do_autoconf();
     break;
-	
+
   case 'config':
     do_config();
     break;
-	
+
   default:
     do_count();
     break;
@@ -103,7 +103,7 @@ exit(1);
 function IceConnect()
 {
   global $ICE, $host, $port, $IceProfile, $IceSecret;
-  try 
+  try
     {
       Ice_loadProfile($IceProfile);
       $iceproxy = $ICE->stringToProxy("Meta:tcp -h $host -p $port");
@@ -146,15 +146,15 @@ function do_config_header()
 function do_config_data()
 {
   global $ICE, $IceSecret;
-  
-  try 
+
+  try
     {
       $metaServer = IceConnect();
       $AdefaultConf = $metaServer->getDefaultConf();
-		
+
       $AvirtualServer = $metaServer->getAllServers();
 
-      foreach ($AvirtualServer as $numserver=>$s) 
+      foreach ($AvirtualServer as $numserver=>$s)
 	{
 	  $serverid = $s->ice_context($IceSecret)->id();
 	  $servename = $s->ice_context($IceSecret)->getConf( 'registername');
@@ -189,14 +189,14 @@ function do_count()
   $totalMaxUsers="0";
   $totalConnectedUsers="0";
 
-  try 
+  try
     {
       $metaServer = IceConnect();
       $AdefaultConf = $metaServer->getDefaultConf();
-		
+
       $AvirtualServer = $metaServer->getAllServers();
 
-      foreach ($AvirtualServer as $numserver=>$s) 
+      foreach ($AvirtualServer as $numserver=>$s)
 	{
 	  $maxusers = $s->ice_context($IceSecret)->getConf( 'users' );
 	  if (!$maxusers) $maxusers = $AdefaultConf['users'];
@@ -215,7 +215,7 @@ function do_count()
 	  fwrite(STDOUT,  "vserver_".$serverid."_maxusers.value ".$maxusers."\n");
 	  fwrite(STDOUT,  "vserver_".$serverid."_online.value ".$connectedUsers."\n");
 	}
-		
+
       fwrite(STDOUT,  "total_maxusers.value ".$totalMaxUsers."\n");
       fwrite(STDOUT,  "total_online.value ".$totalConnectedUsers."\n");
       exit(0);

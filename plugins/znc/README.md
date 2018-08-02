@@ -6,7 +6,7 @@ ZNC-Logs
 
 2. Enable the log-plugin in znc (if you enable it for the complete instance, there will be some issues because this plugin only uses the network-name + channel-name, if there are some networks with the same name, it will count all lines together)
 
-3. Add this to your `/etc/munin/plugin-conf.d/munin-node`  
+3. Add this to your `/etc/munin/plugin-conf.d/munin-node`
 ```
 [znc_logs]
 user $your_znc_user

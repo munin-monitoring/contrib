@@ -84,7 +84,7 @@
     default:  asmusage
 
     Module name(s) to exclude seperated by white-space.
-    By default, asmusage module is excluded because another privilege 
+    By default, asmusage module is excluded because another privilege
     is necessary to connect ASM instance.
 
   env.include_module:
@@ -92,21 +92,21 @@
     default:  none
 
     Module name(s) to include seperated by white-space.
-    If both include_module and exclude_module are set, exclude will be 
+    If both include_module and exclude_module are set, exclude will be
     ignored.
 
-  env.plugin_name: 
+  env.plugin_name:
     example:  env.plugin_name  oracle_sysstat_2
     default:  program name (usually oracle_sysstat)
 
-    Used for internal graph name. 
+    Used for internal graph name.
     It will be useful to monitor multi-instance databases.
 
-  env.db_name: 
+  env.db_name:
     example:  env.db_name  dbname
     default:  none
 
-    Used for graph title. 
+    Used for graph title.
     It will be useful to monitor multi-instance databases.
 
 =head1 NOTES
@@ -133,7 +133,7 @@
 . "${MUNIN_LIBDIR:-}/plugins/plugin.sh"
 is_multigraph "$@"
 
-# Like perl 'use strict;' 
+# Like perl 'use strict;'
 set -o nounset
 
 # Global variables
@@ -661,7 +661,7 @@ sqlplus_variables="
     set numwidth 30
 "
 
-# Functions 
+# Functions
 
 autoconf() {
     if which sqlplus >/dev/null ; then
@@ -688,7 +688,7 @@ fetch() {
 do_config() {
     local label_max_length=45
     local field type draw label
-    local fields= 
+    local fields=
 
     getfield
     echo "multigraph ${plugin_name}_${module}"
@@ -697,7 +697,7 @@ do_config() {
     echo "${global_attrs[$module]}" | sed -e 's/^  *//' -e '/^$/d'
 
     # print data source attributes
-    # split line into field,type,draw,label 
+    # split line into field,type,draw,label
     while read -r field type draw label
     do
         [ -z "$field" ] && continue
@@ -731,7 +731,7 @@ module_list() {
         echo "$include_module"
     else
         for i in $exclude_module
-        do 
+        do
             # remove excluded modules
             unset -v "global_attrs[$i]"
         done
@@ -768,8 +768,8 @@ getvalue_sysstat() {
         echo "${sqlplus_variables}
           VAR vf VARCHAR2(64)
           VAR vl VARCHAR2(64)
-          EXEC :vf := '${field}' 
-          EXEC :vl := '${label}' 
+          EXEC :vf := '${field}'
+          EXEC :vl := '${label}'
           SELECT
             :vf || '.value ' || value
           FROM
@@ -789,8 +789,8 @@ getvalue_sgainfo() {
         echo "${sqlplus_variables}
           VAR vf VARCHAR2(64)
           VAR vl VARCHAR2(64)
-          EXEC :vf := '${field}' 
-          EXEC :vl := '${label}' 
+          EXEC :vf := '${field}'
+          EXEC :vl := '${label}'
           SELECT
             :vf || '.value ' || bytes
           FROM
@@ -810,8 +810,8 @@ getvalue_pgastat() {
         echo "${sqlplus_variables}
           VAR vf VARCHAR2(64)
           VAR vl VARCHAR2(64)
-          EXEC :vf := '${field}' 
-          EXEC :vl := '${label}' 
+          EXEC :vf := '${field}'
+          EXEC :vl := '${label}'
           SELECT
             :vf || '.value ' || value
           FROM
@@ -831,8 +831,8 @@ getvalue_cputime() {
         echo "${sqlplus_variables}
           VAR vf VARCHAR2(64)
           VAR vl VARCHAR2(64)
-          EXEC :vf := '${field}' 
-          EXEC :vl := '${label}' 
+          EXEC :vf := '${field}'
+          EXEC :vl := '${label}'
           SELECT
             :vf || '.value ' || ROUND( value / 1000000 )
           FROM
@@ -853,11 +853,11 @@ FROM
 WHERE
   name = 'physical reads cache'
 ;
-SELECT 
+SELECT
   'buf_logical.value ' || ( sd.value + sc.value )
-FROM 
-  v\$sysstat sd, v\$sysstat sc 
-WHERE 
+FROM
+  v\$sysstat sd, v\$sysstat sc
+WHERE
   sd.name = 'db block gets from cache' AND sc.name = 'consistent gets from cache'
 ;
 SELECT 'lib_pins.value '    || SUM(pins)    FROM v\$librarycache;
@@ -892,7 +892,7 @@ ${sqlplus_variables}
 SELECT
   REGEXP_REPLACE( du.username, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) || '.value ' ||
   count(vs.username)
-FROM 
+FROM
   ( SELECT
       username
     FROM
@@ -952,7 +952,7 @@ FROM
   ) en
   LEFT JOIN v\$session se
 ON
-  en.wait_class = se.wait_class AND 
+  en.wait_class = se.wait_class AND
   se.username is not null AND
   se.wait_time = 0
 GROUP BY
@@ -1010,12 +1010,12 @@ getfield_eventwait2() {
     data_attrs[$module]=$( ${sqlplus} "${oracle_auth}" <<EOF
 ${sqlplus_variables}
 VAR vl VARCHAR2(64)
-EXEC :vl := '${waitclass}' 
+EXEC :vl := '${waitclass}'
 SELECT
   REGEXP_REPLACE( name, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) ||
   ' DERIVE LINE ' || name
 FROM
-  v\$event_name 
+  v\$event_name
 WHERE
   wait_class = :vl
 ORDER BY
@@ -1030,9 +1030,9 @@ getvalue_eventwait2() {
     ${sqlplus} "${oracle_auth}" <<EOF
 ${sqlplus_variables}
 VAR vl VARCHAR2(64)
-EXEC :vl := '${waitclass}' 
+EXEC :vl := '${waitclass}'
 SELECT
-  REGEXP_REPLACE( en.name, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) || '.value ' || 
+  REGEXP_REPLACE( en.name, '^[^A-Za-z_]|[^A-Za-z0-9_]', '_' ) || '.value ' ||
   NVL( se.time_waited_micro, 0 )
 FROM
   v\$event_name en LEFT JOIN v\$system_event se

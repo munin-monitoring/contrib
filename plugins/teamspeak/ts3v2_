@@ -16,7 +16,7 @@
 #
 #######################################################
 # 02.10.10 - v0.3
-#		    -now works again with 3.0.0-beta29 
+#		    -now works again with 3.0.0-beta29
 #
 # 18.04.10 - v0.2
 #           -transfer mode added
@@ -25,20 +25,20 @@
 #           -initial release
 #
 ######################################################
- 
+
 #%# family=auto
 #%# capabilities=autoconf suggest
- 
+
 use strict;
 use Net::Telnet;
- 
+
 # CONFIG HERE!
 my $hostname =  $ENV{host} || "localhost";    # serveraddress
 my $port =      $ENV{port} || 10011;      # querryport
 my $user =      $ENV{user} || "serveradmin";
 my $password =  $ENV{password} || "";
 my $filename =  "ts3v2_";
- 
+
 # SCRIPT START!
 #init telnet connection
 my $name = ""; my $server = ""; my @num; my $id = 0; my $i = 0; my $myserver; my $transfer;
@@ -57,7 +57,7 @@ if ($password ne "") {
         die "ServerQuery login failed: ".$response;
   }
 }
- 
+
 #get argument
 my $argument = "";
 if ($0 =~ /$filename(\w+)$/i) {
@@ -66,7 +66,7 @@ if ($0 =~ /$filename(\w+)$/i) {
         die "Error: We need to know what serverid you want, so link this plugin as "
                 .$filename."1, ".$filename."2 or ".$filename."overview.\n";
 }
- 
+
 #check for overview, transfer or single server mode
 my $mode = "";
 if ($argument eq "overview" or $argument eq "transfer" or (defined $ARGV[0] and ($ARGV[0] eq "suggest" or $ARGV[0] eq "autoconf"))) {
@@ -92,7 +92,7 @@ if ($argument eq "overview" or $argument eq "transfer" or (defined $ARGV[0] and 
 } else {
         die "ERROR: unknown plugin mode: $argument\n";
 }
- 
+
 #check for config mode
 if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
         print "yes";
@@ -111,7 +111,7 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
                 $telnet->waitfor("/error id=0 msg=ok/");
                 $telnet->cmd("serverinfo");
                 my $line = $telnet->getline(Timeout=>1);
- 
+
                 if ($line =~ m/virtualserver_id=(\d+) virtual/) {
                         my $id = $1;
                 } else {
@@ -124,7 +124,7 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
                         die "ERROR: server string not recognized!\n";
                 }
                 $telnet->waitfor("/error id=0 msg=ok/");
- 
+
                 print "graph_title Teamspeak Users ".$name."\n";
                 print "graph_vlabel Connected Teamspeak Users\n";
                 print "graph_category voip\n";
@@ -132,7 +132,7 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
                 print "users.label Users\n";
                 print "users.info Connected users to ".$name."\n";
                 print "users.type GAUGE\n";
- 
+
                 exit 0;
         } elsif ($mode eq "o") {
                 #overview mode
@@ -140,7 +140,7 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
                 print "graph_vlabel Connected Teamspeak Users\n";
                 print "graph_category voip\n";
                 print "graph_info This graph shows the number of connected users on a Teamspeak3 server\n";
- 
+
                 foreach (@num) {
                         $telnet->cmd("use sid=".$_);
                         $telnet->waitfor("/error id=0 msg=ok/");
@@ -176,7 +176,7 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
                 $telnet->cmd("use sid=".$server);
                 $telnet->waitfor("/error id=0 msg=ok/");
                 $telnet->cmd("serverinfo");
- 
+
                 my $line = $telnet->getline(Timeout=>1);
                 if ($line =~ m/virtualserver_clientsonline=(\d+) /) {
                         print "users.value ".($1-1)."\n";
@@ -191,7 +191,7 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
                         $telnet->cmd("use sid=".$_);
                         $telnet->waitfor("/error id=0 msg=ok/");
                         $telnet->cmd("serverinfo");
- 
+
                         my $line = $telnet->getline(Timeout=>1);
                         if ($line =~ m/virtualserver_clientsonline=(\d+) /) {
                                 print $_.".value ".($1-1)."\n";
@@ -211,10 +211,10 @@ if (exists $ARGV[0] and $ARGV[0] eq "autoconf") {
                         die "ERROR: server string not recognized!\n";
                 }
                 $telnet->waitfor("/error id=0 msg=ok/");
- 
+
         }
 }
- 
+
 #close telnet connection
 $telnet->close;
 exit;

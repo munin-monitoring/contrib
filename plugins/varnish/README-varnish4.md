@@ -30,4 +30,4 @@ not in the path already.
 
 `env.name` is blank (undefined) by default and can be used to specify a -n
 name argument to varnish if multiple instances are running on the same
-server. 
+server.

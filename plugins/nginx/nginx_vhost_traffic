@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # Script for monitoring nginx Virtual host output traffic
-# 
+#
 # Requierements: logtail awk
 # one unique access log file with $bytes_sent value for more accuracy
 # check http://wiki.nginx.org/NginxHttpLogModule
@@ -11,23 +11,23 @@
 #
 # Virtual host list
 # env.vhosts "example.com example.net example.org"
-# 
+#
 # Log path
 # env.logdir = /var/log/nginx
-# env.flogfile = access.log 
+# env.flogfile = access.log
 #
 # Position of the $bytes_sent in the access.log file
 # env.bparam 11
 #
 # Aggregate subdomains
-# ex: example.com will match www.example.com, webmail.example.com and *example.com 
+# ex: example.com will match www.example.com, webmail.example.com and *example.com
 # BUG: will also match also www.bad-example.com
-# env.aggregate true #change to false to disable aggregation 
+# env.aggregate true #change to false to disable aggregation
 #
 # To report bugs, improvements or get updates
 # see http://github.com/joanpc/nginix_vhost_traffic
 #
-# inspired in postfix_filtered_awk 
+# inspired in postfix_filtered_awk
 # Copyright (c) 2010, Joan Perez i Cauhe
 
 LOGDIR=${logdir:-/var/log/nginx}
@@ -48,8 +48,8 @@ case $1 in
 	echo 'graph_category webserver'
 
 	i=0
-	for vhost in $VHOSTS 
-	do 
+	for vhost in $VHOSTS
+	do
 		i=$(($i + 1))
 		echo vhost$i.label $vhost
 		echo vhost$i.type ABSOLUTE
@@ -57,7 +57,7 @@ case $1 in
 		echo vhost$i.draw $DRAW
 		DRAW=STACK
 	done
-	
+
 	echo rest.label Rest
 	echo rest.type ABSOLUTE
 	echo rest.cdef rest,8,*
@@ -72,16 +72,16 @@ export AGGREGATE
 # Awk Script
 $LOGTAIL ${ACCESS_LOG} -o $STATEFILE | awk '
 
-BEGIN { 
+BEGIN {
 split(ENVIRON["VHOSTS"], hosts)
 for (host in hosts) { track[hosts[host]] = host}
-}        
+}
 {
 		cn[$2]+=$ENVIRON["BPARAM"]
 }
-END { 
-		for (host in cn) {		
-		if (match(ENVIRON["AGGREGATE"], "true")) {	
+END {
+		for (host in cn) {
+		if (match(ENVIRON["AGGREGATE"], "true")) {
 			found = 0
 			for (vhost in track) {
 				if (index(host, vhost)) {
@@ -93,7 +93,7 @@ END {
 			if (! found) rest+=cn[host]
 		} else {
 			if (host in track) {
-				res[host] += cn[host]	
+				res[host] += cn[host]
 			} else rest+=cn[host]
 		}
 		}

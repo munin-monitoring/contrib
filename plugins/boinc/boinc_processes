@@ -5,12 +5,12 @@
 # Parameters:
 #
 #	password	-- The password for RPC authentication
-#			   (default: boinc_cmd will look for a file 
+#			   (default: boinc_cmd will look for a file
 #			   'gui_rpc_auth.cfg' and use the password in it)
 #       host 		-- the host to connect to (default: localhost)
 #	port 		-- optional (default: 31416)
 #
-# This plugin can monitor boinc processes running on local/remote machines. 
+# This plugin can monitor boinc processes running on local/remote machines.
 # You can see the progress on various projects.
 #
 # Author: Petr Ruzicka <petr.ruzicka@gmail.com>
@@ -49,14 +49,14 @@ sub autoconf {
 
     $reply =~ /<nonce>(.*)<\/nonce>/;
     $hash = md5_hex($1, $password);
-	
+
     print $client "<boinc_gui_rpc_request><auth2><nonce_hash>$hash</nonce_hash></auth2></boinc_gui_rpc_request>\003";
-	
+
     {
       local $/ = "\003";
       $reply = <$client>;
     }
-	
+
     if ($reply =~ /<authorized\/>/) {
       print "yes\n";
       exit 0;
@@ -70,29 +70,29 @@ sub config {
   my $client = IO::Socket::INET->new ( PeerAddr => $host,
     				       PeerPort => $port,
 				       Proto => 'tcp' )
-  or die "Can't bind : $@\n"; 
+  or die "Can't bind : $@\n";
 
   print $client "<boinc_gui_rpc_request><auth1/></boinc_gui_rpc_request>\003";
 
-  {	
+  {
     local $/ = "\003";
     $reply = <$client>;
   }
 
   $reply =~ /<nonce>(.*)<\/nonce>/;
   my $hash = md5_hex($1, $password);
-	
+
   print $client "<boinc_gui_rpc_request><auth2><nonce_hash>$hash</nonce_hash></auth2></boinc_gui_rpc_request>\003";
-	
+
   {
     local $/ = "\003";
     $reply = <$client>;
   }
-	
+
   if ($reply !~ /<authorized\/>/) {
     die "Wrong password: $_";
   }
-    
+
   print $client "<boinc_gui_rpc_request><get_state></boinc_gui_rpc_request>";
 
   while (chomp($reply = <$client>) && ($reply ne "</boinc_gui_rpc_reply>")) {
@@ -101,7 +101,7 @@ sub config {
       print "graph_category htc\n";
       print "graph_args -l 0\n";
       print "graph_vlabel %\n";
-    }  
+    }
     if ($reply =~ /<project_name>(.*)<\/project_name>/) {
       my $boinc_munin_name=$1;
       $boinc_munin_name =~ /(\w+).*/;
@@ -115,31 +115,31 @@ sub report {
   my $client = IO::Socket::INET->new ( PeerAddr => $host,
     				       PeerPort => $port,
 				       Proto => 'tcp' )
-  or die "Can't bind : $@\n"; 
+  or die "Can't bind : $@\n";
 
   print $client "<boinc_gui_rpc_request><auth1/></boinc_gui_rpc_request>\003";
 
-  {	
+  {
     local $/ = "\003";
     $reply = <$client>;
   }
 
   $reply =~ /<nonce>(.*)<\/nonce>/;
   my $hash = md5_hex($1, $password);
-	
+
   print $client "<boinc_gui_rpc_request><auth2><nonce_hash>$hash</nonce_hash></auth2></boinc_gui_rpc_request>\003";
-	
+
   {
     local $/ = "\003";
     $reply = <$client>;
   }
-	
+
   if ($reply !~ /<authorized\/>/) {
     die "Wrong password: $_";
   }
-    
+
   print $client "<boinc_gui_rpc_request><get_state></boinc_gui_rpc_request>";
-    
+
   while (chomp($reply = <$client>) && ($reply ne "</boinc_gui_rpc_reply>")) {
     if ($reply =~ /<project_name>(\w+).*<\/project_name>/) {
       $project = $1;

@@ -2,10 +2,10 @@
 # Simple munin plugin to find the google rank for a URL/WORD combination
 #
 # THIS SCRIPT BREAKS THE TOS OF GOOGLE SO USE WITH CARE AND DON'T BLAME ME IF THINGS GO WRONG
-# 
+#
 # (c) 2009 i.dobson@planet-ian.com
 #
-# For each url/words that you want to watch you need to create a variable/word pair in your 
+# For each url/words that you want to watch you need to create a variable/word pair in your
 # munin-node configuration file for example
 #
 #[google_rank]
@@ -19,18 +19,18 @@
 # Version 0.5 24.1.2009
 # Added loop to check the first 500 pages. Note the script sleeps 5 seconds between each page grab so
 # If the word/url your looking for is in the higher positions then you need to increase the timeout
-#  
+#
 # Version 0.5 21.1.2009
-# Dump each page grabbed from google into separate files (helps with debugging) 
+# Dump each page grabbed from google into separate files (helps with debugging)
 #
 # Version 0.4 19.1.2009
 # Fixed corrupt then empty cache file bug
 #
-# Version 0.3 19.1.2009 
+# Version 0.3 19.1.2009
 #  The script now grabs the google page based on the LASTHIT counter.
 #  The script grabs the google page for URL1, then the next time it's called URL2 etc. If the url/word pair doesn't exist for LASTHIT then the script just dumps the cached data
 #
-# Version 0.2 18.01.2009 
+# Version 0.2 18.01.2009
 #  Cache added, the script only grabs the pages from google every 10 calls
 #  The script still only checks to first 100 pages returned by google
 #
@@ -70,7 +70,7 @@ if [ "$1" = "config" ]; then
      fi
      if [ "$WORD" = "" ]; then
        exit 0
-     fi 
+     fi
      VAR=`echo $URL.$WORD | sed -e "s/http:\/\///g"| sed -e "s/ /_/g"| sed -e "s/\./_/g"| sed -e "s/\-/_/g"`
      URL=`echo $URL| sed -e "s/http:\/\///g"`
      echo $VAR.label Pagerank $URL - $WORD
@@ -108,7 +108,7 @@ if [ "$URL" != "" ]; then
   SEARCHWORD=`echo $WORD| sed -e "s/ /%20/g"`
 
 until [ "$FOUND" -ne "0" ]; do
-#Grab page from google for the WORD/PAGE combination.Pipe it into awk to pull out the url's only, one per line. Then dump only the lines containing the URL defined 
+#Grab page from google for the WORD/PAGE combination.Pipe it into awk to pull out the url's only, one per line. Then dump only the lines containing the URL defined
     wget -q --user-agent=Firefox -O - http://www.google.com/search?q=$SEARCHWORD\&num=100\&hl=en\&safe=off\&pwst=1\&start=$start\&sa=N > /tmp/google_rank.$LASTHIT.data
     VALUE=`cat /tmp/google_rank.$LASTHIT.data|sed 's/<a href=\"\([^\"]*\)\" class=l>/\n\1\n/g'|awk -v num=$num -v base=$base '{ if ( $1 ~ /^http/ ) print base,num++,$NF }'|awk '{ print $2 "  " $3}'|grep -i $URL| awk '{ print $1}'`
     VALUE=`echo $VALUE| awk '{ print $1}'`
@@ -117,7 +117,7 @@ until [ "$FOUND" -ne "0" ]; do
       let start="start + 100"
       sleep 5
     else
-      FOUND=1 
+      FOUND=1
       let VALUE="$VALUE + $start"
     fi
 ###    echo Start=$start Value=$VALUE Found=$FOUND
@@ -139,12 +139,12 @@ done
 
 #write data back
   rm /tmp/google_rank.cache
-  for iLoop in `seq 1 10`; do 
+  for iLoop in `seq 1 10`; do
     echo ${Data[$iLoop]} >> /tmp/google_rank.cache
   done
 fi
 
-#Reset counter to start 
+#Reset counter to start
   if [ "$LASTHIT" -gt 30 ]; then
      echo 0 > /tmp/google_rank.status
   fi
