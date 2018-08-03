@@ -119,9 +119,7 @@ if debug:
 
 conf = {
     'git_path':  os.getenv('git_path', '/usr/bin/git'),
-    'state_file': os.getenv('MUNIN_STATEFILE',
-                            '/var/lib/munin-node/plugin-state/nobody/' +
-                            'git_commit_behind.state')
+    'state_file': os.getenv('MUNIN_STATEFILE')
 }
 
 repo_codes = set(re.search('repo\.([^.]+)\..*', elem).group(1)
@@ -201,6 +199,10 @@ def get_info():
 
 
 def check_update_repos():
+    if not conf['state_file']:
+        logging.error('Munin state file unavailable')
+        sys.exit(1)
+
     if len(sys.argv) > 2:
         max_interval = int(sys.argv[2])
     else:
@@ -245,14 +247,22 @@ if len(sys.argv) > 1:
     if action == 'config':
         print_config()
     elif action == 'autoconf':
+        errors = []
+
+        if not conf['state_file']:
+            errors.append('munin state file unavailable')
+
         if os.access(conf['git_path'], os.X_OK):
             test_git = call([conf['git_path'], '--version'], stdout=DEVNULL)
-            if test_git == 0:
-                print('yes')
-            else:
-                print('no (git seems to be broken ?!)')
+            if test_git != 0:
+                errors.append('git seems to be broken ?!')
         else:
-            print('no (git is missing or not executable)')
+            errors.append('git is missing or not executable')
+
+        if errors:
+            print('no (%s)' % ', '.join(errors))
+        else:
+            print('yes')
     elif action == 'version':
         print('Git commit behind Munin plugin, version {0}'.format(
             plugin_version))
