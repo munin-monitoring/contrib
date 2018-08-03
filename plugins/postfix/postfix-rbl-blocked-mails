@@ -9,6 +9,15 @@ LOGFILE=${logfile:-/var/log/mail.log}
 DATE=`date '+%b %e %H'`
 MAXLABEL=20
 
+
+get_blocked_by_domain_count() {
+    local escaped_domain
+    # escape dots - for a proper regular expression
+    escaped_domain=$(echo "$1" | sed 's/\./\\./g')
+    grep -c "$DATE.*blocked using [^ ]*${escaped_domain}" "$LOGFILE"
+}
+
+
 if [ "$1" = "autoconf" ]; then
     if [ -r "$LOGFILE" ]; then
         echo yes
@@ -32,14 +41,8 @@ if [ "$1" = "config" ]; then
 fi
 
 
-echo -en "spamhaus.value "
-echo $(grep "blocked using sbl-xbl.spamhaus.org" $LOGFILE | grep "$DATE" | wc -l)
-echo -en "spamcop.value "
-echo $(grep "blocked using bl.spamcop.net" $LOGFILE | grep "$DATE" | wc -l)
-echo -en "manitu.value "
-echo $(grep "blocked using ix.dnsbl.manitu.net" $LOGFILE | grep "$DATE" | wc -l)
-echo -en "msrbl.value "
-echo $(grep "blocked using combined.rbl.msrbl.net" $LOGFILE | grep "$DATE" | wc -l)
-echo -en "njabl.value "
-echo $(grep "blocked using combined.njabl.org" $LOGFILE | grep "$DATE" | wc -l)
-
+printf 'spamhaus.value %s\n' "$(get_blocked_by_domain_count "sbl-xbl.spamhaus.org")"
+printf 'spamcop.value %s\n' "$(get_blocked_by_domain_count "bl.spamcop.net")"
+printf 'manitu.value %s\n' "$(get_blocked_by_domain_count "ix.dnsbl.manitu.net")"
+printf 'msrbl.value %s\n' "$(get_blocked_by_domain_count "combined.rbl.msrbl.net")"
+printf 'njabl.value %s\n' "$(get_blocked_by_domain_count "combined.njabl.org")"
