@@ -96,8 +96,6 @@ GPLv2
 =cut"""
 
 
-from __future__ import print_function
-
 import logging
 import os
 from random import randint
@@ -121,8 +119,8 @@ conf = {
                             'git_commit_behind.state')
 }
 
-repo_codes = set([re.search('repo\.([^.]+)\..*', elem).group(1)
-                  for elem in os.environ.keys() if 'repo.' in elem])
+repo_codes = set(re.search('repo\.([^.]+)\..*', elem).group(1)
+                 for elem in os.environ.keys() if elem.startswith('repo.'))
 
 repos_conf = {}
 for code in repo_codes:
@@ -189,7 +187,7 @@ def get_info():
 
             print('%s.value %d' % (repo_code, int(commits_behind)))
         except CalledProcessError as e:
-            logging.error('Error executing git command : %s' % str(e))
+            logging.error('Error executing git command : %s', e)
         except FileNotFoundError as e:
             logging.error('Repo not found at path %s' %
                           repos_conf[repo_code]['path'])
@@ -225,7 +223,7 @@ def do_update_repos():
             logging.info('Fetching repo %s' % repo_code)
             execute_git_command(repos_conf[repo_code], ['fetch'])
         except CalledProcessError as e:
-            logging.error('Error executing git command : %s' % str(e))
+            logging.error('Error executing git command : %s', e)
         except FileNotFoundError as e:
             logging.error('Repo not found at path %s' %
                           repos_conf[repo_code]['path'])
@@ -252,7 +250,7 @@ if len(sys.argv) > 1:
     elif action == 'update':
         check_update_repos()
     elif action:
-        logging.warn('Unknown argument \'%s\'' % action)
+        logging.warn("Unknown argument '%s'" % action)
         sys.exit(1)
     else:
         get_info()
