@@ -25,20 +25,17 @@ Link this plugin, as usual.
 For example :
   ln -s /path/to/git_commit_behind /etc/munin/plugins/git_commit_behind
 
-You also need to setup a cron job to trigger the git fetches.
-
-The plugin can be called with an "update" mode to handle the fetches :
-munin-run git_commit_behind update <maxinterval> <probability>
-It will run the fetches randomly (1 in <probability> chances),
-and ensure that it is run at least every <maxinterval> seconds.
+If you wish to update the repositories via cron and not during the plugin
+execution (cf CONFIGURATION section), you need a dedicated cron job.
 
 For example, you can use the following cron :
 
-# If the git_commit_behind plugin is enabled, fetch git repositories approx.
-# once an hour (12 invocations an hour, 1 in 12 chance that the update will
-# happen), but ensure that there will never be more than two hours
+# If the git_commit_behind plugin is enabled, fetch git repositories randomly
+# according to the plugin configuration.
+# By default : once an hour (12 invocations an hour, 1 in 12 chance that the
+# update will happen), but ensure that there will never be more than two hours
 # (7200 seconds) interval between updates.
-*/5 * * * * root if [ -x /etc/munin/plugins/git_commit_behind ]; then /usr/sbin/munin-run git_commit_behind update 7200 12 >/dev/null; fi
+*/5 * * * * root if [ -x /etc/munin/plugins/git_commit_behind ]; then /usr/sbin/munin-run git_commit_behind update >/dev/null; fi
 
 =head1 CONFIGURATION
 
@@ -46,9 +43,20 @@ Use your "/etc/munin/plugin-conf.d/munin-node" to configure this plugin.
     [git_commit_behind]
     user root
     env.git_path /path/to/git
+    env.update.mode [munin|cron]
+    env.update.probability 12
+    env.update.maxinterval 7200
 
 user root : required (to be able to switch to each repo user)
 env.git_path : optional (default : /usr/bin/git), the path to the git binary.
+env.update.mode : optional (default : munin), the update mode.
+    munin : repositories are git fetched during the pugin execution
+    cron : a dedicated cron job needs to be used to update the repositories
+env.update.probability : optional (default : 12),
+    runs the update randomly (1 in <probability> chances)
+env.update.maxinterval : optional (default : 7200),
+    ensures that the update is run at least every <maxinterval> seconds
+
 
 Then, for each repository you want to check, you need the following
 configuration block under the git_commit_behind section
@@ -118,8 +126,11 @@ if debug:
                         format='%(asctime)s %(levelname)-7s %(message)s')
 
 conf = {
-    'git_path':  os.getenv('git_path', '/usr/bin/git'),
-    'state_file': os.getenv('MUNIN_STATEFILE')
+    'git_path':            os.getenv('git_path', '/usr/bin/git'),
+    'state_file':          os.getenv('MUNIN_STATEFILE'),
+    'update_mode':         os.getenv('update.mode', 'munin'),
+    'update_probability':  int(os.getenv('update.probability', '12')),
+    'update_maxinterval':  int(os.getenv('update.maxinterval', '7200'))
 }
 
 repo_codes = set(re.search('repo\.([^.]+)\..*', elem).group(1)
@@ -198,28 +209,23 @@ def get_info():
                           repos_conf[repo_code]['path'])
 
 
-def check_update_repos():
+def check_update_repos(mode):
     if not conf['state_file']:
         logging.error('Munin state file unavailable')
         sys.exit(1)
 
-    if len(sys.argv) > 2:
-        max_interval = int(sys.argv[2])
-    else:
-        max_interval = 7200
-
-    if len(sys.argv) > 3:
-        probability = int(sys.argv[3])
-    else:
-        probability = 12
+    if mode != conf['update_mode']:
+        logging.debug('Wrong mode, skipping')
+        return
 
     if not os.path.isfile(conf['state_file']):
         logging.debug('No state file -> updating')
         do_update_repos()
-    elif os.path.getmtime(conf['state_file']) + max_interval < time.time():
+    elif (os.path.getmtime(conf['state_file']) + conf['update_maxinterval']
+            < time.time()):
         logging.debug('State file last modified too long ago -> updating')
         do_update_repos()
-    elif randint(1, probability) == 1:
+    elif randint(1, conf['update_probability']) == 1:
         logging.debug('Recent state, but random matched -> updating')
         do_update_repos()
     else:
@@ -267,11 +273,11 @@ if len(sys.argv) > 1:
         print('Git commit behind Munin plugin, version {0}'.format(
             plugin_version))
     elif action == 'update':
-        check_update_repos()
-    elif action:
+        check_update_repos('cron')
+    else:
         logging.warn("Unknown argument '%s'" % action)
         sys.exit(1)
-    else:
-        get_info()
 else:
+    if conf['update_mode'] == 'munin':
+        check_update_repos('munin')
     get_info()
