@@ -1,0 +1,286 @@
+#! /usr/bin/env python3
+
+"""=cut
+=head1 NAME
+
+git_commit_behind - Munin plugin to monitor local git repositories and report
+how many commits behind their remote they are
+
+=head1 NOTES
+
+This plugin is similar to how apt_all works for apt packages.
+
+To be able to check how behind a git repository is, we need to run git fetch.
+To avoid fetching all repos every 5 minutes (for each munin period) and thus
+slowing down the data collection, the git fetch operation is only randomly
+triggered (based on env.update.probability).
+In case of very time-consuming update operations, you can run them in a
+separate cron job.
+
+=head1 REQUIREMENTS
+
+ - Python3
+ - Git
+
+=head1 INSTALLATION
+
+Link this plugin, as usual.
+For example :
+  ln -s /path/to/git_commit_behind /etc/munin/plugins/git_commit_behind
+
+If you wish to update the repositories via cron and not during the plugin
+execution (cf CONFIGURATION section), you need a dedicated cron job.
+
+For example, you can use the following cron :
+
+# If the git_commit_behind plugin is enabled, fetch git repositories randomly
+# according to the plugin configuration.
+# By default : once an hour (12 invocations an hour, 1 in 12 chance that the
+# update will happen), but ensure that there will never be more than two hours
+# (7200 seconds) interval between updates.
+*/5 * * * * root if [ -x /etc/munin/plugins/git_commit_behind ]; then /usr/sbin/munin-run git_commit_behind update >/dev/null; fi
+
+=head1 CONFIGURATION
+
+Use your "/etc/munin/plugin-conf.d/munin-node" to configure this plugin.
+    [git_commit_behind]
+    user [user]
+    env.git_path /path/to/git
+    env.update.mode [munin|cron]
+    env.update.probability 12
+    env.update.maxinterval 7200
+
+user [user] : required, the owner of the repository checkouts
+    in case of multiple different owners, use root
+env.git_path : optional (default : /usr/bin/git), the path to the git binary.
+env.update.mode : optional (default : munin), the update mode.
+    munin : repositories are git fetched during the pugin execution
+    cron : a dedicated cron job needs to be used to update the repositories
+env.update.probability : optional (default : 12),
+    runs the update randomly (1 in <probability> chances)
+env.update.maxinterval : optional (default : 7200),
+    ensures that the update is run at least every <maxinterval> seconds
+
+
+Then, for each repository you want to check, you need the following
+configuration block under the git_commit_behind section
+    env.repo.[repoCode].path /path/to/local/repo
+    env.repo.[repoCode].name Repo Name
+    env.repo.[repoCode].user user
+    env.repo.[repoCode].warning 10
+    env.repo.[repoCode].critical 100
+
+[repoCode] can only contain letters, numbers and underscores.
+
+path : mandatory, the local path to your git repository
+name : optional (default : [repoCode]), a cleaner name that will be displayed
+user : optional (default : empty), the owner of the repository
+       if set and different from the user running the plugin, the git commands
+       will be executed as this user
+warning : optional (default 10), the warning threshold
+critical : optional (default 100), the critical threshold
+
+For example :
+
+    [git_commit_behind]
+    user root
+
+    env.repo.munin_contrib.path /opt/munin-contrib
+    env.repo.munin_contrib.name Munin Contrib
+
+    env.repo.other_repo.path /path/to/other-repo
+    env.repo.other_repo.name Other Repo
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+
+1.0.0
+
+=head1 AUTHOR
+
+Neraud (https://github.com/Neraud)
+
+=head1 LICENSE
+
+GPLv2
+
+=cut"""
+
+
+import logging
+import os
+from pathlib import Path
+from random import randint
+import re
+from shlex import quote
+from subprocess import check_output, call, DEVNULL, CalledProcessError
+import sys
+import time
+
+
+plugin_version = "1.0.0"
+
+if int(os.getenv('MUNIN_DEBUG', 0)) > 0:
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(asctime)s %(levelname)-7s %(message)s')
+
+conf = {
+    'git_path':            os.getenv('git_path', '/usr/bin/git'),
+    'state_file':          os.getenv('MUNIN_STATEFILE'),
+    'update_mode':         os.getenv('update.mode', 'munin'),
+    'update_probability':  int(os.getenv('update.probability', '12')),
+    'update_maxinterval':  int(os.getenv('update.maxinterval', '7200'))
+}
+
+repo_codes = set(re.search('repo\.([^.]+)\..*', elem).group(1)
+                 for elem in os.environ.keys() if elem.startswith('repo.'))
+
+repos_conf = {}
+for code in repo_codes:
+    repos_conf[code] = {
+        'name':        os.getenv('repo.%s.name' % code, code),
+        'path':        os.getenv('repo.%s.path' % code, None),
+        'user':        os.getenv('repo.%s.user' % code, None),
+        'warning':     os.getenv('repo.%s.warning' % code, '10'),
+        'critical':    os.getenv('repo.%s.critical' % code, '100')
+    }
+
+
+def print_config():
+    print('graph_title Git repositories - Commits behind')
+
+    print('graph_args --base 1000 -r --lower-limit 0')
+    print('graph_vlabel number of commits behind')
+    print('graph_scale yes')
+    print('graph_info This graph shows the number of commits behind' +
+          ' for each configured git repository')
+    print('graph_category file_transfer')
+
+    print('graph_order %s' % ' '.join(repo_codes))
+
+    for repo_code in repos_conf.keys():
+        print('%s.label %s' % (repo_code, repos_conf[repo_code]['name']))
+        print('%s.warning %s' % (repo_code, repos_conf[repo_code]['warning']))
+        print('%s.critical %s' %
+              (repo_code, repos_conf[repo_code]['critical']))
+
+
+def generate_git_command(repo_conf, git_command):
+    if not repo_conf['user'] or repo_conf['user'] == os.environ['USER']:
+        cmd = [quote(conf['git_path'])] + git_command
+    else:
+        shell_cmd = 'cd %s ; %s %s' % (
+            quote(repo_conf['path']),
+            quote(conf['git_path']),
+            ' '.join(git_command))
+        cmd = ['su', '-', repo_conf['user'], '-c', shell_cmd]
+    return cmd
+
+
+def execute_git_command(repo_conf, git_command):
+    cmd = generate_git_command(repo_conf, git_command)
+    return check_output(cmd, cwd=repo_conf['path']).decode('utf-8').rstrip()
+
+
+def print_info():
+    if not os.access(conf['git_path'], os.X_OK):
+        print('Git (%s) is missing, or not executable !' %
+              conf['git_path'], file=sys.stderr)
+        sys.exit(1)
+
+    for repo_code in repos_conf.keys():
+        logging.debug(' - %s' % repo_code)
+        try:
+            remote_branch = execute_git_command(
+                repos_conf[repo_code],
+                ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])
+            logging.debug('remote_branch = %s' % remote_branch)
+
+            commits_behind = execute_git_command(
+                repos_conf[repo_code],
+                ['rev-list', 'HEAD..%s' % remote_branch, '--count'])
+
+            print('%s.value %d' % (repo_code, int(commits_behind)))
+        except CalledProcessError as e:
+            logging.error('Error executing git command : %s', e)
+        except FileNotFoundError as e:
+            logging.error('Repo not found at path %s' %
+                          repos_conf[repo_code]['path'])
+
+
+def check_update_repos(mode):
+    if not conf['state_file']:
+        logging.error('Munin state file unavailable')
+        sys.exit(1)
+
+    if mode != conf['update_mode']:
+        logging.debug('Wrong mode, skipping')
+        return
+
+    if not os.path.isfile(conf['state_file']):
+        logging.debug('No state file -> updating')
+        do_update_repos()
+    elif (os.path.getmtime(conf['state_file']) + conf['update_maxinterval']
+            < time.time()):
+        logging.debug('State file last modified too long ago -> updating')
+        do_update_repos()
+    elif randint(1, conf['update_probability']) == 1:
+        logging.debug('Recent state, but random matched -> updating')
+        do_update_repos()
+    else:
+        logging.debug('Recent state and random missed -> skipping')
+
+
+def do_update_repos():
+    for repo_code in repos_conf.keys():
+        try:
+            logging.info('Fetching repo %s' % repo_code)
+            execute_git_command(repos_conf[repo_code], ['fetch'])
+        except CalledProcessError as e:
+            logging.error('Error executing git command : %s', e)
+        except FileNotFoundError as e:
+            logging.error('Repo not found at path %s' %
+                          repos_conf[repo_code]['path'])
+    logging.debug('Updating the state file')
+
+    # 'touch' the state file to update its last modified date
+    Path(conf['state_file']).touch()
+
+
+if len(sys.argv) > 1:
+    action = sys.argv[1]
+    if action == 'config':
+        print_config()
+    elif action == 'autoconf':
+        errors = []
+
+        if not conf['state_file']:
+            errors.append('munin state file unavailable')
+
+        if os.access(conf['git_path'], os.X_OK):
+            test_git = call([conf['git_path'], '--version'], stdout=DEVNULL)
+            if test_git != 0:
+                errors.append('git seems to be broken ?!')
+        else:
+            errors.append('git is missing or not executable')
+
+        if errors:
+            print('no (%s)' % ', '.join(errors))
+        else:
+            print('yes')
+    elif action == 'version':
+        print('Git commit behind Munin plugin, version {0}'.format(
+            plugin_version))
+    elif action == 'update':
+        check_update_repos('cron')
+    else:
+        logging.warn("Unknown argument '%s'" % action)
+        sys.exit(1)
+else:
+    if conf['update_mode'] == 'munin':
+        check_update_repos('munin')
+    print_info()
