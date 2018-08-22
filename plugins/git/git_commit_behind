@@ -114,6 +114,7 @@ GPLv2
 import logging
 import os
 from pathlib import Path
+import pwd
 from random import randint
 import re
 from shlex import quote
@@ -127,6 +128,8 @@ plugin_version = "1.0.0"
 if int(os.getenv('MUNIN_DEBUG', 0)) > 0:
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s %(levelname)-7s %(message)s')
+
+current_user = pwd.getpwuid(os.geteuid())[0]
 
 conf = {
     'git_path':            os.getenv('git_path', '/usr/bin/git'),
@@ -170,7 +173,7 @@ def print_config():
 
 
 def generate_git_command(repo_conf, git_command):
-    if not repo_conf['user'] or repo_conf['user'] == os.environ['USER']:
+    if not repo_conf['user'] or repo_conf['user'] == current_user:
         cmd = [quote(conf['git_path'])] + git_command
     else:
         shell_cmd = 'cd %s ; %s %s' % (
