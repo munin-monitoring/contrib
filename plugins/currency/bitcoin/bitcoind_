@@ -79,15 +79,15 @@ def main():
 
     if command == 'suggest':
         for var_name in request_labels.keys():
-            print var_name
+            print(var_name)
         return
 
     if command == 'config':
-        print 'graph_category htc'
-        print 'graph_title Bitcoin %s' % labels[0]
-        print 'graph_vlabel %s' % labels[1]
+        print('graph_category htc')
+        print('graph_title Bitcoin %s' % labels[0])
+        print('graph_vlabel %s' % labels[1])
         for label in line_labels:
-            print '%s.label %s' % (label, label)
+            print('%s.label %s' % (label, label))
         return
 
     # Munin should send connection options via environment vars
@@ -110,7 +110,7 @@ def main():
 
     if error:
         if command == 'autoconf':
-            print 'no'
+            print('no')
             return
         else:
             # TODO: Better way to report errors to Munin-node.
@@ -128,11 +128,11 @@ def main():
             info['waiting'] = len(memory_pool)
 
     if command == 'autoconf':
-        print 'yes'
+        print('yes')
         return
 
     for label in line_labels:
-        print "%s.value %s" % (label, info[label])
+        print("%s.value %s" % (label, info[label]))
 
 
 def parse_conf(filename):
@@ -151,7 +151,8 @@ def parse_conf(filename):
                     continue
                 (var, value) = (m.group(1), m.group(2).strip())
                 options[var] = value
-    except:
+    except OSError:
+        # the config file may be missing
         pass
 
     return options
@@ -212,9 +213,9 @@ class Proxy(object):
     def __call__(self, *args):
         if DEBUG:
             arg_strings = [json.dumps(arg) for arg in args]
-            print "Calling %s(%s) @ %s" % (self.method,
+            print("Calling %s(%s) @ %s" % (self.method,
                                            ', '.join(arg_strings),
-                                           self.service.url)
+                                           self.service.url))
 
         data = {
             'method': self.method,
@@ -229,15 +230,15 @@ class Proxy(object):
 
         try:
             body = urllib2.urlopen(request).read()
-        except Exception, e:
+        except urllib2.URLError as e:
             return (None, e)
 
         if DEBUG:
-            print 'RPC Response (%s): %s' % (self.method, json.dumps(body, indent=4))
+            print('RPC Response (%s): %s' % (self.method, json.dumps(body, indent=4)))
 
         try:
             data = json.loads(body)
-        except ValueError, e:
+        except ValueError as e:
             return (None, e.message)
         # TODO: Check that id matches?
         return (data['result'], data['error'])
