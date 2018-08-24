@@ -14,8 +14,10 @@ This plugin supports two ways to do that:
 
      [bitcoind_*]
      user your-username
+     env.bitcoin_configfile /home/your-username/.bitcoin/bitcoin.conf
 
-   Then be sure your $HOME/.bitcoin/bitcoin.conf has the correct authentication info:
+   Then be sure that the file referenced above (typically: $HOME/.bitcoin/bitcoin.conf)
+   has the correct authentication info:
        rpcconnect, rpcport, rpcuser, rpcpassword
 
 2) Place your bitcoind authentication directly in /etc/munin/plugin-conf.d/bitcoin.conf
@@ -97,8 +99,16 @@ def main():
     bitcoin_options.rpcport = bitcoin_options.get('rpcport', '8332')
 
     if bitcoin_options.get('rpcuser') is None:
-        conf_file = os.path.join(os.path.expanduser('~/.bitcoin'), 'bitcoin.conf')
-        bitcoin_options = parse_conf(conf_file)
+        conf_file = os.getenv("bitcoin_configfile")
+        if not conf_file:
+            print("Missing environment settings (rpcuser/rcpassword or bitcoin_configfile)",
+                  file=sys.stderr)
+            sys.exit(1)
+        elif not os.path.exists(conf_file):
+            print("Configuration file does not exist: {}".format(conf_file), file=sys.stderr)
+            sys.exit(1)
+        else:
+            bitcoin_options = parse_conf(conf_file)
 
     bitcoin_options.require('rpcuser', 'rpcpassword')
 
