@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 # Plugin for monitor JVM activity - GC Time -
 #
@@ -22,9 +22,10 @@
 #
 # Target:
 #
-#	Target Java Virtual Machine to monitor are:
-#	  Sun JDK 5.0 (http://java.sun.com/javase/) (default)
-#	  BEA JRockit 5.0 (http://dev2dev.bea.com/jrockit/)
+#       Target Java Virtual Machine to monitor are:
+#         Sun JDK 5.0 (http://java.sun.com/javase/)
+#         Sun JDK 8.0 (http://java.sun.com/javase/)
+#         BEA JRockit 5.0 (http://dev2dev.bea.com/jrockit/)
 #
 # Parameters:
 #
@@ -33,148 +34,94 @@
 # Config variables:
 #
 #       pidfilepath  - Which file path use. Defaults to '/var/run/jsvc.pid'
-#       javahome     - Defaults to '/usr/local/java/jdk'
+#       javahome     - override automatic detection of JRE directory
+#       graphtitle   - Title of the graph (defaults to PID file location)
 #
-DefaultPidFile="/var/run/jsvc.pid"
-DefaultJavaHome="/usr/local/java/jdk"
 
-#
-# Environment Variables
-#
-if [ -z "${pidfilepath}" ]; then
-  pidfilepath="${DefaultPidFile}"
-fi
+default_java_home=/usr/lib/jvm/default-java
+[ -e "$default_java_home" ] || default_java_home=/usr/local/java/jdk
 
-if [ -z "${graphtitle}" ]; then
-  graphtitle="${pidfilepath}"
-fi
+pidfilepath=${pidfilepath:-/var/run/jsvc.pid}
+graphtitle=${graphtitle:-$pidfilepath}
+JAVA_HOME=${javahome:-$default_java_home}
 
-if [ -z "${javahome}" ]; then
-  JAVA_HOME="${DefaultJavaHome}"
-else
-  JAVA_HOME="${javahome}"
-fi
 export JAVA_HOME
 
-#
-# Functions
-#
-chk_jdk()
-{
-  isJRockit=`${JAVA_HOME}/bin/java -version 2>&1 | egrep -i 'jrockit'`
-  if [ -n "${isJRockit}" ]; then
-    JDK_TYPE="bea"
-  else
-    JDK_TYPE="sun"
+
+get_jdk_type() {
+    local version
+    if "${JAVA_HOME}/bin/java" -version 2>&1 | grep -qi 'jrockit'; then
+        echo "bea"
+    else
+        version=$("${JAVA_HOME}/bin/java" -version 2>&1 | grep '^java version' | awk '{print $3}' | sed -e 's/\"//g' | cut -d'_' -f 1)
+        if echo "$version" | grep -q '^1\.5\.'; then
+            echo "sun15"
+        else
+            echo "sun"
+        fi
   fi
 }
 
-chk_version()
-{
-  Version=`${JAVA_HOME}/bin/java -version 2>&1 | egrep '^java version' | awk '{print $3}' | sed -e 's/\"//g' | cut -d'_' -f 1`
-  if [ "${Version}" != "1.5.0" ]; then
-    return 1
-  else
-    return 0
-  fi
+
+print_config() {
+    echo "graph_title GC Time $graphtitle"
+    echo 'graph_args -l 0'
+    echo 'graph_vlabel GC Time(sec)'
+    echo 'graph_total total'
+    echo 'graph_info GC Time'
+    echo 'graph_category virtualization'
+
+    echo 'Young_GC.label Young_GC'
+    echo 'Young_GC.min 0'
+    if [ "${JDK_TYPE}" = "bea" ]; then
+        echo 'Old_GC.label Old_GC'
+        echo 'Old_GC.min 0'
+        echo 'Young_Pause.label Young_GC Pause'
+        echo 'Young_Pause.min 0'
+        echo 'Old_Pause.label Old_GC Pause'
+        echo 'Old_Pause.min 0'
+    else
+        echo 'Full_GC.label Full_GC'
+        echo 'Full_GC.min 0'
+    fi
 }
 
-config_common()
-{
-        echo 'graph_title GC Time' $graphtitle
-        echo 'graph_args -l 0'
-        echo 'graph_vlabel GC Time(sec)'
-        echo 'graph_total total'
-        echo 'graph_info GC Time'
-        echo 'graph_category virtualization'
+
+print_stats() {
+    local pid_num="$1"
+    local awk_script
+    if [ "${JDK_TYPE}" = "bea" ]; then
+        # shellcheck disable=SC2016
+        awk_script='{
+            YCTime = $6;
+            OCTime = $7;
+            YCPauseTime = $9;
+            OCPauseTime = $10;
+            print "Young_GC.value " YCTime;
+            print "Old_GC.value " OCTime;
+            print "Young_Pause.value " YCPauseTime;
+            print "Old_Pause.value " OCPauseTime; }'
+    elif [ "${JDK_TYPE}" = "sun15" ]; then
+        # shellcheck disable=SC2016
+        awk_script='{
+            YGCT  = $12;
+            FGCT  = $14;
+            print "Young_GC.value " YGCT;
+            print "Full_GC.value " FGCT; }'
+    else
+        # example output of jstat for Java 1.8:
+        #   S0C S1C S0U S1U EC EU OC OU MC MU CCSC CCSU YGC YGCT FGC FGCT GCT
+        #   2048.0 2048.0 0.0 1344.0 694784.0 145013.5 1398272.0 414857.1 102400.0 96308.0 12544.0 11240.1 979 20.997 5 2.705 23.702
+        # shellcheck disable=SC2016
+        awk_script='{
+            YGCT  = $14;
+            FGCT  = $16;
+            print "Young_GC.value " YGCT;
+            print "Full_GC.value " FGCT; }'
+    fi
+    "${JAVA_HOME}/bin/jstat" -gc "$pid_num" | tail -1 | awk "$awk_script"
 }
 
-config_sun_jdk()
-{
-  config_common
-
-  echo 'Young_GC.label Young_GC'
-  echo 'Young_GC.min 0'
-  echo 'Full_GC.label Full_GC'
-  echo 'Full_GC.min 0'
-
-}
-
-config_bea_jdk()
-{
-  config_common
-
-  echo 'Young_GC.label Young_GC'
-  echo 'Young_GC.min 0'
-  echo 'Old_GC.label Old_GC'
-  echo 'Old_GC.min 0'
-  echo 'Young_Pause.label Young_GC Pause'
-  echo 'Young_Pause.min 0'
-  echo 'Old_Pause.label Old_GC Pause'
-  echo 'Old_Pause.min 0'
-
-}
-
-print_sun_stats()
-{
-${JAVA_HOME}/bin/jstat -gc ${PidNum} | tail -1 | awk \
-'{\
-	S0C = $1; \
-	S1C = $2; \
-	S0U = $3; \
-	S1U = $4; \
-	EC  = $5; \
-	EU  = $6; \
-	OC  = $7; \
-	OU  = $8; \
-	PC  = $9; \
-	PU  = $10; \
-        YGC  = $11; \
-        YGCT  = $12; \
-        FGC  = $13; \
-        FGCT  = $14; \
-        GCT  = $15; \
-
-	\
-	S0F = S0C - S0U; \
-	S1F = S1C - S1U; \
-	EF  = EC  - EU;  \
-	OF  = OC  - OU;  \
-	PF  = PC  - PU;  \
-	\
-        print "Young_GC.value " YGCT; \
-        print "Full_GC.value " FGCT; \
-}'
-}
-
-print_bea_stats()
-{
-${JAVA_HOME}/bin/jstat -gc ${PidNum} | tail -1 | awk \
-'{\
-	HeapSize = $1; \
-	NurserySize = $2; \
-	UsedHeapSize = $3; \
-	YC = $4; \
-	OC = $5; \
-	YCTime = $6; \
-	OCTime = $7; \
-	GCTime = $8; \
-	YCPauseTime = $9; \
-	OCPauseTime = $10; \
-	PauseTime = $11; \
-	Finalizers = $12; \
-	\
-	print "Young_GC.value " YCTime; \
-	print "Old_GC.value " OCTime; \
-	print "Young_Pause.value " YCPauseTime; \
-	print "Old_Pause.value " OCPauseTime
-}'
-}
-
-#
-# common for all argument
-#
-chk_jdk
 
 #
 # autoconf
@@ -186,13 +133,7 @@ if [ "$1" = "autoconf" ]; then
     exit 1
   fi
 
-  chk_version
-  if [ $? != 0 ]; then
-    echo "no (Java version is invalid)"
-    exit 1
-  fi
-
-  if [ ! -f "${pidfilepath}" -o ! -r "${pidfilepath}" ]; then
+  if [ ! -f "${pidfilepath}" ] || [ ! -r "${pidfilepath}" ]; then
     echo "no (No such file ${pidfilepath} or cannot read ${pidfilepath}"
     exit 1
   fi
@@ -202,25 +143,11 @@ if [ "$1" = "autoconf" ]; then
 fi
 
 
-#
-# config
-#
+JDK_TYPE=$(get_jdk_type)
+
+
 if [ "$1" = "config" ]; then
-  if [ "${JDK_TYPE}" == "bea" ]; then
-    config_bea_jdk
-  else
-    config_sun_jdk
-  fi
-  exit 0
+    print_config
 fi
 
-#
-# Main
-#
-PidNum=`cat ${pidfilepath}`
-
-if [ "${JDK_TYPE}" == "bea" ]; then
-  print_bea_stats
-else
-  print_sun_stats
-fi
+print_stats "$(cat "$pidfilepath")"
