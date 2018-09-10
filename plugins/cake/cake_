@@ -1,0 +1,131 @@
+#!/bin/bash
+# -*- sh -*-
+
+: << =cut
+
+=pod
+
+=encoding UTF-8
+
+=head1 NAME
+
+cake_ - Plugin to monitor cake's backlog, dropped, overlimits and requeues
+
+=head1 CONFIGURATION
+
+None needed.
+
+=head1 INTERPRETATION
+
+Cake, also known as sch_cake is a modern bandwidth limiter, which eliminates
+buffer bloat over slow links. It's also capable to give flows, hosts and each 
+flow of each host a fair part of the avaible bandwidth.
+
+This plugin allows for a monitor of the pressure on the qdisc, by monitoring key
+values.
+
+=head1 SEE ALSO
+
+Take a look at "man cake" to get more information about cake.
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=head1 AUTHORS
+
+RubenKelevra <ruben@vfn-nrw.de>
+
+work based on the tc plugin, authors:
+Steve Schnepp <steve.schnepp@gmail.com>,
+Samuel Smith <esaym@cpan.org>,
+Nye Liu <nyet@nyet.org>
+
+=head1 LICENSE
+
+GPLv2 or later
+
+=cut
+
+DEVICE=${0##*/cake_}
+
+tc_cake_sent() {
+    /sbin/tc -s qdisc show dev "$1" | grep -E "^ Sent" | tr ',' ' ' | tr ')' ' ' 
+}
+tc_cake_backlog() {
+    /sbin/tc -s qdisc show dev "$1" | grep -E "^ backlog" | tr 'p' ' ' 
+}
+
+case "$1" in
+    autoconf)
+    if [ -r /proc/net/dev ]; then
+        echo yes
+        exit 0
+    else
+        echo "no (/proc/net/dev not found)"
+        exit 1
+    fi
+    ;;
+    suggest)
+    if [ -r /proc/net/dev ]; then
+        ifs="$(awk '
+                /^ *(eth|tap|bond|wlan|ath|ra|sw|eno|ens|enp|wlp|wl)[0-9]*/ {
+                   split($0, a, /: */);
+                   gsub(/^ +/,"",a[1]);
+                   if (($2 > 0) || ($10 > 0)) print a[1]; }' /proc/net/dev)"
+        cake_ifs=()
+        for if in $ifs; do
+            qdisc="$(/sbin/tc -s qdisc show dev "$if" | head -n1 | awk '{ print $2 }')"
+            if [ "$qdisc" == "cake" ]; then
+                cake_ifs+=("$if")
+            fi
+        done
+        echo "$cake_ifs"
+    fi
+    exit 0
+    ;;
+    config)
+    
+    echo "graph_title $DEVICE cake packet handling stats"
+    echo 'graph_args --base 1000'
+    echo 'graph_vlabel packets per second'
+    echo 'graph_category network'
+    echo "graph_info This graph shows the general packet handling status of egress traffic of the $DEVICE network interface."
+    
+    echo "backlog.label backlog";
+    echo "backlog.draw LINE2";
+    echo "backlog.info amount of packets currently buffered";
+    
+    echo "dropped.label dropped"
+    echo "dropped.draw AREA"
+    echo "dropped.type DERIVE"
+    echo "dropped.min 0"
+    echo "dropped.info dropped packets in queue"
+    echo "overlimits.label overlimits"
+    echo "overlimits.draw STACK"
+    echo "overlimits.type DERIVE"
+    echo "overlimits.min 0"
+    echo "overlimits.info packets exeeded a limit"
+    echo "requeues.label requeues"
+    echo "requeues.draw STACK"
+    echo "requeues.type DERIVE"
+    echo "requeues.min 0"
+    echo "requeues.info packets requeued in queue"
+    
+    exit 0
+    ;;
+esac
+
+# sent
+tc_cake_sent "$DEVICE" | awk '{
+    print "dropped.value " $7
+    print "overlimits.value " $9
+    print "requeues.value " $11
+}'
+# backlog
+tc_cake_backlog "$DEVICE" | awk '{
+    print "backlog.value " $3
+}'
+
+exit 0

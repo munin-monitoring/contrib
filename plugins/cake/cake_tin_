@@ -1,0 +1,224 @@
+#!/bin/bash
+# -*- sh -*-
+
+: << =cut
+
+=pod
+
+=encoding UTF-8
+
+=head1 NAME
+
+cake_tin_ - Plugin to monitor cake's tin' performances in packages per second
+
+=head1 CONFIGURATION
+
+None needed.
+
+=head1 INTERPRETATION
+
+Cake, also known as sch_cake is a modern bandwidth limiter, which eliminates
+buffer bloat over slow links. It's also capable to give flows, hosts and each 
+flow of each host a fair part of the avaible bandwidth.
+
+This plugin allows for a monitoring packets per tins on the qdisc.
+
+=head1 SEE ALSO
+
+Take a look at "man cake" to get more information about cake.
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=head1 AUTHORS
+
+RubenKelevra <ruben@vfn-nrw.de>
+
+work based on the tc plugin, authors:
+Steve Schnepp <steve.schnepp@gmail.com>,
+Samuel Smith <esaym@cpan.org>,
+Nye Liu <nyet@nyet.org>
+
+=head1 LICENSE
+
+GPLv2 or later
+
+=cut
+
+DEVICE=${0##*/cake_tin_}
+
+tc_cake_get_diffserv() {
+    /sbin/tc -s qdisc show dev "$DEVICE" | head -n1 | grep -i "diffserv3" > /dev/null
+    if [ $? -eq 0 ]; then
+        echo 3
+    fi
+    /sbin/tc -s qdisc show dev "$DEVICE" | head -n1 | grep -i "diffserv4" > /dev/null
+    if [ $? -eq 0 ]; then
+        echo 4
+    fi
+    /sbin/tc -s qdisc show dev "$DEVICE" | head -n1 | grep -i "diffserv8" > /dev/null
+    if [ $? -eq 0 ]; then
+        echo 8
+    fi
+    return 0
+}
+
+case "$1" in
+    autoconf)
+    if [ -r /proc/net/dev ]; then
+        echo yes
+        exit 0
+    else
+        echo "no (/proc/net/dev not found)"
+        exit 1
+    fi
+    ;;
+    suggest)
+    if [ -r /proc/net/dev ]; then
+        ifs="$(awk '
+                /^ *(eth|tap|bond|wlan|ath|ra|sw|eno|ens|enp|wlp|wl)[0-9]*/ {
+                   split($0, a, /: */);
+                   gsub(/^ +/,"",a[1]);
+                   if (($2 > 0) || ($10 > 0)) print a[1]; }' /proc/net/dev)"
+        cake_ifs=()
+        for if in $ifs; do
+            qdisc="$(/sbin/tc -s qdisc show dev "$if" | head -n1 | awk '{ print $2 }')"
+            if [ "$qdisc" == "cake" ]; then
+                cake_ifs+=("$if")
+            fi
+        done
+        echo "$cake_ifs"
+    fi
+    exit 0
+    ;;
+    config)
+    
+    echo "graph_title $DEVICE cake QoS tin stats"
+    echo 'graph_args --base 1000'
+    echo 'graph_vlabel packets per second'
+    echo 'graph_category network'
+    echo "graph_info This graph shows the packages per tin of egress traffic of the $DEVICE network interface."
+    
+    diffserv_no="$(tc_cake_get_diffserv)"
+    
+    if [ "$diffserv_no" == "3" ]; then
+
+        echo "bulk.label Bulk"
+        echo "bulk.draw AREA"
+        echo "bulk.type DERIVE"
+        echo "bulk.min 0"
+        echo "bulk.info sent bulk packets thru cake"
+        
+        echo "besteffort.label Best Effort"
+        echo "besteffort.draw STACK"
+        echo "besteffort.type DERIVE"
+        echo "besteffort.min 0"
+        echo "besteffort.info sent best effort packets thru cake"
+        
+        echo "voice.label Voice"
+        echo "voice.draw STACK"
+        echo "voice.type DERIVE"
+        echo "voice.min 0"
+        echo "voice.info sent Voice packets thru cake"
+        
+        exit 0
+    fi
+    
+    if [ "$diffserv_no" == "4" ]; then
+        
+        echo "bulk.label Bulk"
+        echo "bulk.draw AREA"
+        echo "bulk.type DERIVE"
+        echo "bulk.min 0"
+        echo "bulk.info sent bulk packets thru cake"
+        
+        echo "besteffort.label Best Effort"
+        echo "besteffort.draw STACK"
+        echo "besteffort.type DERIVE"
+        echo "besteffort.min 0"
+        echo "besteffort.info sent best effort packets thru cake"
+        
+        echo "video.label Video"
+        echo "video.draw STACK"
+        echo "video.type DERIVE"
+        echo "video.min 0"
+        echo "video.info sent Video packets thru cake"
+        
+        echo "voice.label Voice"
+        echo "voice.draw STACK"
+        echo "voice.type DERIVE"
+        echo "voice.min 0"
+        echo "voice.info sent Voice packets thru cake"
+        
+        exit 0
+    fi
+    
+    if [ "$diffserv_no" == "8" ]; then
+        
+        echo "tin1.label Tin 1"
+        echo "tin1.draw AREA"
+        echo "tin1.type DERIVE"
+        echo "tin1.min 0"
+        echo "tin1.info sent Tin 1 packets thru cake"
+        
+        for i in `seq 2 8`; do
+            echo "tin${i}.label Tin $i"
+            echo "tin${i}.draw STACK"
+            echo "tin${i}.type DERIVE"
+            echo "tin${i}.min 0"
+            echo "tin${i}.info sent Tin $i packets thru cake"
+        done
+        
+        exit 0  
+    fi
+    
+    echo "cake_tin: no diffserv set (besteffort?)" >&2
+    echo 1
+    
+    ;;
+esac
+
+
+diffserv_no="$(tc_cake_get_diffserv)"
+
+if [ "$diffserv_no" == "3" ]; then
+    /sbin/tc -s qdisc show dev "$DEVICE" | grep "^  pkts" | awk '{
+    print "bulk.value " $2
+    print "besteffort.value " $3
+    print "voice.value " $4
+    }'
+    exit 0
+fi
+if [ "$diffserv_no" == "4" ]; then
+    /sbin/tc -s qdisc show dev "$DEVICE" | grep "^  pkts" | awk '{
+    print "bulk.value " $2
+    print "besteffort.value " $3
+    print "video.value " $4
+    print "voice.value " $5
+    }'
+    exit 0
+fi
+if [ "$diffserv_no" == "8" ]; then
+    /sbin/tc -s qdisc show dev "$DEVICE" | grep "^  pkts" | awk '{
+    print "tin1.value " $2
+    print "tin2.value " $3
+    print "tin3.value " $4
+    print "tin4.value " $5
+    print "tin5.value " $6
+    print "tin6.value " $7
+    print "tin7.value " $8
+    print "tin8.value " $9
+    }'
+    exit 0
+fi
+
+
+exit 1
+
+ 
+ 
+ 
+ 
+ 
