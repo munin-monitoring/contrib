@@ -9,7 +9,7 @@
 
 =head1 NAME
 
-cake_tin_ - Plugin to monitor cake's tin' performances in packages per second
+cake_tin_pps_ - Plugin to monitor cake's tin' pps
 
 =head1 CONFIGURATION
 
@@ -47,7 +47,7 @@ GPLv2 or later
 
 =cut
 
-DEVICE=${0##*/cake_tin_}
+DEVICE=${0##*/cake_tin_pps_}
 
 tc_cake_get_diffserv() {
     /sbin/tc -s qdisc show dev "$DEVICE" | head -n1 | grep -i "diffserv3" > /dev/null
@@ -63,6 +63,10 @@ tc_cake_get_diffserv() {
         echo 8
     fi
     return 0
+}
+
+tc_cake_get_pkts() {
+    /sbin/tc -s qdisc show dev "$DEVICE" | grep "^  pkts"
 }
 
 case "$1" in
@@ -184,7 +188,7 @@ esac
 diffserv_no="$(tc_cake_get_diffserv)"
 
 if [ "$diffserv_no" == "3" ]; then
-    /sbin/tc -s qdisc show dev "$DEVICE" | grep "^  pkts" | awk '{
+    tc_cake_get_pkts | awk '{
     print "bulk.value " $2
     print "besteffort.value " $3
     print "voice.value " $4
@@ -192,7 +196,7 @@ if [ "$diffserv_no" == "3" ]; then
     exit 0
 fi
 if [ "$diffserv_no" == "4" ]; then
-    /sbin/tc -s qdisc show dev "$DEVICE" | grep "^  pkts" | awk '{
+    tc_cake_get_pkts | awk '{
     print "bulk.value " $2
     print "besteffort.value " $3
     print "video.value " $4
@@ -201,7 +205,7 @@ if [ "$diffserv_no" == "4" ]; then
     exit 0
 fi
 if [ "$diffserv_no" == "8" ]; then
-    /sbin/tc -s qdisc show dev "$DEVICE" | grep "^  pkts" | awk '{
+    tc_cake_get_pkts | awk '{
     print "tin1.value " $2
     print "tin2.value " $3
     print "tin3.value " $4
