@@ -50,82 +50,155 @@ GPLv2 or later
 
 DEVICE=${0##*/cake_}
 
-tc_cake_sent() {
-    /sbin/tc -s qdisc show dev "$1" | grep -E "^ Sent" | tr ',' ' ' | tr ')' ' ' 
-}
-tc_cake_backlog() {
-    /sbin/tc -s qdisc show dev "$1" | grep -E "^ backlog" | tr 'p' ' ' 
+tc_get_ifb_dev() {
+	dev="$(/sbin/tc filter show dev $DEVICE parent ffff: protocol all | grep "mirred" | grep "Egress Redirect to device")"
+	[ $? -eq 1 ] && return 1
+	
+	echo "$dev" | sed -n 's/.* device \([^ ]*\).*/\1/p' | tr ')' ' ' | awk '{ print $1 }'
 }
 
+tc_cake_sent() {
+	/sbin/tc -s qdisc show dev "$1" | grep -E "^ Sent" | tr ',' ' ' | tr ')' ' ' 
+}
+tc_cake_backlog() {
+	/sbin/tc -s qdisc show dev "$1" | grep -E "^ backlog" | tr 'p' ' ' 
+}
+
+DEVICE_IN="$(tc_get_ifb_dev)"
+has_if_in=$?
+
 case "$1" in
-    autoconf)
-    if [ -r /proc/net/dev ]; then
-        echo yes
-        exit 0
-    else
-        echo "no (/proc/net/dev not found)"
-        exit 1
-    fi
-    ;;
-    suggest)
-    if [ -r /proc/net/dev ]; then
-        ifs="$(awk '
-                /^ *(eth|tap|bond|wlan|ath|ra|sw|eno|ens|enp|wlp|wl)[0-9]*/ {
-                   split($0, a, /: */);
-                   gsub(/^ +/,"",a[1]);
-                   if (($2 > 0) || ($10 > 0)) print a[1]; }' /proc/net/dev)"
-        cake_ifs=()
-        for if in $ifs; do
-            qdisc="$(/sbin/tc -s qdisc show dev "$if" | head -n1 | awk '{ print $2 }')"
-            if [ "$qdisc" == "cake" ]; then
-                cake_ifs+=("$if")
-            fi
-        done
-        echo "$cake_ifs"
-    fi
-    exit 0
-    ;;
-    config)
-    
-    echo "graph_title $DEVICE cake queuing"
-    echo 'graph_args --base 1000'
-    echo 'graph_vlabel packets per second'
-    echo 'graph_category network'
-    echo "graph_info This graph shows the general packet handling status of egress traffic of the $DEVICE network interface."
-    
-    echo "backlog.label backlog";
-    echo "backlog.draw LINE2";
-    echo "backlog.info amount of packets currently buffered";
-    
-    echo "dropped.label dropped"
-    echo "dropped.draw AREA"
-    echo "dropped.type DERIVE"
-    echo "dropped.min 0"
-    echo "dropped.info dropped packets in queue"
-    echo "overlimits.label overlimits"
-    echo "overlimits.draw STACK"
-    echo "overlimits.type DERIVE"
-    echo "overlimits.min 0"
-    echo "overlimits.info packets exeeded a limit"
-    echo "requeues.label requeues"
-    echo "requeues.draw STACK"
-    echo "requeues.type DERIVE"
-    echo "requeues.min 0"
-    echo "requeues.info packets requeued in queue"
-    
-    exit 0
-    ;;
+	autoconf)
+	if [ -r /proc/net/dev ]; then
+		echo yes
+		exit 0
+	else
+		echo "no (/proc/net/dev not found)"
+		exit 1
+	fi
+	;;
+	suggest)
+	if [ -r /proc/net/dev ]; then
+		ifs="$(awk '
+				/^ *(eth|tap|bond|wlan|ath|ra|sw|eno|ens|enp|wlp|wl)[0-9]*/ {
+				   split($0, a, /: */);
+				   gsub(/^ +/,"",a[1]);
+				   if (($2 > 0) || ($10 > 0)) print a[1]; }' /proc/net/dev)"
+		cake_ifs=()
+		for if in $ifs; do
+			qdisc="$(/sbin/tc -s qdisc show dev "$if" | head -n1 | awk '{ print $2 }')"
+			if [ "$qdisc" == "cake" ]; then
+				cake_ifs+=("$if")
+			fi
+		done
+		echo "$cake_ifs"
+	fi
+	exit 0
+	;;
+	config)
+	
+	if [ $has_if_in -eq 0 ]; then
+		echo "graph_title $DEVICE ($DEVICE_IN) cake queuing"
+	else
+		echo "graph_title $DEVICE cake queuing"
+	fi
+	echo 'graph_args --base 1000'
+	if [ $has_if_in -eq 0 ]; then
+		echo 'graph_vlabel pps in (-) / out (+)'
+	else
+		echo 'graph_vlabel packets per second'
+	fi
+	echo 'graph_category network'
+	if [ $has_if_in -eq 0 ]; then
+		echo "graph_info This graph shows the general packet handling status of egress+ingress traffic of the $DEVICE ($DEVICE_IN) network interface."
+	else
+		echo "graph_info This graph shows the general packet handling status of egress traffic of the $DEVICE network interface."
+	fi
+	
+	if [ $has_if_in -eq 0 ]; then
+		echo "backlog_in.label backlog";
+		echo "backlog_in.draw LINE2";
+		echo "backlog_in.min 0";
+		echo "backlog_in.info amount of packets currently buffered";
+		echo "backlog_in.graph no"
+	fi
+	echo "backlog.label backlog";
+	echo "backlog.draw LINE2";
+	echo "backlog.min 0";
+	echo "backlog.info amount of packets currently buffered";
+	[ $has_if_in -eq 0 ] && echo "backlog.negative backlog_in"
+	
+	if [ $has_if_in -eq 0 ]; then
+		echo "dropped_in.label dropped"
+		echo "dropped_in.draw AREA"
+		echo "dropped_in.type DERIVE"
+		echo "dropped_in.min 0"
+		echo "dropped_in.info dropped packets in queue"
+		echo "dropped_in.graph no"
+	fi
+	echo "dropped.label dropped"
+	echo "dropped.draw AREA"
+	echo "dropped.type DERIVE"
+	echo "dropped.min 0"
+	echo "dropped.info dropped packets in queue"
+	[ $has_if_in -eq 0 ] && echo "dropped.negative dropped_in"
+	
+	if [ $has_if_in -eq 0 ]; then
+		echo "overlimits_in.label overlimits"
+		echo "overlimits_in.draw STACK"
+		echo "overlimits_in.type DERIVE"
+		echo "overlimits_in.min 0"
+		echo "overlimits_in.info packets exeeded a limit"
+		echo "overlimits_in.graph no"
+	fi
+	echo "overlimits.label overlimits"
+	echo "overlimits.draw STACK"
+	echo "overlimits.type DERIVE"
+	echo "overlimits.min 0"
+	echo "overlimits.info packets exeeded a limit"
+	[ $has_if_in -eq 0 ] && echo "overlimits.negative overlimits_in"
+	
+	if [ $has_if_in -eq 0 ]; then
+		echo "requeues_in.label requeues"
+		echo "requeues_in.draw STACK"
+		echo "requeues_in.type DERIVE"
+		echo "requeues_in.min 0"
+		echo "requeues_in.info packets requeued in queue"
+		echo "requeues_in.graph no"
+	fi
+	echo "requeues.label requeues"
+	echo "requeues.draw STACK"
+	echo "requeues.type DERIVE"
+	echo "requeues.min 0"
+	echo "requeues.info packets requeued in queue"
+	[ $has_if_in -eq 0 ] && echo "requeues.negative requeues_in"
+	
+	exit 0
+	;;
 esac
 
 # sent
 tc_cake_sent "$DEVICE" | awk '{
-    print "dropped.value " $7
-    print "overlimits.value " $9
-    print "requeues.value " $11
+	print "dropped.value " $7
+	print "overlimits.value " $9
+	print "requeues.value " $11
 }'
 # backlog
 tc_cake_backlog "$DEVICE" | awk '{
-    print "backlog.value " $3
+	print "backlog.value " $3
 }'
 
-exit 0
+if [ $has_if_in -eq 1 ]; then
+	exit 0
+fi
+
+# sent
+tc_cake_sent "$DEVICE_IN" | awk '{
+	print "dropped_in.value " $7
+	print "overlimits_in.value " $9
+	print "requeues_in.value " $11
+}'
+# backlog
+tc_cake_backlog "$DEVICE_IN" | awk '{
+	print "backlog_in.value " $3
+}'
