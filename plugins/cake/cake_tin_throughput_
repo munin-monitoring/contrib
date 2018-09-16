@@ -47,7 +47,7 @@ GPLv2 or later
 
 =cut
 
-DEVICE=${0##*/cake_tin_throughput_}
+DEVICE="${0##*/cake_tin_throughput_}"
 
 # green/blue -> red
 eight_color=("006b5f" "1a9850" "66bd63" "a6d96a" "fdae61" "f46d43" "d73027" "9427d7")
@@ -55,7 +55,7 @@ four_color=("3288bd" "abdda4" "fdae61" "d53e4f")
 three_color=("3288bd" "abdda4" "d53e4f")
 
 tc_get_ifb_dev() {
-	dev="$(/sbin/tc filter show dev $DEVICE parent ffff: protocol all | grep "mirred" | grep "Egress Redirect to device")"
+	dev="$(/sbin/tc filter show dev "$DEVICE" parent ffff: protocol all | grep "mirred" | grep "Egress Redirect to device")"
 	[ $? -eq 1 ] && return 1
 	
 	echo "$dev" | sed -n 's/.* device \([^ ]*\).*/\1/p' | tr ')' ' ' | awk '{ print $1 }'
@@ -84,7 +84,7 @@ tc_cake_get_bandwidth() {
 
 tc_cake_get_bits() {
 	bytes="$(/sbin/tc -s qdisc show dev "$1" | grep "^  bytes" | sed -e 's/bytes//')"
-	for e in ${bytes[@]}; do
+	for e in "${bytes[@]}"; do
 		bits="$(convert_byte_to_bit $e)"
 		echo -en " $bits "
 	done
@@ -93,7 +93,7 @@ tc_cake_get_bits() {
 
 convert_byte_to_bit() {
 	#convert byte into bit
-	echo $1 | awk '{
+	echo "$1" | awk '{
 		bit = $1;
 		sub(/[A-Za-z]+$/, "", bit);
 		
@@ -105,7 +105,7 @@ convert_byte_to_bit() {
 
 convert_bit() {
 	#converts Tbit, Gbit, Mbit, Kbit into bit without a unit
-	echo $1 | awk '{
+	echo "$1" | awk '{
 		bit = $1;
 		sub(/[A-Za-z]+$/, "", bit);
 		unit = $1;
@@ -372,7 +372,7 @@ case "$1" in
 			if [ $has_if_in -eq 0 ]; then
 				echo "tin${i}_in.label Tin $i"
 				echo "tin${i}_in.draw STACK"
-				echo "tin${i}_in.colour ${eight_color[$((${i} - 1))]}"
+				echo "tin${i}_in.colour ${eight_color[$((i - 1))]}"
 				echo "tin${i}_in.type DERIVE"
 				echo "tin${i}_in.min 0"
 				echo "tin${i}_in.info sent Tin $i bits thru cake"
@@ -380,7 +380,7 @@ case "$1" in
 			fi
 			echo "tin${i}.label  Tin $i"
 			echo "tin${i}.draw STACK"
-			echo "tin${i}.colour ${eight_color[$((${i} - 1))]}"
+			echo "tin${i}.colour ${eight_color[$((i - 1))]}"
 			echo "tin${i}.type DERIVE"
 			echo "tin${i}.min 0"
 			echo "tin${i}.info sent Tin $i bits thru cake"
@@ -397,7 +397,7 @@ case "$1" in
 esac
 
 if [ "$diffserv_no" == "3" ]; then
-	echo "bandwidth.value $(tc_cake_get_bandwidth $DEVICE)"
+	echo "bandwidth.value $(tc_cake_get_bandwidth "$DEVICE")"
 
 	tc_cake_get_bits "$DEVICE" | awk '{
 	print "bulk.value " $1
@@ -406,7 +406,7 @@ if [ "$diffserv_no" == "3" ]; then
 	}'
 	
 	if [ $has_if_in -eq 0 ]; then
-		echo "bandwidth_in.value $(tc_cake_get_bandwidth $DEVICE_IN)"
+		echo "bandwidth_in.value $(tc_cake_get_bandwidth "$DEVICE_IN")"
 		
 		tc_cake_get_bits "$DEVICE_IN" | awk '{
 		print "bulk_in.value " $1
@@ -417,7 +417,7 @@ if [ "$diffserv_no" == "3" ]; then
 	exit 0
 fi
 if [ "$diffserv_no" == "4" ]; then
-	echo "bandwidth.value $(tc_cake_get_bandwidth $DEVICE)"
+	echo "bandwidth.value $(tc_cake_get_bandwidth "$DEVICE")"
 	
 	tc_cake_get_bits "$DEVICE" | awk '{
 	print "bulk.value " $1
@@ -427,7 +427,7 @@ if [ "$diffserv_no" == "4" ]; then
 	}'
 	
 	if [ $has_if_in -eq 0 ]; then
-		echo "bandwidth_in.value $(tc_cake_get_bandwidth $DEVICE_IN)"
+		echo "bandwidth_in.value $(tc_cake_get_bandwidth "$DEVICE_IN")"
 		
 		tc_cake_get_bits "$DEVICE_IN" | awk '{
 		print "bulk_in.value " $1
@@ -439,7 +439,7 @@ if [ "$diffserv_no" == "4" ]; then
 	exit 0
 fi
 if [ "$diffserv_no" == "8" ]; then
-	echo "bandwidth.value $(tc_cake_get_bandwidth $DEVICE)"
+	echo "bandwidth.value $(tc_cake_get_bandwidth "$DEVICE")"
 	
 	tc_cake_get_bits "$DEVICE" | awk '{
 	print "tin1.value " $1
@@ -453,7 +453,7 @@ if [ "$diffserv_no" == "8" ]; then
 	}'
 	
 	if [ $has_if_in -eq 0 ]; then
-		echo "bandwidth_in.value $(tc_cake_get_bandwidth $DEVICE_IN)"
+		echo "bandwidth_in.value $(tc_cake_get_bandwidth "$DEVICE_IN")"
 		
 		tc_cake_get_bits "$DEVICE_IN" | awk '{
 		print "tin1_in.value " $1

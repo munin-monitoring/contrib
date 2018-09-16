@@ -47,7 +47,7 @@ GPLv2 or later
 
 =cut
 
-DEVICE=${0##*/cake_tin_delay_}
+DEVICE="${0##*/cake_tin_delay_}"
 
 # green/blue -> red
 eight_color=("006b5f" "1a9850" "66bd63" "a6d96a" "fdae61" "f46d43" "d73027" "9427d7")
@@ -55,7 +55,7 @@ four_color=("3288bd" "abdda4" "fdae61" "d53e4f")
 three_color=("3288bd" "abdda4" "d53e4f")
 
 tc_get_ifb_dev() {
-	dev="$(/sbin/tc filter show dev $DEVICE parent ffff: protocol all | grep "mirred" | grep "Egress Redirect to device")"
+	dev="$(/sbin/tc filter show dev "$DEVICE" parent ffff: protocol all | grep "mirred" | grep "Egress Redirect to device")"
 	[ $? -eq 1 ] && return 1
 	
 	echo "$dev" | sed -n 's/.* device \([^ ]*\).*/\1/p' | tr ')' ' ' | awk '{ print $1 }'
@@ -79,7 +79,7 @@ tc_cake_get_diffserv() {
 
 convert_time() {
 	#converts us, ms, s into s without a unit
-	echo $1 | awk '{
+	echo "$1" | awk '{
 		time = $1;
 		sub(/[a-z]+$/, "", time);
 		unit = $1;
@@ -106,8 +106,8 @@ convert_time() {
 
 tc_cake_get_delays() {
 	delays="$(/sbin/tc -s qdisc show dev "$1" | grep "^  av_delay" | sed -e 's/av_delay//')"
-	for e in ${delays[@]}; do
-		delay="$(convert_time $e)"
+	for e in "${delays[@]}"; do
+		delay="$(convert_time "$e")"
 		echo -en " $delay "
 	done
 	echo ""
@@ -310,14 +310,14 @@ case "$1" in
 			if [ $has_if_in -eq 0 ]; then
 				echo "tin${i}_in.label Tin $i"
 				echo "tin${i}_in.type GAUGE"
-				echo "tin${i}_in.colour ${eight_color[$((${i} - 1))]}"
+				echo "tin${i}_in.colour ${eight_color[$((i - 1))]}"
 				echo "tin${i}_in.min 0"
 				echo "tin${i}_in.info avg delay for Tin $i packets thru cake"
 				echo "tin${i}_in.graph no"
 			fi
 			echo "tin${i}.label Tin $i"
 			echo "tin${i}.type GAUGE"
-			echo "tin${i}.colour ${eight_color[$((${i} - 1))]}"
+			echo "tin${i}.colour ${eight_color[$((i - 1))]}"
 			echo "tin${i}.min 0"
 			echo "tin${i}.info avg delay for Tin $i packets thru cake"
 			[ $has_if_in -eq 0 ] && echo "tin${i}.negative tin${i}_in"
