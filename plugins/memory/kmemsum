@@ -16,18 +16,15 @@
 
 if [ "$1" = "autoconf" ]; then
     if [ -x /sbin/sysctl ]; then
-        /sbin/sysctl vm.kmem_size_max > /dev/null
-    	if [ $? = "0" ]; then
-	    	echo yes
-    		exit 0
-    	else
-		    echo no
-		    exit 1
-	    fi
+        if /sbin/sysctl vm.kmem_size_max >/dev/null 2>&1; then
+            echo "yes"
+        else
+            echo "no (missing sysctl variable 'vm.kmem_size_max')"
+        fi
     else
-        echo no
-        exit 1
+        echo "no (missing 'sysctl' executable)"
     fi
+    exit 0
 fi
 
 TEXT=`kldstat | tr a-f A-F | awk 'BEGIN {print "ibase=16"}; NR > 1 {print $4}' | bc | awk '{a+=$1}; END {print a}'`
