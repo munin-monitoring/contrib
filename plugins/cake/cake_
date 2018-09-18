@@ -52,7 +52,7 @@ DEVICE="${0##*/cake_}"
 
 tc_get_ifb_dev() {
 	dev="$(/sbin/tc filter show dev "$DEVICE" parent ffff: protocol all | grep "mirred" | grep "Egress Redirect to device")"
-	[ $? -eq 1 ] && return 1
+	[ "$?" -eq "1" ] && return 1
 	
 	echo "$dev" | sed -n 's/.* device \([^ ]*\).*/\1/p' | tr ')' ' ' | awk '{ print $1 }'
 }
@@ -97,25 +97,25 @@ case "$1" in
 	;;
 	config)
 	
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		echo "graph_title $DEVICE ($DEVICE_IN) cake queuing"
 	else
 		echo "graph_title $DEVICE cake queuing"
 	fi
 	echo 'graph_args --base 1000 --logarithmic'
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		echo 'graph_vlabel pps in (-) / out (+)'
 	else
 		echo 'graph_vlabel packets per second'
 	fi
 	echo 'graph_category network'
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		echo "graph_info This graph shows the general packet handling status of egress+ingress traffic of the $DEVICE ($DEVICE_IN) network interface."
 	else
 		echo "graph_info This graph shows the general packet handling status of egress traffic of the $DEVICE network interface."
 	fi
 	
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		echo "backlog_in.label backlog"
 		echo "backlog_in.draw LINE2"
 		echo "backlog_in.colour 85c4e0"
@@ -128,9 +128,9 @@ case "$1" in
 	echo "backlog.colour 85c4e0"
 	echo "backlog.min 0"
 	echo "backlog.info amount of packets currently buffered"
-	[ $has_if_in -eq 0 ] && echo "backlog.negative backlog_in"
+	[ "$has_if_in" -eq "0" ] && echo "backlog.negative backlog_in"
 	
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		echo "dropped_in.label dropped"
 		echo "dropped_in.draw AREA"
 		echo "dropped_in.colour c77223"
@@ -145,9 +145,9 @@ case "$1" in
 	echo "dropped.type DERIVE"
 	echo "dropped.min 0"
 	echo "dropped.info dropped packets in queue"
-	[ $has_if_in -eq 0 ] && echo "dropped.negative dropped_in"
+	[ "$has_if_in" -eq "0" ] && echo "dropped.negative dropped_in"
 	
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		echo "overlimits_in.label overlimits"
 		echo "overlimits_in.draw STACK"
 		echo "overlimits_in.colour b6655c"
@@ -162,9 +162,9 @@ case "$1" in
 	echo "overlimits.type DERIVE"
 	echo "overlimits.min 0"
 	echo "overlimits.info packets exeeded a limit"
-	[ $has_if_in -eq 0 ] && echo "overlimits.negative overlimits_in"
+	[ "$has_if_in" -eq "0" ] && echo "overlimits.negative overlimits_in"
 	
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		echo "requeues_in.label requeues"
 		echo "requeues_in.draw STACK"
 		echo "requeues_in.colour 4e9e14"
@@ -179,7 +179,7 @@ case "$1" in
 	echo "requeues.type DERIVE"
 	echo "requeues.min 0"
 	echo "requeues.info packets requeued in queue"
-	[ $has_if_in -eq 0 ] && echo "requeues.negative requeues_in"
+	[ "$has_if_in" -eq "0" ] && echo "requeues.negative requeues_in"
 	
 	exit 0
 	;;
@@ -195,7 +195,7 @@ tc_cake_backlog "$DEVICE" | awk '{
 	print "backlog.value " $3
 }'
 
-if [ $has_if_in -eq 0 ]; then
+if [ "$has_if_in" -eq "0" ]; then
 	tc_cake_sent "$DEVICE_IN" | awk '{
 		print "dropped_in.value " $7
 		print "overlimits_in.value " $9

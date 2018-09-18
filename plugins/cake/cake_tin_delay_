@@ -56,22 +56,22 @@ three_color=("3288bd" "abdda4" "d53e4f")
 
 tc_get_ifb_dev() {
 	dev="$(/sbin/tc filter show dev "$DEVICE" parent ffff: protocol all | grep "mirred" | grep "Egress Redirect to device")"
-	[ $? -eq 1 ] && return 1
+	[ "$?" -eq "1" ] && return 1
 	
 	echo "$dev" | sed -n 's/.* device \([^ ]*\).*/\1/p' | tr ')' ' ' | awk '{ print $1 }'
 }
 
 tc_cake_get_diffserv() {
 	/sbin/tc -s qdisc show dev "$1" | head -n1 | grep -i "diffserv3" > /dev/null
-	if [ $? -eq 0 ]; then
+	if [ "$?" -eq "0" ]; then
 		echo 3
 	fi
 	/sbin/tc -s qdisc show dev "$1" | head -n1 | grep -i "diffserv4" > /dev/null
-	if [ $? -eq 0 ]; then
+	if [ "$?" -eq "0" ]; then
 		echo 4
 	fi
 	/sbin/tc -s qdisc show dev "$1" | head -n1 | grep -i "diffserv8" > /dev/null
-	if [ $? -eq 0 ]; then
+	if [ "$?" -eq "0" ]; then
 		echo 8
 	fi
 	return 0
@@ -117,7 +117,7 @@ DEVICE_IN="$(tc_get_ifb_dev)"
 has_if_in=$?
 
 diffserv_no="$(tc_cake_get_diffserv "$DEVICE")"
-if [ $has_if_in -eq 0 ]; then
+if [ "$has_if_in" -eq "0" ]; then
 	diffserv_in_no="$(tc_cake_get_diffserv "$DEVICE_IN")"
 	
 	if [ ! "$diffserv_no" == "$diffserv_in_no" ]; then
@@ -156,19 +156,19 @@ case "$1" in
 	;;
 	config)
 	
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		echo "graph_title $DEVICE ($DEVICE_IN) cake QoS tin's avg delay"
 	else
 		echo "graph_title $DEVICE cake QoS tin's avg delay"
 	fi
 	echo 'graph_args --base 1000'
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		echo 'graph_vlabel seconds in (-) / out (+)'
 	else
 		echo 'graph_vlabel seconds'
 	fi
 	echo 'graph_category network'
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		echo "graph_info This graph shows the average latency of egress+ingress traffic per tin of the $DEVICE ($DEVICE_IN) network interface."
 	else
 		echo "graph_info This graph shows the average latency of egress traffic per tin of the $DEVICE network interface."
@@ -176,7 +176,7 @@ case "$1" in
 	
 	if [ "$diffserv_no" == "3" ]; then
 
-		if [ $has_if_in -eq 0 ]; then
+		if [ "$has_if_in" -eq "0" ]; then
 			echo "bulk_in.label Bulk"
 			echo "bulk_in.type GAUGE"
 			echo "bulk_in.colour ${three_color[0]}"
@@ -189,9 +189,9 @@ case "$1" in
 		echo "bulk.colour ${three_color[0]}"
 		echo "bulk.min 0"
 		echo "bulk.info avg delay for bulk packets thru cake"
-		[ $has_if_in -eq 0 ] && echo "bulk.negative bulk_in"
+		[ "$has_if_in" -eq "0" ] && echo "bulk.negative bulk_in"
 		
-		if [ $has_if_in -eq 0 ]; then
+		if [ "$has_if_in" -eq "0" ]; then
 			echo "besteffort_in.label Best Effort"
 			echo "besteffort_in.type GAUGE"
 			echo "besteffort_in.colour ${three_color[1]}"
@@ -204,9 +204,9 @@ case "$1" in
 		echo "besteffort.colour ${three_color[1]}"
 		echo "besteffort.min 0"
 		echo "besteffort.info avg delay for best effort packets thru cake"
-		[ $has_if_in -eq 0 ] && echo "besteffort.negative besteffort_in"
+		[ "$has_if_in" -eq "0" ] && echo "besteffort.negative besteffort_in"
 		
-		if [ $has_if_in -eq 0 ]; then
+		if [ "$has_if_in" -eq "0" ]; then
 			echo "voice_in.label Voice"
 			echo "voice_in.type GAUGE"
 			echo "voice_in.colour ${three_color[2]}"
@@ -219,14 +219,14 @@ case "$1" in
 		echo "voice.colour ${three_color[2]}"
 		echo "voice.min 0"
 		echo "voice.info avg delay for Voice packets thru cake"
-		[ $has_if_in -eq 0 ] && echo "voice.negative voice_in"
+		[ "$has_if_in" -eq "0" ] && echo "voice.negative voice_in"
 		
 		exit 0
 	fi
 	
 	if [ "$diffserv_no" == "4" ]; then
 
-		if [ $has_if_in -eq 0 ]; then
+		if [ "$has_if_in" -eq "0" ]; then
 			echo "bulk_in.label Bulk"
 			echo "bulk_in.type GAUGE"
 			echo "bulk_in.colour ${four_color[0]}"
@@ -239,9 +239,9 @@ case "$1" in
 		echo "bulk.colour ${four_color[0]}"
 		echo "bulk.min 0"
 		echo "bulk.info avg delay for bulk packets thru cake"
-		[ $has_if_in -eq 0 ] && echo "bulk.negative bulk_in"
+		[ "$has_if_in" -eq "0" ] && echo "bulk.negative bulk_in"
 		
-		if [ $has_if_in -eq 0 ]; then
+		if [ "$has_if_in" -eq "0" ]; then
 			echo "besteffort_in.label Best Effort"
 			echo "besteffort_in.type GAUGE"
 			echo "besteffort_in.colour ${four_color[1]}"
@@ -254,9 +254,9 @@ case "$1" in
 		echo "besteffort.colour ${four_color[1]}"
 		echo "besteffort.min 0"
 		echo "besteffort.info avg delay for best effort packets thru cake"
-		[ $has_if_in -eq 0 ] && echo "besteffort.negative besteffort_in"
+		[ "$has_if_in" -eq "0" ] && echo "besteffort.negative besteffort_in"
 		
-		if [ $has_if_in -eq 0 ]; then
+		if [ "$has_if_in" -eq "0" ]; then
 			echo "video_in.label Video"
 			echo "video_in.type GAUGE"
 			echo "video_in.colour ${four_color[2]}"
@@ -269,9 +269,9 @@ case "$1" in
 		echo "video.colour ${four_color[2]}"
 		echo "video.min 0"
 		echo "video.info avg delay for Video packets thru cake"
-		[ $has_if_in -eq 0 ] && echo "video.negative video_in"
+		[ "$has_if_in" -eq "0" ] && echo "video.negative video_in"
 		
-		if [ $has_if_in -eq 0 ]; then
+		if [ "$has_if_in" -eq "0" ]; then
 			echo "voice_in.label Voice"
 			echo "voice_in.type GAUGE"
 			echo "voice_in.colour ${four_color[3]}"
@@ -284,14 +284,14 @@ case "$1" in
 		echo "voice.colour ${four_color[3]}"
 		echo "voice.min 0"
 		echo "voice.info avg delay for Voice packets thru cake"
-		[ $has_if_in -eq 0 ] && echo "voice.negative voice_in"
+		[ "$has_if_in" -eq "0" ] && echo "voice.negative voice_in"
 		
 		exit 0
 	fi
 	
 	if [ "$diffserv_no" == "8" ]; then
 		
-		if [ $has_if_in -eq 0 ]; then
+		if [ "$has_if_in" -eq "0" ]; then
 			echo "tin1_in.label Tin 1"
 			echo "tin1_in.type GAUGE"
 			echo "tin1.colour ${eight_color[0]}"
@@ -304,10 +304,10 @@ case "$1" in
 		echo "tin1.colour ${eight_color[0]}"
 		echo "tin1.min 0"
 		echo "tin1.info avg delay for Tin 1 packets thru cake"
-		[ $has_if_in -eq 0 ] && echo "tin1.negative tin1_in"
+		[ "$has_if_in" -eq "0" ] && echo "tin1.negative tin1_in"
 		
 		for i in `seq 2 8`; do
-			if [ $has_if_in -eq 0 ]; then
+			if [ "$has_if_in" -eq "0" ]; then
 				echo "tin${i}_in.label Tin $i"
 				echo "tin${i}_in.type GAUGE"
 				echo "tin${i}_in.colour ${eight_color[$((i - 1))]}"
@@ -320,7 +320,7 @@ case "$1" in
 			echo "tin${i}.colour ${eight_color[$((i - 1))]}"
 			echo "tin${i}.min 0"
 			echo "tin${i}.info avg delay for Tin $i packets thru cake"
-			[ $has_if_in -eq 0 ] && echo "tin${i}.negative tin${i}_in"
+			[ "$has_if_in" -eq "0" ] && echo "tin${i}.negative tin${i}_in"
 		done
 		
 		exit 0  
@@ -334,7 +334,7 @@ if [ "$diffserv_no" == "3" ]; then
 	print "besteffort.value " $2
 	print "voice.value " $3
 	}'
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		tc_cake_get_delays "$DEVICE_IN" | awk '{
 		print "bulk_in.value " $1
 		print "besteffort_in.value " $2
@@ -350,7 +350,7 @@ if [ "$diffserv_no" == "4" ]; then
 	print "video.value " $3
 	print "voice.value " $4
 	}'
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		tc_cake_get_delays "$DEVICE_IN" | awk '{
 		print "bulk_in.value " $1
 		print "besteffort_in.value " $2
@@ -371,7 +371,7 @@ if [ "$diffserv_no" == "8" ]; then
 	print "tin7.value " $7
 	print "tin8.value " $8
 	}'
-	if [ $has_if_in -eq 0 ]; then
+	if [ "$has_if_in" -eq "0" ]; then
 		tc_cake_get_delays "$DEVICE_IN" | awk '{
 		print "tin1_in.value " $1
 		print "tin2_in.value " $2
