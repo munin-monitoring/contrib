@@ -29,7 +29,8 @@ In all other cases you need to use other munin plugins instead, e.g. "libvirt".
 parsed environment variables:
 
   * vmsuffix: part of vm name to be removed
-
+  * ganeti: True/False (default False), use ganeti run-time information to resolve
+    interface names by pid
 
 =head1 AUTHOR
 
@@ -136,8 +137,27 @@ def get_vm_network_interface_names(pid):
         match = KVM_INTERFACE_NAME_REGEX.search(netdev_description)
         if match:
             result.add(match.groups()[0])
+    if os.getenv('ganeti'):
+        vm_name = _get_ganeti_vm_name(pid)
+        if vm_name:
+            for root, dirs, files in os.walk('/var/run/ganeti/kvm-hypervisor/nic/{0}'.format(vm_name)):
+               for name in files:
+                   with open(os.path.join(root, name)) as f:
+                       result.add(f.read())
     return result
 
+
+def _get_ganeti_vm_name(pid):
+    # grep -rl /var/run/ganeti/kvm-hypervisor/pid $PID
+    vm_name = ''
+    for root, dirs, files in os.walk('/var/run/ganeti/kvm-hypervisor/pid'):
+        for name in files:
+            with open(os.path.join(root, name)) as f:
+               read_pid = f.read()
+               if int(read_pid) == int(pid):
+                   vm_name = name
+                   break
+    return vm_name
 
 def detect_kvm():
     """ Check if kvm is installed """
@@ -148,7 +168,6 @@ def detect_kvm():
 
 def find_vm_names(pids):
     """Find and clean vm names from pids
-
     @return a dictionnary of {pids : cleaned vm name}
     """
     result = {}
