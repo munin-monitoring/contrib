@@ -1,0 +1,142 @@
+#!/usr/bin/env perl
+# -*- perl
+
+=pod
+
+=head1 NAME
+
+zfs_space_ - Script to monitor zfs pool space by group or user
+
+=head1 CONFIGURATION
+
+Create one symlink per zpool for example zfs_space_userspace_system
+
+if you need to override the defaults below:
+
+ [zfs_usage_*]
+  env.zpoolexec - Path to zpool binary
+  env.zfsexec   - Path to zfs binary
+
+=head2 DEFAULT CONFIGURATION
+
+ [zfs_usage_*]
+  env.zpoolexec /sbin/zpool
+  env.zfsexec   /sbin/zfs
+
+
+=head1 BUGS
+
+=head1 AUTHOR
+
+2012, Claudius Herder
+2018, Kienan Stewart
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+use strict;
+use warnings;
+use Munin::Plugin;
+
+my $zpool;
+my $zspace;
+my $zpoolexec = (defined($ENV{'zpoolexec'}) ? $ENV{'zpoolexec'} : '/sbin/zpool');
+my $zfsexec   = (defined($ENV{'zfsexec'}) ? $ENV{'zfsexec'} : '/sbin/zfs');
+my $space;
+
+
+sub do_collect {
+    my $sget="$zfsexec $zspace -H -p -s used $zpool";
+
+    foreach my $line (split(/\n/, `$sget` )) {
+        my ($entity_type, $entity_name, $used, $quota) = (split(/\t/,$line));
+        $space->{$entity_name} = $used;
+    }
+}
+
+
+sub do_config {
+    print "graph_title ZFS $zspace usage for zpool $zpool\n";
+    print "graph_info This graph shows used bytes by $zspace of zpool $zpool\n";
+    print "graph_args --base 1024 --lower-limit 0 --rigid\n";
+    print "graph_vlabel bytes \n";
+    print "graph_category fs\n";
+    my $zspace_description = 'user';
+    if ( $space eq 'groupspace' ) {
+      $zspace_description = 'group'
+    }
+    foreach my $user ( keys %{$space}) {
+        print "${user}_space.label $user\n";
+        print "${user}_space.type  GAUGE\n";
+        print "${user}_space.min 0\n";
+        print "${user}_space.draw AREA\n";
+        print "${user}_space.info Space used by $zspace_description $user\n";
+    } 
+}
+
+sub do_fetch {
+  foreach my $user ( keys %{$space}) {
+     print "${user}_space.value $space->{$user}\n"
+  } 
+}
+
+
+sub do_autoconf {
+    if (`which $zpoolexec 2>/dev/null` =~ m{^/}) {
+        print "yes\n";
+    } else {
+        print "no ($zpoolexec could not be found)\n";
+    }
+    exit 0;
+}
+
+
+sub do_suggest {
+    my $poollist=(`zpool list -H  -o name`);
+    print "$poollist";
+}
+
+sub do_setpool {
+    if ( $0 =~ /zfs_space_$/) {
+        die ("Can't run without a symlinked name\n")
+    }
+    elsif ($0 =~ /zfs_space_(.+)*$/) {
+        my @config = split /_/, $1;
+        $zpool = $config[0];
+        $zspace = $config[1];
+    }
+}
+
+if ($ARGV[0]) {
+    if ($ARGV[0] eq "config") {
+        do_setpool();
+        do_collect();
+        do_config();
+        exit 0;
+    }
+    elsif ($ARGV[0] eq "autoconf") {
+        do_autoconf();
+        exit 0;
+    }
+    elsif ($ARGV[0] eq "suggest") {
+        do_suggest();
+        exit 0;
+    }
+}
+else {
+    do_setpool();
+    do_collect();
+    do_fetch();
+}
+
+exit 0;
+
+__END__
