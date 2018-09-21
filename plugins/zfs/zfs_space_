@@ -50,15 +50,16 @@ my $zpool;
 my $zspace;
 my $zpoolexec = (defined($ENV{'zpoolexec'}) ? $ENV{'zpoolexec'} : '/sbin/zpool');
 my $zfsexec   = (defined($ENV{'zfsexec'}) ? $ENV{'zfsexec'} : '/sbin/zfs');
-my $space;
+my @space = ();
 
 
 sub do_collect {
-    my $sget="$zfsexec $zspace -H -p -s used $zpool";
+    my $sget="$zfsexec $zspace -H -p -S used $zpool";
 
     foreach my $line (split(/\n/, `$sget` )) {
         my ($entity_type, $entity_name, $used, $quota) = (split(/\t/,$line));
-        $space->{$entity_name} = $used;
+        my %entry = ( name => $entity_name, used => $used);
+        push @space, \%entry
     }
 }
 
@@ -67,25 +68,36 @@ sub do_config {
     print "graph_title ZFS $zspace usage for zpool $zpool\n";
     print "graph_info This graph shows used bytes by $zspace of zpool $zpool\n";
     print "graph_args --base 1024 --lower-limit 0 --rigid\n";
+    my @order;
+    for my $i ( 0 .. $#space ) {
+        my $user = '';
+        $user = $space[$i]->{name};
+        push @order, "${user}_space";
+    }
+    printf "graph_order @order\n";
     print "graph_vlabel bytes \n";
     print "graph_category fs\n";
     my $zspace_description = 'user';
-    if ( $space eq 'groupspace' ) {
+    if ( $zspace eq 'groupspace' ) {
       $zspace_description = 'group'
     }
-    foreach my $user ( keys %{$space}) {
+    for my $x ( 0 .. $#space ) {
+        my $user = '';
+        $user = $space[$x]->{name};
         print "${user}_space.label $user\n";
         print "${user}_space.type  GAUGE\n";
         print "${user}_space.min 0\n";
         print "${user}_space.draw AREA\n";
         print "${user}_space.info Space used by $zspace_description $user\n";
-    } 
+    }
 }
 
 sub do_fetch {
-  foreach my $user ( keys %{$space}) {
-     print "${user}_space.value $space->{$user}\n"
-  } 
+  for my $i ( 0 .. $#space ) {
+      my $user = $space[$i]->{name};
+      my $used = $space[$i]->{used};
+      print "${user}_space.value ${used}\n";
+  }
 }
 
 
