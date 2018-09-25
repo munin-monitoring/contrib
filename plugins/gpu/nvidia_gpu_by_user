@@ -6,13 +6,24 @@
 
 =head1 NAME
 
-gpubyuser - Plugin to monitor GPU memory usage by user
+nvidia_gpu_by_user - Plugin to monitor GPU memory usage by user.
 
 =head1 CONFIGURATION
 
 Add this to node configuration file:
  [nvidia_gpu_by_user]
   env.smiexec - Location of nvidia-smi executable.
+  env.gpuusers - List of the username to monitor(space separated).
+
+=head1 USAGE
+
+Example:
+ [nvidia_gpu_by_user]
+  env.smiexec /path/to/nvidia-smi
+  env.gpuusers root hideki
+
+If env.gpuusers is set, graph always shows listed users.
+Otherwise graph shows users that have been using GPUs only.
 
 =head1 AUTHOR
 
@@ -32,10 +43,14 @@ GPLv2
 
 EOF
 
-. "$MUNIN_LIBDIR/plugins/plugin.sh"
+# . "$MUNIN_LIBDIR/plugins/plugin.sh"
+. /usr/share/munin/plugins/plugin.sh
 
 # Get location of nvidia-smi executable or use default
 nvSmiExec=${smiexec:-'/usr/bin/nvidia-smi'}
+
+# Get gpuusers
+gpuUSERS=${gpuusers:-""}
 
 # Check if autoconf was requested
 if [ "$1" = "autoconf" ]; then
@@ -48,8 +63,6 @@ if [ "$1" = "autoconf" ]; then
 		exit 0
 	fi
 fi
-
-gpuUSERS=$(clean_fieldname "$(ls /home)" | tr "\n" " ")
 
 # GPU usage
 smiOutput=$("$nvSmiExec" -q)
@@ -66,6 +79,7 @@ echo "$smiInfo" | \
 BEGIN {
  n=-1;
  split("", gpu);
+ stderr="/dev/stderr"
 }
 
 $0 ~ "^Product Name" {
@@ -84,7 +98,7 @@ $0 ~ "^Total" {
 }
 
 $0 ~ "^Process ID" {
- "ps -axo pid,user | sed \"s/^ *//g\" | grep \"^"$2" \" 2>/dev/null | cut -d\" \" -f 2 | sed -e \"s/^[^A-Za-z_]/_/\" -e \"s/[^A-Za-z0-9_]/_/g\" -e \"s/^root$/__root/\" | tr \"\n\"  \" \" | tr -d \" \"" | getline tmpid
+ "ps -axo pid,user | sed \"s/^ *//g\" | grep \"^"$2" \" 2>/dev/null | cut -d\" \" -f 2 | sed -e \"s/^[^A-Za-z_]/_/\" -e \"s/[^A-Za-z0-9_]/_/g\" | tr \"\n\"  \" \" | tr -d \" \"" | getline tmpid
  if (tmpid == "") tmpid = "other";
  m = getUserIdxInGpu(n, tmpid);
  gpu["user", n, m] = tmpid;
@@ -99,8 +113,8 @@ $0 ~ "^Used GPU Memory" {
 END {
  if (n < 0) {
 
-  print "No NVIDIA GPUs detected. Exiting."
-  exit;
+  print "No NVIDIA GPUs detected. Exiting." > stderr;
+  exit 1;
 
  }
 
@@ -236,5 +250,4 @@ function getUserCountInGpu(_n) {
  }
  return j;
 }
-
 '
