@@ -1,0 +1,240 @@
+#!/bin/sh
+#  -*- sh -*-
+
+: <<EOF #
+ =cut
+
+=head1 NAME
+
+gpubyuser - Plugin to monitor GPU memory usage by user
+
+=head1 CONFIGURATION
+
+Add this to node configuration file:
+ [nvidia_gpu_by_user]
+  env.smiexec - Location of nvidia-smi executable.
+
+=head1 AUTHOR
+
+Hideki Takano
+ymhtakano@gmail.com
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+EOF
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+# Get location of nvidia-smi executable or use default
+nvSmiExec=${smiexec:-'/usr/bin/nvidia-smi'}
+
+# Check if autoconf was requested
+if [ "$1" = "autoconf" ]; then
+	# Autoconf only returns yes if nvidia-smi exists and is executable
+	if [ -x "$nvSmiExec" ]; then
+		echo yes
+		exit 0
+	else
+		echo "no (nvidia-smi executable not found)"
+		exit 0
+	fi
+fi
+
+gpuUSERS=$(clean_fieldname "$(ls /home)" | tr "\n" " ")
+
+# GPU usage
+smiOutput=$("$nvSmiExec" -q)
+smiInfo=$(echo "$smiOutput" | grep -A 3 -E "(Product Name|GPU UUID|Process ID|FB Memory Usage)" | grep -E "(Product Name|GPU UUID|Process ID|Total|Used GPU Memory)")
+
+# config to sort user by a-z (1:on, 0:off)
+printGraphOrder=0
+
+# output graph data
+echo "$smiInfo" | \
+    sed "s/^ *//g" | \
+    sed "s/: */:/g" | \
+    awk -F':' -v arg="$1" -v gpuUsers="$gpuUSERS" -v order="$printGraphOrder" '
+BEGIN {
+ n=-1;
+ split("", gpu);
+}
+
+$0 ~ "^Product Name" {
+ n++;
+ m=0;
+ gpu["name", n] = $2
+}
+
+$0 ~ "^GPU UUID" {
+ gpu["id", n] = $2
+}
+
+$0 ~ "^Total" {
+ split ($2, tmp, " ");
+ gpu["total", n] = tmp[1];
+}
+
+$0 ~ "^Process ID" {
+ "ps -axo pid,user | sed \"s/^ *//g\" | grep \"^"$2" \" 2>/dev/null | cut -d\" \" -f 2 | sed -e \"s/^[^A-Za-z_]/_/\" -e \"s/[^A-Za-z0-9_]/_/g\" -e \"s/^root$/__root/\" | tr \"\n\"  \" \" | tr -d \" \"" | getline tmpid
+ if (tmpid == "") tmpid = "other";
+ m = getUserIdxInGpu(n, tmpid);
+ gpu["user", n, m] = tmpid;
+}
+
+$0 ~ "^Used GPU Memory" {
+ split ($2, tmp, " ");
+ if (gpu["used", n, m] == "") gpu["used", n, m] = tmp[1];
+ else gpu["used", n, m] += tmp[1];
+}
+
+END {
+ if (n < 0) {
+
+  print "No NVIDIA GPUs detected. Exiting."
+  exit;
+
+ }
+
+ # add other 0% if not exists (for displaying graph)
+ split (gpuUsers, gu_array, " ");
+ gu_idx = 1;
+ while (gu_array[gu_idx] != "") {
+  gu = gu_array[gu_idx];
+  for (i=0; i<=n; i++) {
+   j = getUserIdxInGpu(i, gu);
+   if (j == getUserCountInGpu(i)) {
+    gpu["user", i, j] = gu;
+    gpu["used", i, j] = "0";
+   }
+  }
+  gu_idx++;
+ }
+ 
+ if (arg == "config") {
+  # print graph summary
+  
+  print "multigraph gpu_multigraph"
+  print "graph_title GPU memory usage by user"
+  print "graph_args --base 1000 -r --lower-limit 0"
+  print "graph_category gpu_by_user"
+  print "graph_info This graph shows GPU memory usage, for monitored users."
+  print "graph_vlabel %"
+  print "graph_period second"
+  
+  if (order == 1) {
+   printf "graph_order"
+    for (i=0; i<=n; i++) {
+    gu_idx = 1;
+    while (gu_array[gu_idx] != "") {
+     gu = gu_array[gu_idx];
+     printf (" gpu%s_%s", i, gu);
+     gu_idx++;
+    }
+   }
+   print "" 
+  }
+
+  for (i=0; i<=n; i++) {
+   m = getUserCountInGpu(i);
+   for (j=0; j<m; j++) {
+    p = "gpu" i "_" gpu["user", i, j];
+    print p ".label " p;
+    print p ".info GPU" i " used by " gpu["user", i, j];
+    print p ".min 0"
+    print p ".draw AREASTACK"
+    print p ".type GAUGE";
+   }
+  }
+  printf ("graph_info FB Memory usage for NVIDIA GPUs (total memory is: %s in GPU%d", gpu["total", n], 0);
+  for (i=1; i<=n; i++) {
+   printf (", %s in GPU%d", gpu["total", n], i);
+  }
+  printf ")\n\n";
+
+  for (i=0; i<=n; i++) {
+   print "multigraph gpu_multigraph.gpu" i;
+   print "graph_info Memory information for " gpu["name", i];
+   print "graph_title GPU" i " memory usage by user"
+   print "graph_args --base 1000 -r --lower-limit 0 --upper-limit 100"
+   print "graph_category gpu_by_user"
+   print "graph_info This graph shows GPU" i " memory usage, for monitored users."
+   print "graph_vlabel %"
+   print "graph_scale no"
+   print "graph_period second"
+
+   if (order == 1) {
+    printf "graph_order"
+    gu_idx = 1;
+    while (gu_array[gu_idx] != "") {
+     gu = gu_array[gu_idx];
+     printf (" gpu%s_%s", i, gu);
+     gu_idx++;
+    }
+    print ""
+   }
+
+   m = getUserCountInGpu(i);
+   for (j=0; j<m; j++) {
+    p = "gpu" i "_" gpu["user", i, j];
+    print p ".label " p;
+    print p ".info GPU" i " used by " gpu["user", i, j];
+    print p ".min 0"
+    print p ".draw AREASTACK"
+    print p ".type GAUGE";   }
+   print ""
+  }
+ }
+ else {
+  # print graph value  
+
+  print "multigraph gpu_multigraph"
+  for (i=0; i<=n; i++) {
+   m = getUserCountInGpu(i);
+   for (j=0; j<m; j++) {
+    print "gpu" i "_" gpu["user", i, j] ".value " getTwoDecimalPlaces(100.0 * gpu["used", i, j] / gpu["total", i]);
+   }
+  }
+  print ""
+
+  for (i=0; i<=n; i++) {
+   print "multigraph gpu_multigraph.gpu" i;
+   m = getUserCountInGpu(i);
+   for (j=0; j<m; j++) {
+    print "gpu" i "_" gpu["user", i, j] ".value " getTwoDecimalPlaces(100.0 * gpu["used", i, j] / gpu["total", i]);
+   }
+   print ""
+  }
+ }
+}
+
+function getTwoDecimalPlaces(_n) {
+ return int(_n * 100 + 0.5) / 100.0;
+}
+
+function getUserIdxInGpu(_n, _user) {
+ j = 0;
+ while (gpu["user", _n, j] != "") {
+  if (gpu["user", _n, j] == _user) return j;
+  j++;
+ }
+ return j;
+}
+
+function getUserCountInGpu(_n) {
+ j = 0;
+ while (gpu["user", _n, j] != "") {
+  j++;
+ }
+ return j;
+}
+
+'
