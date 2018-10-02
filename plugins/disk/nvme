@@ -1,9 +1,14 @@
-#! /usr/bin/perl -w
-# -*- perl -*-
+#! /usr/bin/perl
+# -*- mode: perl; perl-indent-level: 4 -*-
 
 =head1 NAME
 
 nvme - Munin plugin to monitor the use of NVMe devices
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems with NVMe (Non-Volatile Memory storage attached via PCIe
+bus).
 
 =head1 CONFIGURATION
 
@@ -17,7 +22,7 @@ The plugin does not support alerting.
 
 =head1 INTERPRETATION
 
-This is a multigraph plugin which makes three graphs
+This is a multigraph plugin which makes three graphs.
 
 =head2 nvme_usage
 
@@ -35,7 +40,7 @@ if you write more than you read, you should probably look for archival
 storage instead.
 
 It is a good idea to compare these numbers to I/O counters from
-diskstats.  If they are much higher, look into if the write
+diskstats.  If they are much higher, look into whether the write
 amplification can be due to suboptimal I/O request sizes.
 
 =head2 nvme_writecycles
@@ -74,20 +79,30 @@ GPLv2
 
 use strict;
 use Munin::Plugin;
+use IPC::Cmd qw(can_run);
 
 # Check that multigraph is supported
 need_multigraph();
 
+# Return undef if no problem, otherwise explanation
+sub autoconf_problem {
+    return if can_run('nvme');
+    if (open(my $mods, '/proc/modules')) {
+        while (<$mods>) {
+            return "missing nvme(1)" if /^nvme[^a-z]/;
+        }
+        close($mods);
+    }
+    return "missing nvme";    # vague message for non-Linux
+}
+
 sub run_nvme {
     my (@cmd) = @_;
     my @lines;
-    $ENV{'LC_ALL'} = 'C';
-    if (open(my $nvme, '-|', 'nvme', @cmd)) {
+    if (can_run('nvme') && open(my $nvme, '-|', 'nvme', @cmd)) {
         @lines = <$nvme>;
         close($nvme);
-    } else {
-        # Perl printed a warning about failed exec already.  Ignore
-        # error and return nothing.
+        warn "nvme: probably needs to run as user root\n" if $? && $> != 0;
     }
     @lines;
 }
@@ -110,8 +125,14 @@ sub nvme_list {
     # ---------------- -------------------- ---------------------------------------- --------- -------------------------- ---------------- --------
     # /dev/nvme1n1     S464NB0K601188N      Samsung SSD 970 EVO 2TB                  1         695.50  GB /   2.00  TB    512   B +  0 B   1B2QEXE7
     my %devices;
+
+    my $recognised_output;
+    my $lineno = 0;
     for (run_nvme('list')) {
-        if (m:^(/\S+)\s+(\S+)\s+(\S.*\S)\s{3,}(\d+)\s+(\S+\s+.B)\s+/\s+(\S+\s+.B):) {
+        ++$lineno;
+        if (m:^Node\s+SN\s+Model\s+Namespace Usage:) {
+            ++$recognised_output;
+        } elsif (m:^(/\S+)\s+(\S+)\s+(\S.*\S)\s{3,}(\d+)\s+(\S+\s+.B)\s+/\s+(\S+\s+.B):) {
             $devices{$2} = {
                 device    => $1,
                 sn        => $2,
@@ -120,7 +141,13 @@ sub nvme_list {
                 usage     => human_to_bytes($5),
                 capacity  => human_to_bytes($6),
             };
+        } elsif ($lineno > 2) {
+            # could not parse device information
+            $recognised_output = 0;
         }
+    }
+    if ($lineno && !$recognised_output) {
+        warn "Could not recognise output from 'nvme list', please report\n";
     }
     \%devices;
 }
@@ -146,12 +173,14 @@ use Data::Dumper;
 
 my $mode = ($ARGV[0] or "print");
 
-my $list = nvme_list();
+my $problem = autoconf_problem();
+my $list    = nvme_list();
+
 if ($mode eq 'autoconf') {
     if (keys %{$list}) {
         print "yes\n";
     } else {
-        print "no (no devices to monitor)\n";
+        printf("no (%s)\n", $problem || "no devices to monitor");
     }
     exit 0;
 }
