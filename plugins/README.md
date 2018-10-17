@@ -29,7 +29,7 @@ Please note, that this repository is not supposed to be a dumping site for rando
 6. pick a suitable [name and location](#Plugin_name_and_location)
 7. bonus:
     * use the [multigraph approach](http://guide.munin-monitoring.org/en/latest/plugin/multigraphing.html#plugin-multigraphing) for non-trivial plugins
-    * add [example graphs](http://munin-monitoring.org/wiki/PluginGallery#Rulesforplugincontributors) for the [gallery](http://gallery.munin-monitoring.org/)
+    * add [example graphs](http://guide.munin-monitoring.org/en/latest/develop/plugins/plugin-gallery.html#rules-for-plugin-contributors) for the [gallery](http://gallery.munin-monitoring.org/)
     * support [dirtyconfig](http://guide.munin-monitoring.org/en/latest/plugin/protocol-dirtyconfig.html#plugin-protocol-dirtyconfig) if it is suitable
 8. open a [pull request](https://github.com/munin-monitoring/contrib/pull/) with your new plugin or send it attached to an email to the [mailing list](https://lists.sourceforge.net/lists/listinfo/munin-users)
 
