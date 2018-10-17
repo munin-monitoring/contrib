@@ -13,7 +13,14 @@ Linux systems with systemd installed.
 
 =head1 CONFIGURATION
 
-None needed.
+None needed. You may optionally pass warning and critical values for any of the possible states (active,
+reloading, inactive, failed, activating, deactivating) like so:
+
+ [systemd_units]
+     env.failed_warning 0
+     env.failed_critical 5
+     env.inactive_warning 10
+     env.inactive_critical 20
 
 =head1 AUTHOR
 
@@ -29,6 +36,8 @@ GPLv2
  #%# capabilities=autoconf
 
 =cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
 
 states="active \
 	reloading \
@@ -52,9 +61,13 @@ EOF
 	for state in $states; do
 		echo "$state.label $state"
 		echo "$state.draw AREASTACK"
+		# Set default alert levels for failed units
 		if [ "$state" = "failed" ]; then
-			echo "$state.warning 0"
-			echo "$state.critical 10"
+			failed_warning="${failed_warning:-0}" print_warning $state
+			failed_critical="${failed_critical:-10}" print_critical $state
+		else
+			print_warning $state
+			print_critical $state
 		fi
 	done
 }
