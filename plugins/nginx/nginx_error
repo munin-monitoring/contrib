@@ -122,9 +122,13 @@ http_codes[503]='Service Unavailable'
 do_fetch () {
   local count status_code
   declare -A line_counts
-  while read -r count status_code; do
+  values="$(awk '{print $9}' "$log" | sort | uniq -c)"
+  # Log files may be empty due to logrotation
+  if [ -n "$values" ]; then
+    while read -r count status_code; do
       line_counts[$status_code]=$count
-  done <<< "$(awk '{print $9}' "$log" | sort | uniq -c)"
+    done <<< "$values"
+  fi
 
   for status_code in "${!http_codes[@]}"; do
     echo "error${status_code}.value ${line_counts[$status_code]:-0}"
