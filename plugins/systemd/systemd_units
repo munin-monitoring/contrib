@@ -21,6 +21,9 @@ reloading, inactive, failed, activating, deactivating) like so:
      env.failed_critical 5
      env.inactive_warning 10
      env.inactive_critical 20
+     
+Note that for failed units, default warning and critical values are set to 0 and 10, respectively. No other
+states have default levels set.
 
 =head1 AUTHOR
 
@@ -38,6 +41,9 @@ GPLv2
 =cut
 
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+failed_warning="${failed_warning:-0}"
+failed_critical="${failed_critical:-10}"
 
 states="active \
 	reloading \
@@ -61,14 +67,8 @@ EOF
 	for state in $states; do
 		echo "$state.label $state"
 		echo "$state.draw AREASTACK"
-		# Set default alert levels for failed units
-		if [ "$state" = "failed" ]; then
-			failed_warning="${failed_warning:-0}" print_warning $state
-			failed_critical="${failed_critical:-10}" print_critical $state
-		else
-			print_warning $state
-			print_critical $state
-		fi
+		print_warning $state
+		print_critical $state
 	done
 }
 
