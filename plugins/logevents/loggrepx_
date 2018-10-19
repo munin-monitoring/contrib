@@ -1,0 +1,162 @@
+#!/bin/bash
+
+: << =cut
+
+=head1 NAME
+
+loggrepx - Counts the number of matching log lines by log file
+
+=head1 DESCRIPTION
+
+This plugin is somewhat of a bash port of the original loggrep plugin,
+except that it adds a breakdown of matches per file, rather than aggregating
+matches across all files.
+
+=head1 CONFIGURATION
+
+The plugin can be included multiple times to create graphs for various
+differing kinds of information in your log files. For example, you may
+want to monitor the occurrence of 5xx errors in your webserver logs, but
+also the occurrence of alert|critical|emergency entries in your syslog.
+
+You can accomplish this by linking the plugin twice and providing
+different criteria for each instance.
+
+Note that most instances will probably work best when run as root, since
+log files are usually (or at least should be) controlled with strict
+permissions.
+
+Available config options include the following:
+
+ env.logfiles         - Files to grep (shellglob) (required)
+ env.regex            - Regex to look for (required)
+ env.title            - Graph title
+ env.warning          - Default warning level
+ env.critical         - Default critical level
+ env.[field]_label    - Label to use for a specific logfile
+ env.[field]_warning  - Warning level for specific logfile
+ env.[field]_critical - Critical level for specific logfile
+
+NOTE: for any variable with [field] in it, [field] is derived from the
+full logfile path by simply replacing all non-alphanumerics with
+underscores. For example, the "warning" field for the logfile
+\`/var/log/nginx/errors.log\` would be \`var_log_nginx_errors_log_warning\`
+
+One good way to get these names is to run \`munin-run [plugin-name]\`
+after you've configured the required variables and then just copy/pasting
+the names from the output.
+
+=head1 AUTHOR
+
+Kael Shipman <kael.shipman@gmail.com>
+
+=head1 LICENSE
+
+Copyright 2018 Kael Shipman<kael.shipman@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+LOGFILES="$(IFS= ; for f in $logfiles; do echo "$f"; done)"
+title="${title:-Log Matches}"
+
+
+
+
+function config() {
+    echo "graph_title ${title}"
+    echo "graph_args --base 1000 -l 0"
+    echo "graph_vlabel ${title}"
+    echo "graph_category logevents"
+    echo "graph_info Lists number of times the given regex is matched in the given log files per period"
+
+    local nm logfile lbl
+    while read -u 3 -r logfile; do
+        nm="$(echo "$logfile" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
+        lbl="$(eval "echo \$${nm}_label")"
+        echo "$nm.label $([ -n "$lbl" ] && echo "$lbl" || echo "$logfile")"
+        print_warning "$nm"
+        print_critical "$nm"
+        echo "$nm.info Lines that match '${regex}' in log file '$logfile'"
+    done 3< <(echo "$LOGFILES")
+}
+
+
+
+
+function fetch() {
+    # Load state
+    touch "$MUNIN_STATEFILE"
+    . "$MUNIN_STATEFILE"
+
+    local nm logfile prvlines curlines matches
+    while read -u 3 -r logfile; do
+        nm="$(echo "$logfile" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
+
+        # Get running number of lines to determine whether or not the file may have been rotated
+        prvlines="$(eval "echo \$${nm}_lines")"
+        if [ -z "$prvlines" ]; then
+            prvlines=0
+        fi
+
+        # Get the current number of lines in the file
+        curlines="$(wc -l "$logfile" | egrep -o '^[0-9]+')"
+        if ! [ "$curlines" -eq "$curlines" ] &>/dev/null; then
+            curlines=0
+        fi
+
+        # If the current line count is less than the previous line count, we've probably rotated.
+        # Reset to 0.
+        if [ "$curlines" -lt "$prvlines" ]; then
+            prvlines=0
+        else
+            prvlines=$((prvlines + 1))
+        fi
+
+        # Get current number of incidents
+        matches="$(tail -n +"$prvlines" "$logfile" | egrep -c "${regex}" || true)"
+
+        # Echo the value
+        echo "$nm.value $matches"
+
+        # Update the statefile
+        sed -i "/^$nm.*/d" "$MUNIN_STATEFILE"
+        echo "${nm}_lines=$curlines" >> "$MUNIN_STATEFILE"
+    done 3< <(echo "$LOGFILES")
+    return 0
+}
+
+
+
+
+
+case "$1" in
+    autoconf) echo no; exit 0 ;;
+    config) config ;;
+    *) fetch ;;
+esac
+
