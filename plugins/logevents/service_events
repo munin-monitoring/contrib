@@ -154,7 +154,7 @@ reqvars=(_logfiles _regex)
 while read -u 3 -r v; do
     n=0
     while [ $n -lt "${#reqvars[@]}" ]; do
-        if echo "$v" | egrep -q "${reqvars[$n]}$"; then
+        if echo "$v" | grep -Eq "${reqvars[$n]}$"; then
             !((setvars|=$(( 2 ** $n )) ))
         fi
         !((n++))
@@ -203,7 +203,7 @@ fi
 LOGFILES=
 declare -a LOGFILEMAP
 while read -u 3 -r v; do
-    if echo "$v" | egrep -q "_logfiles$"; then
+    if echo "$v" | grep -Eq "_logfiles$"; then
         # Get the name associated with these logfiles
         logfiletype="${v%_logfiles}"
         # This serves to expand globs while preserving spaces (and also appends the necessary newline)
@@ -244,15 +244,16 @@ function config() {
     echo "graph_title ${title}"
     echo "graph_args --base 1000 -l 0"
     echo "graph_vlabel ${vlabel}"
-    echo "graph_category logevents"
+    echo "graph_category other"
     echo "graph_info Lists number of matching lines found in various logfiles associated with each service"
 
+    local var_prefix
     while read -u 3 -r svc; do
-        nm="$(echo "$svc" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
-        echo "$nm.label $svc"
-        print_warning "$nm"
-        print_critical "$nm"
-        echo "$nm.info Number of event occurrences for $svc"
+        var_prefix="$(echo "$svc" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
+        echo "$var_prefix.label $svc"
+        print_warning "$var_prefix"
+        print_critical "$var_prefix"
+        echo "$var_prefix.info Number of event occurrences for $svc"
     done 3< <(IFS=$'\n'; echo "${services[*]}")
 }
 
@@ -262,18 +263,19 @@ function config() {
 function fetch() {
     # Load state
     touch "$MUNIN_STATEFILE"
-    . "$MUNIN_STATEFILE"
+    local curstate="$(cat "$MUNIN_STATEFILE")"
+    local nextstate=()
 
-    local n svcnm service svc svc_counter logbinding logfile lognm logmatch prvlines curlines matches
+    local n svcnm varnm service svc svc_counter logbinding logfile lognm logmatch prvlines curlines matches
 
     # Set service counters to 0 and set any logbindings that aren't yet set
     while read -u 3 -r svc; do
         svcnm="$(echo "$svc" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
         typeset "${svcnm}_total=0"
 
-        v="${svcnm}_logbinding"
-        if [ -z "${!v}" ]; then
-            typeset "$v=$svc"
+        varnm="${svcnm}_logbinding"
+        if [ -z "$(echo "$curstate" | grep "^${varnm}=" | cut -f 2 -d "=")" ]; then
+            typeset "$varnm=$svc"
         fi
     done 3< <(IFS=$'\n'; echo "${services[*]}")
 
@@ -288,7 +290,7 @@ function fetch() {
         service=
         while read -u 4 -r svc; do
             logbinding="$(echo "$svc" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')_logbinding"
-            if echo "$logfile" | egrep -q "${!logbinding}"; then
+            if echo "$logfile" | grep -Eq "${!logbinding}"; then
                 service="$svc"
                 break
             fi
@@ -305,13 +307,13 @@ function fetch() {
         lognm="$(echo "$logfile" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
 
         # Get previous line count to determine whether or not the file may have been rotated
-        prvlines="$(eval "echo \$${lognm}_lines")"
+        prvlines="$(echo "$curstate" | grep "^${lognm}_lines=" | cut -f 2 -d "=")"
         if [ -z "$prvlines" ]; then
             prvlines=0
         fi
 
         # Get the current number of lines in the file
-        curlines="$(wc -l "$logfile" | egrep -o '^[0-9]+')"
+        curlines="$(wc -l < "$logfile")"
         if ! [ "$curlines" -eq "$curlines" ] &>/dev/null; then
             curlines=0
         fi
@@ -326,18 +328,21 @@ function fetch() {
 
         # Get incidents starting at the line after the last line we've seen
         logmatch="${LOGFILEMAP[$n]}_regex"
-        matches="$(tail -n +"$prvlines" "$logfile" | egrep -c "${!logmatch}" || true)"
+        matches="$(tail -n +"$prvlines" "$logfile" | grep -Ec "${!logmatch}" || true)"
 
         # Aggregate and add to the correct service counter
         svc_counter="${svcnm}_total"
         !((matches+=${!svc_counter}))
         typeset "$svc_counter=$matches"
 
-        # Update the statefile
-        sed -i "/^${lognm}_.*/d" "$MUNIN_STATEFILE"
-        echo "${lognm}_lines=$curlines" >> "$MUNIN_STATEFILE"
+        # Push onto next state
+        nextstate+=("${lognm}_lines=$curlines")
+
         !((n++))
     done 3< <(echo "$LOGFILES")
+
+    # Write state to munin statefile
+    (IFS=$'\n'; echo "${nextstate[*]}" > "$MUNIN_STATEFILE")
 
     # Now echo values
     while read -u 3 -r svc; do
@@ -354,7 +359,6 @@ function fetch() {
 
 
 case "$1" in
-    autoconf) echo no; exit 0 ;;
     config) config ;;
     *) fetch ;;
 esac
