@@ -1,0 +1,365 @@
+#!/bin/bash
+
+set -e
+
+: << =cut
+
+=head1 DESCRIPTION
+
+service_events - Tracks the number of significant event occurrences per service
+
+This plugin is a riff on the loggrep family (\`loggrep\` and my own \`loggrepx_\`).
+However, rather than focusing on single log files, it focuses on providing
+insight into all "significant events" happening for a given service, which
+may be found across several log files.
+
+The idea is that any given service may produce events in various areas of
+operation. For example, while a typical web app might log runtime errors
+to it's app.log file, a filesystem change may prevent the whole app from
+event being bootstrapped, which may be logged in an apache log or in syslog.
+
+This plugin attempts to answer the question, "how is my service doing?".
+Unfortunately, it won't help you trace down exactly where the events are
+coming from if you happen to be watching a number of different logs, but
+it will at least let you know that something is wrong and that action
+should be taken.
+
+The plugin can be included multiple times to create graphs for various
+differing kinds of services. For example, you may have both webservices
+and system cleanup services, and you want to keep an eye on them in
+different ways.
+
+You can accomplish this by linking the plugin twice with different names
+and providing different configuration for each instance.
+
+=head1 CONFIGURATION
+
+Configuration for this plugin is admittedly complicated. What we're doing
+here is defining groups of logfiles that we're searching for various
+kinds of events. It is assumed that the _way_ we search for events in the
+logfiles is related to the type of logfile; thus, we associate match
+criteria with logfile groups. Then, we define services that we want to
+track, then mappings of logfile paths to those services.
+
+(Note that most instances will probably work best when run as root, since
+log files are usually (or at least should be) controlled with strict
+permissions.)
+
+Available config options include the following:
+
+ Plugin-specific:
+
+ env.<type>_logfiles      - (reqd) Shell glob pattern defining logfiles of
+                            type <type>
+ env.<type>_regex         - (reqd) egrep pattern for finding events in logs
+                            of type <type>
+ env.services             - (optl) Space-separated list of service names
+ env.services_autoconf    - (optl) Shell glob pattern that expands to paths
+                            whose final member is the name of a service
+ env.<service>_logbinding - (optl) egrep pattern for binding <service> to
+                            a given set of logfiles (based on path)
+ env.<service>_warning    - (optl) service-specific warning level override
+ env.<service>_critical   - (optl) service-specific critical level override
+
+ Munin-standard:
+
+ env.title                - Graph title
+ env.vlabel               - Custom label for the vertical axis
+ env.warning              - Default warning level
+ env.critical             - Default critical level
+
+For plugin-specific options, the following rules apply:
+
+* <type> is any arbitrary string. It just has to match between <type>_logfiles
+  and <type>_regex. Common values are "apache", "nginx", "apt", "syslog", etc.
+* <service> is a string derived by passing the service name through a filter
+  that removes non-alphabet characters from the beginning and replaces all non-
+  alpha-numeric characters with underscore (\`_\`).
+* logfiles are bound to services by matching <service>_logbinding on the full
+  logfile path. For example, specifying my_site_logbinding=my-site would bind
+  both /var/log/my-site/errors.log and /srv/www/my-site/logs/app.log to the
+  defined my-site service.
+
+=head2 SERVICE AUTOCONF
+
+Because services are often dynamic and you don't want to have to manually update
+config every time you deploy a new service, you have the option of defining a
+glob pattern that resolves to a collection of paths whose endpoints are service
+names. Because of the way services are deployed in real life, it's fairly common
+that paths will exist on your system that can accommodate this. Most often it
+will be something like /srv/*/*, which would match all children in /srv/www/ and
+/srv/local/.
+
+If you choose not to use the autoconf feature, you MUST specify services as a
+space-separated list of service names in the \`services\` variable.
+
+=head2 EXAMPLE CONFIG
+
+	[service_events]
+	user root
+	env.services_autoconf /srv/*/*
+	env.cfxsvc_logfiles /srv/*/*/logs/app.log
+	env.cfxsvc_regex error|alert|crit|emerg
+	env.phpfpm_logfiles /srv/*/*/logs/php-fpm*.log
+	env.phpfpm_regex Fatal error
+	env.apache_logfiles /srv/*/*/logs/errors.log
+	env.apache_regex error|alert|crit|emerg
+	env.warning 1
+	env.critical 5
+	env.my_special_service_warning 100 
+	env.my_special_service_critical 300
+
+
+=head1 AUTHOR
+
+Kael Shipman <kael.shipman@gmail.com>
+
+=head1 LICENSE
+
+MIT LICENSE
+
+Copyright 2018 Kael Shipman<kael.shipman@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+
+# Get list of all currently set env variables
+vars="$(printenv | sed -r "s/^([^=]+).*/\1/g")"
+
+# Certain variables MUST be set; check that they are (using bitmask)
+setvars=0
+reqvars=(_logfiles _regex)
+while read -u 3 -r v; do
+    n=0
+    while [ $n -lt "${#reqvars[@]}" ]; do
+        if echo "$v" | grep -Eq "${reqvars[$n]}$"; then
+            !((setvars|=$(( 2 ** $n )) ))
+        fi
+        !((n++))
+    done
+done 3< <(echo "$vars")
+
+
+# Sum all required variables
+n=0
+allvars=0
+while [ $n -lt "${#reqvars[@]}" ]; do
+    !((allvars+=$(( 2 ** $n ))))
+    !((n++))
+done
+
+# And scream if something's not set
+if ! [ "$setvars" -eq "$allvars" ]; then
+    >&2 echo "E: Missing some required variables:"
+    >&2 echo
+    n=0
+    i=1
+    while [ $n -lt "${#reqvars[@]}" ]; do
+        if [ $(( $setvars & $i )) -eq 0 ]; then
+            >&2 echo "   *${reqvars[$n]}"
+        fi
+        i=$((i<<1))
+        !((n++))
+    done
+    >&2 echo
+    >&2 echo "Please read the docs."
+    exit 1
+fi
+
+# Check for more difficult variables
+if [ -z "$services" ] && [ -z "$services_autoconf" ]; then
+    >&2 echo "E: You must pass either \$services or \$services_autoconf"
+    exit 1
+fi
+if [ -z "$services_autoconf" ] && ! echo "$vars" | grep -q "_logbinding"; then
+    >&2 echo "E: You must pass either \$*_logbinding (for each service) or \$services_autoconf"
+    exit 1
+fi
+
+
+# Now go find all log files
+LOGFILES=
+declare -a LOGFILEMAP
+while read -u 3 -r v; do
+    if echo "$v" | grep -Eq "_logfiles$"; then
+        # Get the name associated with these logfiles
+        logfiletype="${v%_logfiles}"
+        # This serves to expand globs while preserving spaces (and also appends the necessary newline)
+        while IFS= read -u 4 -r -d$'\n' line; do
+            LOGFILEMAP+=($logfiletype)
+            LOGFILES="${LOGFILES}$line"$'\n'
+        done 4< <(IFS= ; for f in ${!v}; do echo "$f"; done)
+    fi
+done 3< <(echo "$vars")
+
+
+# Set some defaults and other values
+title="${title:-Important Events per Service}"
+vlabel="${vlabel:-events}"
+
+# If services_autoconf is passed, it is assumed to be a shell glob, the leaves of which are the services
+# This also autobinds the service, if not already bound
+if [ -n "$services_autoconf" ]; then
+    declare -a services
+    IFS=
+    for s in $services_autoconf; do
+        s="$(basename "$s")"
+        services+=("$s")
+    done
+    unset IFS
+else
+    services=($services)
+fi
+
+
+# Import munin functions
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+
+# Now get to the real function definitions
+
+function config() {
+    echo "graph_title ${title}"
+    echo "graph_args --base 1000 -l 0"
+    echo "graph_vlabel ${vlabel}"
+    echo "graph_category other"
+    echo "graph_info Lists number of matching lines found in various logfiles associated with each service"
+
+    local var_prefix
+    while read -u 3 -r svc; do
+        var_prefix="$(echo "$svc" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
+        echo "$var_prefix.label $svc"
+        print_warning "$var_prefix"
+        print_critical "$var_prefix"
+        echo "$var_prefix.info Number of event occurrences for $svc"
+    done 3< <(IFS=$'\n'; echo "${services[*]}")
+}
+
+
+
+
+function fetch() {
+    # Load state
+    touch "$MUNIN_STATEFILE"
+    local curstate="$(cat "$MUNIN_STATEFILE")"
+    local nextstate=()
+
+    local n svcnm varnm service svc svc_counter logbinding logfile lognm logmatch prvlines curlines matches
+
+    # Set service counters to 0 and set any logbindings that aren't yet set
+    while read -u 3 -r svc; do
+        svcnm="$(echo "$svc" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
+        typeset "${svcnm}_total=0"
+
+        varnm="${svcnm}_logbinding"
+        if [ -z "$(echo "$curstate" | grep "^${varnm}=" | cut -f 2 -d "=")" ]; then
+            typeset "$varnm=$svc"
+        fi
+    done 3< <(IFS=$'\n'; echo "${services[*]}")
+
+    n=0
+    while read -u 3 -r logfile; do
+        # Handling trailing newline
+        if [ -z "$logfile" ]; then
+            continue
+        fi
+
+        # Find which service this logfile is associated with
+        service=
+        while read -u 4 -r svc; do
+            logbinding="$(echo "$svc" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')_logbinding"
+            if echo "$logfile" | grep -Eq "${!logbinding}"; then
+                service="$svc"
+                break
+            fi
+        done 4< <(IFS=$'\n'; echo "${services[*]}")
+
+        # Skip this log if it's not associated with any service
+        if [ -z "$service" ]; then
+            >&2 echo "W: No service associated with log $logfile. Skipping...."
+            continue
+        fi
+
+        # Get shell-compatible names for service and logfile
+        svcnm="$(echo "$service" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
+        lognm="$(echo "$logfile" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
+
+        # Get previous line count to determine whether or not the file may have been rotated
+        prvlines="$(echo "$curstate" | grep "^${lognm}_lines=" | cut -f 2 -d "=")"
+        if [ -z "$prvlines" ]; then
+            prvlines=0
+        fi
+
+        # Get the current number of lines in the file
+        curlines="$(wc -l < "$logfile")"
+        if ! [ "$curlines" -eq "$curlines" ] &>/dev/null; then
+            curlines=0
+        fi
+
+        # If the current line count is less than the previous line count, we've probably rotated.
+        # Reset to 0.
+        if [ "$curlines" -lt "$prvlines" ]; then
+            prvlines=0
+        else
+            prvlines=$((prvlines + 1))
+        fi
+
+        # Get incidents starting at the line after the last line we've seen
+        logmatch="${LOGFILEMAP[$n]}_regex"
+        matches="$(tail -n +"$prvlines" "$logfile" | grep -Ec "${!logmatch}" || true)"
+
+        # Aggregate and add to the correct service counter
+        svc_counter="${svcnm}_total"
+        !((matches+=${!svc_counter}))
+        typeset "$svc_counter=$matches"
+
+        # Push onto next state
+        nextstate+=("${lognm}_lines=$curlines")
+
+        !((n++))
+    done 3< <(echo "$LOGFILES")
+
+    # Write state to munin statefile
+    (IFS=$'\n'; echo "${nextstate[*]}" > "$MUNIN_STATEFILE")
+
+    # Now echo values
+    while read -u 3 -r svc; do
+        svcnm="$(echo "$svc" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
+        svc_counter="${svcnm}_total"
+        echo "${svcnm}.value ${!svc_counter}"
+    done 3< <(IFS=$'\n'; echo "${services[*]}")
+
+    return 0
+}
+
+
+
+
+
+case "$1" in
+    config) config ;;
+    *) fetch ;;
+esac
+
