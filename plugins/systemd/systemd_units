@@ -44,7 +44,8 @@ units from results for the inactive state.
 
 =head1 AUTHOR
 
-Olivier Mehani <shtrom+munin@ssji.net> with contributions from Kael Shipman <kael.shipman@gmail.com>
+Olivier Mehani <shtrom+munin@ssji.net>
+Kael Shipman <kael.shipman@gmail.com>
 
 =head1 LICENSE
 
@@ -74,7 +75,9 @@ exclude="${exclude:-^$}"
 
 autoconf() {
 	which systemctl >/dev/null && \
-	       systemctl  --state=failed --no-pager --no-legend	>/dev/null 2>&1 && echo yes || echo "no (No systemctl or error running it)"
+			systemctl  --state=failed --no-pager --no-legend >/dev/null 2>&1 && \
+			echo yes || \
+			echo "no (No systemctl or error running it)"
 }
 
 config () {
@@ -94,29 +97,31 @@ EOF
 }
 
 fetch () {
-    # Get all units, filtering by global include/exclude rules
-    local state_include state_exclude state_tmp tmp
-	tmp=$(systemctl --no-pager --no-legend --all | egrep "$include" | egrep -v "$exclude" | awk '{print $1, $3}')
+	# Get all units, filtering by global include/exclude rules
+	local state_include_var state_include state_exclude_var state_exclude global_unit_list state_unit_list
+	global_unit_list=$(systemctl --no-pager --no-legend --all | grep -E "$include" | grep -Ev "$exclude" | awk '{print $1, $3}')
 
-    # For each state, echo the number of units and some extra info, filtering for state-specific include/excludes
+	# For each state, echo the number of units and some extra info, filtering for state-specific include/excludes
 	for state in $states ; do
-        # Get state-specific include/excludes, if present
-        state_include="$(eval echo "\$${state}_include")"
-        state_exclude="$(eval echo "\$${state}_exclude")"
-        state_tmp="$tmp"
+		# Get state-specific include/excludes, if present
+		state_include_var="${state}_include"
+		state_include="${!state_include_var}"
+		state_exclude_var="${state}_exclude"
+		state_exclude="${!state_exclude_var}"
+		state_unit_list="$global_unit_list"
 
-        # Filter
-        if [ -n "$state_include" ]; then
-            state_tmp="$(echo "$state_tmp" | egrep "$state_include")"
-        fi
-        if [ -n "$state_exclude" ]; then
-            state_tmp="$(echo "$state_tmp" | egrep -v "$state_exclude")"
-        fi
+		# Filter
+		if [ -n "$state_include" ]; then
+			state_unit_list="$(echo "$state_unit_list" | grep -E "$state_include")"
+		fi
+		if [ -n "$state_exclude" ]; then
+			state_unit_list="$(echo "$state_unit_list" | grep -Ev "$state_exclude")"
+		fi
 
-        # Count and output
-		count=$(echo "$state_tmp" | grep -c "$state$")
+		# Count and output
+		count=$(echo "$state_unit_list" | grep -c "$state$")
 		echo "$state.value $count"
-		extinfo=$(echo "$state_tmp" | grep "$state$" | cut -d " " -f 1 | tr '\n' ' ')
+		extinfo=$(echo "$state_unit_list" | grep "$state$" | cut -d " " -f 1 | tr '\n' ' ')
 		if [ -n "$extinfo" ]; then
 			echo "$state.extinfo" "$extinfo"
 		fi
