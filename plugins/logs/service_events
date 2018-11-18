@@ -16,13 +16,18 @@ may be found across several log files.
 The idea is that any given service may produce events in various areas of
 operation. For example, while a typical web app might log runtime errors
 to it's app.log file, a filesystem change may prevent the whole app from
-event being bootstrapped, which may be logged in an apache log or in syslog.
+even being bootstrapped, and this crucial error may be logged in an apache
+log or in syslog.
 
-This plugin attempts to answer the question, "how is my service doing?".
+This plugin attempts to give visibility into all such "important events"
+that may affect the proper functioning of a given service. It attempts to
+answer the question, "Is my service running normally?".
+
 Unfortunately, it won't help you trace down exactly where the events are
 coming from if you happen to be watching a number of different logs, but
 it will at least let you know that something is wrong and that action
-should be taken.
+should be taken. To try to help with this, the plugin uses the extinfo
+field to list which logs currently have important events in them.
 
 The plugin can be included multiple times to create graphs for various
 differing kinds of services. For example, you may have both webservices
@@ -30,7 +35,10 @@ and system cleanup services, and you want to keep an eye on them in
 different ways.
 
 You can accomplish this by linking the plugin twice with different names
-and providing different configuration for each instance.
+and providing different configuration for each instance. In general, you
+should think of a single instance of this plugin as representing a single
+class of services.
+
 
 =head1 CONFIGURATION
 
@@ -80,6 +88,7 @@ For plugin-specific options, the following rules apply:
   both /var/log/my-site/errors.log and /srv/www/my-site/logs/app.log to the
   defined my-site service.
 
+
 =head2 SERVICE AUTOCONF
 
 Because services are often dynamic and you don't want to have to manually update
@@ -93,7 +102,10 @@ will be something like /srv/*/*, which would match all children in /srv/www/ and
 If you choose not to use the autoconf feature, you MUST specify services as a
 space-separated list of service names in the \`services\` variable.
 
-=head2 EXAMPLE CONFIG
+
+=head2 EXAMPLE CONFIGS
+
+This example uses services autoconf:
 
 	[service_events]
 	user root
@@ -106,13 +118,42 @@ space-separated list of service names in the \`services\` variable.
 	env.apache_regex error|alert|crit|emerg
 	env.warning 1
 	env.critical 5
-	env.my_special_service_warning 100 
+	env.my_special_service_warning 100
 	env.my_special_service_critical 300
+
+This example DOESN'T use services autoconf:
+
+	[service_events]
+	user root
+	env.services auth.example.com admin.example.com www.example.com
+    env.auth_example_com_logbinding my-custom-binding[0-9]+
+	env.cfxsvc_logfiles /srv/*/*/logs/app.log
+	env.cfxsvc_regex error|alert|crit|emerg
+	env.phpfpm_logfiles /srv/*/*/logs/php-fpm*.log
+	env.phpfpm_regex Fatal error
+	env.apache_logfiles /srv/*/*/logs/errors.log
+	env.apache_regex error|alert|crit|emerg
+	env.warning 1
+	env.critical 5
+	env.auth_example_com_warning 100
+	env.auth_example_com_critical 300
+	env.www_example_com_warning 50
+	env.www_example_com_critical 100
+
+This graph will ONLY ever show values for the three listed services, even
+if other services are installed whose logfiles match the logfiles search.
+
+Also notice that in this example, we've only listed a log binding for the
+auth service. The plugin will use the service name by default for any
+services that don't specify a log binding, so in this case, auth has a
+custom log binding, while all other services have log bindings equal to
+their names.
 
 
 =head1 AUTHOR
 
 Kael Shipman <kael.shipman@gmail.com>
+
 
 =head1 LICENSE
 
@@ -137,6 +178,7 @@ THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
 OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
+
 
 =head1 MAGIC MARKERS
 
@@ -245,7 +287,7 @@ function config() {
     echo "graph_args --base 1000 -l 0"
     echo "graph_vlabel ${vlabel}"
     echo "graph_category other"
-    echo "graph_info Lists number of matching lines found in various logfiles associated with each service"
+    echo "graph_info Lists number of matching lines found in various logfiles associated with each service. Extinfo displays currently affected logs."
 
     local var_prefix
     while read -u 3 -r svc; do
@@ -266,7 +308,7 @@ function fetch() {
     local curstate="$(cat "$MUNIN_STATEFILE")"
     local nextstate=()
 
-    local n svcnm varnm service svc svc_counter logbinding logfile lognm logmatch prvlines curlines matches
+    local n svcnm varnm service svc svc_counter logbinding logfile lognm logmatch prvlines curlines matches extinfo_var
 
     # Set service counters to 0 and set any logbindings that aren't yet set
     while read -u 3 -r svc; do
@@ -306,17 +348,13 @@ function fetch() {
         svcnm="$(echo "$service" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
         lognm="$(echo "$logfile" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
 
-        # Get previous line count to determine whether or not the file may have been rotated
+        # Get previous line count to determine whether or not the file may have been rotated (defaulting to 0)
         prvlines="$(echo "$curstate" | grep "^${lognm}_lines=" | cut -f 2 -d "=")"
-        if [ -z "$prvlines" ]; then
-            prvlines=0
-        fi
+        prvlines="${prvlines:-0}"
 
-        # Get the current number of lines in the file
+        # Get the current number of lines in the file (defaulting to 0 on error)
         curlines="$(wc -l < "$logfile")"
-        if ! [ "$curlines" -eq "$curlines" ] &>/dev/null; then
-            curlines=0
-        fi
+        curlines="${curlines:-0}"
 
         # If the current line count is less than the previous line count, we've probably rotated.
         # Reset to 0.
@@ -330,10 +368,17 @@ function fetch() {
         logmatch="${LOGFILEMAP[$n]}_regex"
         matches="$(tail -n +"$prvlines" "$logfile" | grep -Ec "${!logmatch}" || true)"
 
-        # Aggregate and add to the correct service counter
-        svc_counter="${svcnm}_total"
-        !((matches+=${!svc_counter}))
-        typeset "$svc_counter=$matches"
+        # If there were matches, aggregate them and add this log to the extinfo for the service
+        if [ "$matches" -gt 0 ]; then
+            # Aggregate and add to the correct service counter
+            svc_counter="${svcnm}_total"
+            !((matches+=${!svc_counter}))
+            typeset "$svc_counter=$matches"
+
+            # Add this log to extinfo for service
+            extinfo_var="${svcnm}_extinfo"
+            typeset "$extinfo_var=${!extinfo_var}$logfile, "
+        fi
 
         # Push onto next state
         nextstate+=("${lognm}_lines=$curlines")
@@ -348,7 +393,9 @@ function fetch() {
     while read -u 3 -r svc; do
         svcnm="$(echo "$svc" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
         svc_counter="${svcnm}_total"
+        extinfo_var="${svcnm}_extinfo"
         echo "${svcnm}.value ${!svc_counter}"
+        echo "${svcnm}.extinfo ${!extinfo_var}"
     done 3< <(IFS=$'\n'; echo "${services[*]}")
 
     return 0
