@@ -8,7 +8,7 @@ set -e
 
 service_events - Tracks the number of significant event occurrences per service
 
-This plugin is a riff on the loggrep family (\`loggrep\` and my own \`loggrepx_\`).
+This plugin is a riff on the loggrep family (C<loggrep> and my own C<loggrepx_>).
 However, rather than focusing on single log files, it focuses on providing
 insight into all "significant events" happening for a given service, which
 may be found across several log files.
@@ -78,15 +78,16 @@ Available config options include the following:
 
 For plugin-specific options, the following rules apply:
 
-* <type> is any arbitrary string. It just has to match between <type>_logfiles
-  and <type>_regex. Common values are "apache", "nginx", "apt", "syslog", etc.
+* C<< <type> >> is any arbitrary string. It just has to match between
+  C<< <type>_logfiles >> and C<< <type>_regex >>. Common values are "apache",
+  "nginx", "apt", "syslog", etc.
 * <service> is a string derived by passing the service name through a filter
   that removes non-alphabet characters from the beginning and replaces all non-
-  alpha-numeric characters with underscore (\`_\`).
-* logfiles are bound to services by matching <service>_logbinding on the full
-  logfile path. For example, specifying my_site_logbinding=my-site would bind
-  both /var/log/my-site/errors.log and /srv/www/my-site/logs/app.log to the
-  defined my-site service.
+  alpha-numeric characters with underscore (C<_>).
+* logfiles are bound to services by matching C<< <service>_logbinding >> on the
+  full logfile path. For example, specifying C<my_site_logbinding=my-site> would
+  bind both F</var/log/my-site/errors.log> and F</srv/www/my-site/logs/app.log>
+  to the defined C<my-site> service.
 
 
 =head2 SERVICE AUTOCONF
@@ -100,7 +101,7 @@ will be something like /srv/*/*, which would match all children in /srv/www/ and
 /srv/local/.
 
 If you choose not to use the autoconf feature, you MUST specify services as a
-space-separated list of service names in the \`services\` variable.
+space-separated list of service names in the C<services> variable.
 
 
 =head2 EXAMPLE CONFIGS
@@ -197,9 +198,9 @@ while read -u 3 -r v; do
     n=0
     while [ $n -lt "${#reqvars[@]}" ]; do
         if echo "$v" | grep -Eq "${reqvars[$n]}$"; then
-            !((setvars|=$(( 2 ** $n )) ))
+            setvars=$((setvars | $(( 2 ** $n )) ))
         fi
-        !((n++))
+        n=$((n+1))
     done
 done 3< <(echo "$vars")
 
@@ -208,8 +209,8 @@ done 3< <(echo "$vars")
 n=0
 allvars=0
 while [ $n -lt "${#reqvars[@]}" ]; do
-    !((allvars+=$(( 2 ** $n ))))
-    !((n++))
+    allvars=$(( allvars + $(( 2 ** $n )) ))
+    n=$((n+1))
 done
 
 # And scream if something's not set
@@ -223,7 +224,7 @@ if ! [ "$setvars" -eq "$allvars" ]; then
             >&2 echo "   *${reqvars[$n]}"
         fi
         i=$((i<<1))
-        !((n++))
+        n=$((n+1))
     done
     >&2 echo
     >&2 echo "Please read the docs."
@@ -308,7 +309,7 @@ function fetch() {
     local curstate="$(cat "$MUNIN_STATEFILE")"
     local nextstate=()
 
-    local n svcnm varnm service svc svc_counter logbinding logfile lognm logmatch prvlines curlines matches extinfo_var
+    local n svcnm varnm service svc svc_counter_var logbinding logfile lognm logmatch prvlines curlines matches extinfo_var
 
     # Set service counters to 0 and set any logbindings that aren't yet set
     while read -u 3 -r svc; do
@@ -354,7 +355,6 @@ function fetch() {
 
         # Get the current number of lines in the file (defaulting to 0 on error)
         curlines="$(wc -l < "$logfile")"
-        curlines="${curlines:-0}"
 
         # If the current line count is less than the previous line count, we've probably rotated.
         # Reset to 0.
@@ -371,9 +371,9 @@ function fetch() {
         # If there were matches, aggregate them and add this log to the extinfo for the service
         if [ "$matches" -gt 0 ]; then
             # Aggregate and add to the correct service counter
-            svc_counter="${svcnm}_total"
-            !((matches+=${!svc_counter}))
-            typeset "$svc_counter=$matches"
+            svc_counter_var="${svcnm}_total"
+            matches=$(($matches + ${!svc_counter_var}))
+            typeset "$svc_counter_var=$matches"
 
             # Add this log to extinfo for service
             extinfo_var="${svcnm}_extinfo"
@@ -383,7 +383,7 @@ function fetch() {
         # Push onto next state
         nextstate+=("${lognm}_lines=$curlines")
 
-        !((n++))
+        n=$((n+1))
     done 3< <(echo "$LOGFILES")
 
     # Write state to munin statefile
@@ -392,9 +392,9 @@ function fetch() {
     # Now echo values
     while read -u 3 -r svc; do
         svcnm="$(echo "$svc" | sed -r 's/^[^a-zA-Z]+//g' | sed -r 's/[^a-zA-Z0-9]+/_/g')"
-        svc_counter="${svcnm}_total"
+        svc_counter_var="${svcnm}_total"
         extinfo_var="${svcnm}_extinfo"
-        echo "${svcnm}.value ${!svc_counter}"
+        echo "${svcnm}.value ${!svc_counter_var}"
         echo "${svcnm}.extinfo ${!extinfo_var}"
     done 3< <(IFS=$'\n'; echo "${services[*]}")
 
