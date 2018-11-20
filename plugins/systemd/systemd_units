@@ -13,21 +13,40 @@ Linux systems with systemd installed.
 
 =head1 CONFIGURATION
 
-None needed. You may optionally pass warning and critical values for any of the possible states (active,
-reloading, inactive, failed, activating, deactivating) like so:
+No configuration is required for this plugin. You may optionally pass warning and critical values for any
+of the possible states (active, reloading, inactive, failed, activating, deactivating), and you may
+additionally pass both global and state-specific include/exclude filters to include only units you care
+about and/or exclude units you don't care about.
+
+(Note that for failed units, default warning and critical values are set to 0 and 10, respectively. No other
+states have default levels set.)
+
+Value calculations for each state are made using the following algorithm (all filters performed using
+C<grep -E>):
+
+1. Global include rules are applied on the output of C<systemctl list-units --all --no-legend>;
+2. Global exclude rules are then applied to the result of that;
+3. Then, for each state, this global output is further filtered by include, then exclude rules for the state;
+4. Then the result is filtered for the given state and the remaining units counted and listed.
+
+An example configuration might be something like this:
 
  [systemd_units]
-     env.failed_warning 0
-     env.failed_critical 5
-     env.inactive_warning 10
-     env.inactive_critical 20
-     
-Note that for failed units, default warning and critical values are set to 0 and 10, respectively. No other
-states have default levels set.
+ env.failed_warning 0
+ env.failed_critical 5
+ env.inactive_warning 10
+ env.inactive_critical 20
+ env.exclude boring
+ env.inactive_exclude sleepy
+
+In the example above, we've overridden the default warning and critical levels for failed units, added warning
+and critical levels for inactive units, then filtered out boring units from all results and filtered out sleepy
+units from results for the inactive state.
 
 =head1 AUTHOR
 
 Olivier Mehani <shtrom+munin@ssji.net>
+Kael Shipman <kael.shipman@gmail.com>
 
 =head1 LICENSE
 
@@ -51,9 +70,15 @@ states="active \
 	failed \
 	activating \
 	deactivating"
+
+include="${include:-.*}"
+exclude="${exclude:-^$}"
+
 autoconf() {
 	which systemctl >/dev/null && \
-	       systemctl  --state=failed --no-pager --no-legend	>/dev/null 2>&1 && echo yes || echo "no (No systemctl or error running it)"
+			systemctl  --state=failed --no-pager --no-legend >/dev/null 2>&1 && \
+			echo yes || \
+			echo "no (No systemctl or error running it)"
 }
 
 config () {
@@ -73,11 +98,31 @@ EOF
 }
 
 fetch () {
-	tmp=$(systemctl --no-pager --no-legend --all | awk '{print $1, $3}')
+	# Get all units, filtering by global include/exclude rules
+	local state_include_var state_include state_exclude_var state_exclude global_unit_list state_unit_list
+	global_unit_list=$(systemctl --no-pager --no-legend --all | grep -E "$include" | grep -Ev "$exclude" | awk '{print $1, $3}')
+
+	# For each state, echo the number of units and some extra info, filtering for state-specific include/excludes
 	for state in $states ; do
-		count=$(echo "$tmp" | grep -c "$state$")
+		# Get state-specific include/excludes, if present
+		state_include_var="${state}_include"
+		state_include="${!state_include_var}"
+		state_exclude_var="${state}_exclude"
+		state_exclude="${!state_exclude_var}"
+		state_unit_list="$global_unit_list"
+
+		# Filter
+		if [ -n "$state_include" ]; then
+			state_unit_list="$(echo "$state_unit_list" | grep -E "$state_include")"
+		fi
+		if [ -n "$state_exclude" ]; then
+			state_unit_list="$(echo "$state_unit_list" | grep -Ev "$state_exclude")"
+		fi
+
+		# Count and output
+		count=$(echo "$state_unit_list" | grep -c "$state$")
 		echo "$state.value $count"
-		extinfo=$(echo "$tmp" | grep "$state$" | cut -d " " -f 1 | tr '\n' ' ')
+		extinfo=$(echo "$state_unit_list" | grep "$state$" | cut -d " " -f 1 | tr '\n' ' ')
 		if [ -n "$extinfo" ]; then
 			echo "$state.extinfo" "$extinfo"
 		fi
