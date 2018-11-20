@@ -83,7 +83,7 @@ For plugin-specific options, the following rules apply:
   "nginx", "apt", "syslog", etc.
 * <service> is a string derived by passing the service name through a filter
   that removes non-alphabet characters from the beginning and replaces all non-
-  alpha-numeric characters with underscore (C<_>).
+  alphanumeric characters with underscore (C<_>).
 * logfiles are bound to services by matching C<< <service>_logbinding >> on the
   full logfile path. For example, specifying C<my_site_logbinding=my-site> would
   bind both F</var/log/my-site/errors.log> and F</srv/www/my-site/logs/app.log>
@@ -122,12 +122,12 @@ This example uses services autoconf:
 	env.my_special_service_warning 100
 	env.my_special_service_critical 300
 
-This example DOESN'T use services autoconf:
+This example DOES NOT use services autoconf:
 
 	[service_events]
 	user root
 	env.services auth.example.com admin.example.com www.example.com
-    env.auth_example_com_logbinding my-custom-binding[0-9]+
+	env.auth_example_com_logbinding my-custom-binding[0-9]+
 	env.cfxsvc_logfiles /srv/*/*/logs/app.log
 	env.cfxsvc_regex error|alert|crit|emerg
 	env.phpfpm_logfiles /srv/*/*/logs/php-fpm*.log
@@ -188,17 +188,19 @@ OTHER DEALINGS IN THE SOFTWARE.
 =cut
 
 
+services_autoconf=${services_autoconf:-}
+
 # Get list of all currently set env variables
-vars="$(printenv | sed -r "s/^([^=]+).*/\1/g")"
+vars=$(printenv | cut -f 1 -d "=")
 
 # Certain variables MUST be set; check that they are (using bitmask)
 setvars=0
 reqvars=(_logfiles _regex)
 while read -u 3 -r v; do
     n=0
-    while [ $n -lt "${#reqvars[@]}" ]; do
+    while [ "$n" -lt "${#reqvars[@]}" ]; do
         if echo "$v" | grep -Eq "${reqvars[$n]}$"; then
-            setvars=$((setvars | $(( 2 ** $n )) ))
+            setvars=$((setvars | (2 ** n) ))
         fi
         n=$((n+1))
     done
@@ -208,8 +210,8 @@ done 3< <(echo "$vars")
 # Sum all required variables
 n=0
 allvars=0
-while [ $n -lt "${#reqvars[@]}" ]; do
-    allvars=$(( allvars + $(( 2 ** $n )) ))
+while [ "$n" -lt "${#reqvars[@]}" ]; do
+    allvars=$(( allvars + 2 ** n ))
     n=$((n+1))
 done
 
@@ -219,8 +221,8 @@ if ! [ "$setvars" -eq "$allvars" ]; then
     >&2 echo
     n=0
     i=1
-    while [ $n -lt "${#reqvars[@]}" ]; do
-        if [ $(( $setvars & $i )) -eq 0 ]; then
+    while [ "$n" -lt "${#reqvars[@]}" ]; do
+        if [ $(( setvars & i )) -eq 0 ]; then
             >&2 echo "   *${reqvars[$n]}"
         fi
         i=$((i<<1))
@@ -301,15 +303,13 @@ function config() {
 }
 
 
-
-
 function fetch() {
-    # Load state
-    touch "$MUNIN_STATEFILE"
-    local curstate="$(cat "$MUNIN_STATEFILE")"
+    local curstate n svcnm varnm service svc svc_counter_var logbinding logfile lognm logmatch prvlines curlines matches extinfo_var
     local nextstate=()
 
-    local n svcnm varnm service svc svc_counter_var logbinding logfile lognm logmatch prvlines curlines matches extinfo_var
+    # Load state
+    touch "$MUNIN_STATEFILE"
+    curstate="$(cat "$MUNIN_STATEFILE")"
 
     # Set service counters to 0 and set any logbindings that aren't yet set
     while read -u 3 -r svc; do
@@ -379,7 +379,7 @@ function fetch() {
         if [ "$matches" -gt 0 ]; then
             # Aggregate and add to the correct service counter
             svc_counter_var="${svcnm}_total"
-            matches=$(($matches + ${!svc_counter_var}))
+            matches=$((matches + ${!svc_counter_var}))
             typeset "$svc_counter_var=$matches"
 
             # Add this log to extinfo for service
@@ -409,11 +409,7 @@ function fetch() {
 }
 
 
-
-
-
 case "$1" in
     config) config ;;
     *) fetch ;;
 esac
-
