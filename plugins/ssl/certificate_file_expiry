@@ -1,0 +1,72 @@
+#!/bin/sh
+: << =cut
+=head1 NAME
+
+certficate_file_expiry - check the certificate validity of your certfificates
+
+= head1 CONFIGURATION
+
+Installing: Add list of your certificates prefixed by the type in munin plugin-conf.d
+
+For openvpn ca.crt and crl.pem
+[certficate_file_expiry]
+user root
+env.CERTS crl:/etc/openvpn/easy-rsa/keys/crl.pem x509:/etc/openvpn/easy-rsa/keys/ca.crt
+
+For letsencrypt certficates
+[certficate_file_expiry]
+user root
+env.CERTS x509:/etc/letsencrypt/live/domain1.example.com/cert.pem x509:/etc/letsencrypt/live/domain2.example.com/cert.pem
+
+Warning and Critical levels can also be configured with env variables like this
+[certficate_file_expiry]
+...
+# warn when certificate will be invalid within 5 days
+env.warning 5:
+# critical when certificate will be invalid within 1 day
+env.critical 1:
+
+=head1 Dependencies
+
+Dependencies: openssl
+
+=head1 AUTHOR
+
+andreas perhab - andreas.perhab@wt-io-it.at
+https://www.wt-io-it.at/
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+if [ "$1" = "config" ] ; then
+	echo "graph_title Certificate validity"
+	echo "graph_args --logarithmic --base 1000"
+	echo "graph_vlabel certificate validity in days"
+	echo "graph_category security"
+fi
+
+now=$(date +%s)
+warning=${warning:-5:}
+critical=${critical:-1:}
+for cert in ${CERTS}; do
+	cert_type=${cert%:*}
+	cert_file=${cert#*:}
+	cert_name=$(clean_fieldname "$cert_file")
+	if [ "$1" = "config" ] ; then
+		echo "${cert_name}.label ${cert_file}"
+		print_warning "$cert_name"
+		print_critical "$cert_name"
+	elif [ "$1" = "" ] ; then
+		validity=$(/usr/bin/openssl "$cert_type" -text -noout -in "$cert_file" | grep -E '(Next Update|Not After)')
+		validity=${validity#*:}
+		validity=$(date --date="$validity" +%s)
+		validity=$((validity - now))
+		validity=$(echo "$validity" | awk '{ print ($1 / 86400) }')
+		echo "${cert_name}.value $validity"
+	fi
+done
