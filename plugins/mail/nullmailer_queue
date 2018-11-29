@@ -18,18 +18,22 @@ will need to run as that user or root.
 Additionally, the nullmailer queue directory may vary; in that case you
 can specify it with the "queuedir" and "errordir" environment variables.
 
+To add extra warning or critical thresholds set queue_warning,
+failed_critical etc.
+
 Example:
 
 [nullmailer_queue]
 user nullmail
 env.queuedir /var/spool/nullmailer/queue
 env.errordir /var/spool/nullmailer/failed
+env.queue_warning 10
 
 =head1 INTERPRETATION
 
 This plugin will draw a stack of 2: the number of emails in the queue, and
 the number of emails that have permanently failed sending. The latter has
-a warning attached, since those should never happen.
+a warning attached by default, since those should never happen.
 
 =head1 MAGIC MARKERS
 
@@ -50,8 +54,12 @@ GPLv2
 
 =cut
 
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
 queuedir=${queuedir:-/var/spool/nullmailer/queue}
 errordir=${errordir:-/var/spool/nullmailer/failed}
+
+failed_warning=${failed_warning:-0:0}
 
 case $1 in
 	autoconf)
@@ -76,9 +84,12 @@ queue.info Number of emails currently in the queue
 
 failed.label failed
 failed.draw AREASTACK
-failed.warning 0:0
 failed.info Number of emails that have permanently failed to send
 EOF
+		print_warning queue
+		print_critical queue
+		print_warning failed
+		print_critical failed
 		;;
 
 	*)
