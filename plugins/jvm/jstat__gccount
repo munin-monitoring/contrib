@@ -25,6 +25,7 @@
 #       Target Java Virtual Machine to monitor are:
 #         Sun JDK 5.0 (http://java.sun.com/javase/)
 #         Sun JDK 8.0 (http://java.sun.com/javase/)
+#         OpenJDK 1.7 .. 11 (https://openjdk.java.net/)
 #         BEA JRockit 5.0 (http://dev2dev.bea.com/jrockit/)
 #
 # Parameters:
@@ -53,12 +54,7 @@ get_jdk_type() {
     if "${JAVA_HOME}/bin/java" -version 2>&1 | grep -qi 'jrockit'; then
         echo "bea"
     else
-        version=$("${JAVA_HOME}/bin/java" -version 2>&1 | grep '^java version' | awk '{print $3}' | sed -e 's/\"//g' | cut -d'_' -f 1)
-        if echo "$version" | grep -q '^1\.5\.'; then
-            echo "sun15"
-        else
-            echo "sun"
-        fi
+        echo "sun"
   fi
 }
 
@@ -89,17 +85,21 @@ print_stats() {
     if [ "${JDK_TYPE}" = "bea" ]; then
         # shellcheck disable=SC2016
         awk_script='{ YC = $4; OC = $5; print "Young_GC.value " YGC; print "Old_GC.value " FGC; }'
-    elif [ "${JDK_TYPE}" = "sun15" ]; then
-        # shellcheck disable=SC2016
-        awk_script='{ YGC = $11; FGC = $13; print "Young_GC.value " YGC; print "Full_GC.value " FGC; }'
     else
-        # example output of jstat for Java 1.8:
-        #   S0C S1C S0U S1U EC EU OC OU MC MU CCSC CCSU YGC YGCT FGC FGCT GCT
-        #   2048.0 2048.0 0.0 1344.0 694784.0 145013.5 1398272.0 414857.1 102400.0 96308.0 12544.0 11240.1 979 20.997 5 2.705 23.702
+        # List & Order of columns of jstat changes with java versions
+        # idx["YGC"] is index of YGC column in output (i.e. 13)
+        # $idx["YGC"] then accesses the value at this position (taken from 2nd line of the output)
         # shellcheck disable=SC2016
-        awk_script='{ YGC = $13; FGC = $15; print "Young_GC.value " YGC; print "Full_GC.value " FGC; }'
+        awk_script='
+            NR==1 { 
+                for (i=1;i<=NF;i++) idx[$i]=i
+            }
+            NR==2 {
+                print "Young_GC.value " $idx["YGC"];
+                print "Full_GC.value " $idx["FGC"];
+            }'
     fi
-    "${JAVA_HOME}/bin/jstat" -gc "$pid_num" | tail -1 | awk "$awk_script"
+    "${JAVA_HOME}/bin/jstat" -gc "$pid_num" | awk "$awk_script"
 }
 
 
