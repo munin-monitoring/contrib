@@ -58,19 +58,13 @@ progName = progName[progName.rfind("/")+1:]
 
 
 # Where to store plugin state
-if "MUNIN_PLUGSTATE" in os.environ:
-    stateDir = os.environ["MUNIN_PLUGSTATE"]
-else:
-    stateDir = None
+stateDir = os.environ.get("MUNIN_PLUGSTATE", None)
 
 # Which site configuration we should use
 siteName = progName[len("nginx_upstream_multi_"):]
 
 # Log path
-if "log" in os.environ:
-    logPath = os.environ["log"]
-else:
-    logPath = "/var/log/nginx/access.log"
+logPath = os.environ.get("log", "/var/log/nginx/access.log")
 
 # Http statuses list
 httpStatusString = (
@@ -89,10 +83,8 @@ httpStatusString = (
     "506:Variant also negotiates;507:Insufficient storage;508:Loop detected;"
     "509:Bandwidth limit exceeded;510:Not extended")
 
-if "statuses" in os.environ:
-    statuses = os.environ["statuses"].split()
-else:
-    statuses = []
+# an empty list of wanted statuses is interpreted as: all statuses
+statuses = os.environ.get("statuses", "").split()
 
 httpStatusList = {}
 for statusString in httpStatusString.split(";"):
@@ -121,19 +113,13 @@ if "upstream" in os.environ:
 else:
     raise Exception("No upstreams specified")
 
-if "percentiles" in os.environ:
-    percentiles = os.environ["percentiles"].split()
-else:
-    percentiles = [80]
+percentiles = os.environ.get("percentiles", "80").split()
 
-if "graphs" in os.environ:
-    graphs_enabled = os.environ["graphs"].split()
-else:
-    graphs_enabled = ["cache", "http", "time", "request"]
+graphs_enabled = os.environ.get("graphs", "cache http time request").split()
 
 now = int(time.time())
 
-lastBytePath = "%s/nginx_upstream_multi_%s_lastByte.txt" % (stateDir, siteName)
+lastBytePath = os.path.join(stateDir, "nginx_upstream_multi_{}_lastByte.txt".format(siteName))
 try:
     lastRun = os.path.getmtime(lastBytePath)
 except OSError:
