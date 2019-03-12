@@ -1,12 +1,13 @@
 #!/bin/sh
 #
-# Made by Stefan Bühler, Switzerland
+# Made by Stefan BÃ¼hler, Switzerland
 # Monitor blocked Mails during Postfix RBL Scan, included Spamhaus, Spamcop, Manitu, MSRBL, NJABL
 
 
 # Allow user to specify logfile through env.logfile
 LOGFILE=${logfile:-/var/log/mail.log}
 DATE=$(date '+%b %e %H')
+RBLS=${rbls:-spamhaus.org spamcop.net manitu.net msrbl.net njabl.org}
 
 
 get_blocked_by_domain_count() {
@@ -31,22 +32,17 @@ if [ "$1" = "config" ]; then
     echo 'graph_category mail'
     echo 'graph_args --base 1000 -l 0'
     echo 'graph_vlabel block during RBL'
-    echo 'spamhaus.label Blocked by Spamhaus.org'
-    echo 'spamcop.label Blocked by Spamcop'
-    echo 'manitu.label Blocked by manitu.net'
-    echo 'msrbl.label Blocked by msrbl.net'
-    echo 'njabl.label Blocked by njabl.org'
+
+    for RBL in $RBLS
+    do
+      echo "${RBL%%.*}.label Blocked by $RBL"
+    done
+
     exit 0
 fi
 
 
-# sbl-xbl.spamhaus.org or zen.spamhaus.org
-printf 'spamhaus.value %s\n' "$(get_blocked_by_domain_count "spamhaus.org")"
-# bl.spamcop.net
-printf 'spamcop.value %s\n' "$(get_blocked_by_domain_count "spamcop.net")"
-# ix.dnsbl.manitu.net
-printf 'manitu.value %s\n' "$(get_blocked_by_domain_count "manitu.net")"
-# combined.rbl.msrbl.net
-printf 'msrbl.value %s\n' "$(get_blocked_by_domain_count "msrbl.net")"
-# combined.njabl.org
-printf 'njabl.value %s\n' "$(get_blocked_by_domain_count "njabl.org")"
+for RBL in $RBLS
+do
+  printf '%s.value %s\n' "${RBL%%.*}" "$(get_blocked_by_domain_count $RBL)"
+done
