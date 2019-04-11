@@ -1,0 +1,224 @@
+#!/bin/sh -u
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+internode_usage - Plugin to monitor quota usage of an Internode service
+
+The ideal usage is also used as an updated warning limit.
+
+=head1 CONFIGURATION
+
+  [internode_usage]
+    env.internode_api_login LOGIN
+    env.internode_api_password PASSWORD
+
+An optional 'env.internode_api_url' can be used, but should not be needed.  It
+will default to  https://customer-webtools-api.internode.on.net/api/v1.5.
+
+If multiple services are available, the plugin will automatically pick the first
+service from the list. To monitor other services, the plugin can be used
+multiple times, by symlinking it as 'internode_usage_SERVICEID'.
+
+=head1 CAVEATS
+
+* The hourly rate are a bit spikey in the -day view, as the API seems to update
+  every 20 to 30 minutes; it is fine in the -month and more aggregated views
+* The daily rate is the _previous_ day, and does always lag by 24h
+* Due to the way the API seems to update the data, values for the daily rate
+  are missing for a short period every day
+
+=head1 AUTHOR
+
+Olivier Mehani
+
+Copyright (C) 2019 Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=cut
+
+# shellcheck disable=SC1090
+. "${MUNIN_LIBDIR:-.}/plugins/plugin.sh"
+
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+
+if ! command -v curl >/dev/null; then
+	echo "curl not found" >&2
+	exit 1
+fi
+if ! command -v xpath >/dev/null; then
+	echo "xpath (Perl XML::LibXML) not found" >&2
+	exit 1
+fi
+if ! command -v bc >/dev/null; then
+	echo "bc not found" >&2
+	exit 1
+fi
+
+if [ -z "${internode_api_url:-}" ]; then
+    internode_api_url="https://customer-webtools-api.internode.on.net/api/v1.5"
+fi
+
+xpath_extract() {
+	xpath="$1"
+	xpath -q -n -e "${xpath}" | \
+		sed 's/<\([^>]*\)>\([^<]*\)<[^>]*>/\2/'
+}
+
+xpath_extract_attribute() {
+	xpath="$1"
+	xpath -q -n -e "${xpath}" | \
+		sed 's/.*="\([^"]\+\)".*/\1/'
+}
+
+fetch() {
+	# shellcheck disable=SC2154
+	curl -u "${internode_api_login}:${internode_api_password}" -s "$@"
+}
+
+get_data() {
+	SERVICE_XML="$(fetch "${internode_api_url}/${SERVICE_ID}/service")"
+	SERVICE_USERNAME="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/username")"
+	SERVICE_QUOTA="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/quota")"
+	SERVICE_PLAN="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/plan")"
+	SERVICE_ROLLOVER="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/rollover")"
+	SERVICE_INTERVAL="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/plan-interval" | sed 's/ly$//')"
+
+	HISTORY_XML="$(fetch "${internode_api_url}/${SERVICE_ID}/history")"
+	TODAY_TIMESTAMP="$(date +%s)"
+	DAILY_DATE="$(date +%Y-%m-%d -d yesterday)"
+	DAILY_TIMESTAMP="$(date -d "${DAILY_DATE} $(date +%H:%M:%S)" +%s)"
+	DAILY_USAGE="$(echo "${HISTORY_XML}" | xpath_extract "internode/api/usagelist/usage[@day=\"${DAILY_DATE}\"]/traffic")"
+
+	USAGE_XML="$(fetch "${internode_api_url}/${SERVICE_ID}/usage")"
+	SERVICE_USAGE="$(echo "${USAGE_XML}" | xpath_extract "internode/api/traffic")"
+
+	USAGE_CRITICAL="${SERVICE_QUOTA}"
+	USAGE_WARNING="$(echo "${SERVICE_QUOTA}*.75" | bc -ql)"
+
+	TODAY="$(date +%s)"
+	FIRST_DAY="$(date +%s --date "${SERVICE_ROLLOVER} -1 ${SERVICE_INTERVAL}")"
+	LAST_DAY="$(date +%s --date "${SERVICE_ROLLOVER}")"
+	BILLING_PERIOD="(${LAST_DAY}-${FIRST_DAY})"
+	IDEAL_USAGE="$(echo "${SERVICE_QUOTA}-(${SERVICE_QUOTA}*(${LAST_DAY}-${TODAY})/${BILLING_PERIOD})" | bc -ql)"
+}
+
+graph_config() {
+	graph=""
+	if [ -n "${1:-}" ]; then
+		graph=".$1"
+	fi
+
+	echo "multigraph internode_usage_${SERVICE_ID}${graph}"
+
+	case "$graph" in
+		.current)
+			echo "graph_title Hourly rate for ${SERVICE_USERNAME}"
+			echo 'graph_category network'
+			# ${graph_period} is not a shell variable
+			# shellcheck disable=SC2016
+			echo 'graph_vlabel bytes per ${graph_period}'
+			# XXX: this seems to be updated twice per hour;
+			# the data from this graph may be nonsense
+			echo 'graph_period hour'
+
+			echo "hourly_rate.label Hourly usage"
+			echo "hourly_rate.type DERIVE"
+			echo "hourly_rate.min 0"
+
+			;;
+		.daily)
+			echo "graph_title Previous-day usage for ${SERVICE_USERNAME}"
+			echo 'graph_category network'
+			# ${graph_period} is not a shell variable
+			# shellcheck disable=SC2016
+			echo 'graph_vlabel bytes per ${graph_period}'
+			echo 'graph_period day'
+
+			echo "daily_rate.label Previous-day usage"
+			echo "daily_rate.type GAUGE"
+
+			;;
+		*)
+		#.usage)
+			echo "graph_title Uplink usage for ${SERVICE_USERNAME}"
+			echo 'graph_category network'
+			echo 'graph_vlabel bytes'
+			echo 'graph_period hour'
+
+			echo "usage.label Total usage"
+			echo "usage.draw AREA"
+			echo "usage.extinfo ${SERVICE_PLAN}; rollover: ${SERVICE_ROLLOVER}"
+			echo "ideal.label Ideal usage"
+			echo "ideal.draw LINE"
+			echo "ideal.colour FFA500"
+
+			echo "usage.critical ${USAGE_CRITICAL}"
+			echo "usage.warning ${IDEAL_USAGE}"
+			echo "ideal.critical 0:"
+			echo "ideal.warning 0:"
+			;;
+	esac
+	echo
+}
+
+graph_data() {
+	graph=""
+	if [ -n "${1:-}" ]; then
+		graph=".${1}"
+	fi
+
+	echo "multigraph internode_usage_${SERVICE_ID}${graph}"
+	case "${graph}" in
+		.current)
+			echo "hourly_rate.value ${TODAY_TIMESTAMP}:${SERVICE_USAGE:-U}"
+			;;
+		.daily)
+			echo "daily_rate.value ${DAILY_TIMESTAMP}:${DAILY_USAGE:-U}"
+			;;
+		*)
+			echo "usage.value ${TODAY_TIMESTAMP}:${SERVICE_USAGE:-U}"
+			echo "ideal.value ${TODAY_TIMESTAMP}:${IDEAL_USAGE:-U}"
+			;;
+	esac
+	echo
+}
+
+main() {
+	case ${1:-} in
+		config)
+			graph_config
+			graph_config usage
+			graph_config current
+			graph_config daily
+			if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = "1" ]; then
+				main
+			fi
+			;;
+		*)
+			graph_data
+			graph_data usage
+			graph_data current
+			graph_data daily
+			;;
+	esac
+}
+
+# Determine the service ID from the name of the symlink
+SERVICE_ID="$(echo "${0}" | sed -n 's/^.*internode_usage_//p')"
+if [ -z "${SERVICE_ID}" ]; then
+	API_XML="$(fetch "${internode_api_url}")"
+	# Otherwise, get the first service in the list
+	SERVICE_ID="$(echo "${API_XML}" | xpath_extract "internode/api/services/service")"
+fi
+
+get_data
+
+main ${1:-}
