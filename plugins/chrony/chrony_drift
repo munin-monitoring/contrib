@@ -1,0 +1,88 @@
+#! /bin/sh
+# -*- sh -*-
+
+: <<=cut
+
+=head1 NAME
+
+chrony_drift - Munin plugin to monitor the Chrony drift value.
+
+=head1 APPLICABLE SYSTEMS
+
+Any chronyd host.
+
+=head1 CONFIGURATION
+
+The following configuration parameters are used by this plugin:
+
+ [chrony_drift]
+ env.driftfile - Path to driftfile.
+
+=head2 DEFAULT CONFIGURATION
+
+ [chrony_drift]
+ env.driftfile "/var/lib/chrony/chrony.drift"
+
+=head1 USAGE
+
+Link this plugin to /etc/munin/plugins/ and restart the munin-node.
+
+=head1 AUTHOR
+
+HORINOUCHI Masato <thermes+github@confei.to> 2019-07-16
+
+=head1 LICENSE
+
+Same as munin.
+
+=head1 MAGIC MARKERS
+
+#%# family=auto
+#%# capabilities=autoconf
+
+=cut
+
+driftfile=${driftfile:-'/var/lib/chrony/chrony.drift'}
+
+do_autoconf () {
+    if [ -r "$driftfile" ]; then
+        echo "yes"
+    else
+        echo "no (could not read driftfile '$driftfile'.)"
+    fi
+}
+
+
+do_config () {
+    cat <<'EOM'
+graph_title Chrony Drift
+graph_args --base 1000
+graph_vlabel Parts Per Million
+graph_category time
+drift.label System Clock Gain/Loss Rate
+error_bound.label Estimate of Error Bound
+graph_info The rate at which the system clock gains or loses time relative to real time.
+EOM
+}
+
+
+do_ () {
+    if [ -r "$driftfile" ]; then
+        echo "drift.value $(awk '{print $1;}' "$driftfile")"
+        echo "error_bound.value $(awk '{print $2;}' "$driftfile")"
+    else
+        echo "drift.value U"
+        echo "error_bound.value U"
+    fi
+}
+
+
+case $1 in
+    autoconf|config|'')
+        do_"$1"
+        ;;
+    *)
+        echo "Don't know how to do that" >&2
+        exit 1
+        ;;
+esac
