@@ -129,7 +129,12 @@ sub trim_label {
 # Global variables
 my (%domains,$domain,@domainlist,$munindomain,$cpusecs,$cpupercent,$memk,$nettxk,$netrxk,$vbdrd,$vbdwr);
 
-open (XENTOP,"xentop -b -f -i2 |") or die "Could not execute xentop, $!";
+# There is a bug in xentop, its output is too high in rare cases.
+# https://lists.xenproject.org/archives/html/xen-users/2019-04/msg00020.html
+# Workaround to process 3 iterations after the first one (4 iterations) and
+# choose the lowest cpusecs value line.
+
+open (XENTOP,"xentop -b -f -i4 |") or die "Could not execute xentop, $!";
 
 # Now we build a hash of hashes to store information
 while (<XENTOP>) {
@@ -146,13 +151,21 @@ while (<XENTOP>) {
 
   # We need the remaining data only for a normal run
   if ($ARGV[0] eq "") {
-    $domains{$domain}{'cpusecs'} = $cpusecs;
-    $domains{$domain}{'cpupercent'} = $cpupercent;
-    $domains{$domain}{'mem'} = $memk;
-    $domains{$domain}{'nettx'} = $nettxk;
-    $domains{$domain}{'netrx'} = $netrxk;
-    $domains{$domain}{'vbdrd'} = $vbdrd;
-    $domains{$domain}{'vbdwr'} = $vbdwr;
+    # the cnt key counts the iterations
+    # - skip the first one because xentop gives 0% cpu for the first iteration ( cnt > 1 )
+    # - process if not processed yet ( !defined ) or if current cpusecs less than any earlier
+    # normally the cpusecs is monotonous per domain as it grows so a smaller value means that the previous one was wrong
+
+    $domains{$domain}{'cnt'}++;
+    if ( $domains{$domain}{'cnt'} > 1 && ( !defined $domains{$domain}{'cpusecs'} || $cpusecs < $domains{$domain}{'cpusecs'} ) ) {
+      $domains{$domain}{'cpusecs'} = $cpusecs;
+      $domains{$domain}{'cpupercent'} = $cpupercent;
+      $domains{$domain}{'mem'} = $memk;
+      $domains{$domain}{'nettx'} = $nettxk;
+      $domains{$domain}{'netrx'} = $netrxk;
+      $domains{$domain}{'vbdrd'} = $vbdrd;
+      $domains{$domain}{'vbdwr'} = $vbdwr;
+    }
   }
 }
 
