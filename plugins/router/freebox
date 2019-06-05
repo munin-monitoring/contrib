@@ -1,0 +1,479 @@
+#!/bin/bash -u
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+freebox - Plugin to monitor stats of a Freebox (Free.fr's custom series of routers)
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 CAVEAT
+
+Only tested on a Freebox v5 with an ADSL uplink.
+
+=head1 AUTHOR
+
+Olivier Mehani
+
+Copyright (C) 2019 Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=cut
+
+# shellcheck disable=SC1090
+. "${MUNIN_LIBDIR}/plugins/plugin.sh"
+
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+
+fbx_info_url="http://mafreebox.free.fr/pub/fbx_info.txt"
+#
+# Example output (including stray whitespaces):
+#
+
+# ______________________________________________________________________
+# 
+#                       Etat de la Freebox                           
+# ______________________________________________________________________
+# 
+# 
+# Informations générales :
+# ========================
+# 
+#   Modèle                         Freebox ADSL            
+#   Version du firmware            1.5.26                  
+#   Mode de connection             Dégroupé                
+#   Temps depuis la mise en route  9 jours, 23 heures, 4 minutes
+# 
+# 
+# Téléphone :
+# ===========
+# 
+#   Etat                           Ok                      
+#   Etat du combiné                Raccroché               
+#   Sonnerie                       Inactive                
+# 
+# 
+# Adsl :
+# ======
+# 
+#   Etat                           Showtime                
+#   Protocole                      ADSL2+                  
+#   Mode                           Interleaved             
+# 
+#                          Descendant         Montant           
+#                          --                 --                
+#   Débit ATM              1913 kb/s          945 kb/s          
+#   Marge de bruit         5.10 dB            5.60 dB           
+#   Atténuation            50.00 dB           23.30 dB          
+#   FEC                    425249             15503719          
+#   CRC                    5489               0                 
+#   HEC                    705                4296208           
+# 
+#  Journal de connexion adsl :
+#  ---------------------------
+# 
+#   Date                         Etat             Débit (kb/s)    
+#   --                           --               --              
+#   21/05/2019 à 08:35:49        Connexion        1913 / 988      
+#   21/05/2019 à 08:34:38        Déconnexion                      
+#   20/05/2019 à 21:39:30        Connexion        1156 / 988      
+#   20/05/2019 à 21:38:43        Déconnexion                      
+#   20/05/2019 à 14:50:52        Connexion        1925 / 985      
+#   20/05/2019 à 14:50:05        Déconnexion                      
+#   20/05/2019 à 07:14:38        Connexion        206 / 833       
+#   20/05/2019 à 07:14:10        Déconnexion                      
+#   20/05/2019 à 07:13:50        Connexion        983 / 587       
+#   20/05/2019 à 07:12:49        Déconnexion                      
+#   20/05/2019 à 07:09:32        Connexion        1113 / 864      
+#   20/05/2019 à 07:08:45        Déconnexion                      
+#   20/05/2019 à 07:07:22        Connexion        1195 / 826      
+#   20/05/2019 à 07:06:59        Déconnexion                      
+#   20/05/2019 à 07:06:39        Connexion        1832 / 923      
+#   20/05/2019 à 07:05:51        Déconnexion                      
+#   20/05/2019 à 06:58:10        Connexion        1238 / 887      
+#   20/05/2019 à 06:57:23        Déconnexion                      
+#   20/05/2019 à 06:56:46        Connexion        1375 / 935      
+#   20/05/2019 à 06:55:58        Déconnexion                      
+#   20/05/2019 à 06:55:32        Connexion        1353 / 904      
+#   20/05/2019 à 06:54:45        Déconnexion                      
+#   20/05/2019 à 06:50:37        Connexion        1380 / 923      
+#   20/05/2019 à 06:49:32        Déconnexion                      
+# 
+# 
+# Wifi :
+# ======
+# 
+#   Etat                           Ok                      
+#   Modèle                         Ralink RT2880           
+#   Canal                          1                       
+#   État du réseau                 Activé                  
+#   Ssid                           NetSSID 
+#   Type de clé                    WPA (TKIP+AES)          
+#   FreeWifi                       Désactivé               
+#   FreeWifi Secure                Actif                   
+# 
+# 
+# Réseau :
+# ========
+# 
+#   Adresse MAC Freebox            XX:XX:XX:XX:XX:XX
+#   Adresse IP                     203.0.113.60            
+#   IPv6                           Activé                  
+#   Mode routeur                   Activé                  
+#   Adresse IP privée              192.0.2.1             
+#   Adresse IP DMZ                 192.0.2.2             
+#   Adresse IP Freeplayer          192.0.2.0             
+#   Réponse au ping                Activé                  
+#   Proxy Wake On Lan              Désactivé               
+#   Serveur DHCP                   Activé                  
+#   Plage d'adresses dynamique     192.0.2.100 - 192.0.2.254
+# 
+#  Attributions dhcp :
+#  -------------------
+# 
+#   Adresse MAC            Adresse IP                  
+#   --                     --                          
+#   XX:XX:XX:XX:XX:XX      192.0.2.101               
+#   XX:XX:XX:XX:XX:XX      192.0.2.102               
+#   XX:XX:XX:XX:XX:XX      192.0.2.103               
+#   XX:XX:XX:XX:XX:XX      192.0.2.104               
+#   XX:XX:XX:XX:XX:XX      192.0.2.105               
+#   XX:XX:XX:XX:XX:XX      192.0.2.100               
+#   XX:XX:XX:XX:XX:XX      192.0.2.3                 
+# 
+#  Redirections de ports :
+#  -----------------------
+# 
+#   Protocole              Port source    Destination    Port destination
+#   --                     --             --             --            
+#   TCP                    22             192.0.2.3      22            
+#   TCP                    2222           192.0.2.100    22            
+#   TCP                    1194           192.0.2.3      1194          
+#   UDP                    1194           192.0.2.3      1194          
+#   TCP                    80             192.0.2.3      80            
+# 
+#  Interfaces réseau :
+#  -------------------
+# 
+#                          Lien           Débit entrant  Débit sortant 
+#                          --             --             --            
+#   WAN                    Ok             1 ko/s         1 ko/s        
+#   Ethernet                              0 ko/s         0 ko/s        
+#   USB                    Non connecté                                
+#   Switch                 100baseTX-FD   1 ko/s         1 ko/s        
+
+fetch() {
+	# shellcheck disable=SC2154
+	curl -s "$@"
+}
+
+get_line_column() {
+	local key="$1"
+	local field_index="$2"
+	awk '/'"$key"'/ {
+		if ($('"$field_index"') ~ /^[.0-9]+$/) {
+			print $('"$field_index"')
+		}
+	}'
+}
+
+get_data() {
+	INFO="$(fetch "${fbx_info_url}" | iconv -f latin1 -t utf8)"
+
+	UPTIME_DAYS=$(get_line_column "Temps depuis la mise en route" "NF-5" <<< "${INFO}")
+	UPTIME_HOURS=$(get_line_column "Temps depuis la mise en route" "NF-3" <<< "${INFO}")
+	UPTIME_MINUTES=$(get_line_column "Temps depuis la mise en route" "NF-1" <<< "${INFO}")
+
+	ATM_DOWN=$(get_line_column "ATM" "NF-3" <<< "${INFO}")
+	ATM_UP=$(get_line_column "ATM" "NF-1" <<< "${INFO}")
+
+	NOISE_DOWN=$(get_line_column "bruit" "NF-3" <<< "${INFO}")
+	NOISE_UP=$(get_line_column "bruit" "NF-1" <<< "${INFO}")
+
+	ATTENUATION_DOWN=$(get_line_column "Atténuation" "NF-3" <<< "${INFO}")
+	ATTENUATION_UP=$(get_line_column "Atténuation" "NF-1" <<< "${INFO}")
+
+	FEC_DOWN=$(get_line_column "FEC" "NF-1" <<< "${INFO}")
+	FEC_UP=$(get_line_column "FEC" "NF" <<< "${INFO}")
+	CRC_DOWN=$(get_line_column "CRC" "NF-1" <<< "${INFO}")
+	CRC_UP=$(get_line_column "CRC" "NF" <<< "${INFO}")
+	HEC_DOWN=$(get_line_column "HEC" "NF-1" <<< "${INFO}")
+	HEC_UP=$(get_line_column "HEC" "NF" <<< "${INFO}")
+
+	WAN_DOWN=$(get_line_column "WAN" "NF-3" <<< "${INFO}")
+	WAN_UP=$(get_line_column "WAN" "NF-1" <<< "${INFO}")
+	ETH_DOWN=$(get_line_column "Ethernet" "NF-3" <<< "${INFO}")
+	ETH_UP=$(get_line_column "Ethernet" "NF-1" <<< "${INFO}")
+	USB_DOWN=$(get_line_column "USB" "NF-3" <<< "${INFO}")
+	USB_UP=$(get_line_column "USB" "NF-1" <<< "${INFO}")
+	SWITCH_DOWN=$(get_line_column "Switch" "NF-3" <<< "${INFO}")
+	SWITCH_UP=$(get_line_column "Switch" "NF-1" <<< "${INFO}")
+
+	DHCP_CLIENTS=$(sed -nE '/Attributions dhcp/,/Redirections de ports/{s/^\s*([0-9A-F:]{17}).*$/\1/p}' <<< "${INFO}" | wc -l)
+	REDIRECT_TCP=$(sed -nE '/Redirections de ports/,/Interfaces réseau/{s/^\s*(TCP).*$/\1/p}' <<< "${INFO}" | wc -l)
+	REDIRECT_UDP=$(sed -nE '/Redirections de ports/,/Interfaces réseau/{s/^\s*(UDP).*$/\1/p}' <<< "${INFO}" | wc -l)
+
+	if [ -z "${UPTIME_DAYS:-}" ]; then
+		UPTIME_DAYS=0
+	fi
+	if [ -z "${UPTIME_HOURS:-}" ]; then
+		UPTIME_HOURS=0
+	fi
+	if [ -z "${UPTIME_MINUTES:-}" ]; then
+		UPTIME_MINUTES=0
+	fi
+	FREEBOX_UPTIME=$((UPTIME_DAYS*86400+UPTIME_HOURS*3600+UPTIME_MINUTES*60))
+
+	LAST_CONNECT=$(sed -nE '/Journal de connexion adsl/,+5{s#^\s*([0-9]{2})/([0-9]{2})/([0-9]{4})[^0-9]*([0-9]+):([0-9]+):([0-9]+)\s+Connexion.*#\3-\2-\1T\4:\5:\6#p}' <<< "${INFO}")
+	CONNECTION_UPTIME=U
+	if [ -n "${LAST_CONNECT}" ]; then
+		CONNECTION_UPTIME="$(($(date +%s)-$(date -d "${LAST_CONNECT}" +%s)))"
+
+	fi
+}
+
+graph_config() {
+	graph=""
+	if [ -n "${1:-}" ]; then
+		graph=".$1"
+	fi
+
+	echo "multigraph freebox${graph}"
+
+	case "$graph" in
+		.adsl)
+			echo "graph_title ADSL characteristics"
+			echo 'graph_category network'
+			echo 'graph_vlabel dB in (+) / out (-)'
+			echo 'graph_order noise_down noise attenuation_down attenuation'
+
+			echo 'noise_down.label Noise down'
+			echo 'noise_down.graph no'
+			echo 'noise.label Noise'
+			echo 'noise.negative noise_down'
+
+			echo 'attenuation_down.label Attenuation down'
+			echo 'attenuation_down.graph no'
+			echo 'attenuation.label Attenuation'
+			echo 'attenuation.negative attenuation_down'
+			;;
+		.adsl_errors)
+			echo 'graph_title ADSL error correction'
+			echo 'graph_category network'
+			echo 'graph_vlabel errors in (+) / out (-)'
+			echo 'graph_order fec_down fec crc_down crc hec_down hec'
+
+			echo 'fec_down.label FEC down'
+			echo 'fec_down.graph no'
+			echo 'fec.label FEC'
+			echo 'fec.negative fec_down'
+
+			echo 'crc_down.label CRC down'
+			echo 'crc_down.graph no'
+			echo 'crc.label CRC'
+			echo 'crc.negative crc_down'
+
+			echo 'hec_down.label HEC down'
+			echo 'hec_down.graph no'
+			echo 'hec.label HEC'
+			echo 'hec.negative hec_down'
+			;;
+		.traffic)
+			echo 'graph_title Traffic'
+			echo 'graph_category network'
+			echo 'graph_vlabel bits per second in (+) / out (-)'
+			echo 'graph_order atm_down atm wan_down wan eth_down eth usb_down usb switch_down switch'
+
+			echo 'atm_down.label ATM down'
+			echo 'atm_down.graph no'
+			echo 'atm_down.cdef atm_down,1000,*'
+			echo 'atm.label ATM sync'
+			echo 'atm.negative atm_down'
+			echo 'atm.cdef atm,1000,*'
+
+			echo 'wan_down.label WAN down'
+			echo 'wan_down.graph no'
+			echo 'wan_down.cdef wan_down,8000,*'
+			echo 'wan.label WAN'
+			echo 'wan.negative wan_down'
+			echo 'wan.cdef wan,8000,*'
+
+			echo 'eth_down.label ETH down'
+			echo 'eth_down.graph no'
+			echo 'eth_down.cdef eth_down,8000,*'
+			echo 'eth.label Ethernet'
+			echo 'eth.negative eth_down'
+			echo 'eth.cdef eth,8000,*'
+
+			echo 'usb_down.label USB down'
+			echo 'usb.label USB'
+			echo 'usb_down.graph no'
+			echo 'usb_down.cdef usb_down,8000,*'
+			echo 'usb.negative usb_down'
+			echo 'usb.cdef usb,8000,*'
+
+			echo 'switch_down.label Switch down'
+			echo 'switch_down.graph no'
+			echo 'switch_down.cdef switch_down,8000,*'
+			echo 'switch.label Switch'
+			echo 'switch.cdef switch,8000,*'
+			echo 'switch.negative switch_down'
+			;;
+		.uptime)
+			echo 'graph_title Uptimes'
+			echo 'graph_category network'
+			echo 'graph_vlabel days'
+			echo 'graph_args --logarithmic'
+
+			echo 'freebox.label Freebox'
+			echo 'freebox.draw AREA'
+			echo 'freebox.cdef freebox,86400,/'
+
+			echo 'connection.label Connection'
+			echo 'connection.cdef connection,86400,/'
+			;;
+		.users)
+			echo 'graph_title Network users'
+			echo 'graph_category network'
+			echo 'graph_vlabel count'
+
+			echo 'dhcp.label DHCP leases'
+			echo 'redirect_tcp.label TCP redirections'
+			echo 'redirect_udp.label UDP redirections'
+			;;
+		*)
+			echo 'graph_title Freebox connection'
+			echo 'graph_category network'
+			echo 'graph_vlabel bits per second in (+) / out (-)'
+			echo 'graph_order main_atm_down main_atm main_wan_down main_wan'
+
+			# XXX: parameters duplicated from traffic
+			echo 'main_wan_down.label WAN down'
+			echo 'main_wan_down.graph no'
+			echo 'main_wan_down.cdef main_wan_down,8000,*'
+			echo 'main_wan.label WAN'
+			echo 'main_wan.negative main_wan_down'
+			echo 'main_wan.cdef main_wan,8000,*'
+
+			echo 'main_atm_down.label ATM down'
+			echo 'main_atm_down.graph no'
+			echo 'main_atm_down.cdef main_atm_down,1000,*'
+			echo 'main_atm.label ATM sync'
+			echo 'main_atm.negative main_atm_down'
+			echo 'main_atm.cdef main_atm,1000,*'
+			;;
+
+	esac
+	echo
+}
+
+graph_data() {
+	graph=""
+	if [ -n "${1:-}" ]; then
+		graph=".$1"
+	fi
+
+	echo "multigraph freebox${graph}"
+	case "$graph" in
+		.adsl)
+			echo "noise.value ${NOISE_UP:-U}"
+			echo "noise_down.value ${NOISE_DOWN:-U}"
+
+			echo "attenuation.value ${ATTENUATION_UP:-U}"
+			echo "attenuation_down.value ${ATTENUATION_DOWN:-U}"
+			;;
+		.adsl_errors)
+			echo "fec.value ${FEC_UP:-U}"
+			echo "fec_down.value ${FEC_DOWN:-U}"
+
+			echo "crc.value ${CRC_UP:-U}"
+			echo "crc_down.value ${CRC_DOWN:-U}"
+
+			echo "hec.value ${HEC_UP:-U}"
+			echo "hec_down.value ${HEC_DOWN:-U}"
+			;;
+		.traffic)
+			echo "atm.value ${ATM_UP:-U}"
+			echo "atm_down.value ${ATM_DOWN:-U}"
+
+			echo "wan.value ${WAN_UP:-U}"
+			echo "wan_down.value ${WAN_DOWN:-U}"
+
+			echo "eth.value ${ETH_UP:-U}"
+			echo "eth_down.value ${ETH_DOWN:-U}"
+
+			echo "usb.value ${USB_UP:-U}"
+			echo "usb_down.value ${USB_DOWN:-U}"
+
+			echo "switch.value ${SWITCH_UP:-U}"
+			echo "switch_down.value ${SWITCH_DOWN:-U}"
+			;;
+		.uptime)
+			echo "freebox.value ${FREEBOX_UPTIME:-U}"
+			echo "connection.value ${CONNECTION_UPTIME:-U}"
+			;;
+		.users)
+			echo "dhcp.value ${DHCP_CLIENTS:-U}"
+			echo "redirect_tcp.value ${REDIRECT_TCP:-U}"
+			echo "redirect_udp.value ${REDIRECT_UDP:-U}"
+			;;
+		*)
+			echo "main_wan.value ${WAN_UP:-U}"
+			echo "main_wan_down.value ${WAN_DOWN:-U}"
+
+			echo "main_atm.value ${ATM_UP:-U}"
+			echo "main_atm_down.value ${ATM_DOWN:-U}"
+
+	esac
+	echo
+}
+
+main() {
+	case ${1:-} in
+		autoconf)
+			for CMD in curl iconv; do
+				if ! command -v "${CMD}" >/dev/null; then
+					echo "no (${CMD} not found)"
+				fi
+			done
+
+			if curl --connect-timeout 1 -qso /dev/null "${fbx_info_url}"; then
+				echo 'yes'
+			else
+				echo "no (failed to retrieve ${fbx_info_url})"
+			fi
+			;;
+		config)
+			graph_config
+			graph_config adsl
+			graph_config adsl_errors
+			graph_config traffic
+			graph_config uptime
+			graph_config users
+			if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = "1" ]; then
+				main
+			fi
+			;;
+		*)
+			get_data
+			graph_data
+			graph_data adsl
+			graph_data adsl_errors
+			graph_data traffic
+			graph_data uptime
+			graph_data users
+			;;
+	esac
+}
+
+main "${1:-}"
