@@ -8,13 +8,17 @@ file_length_ - Plugin to monitor the length of specified files
 
 Useful for things such as lists (white, black, user, ...).
 
+The type of metric defaults to GAUGE, but it can be configured to, say, DERIVE,
+which is useful for monitoring the rate of message in error logs.
+
 =head1 CONFIGURATION
 
     [file_length_IDENTIFIER]
     env.files FILEPATHGLOB1 FILEPATHGLOB2 ...
-    env.category DEFAULTS_TO_system
+    env.category system
     env.title OPTIONAL_TITLE
     env.logarithmic 1
+    env.type GAUGE
 
 =head1 AUTHOR
 
@@ -22,7 +26,7 @@ Olivier Mehani <shtrom+munin@ssji.net> (based on disk/log_sizes)
 
 =head1 LICENSE
 
-GPLv2
+SPDX-License-Identifier: GPL-2.0-only
 
 =head1 MAGIC MARKERS
 
@@ -43,6 +47,7 @@ FILES=${files:-/var/log/messages}
 # shellcheck disable=SC2116 disable=SC2086
 FILES=$(echo $FILES)
 
+TYPE=${type:-GAUGE}
 
 if [ "$1" = "config" ] ; then
 	# shellcheck disable=SC2154
@@ -63,12 +68,16 @@ EOF
 		MF=$(clean_fieldname "$F")
 		BF=$(basename "$F")
 		echo "$MF.label ${BF}"
+		echo "$MF.type ${TYPE}"
 	done
 
 else
+	HAS_GNU_STAT=$(stat --help | grep GNU)
 	for F in $FILES; do
 		MF=$(echo "$F" | sed 's/[-\/\.]/_/g')
 		echo "$MF.value $(wc -l < "$F")"
-		echo "$MF.extinfo $(stat --printf="%sB\n" "$F")"
+		if [ -n "${HAS_GNU_STAT}" ]; then
+			echo "$MF.extinfo $(stat --printf="%sB\n" "$F")"
+		fi
 	done
 fi
