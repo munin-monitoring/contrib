@@ -36,20 +36,20 @@ SPDX-License-Identifier: GPL-2.0-only
 
 # needs shellcheck -x /usr/share/munin/plugins/plugin.sh
 # shellcheck source=/usr/share/munin/plugins/plugin.sh
-. "$MUNIN_LIBDIR/plugins/plugin.sh"
+. "${MUNIN_LIBDIR}/plugins/plugin.sh"
 
-NAME=$(echo "$0" | sed 's/.*_//')
-TITLE=${title:-File lengths for $NAME}
+NAME=$(echo "${0}" | sed 's/.*_//')
+TITLE=${title:-File lengths for ${NAME}}
 CATEGORY=${category:-system}
 
 FILES=${files:-/var/log/messages}
 # we want globbing to happen here
 # shellcheck disable=SC2116 disable=SC2086
-FILES=$(echo $FILES)
+FILES=$(echo ${FILES})
 
 TYPE=${type:-GAUGE}
 
-if [ "$1" = "config" ] ; then
+if [ "${1}" = "config" ] ; then
 	# shellcheck disable=SC2154
 	if [ "${logarithmic}" = "1" ]; then
 		graph_args="-o"
@@ -60,24 +60,32 @@ if [ "$1" = "config" ] ; then
 graph_title ${TITLE}
 graph_args ${graph_args} --base 1000
 graph_category ${CATEGORY}
-graph_info This graph shows the length of ${FILES}
-graph_vlabel length (lines)
 EOF
+if [ "${TYPE}" = "GAUGE" ]; then
+	echo "graph_info This graph shows the length of ${FILES}"
+	echo "graph_vlabel length (lines)"
+else
+	echo "graph_info This graph shows the addition of new lines in ${FILES}"
+	# ${graph_period} is not a shell variable
+	# shellcheck disable=SC2016
+	echo 'graph_vlabel new lines per ${graph_period}'
+fi
 
-	for F in $FILES; do
-		MF=$(clean_fieldname "$F")
-		BF=$(basename "$F")
-		echo "$MF.label ${BF}"
-		echo "$MF.type ${TYPE}"
+	for F in ${FILES}; do
+		MF=$(clean_fieldname "${F}")
+		BF=$(basename "${F}")
+		echo "${MF}.label ${BF}"
+		echo "${MF}.type ${TYPE}"
+		echo "${MF}.min 0"
 	done
 
 else
-	HAS_GNU_STAT=$(stat --help | grep GNU)
-	for F in $FILES; do
-		MF=$(echo "$F" | sed 's/[-\/\.]/_/g')
-		echo "$MF.value $(wc -l < "$F")"
+	HAS_GNU_STAT=$(stat --help 2>&1| grep GNU)
+	for F in ${FILES}; do
+		MF=$(echo "${F}" | sed 's/[-\/\.]/_/g')
+		echo "${MF}.value $(wc -l < "${F}")"
 		if [ -n "${HAS_GNU_STAT}" ]; then
-			echo "$MF.extinfo $(stat --printf="%sB\n" "$F")"
+			echo "${MF}.extinfo $(stat --printf="%sB\n" "${F}")"
 		fi
 	done
 fi
