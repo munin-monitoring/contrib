@@ -59,7 +59,7 @@ if ( $autoconf ) {
 my $suggest = ( defined $ARGV[0] and $ARGV[0] eq "suggest" );
 if ( $suggest ) {
     if ( defined( $sock ) ) {
-        my @plugins = ('connected_clients', 'key_ratio', 'keys_per_sec', 'per_sec', 'used_keys', 'used_memory');
+        my @plugins = ('connected_clients', 'key_ratio', 'keys_per_sec', 'per_sec', 'repl_backlog_size', 'used_keys', 'used_memory');
         foreach my $plugin (@plugins) {
             print "$plugin\n";
         }
@@ -128,7 +128,7 @@ switch ($0) {
             print "missratio.draw STACK\n";
             exit 0;
         }
-            
+
         my $total = $hash->{'keyspace_hits'} + $hash->{'keyspace_misses'};
         my $hitratio = 0;
         my $missratio = 0;
@@ -143,7 +143,7 @@ switch ($0) {
 
     case "per_sec" {
         if ( $config ) {
-            print "graph_title ${TITLE_PREFIX}Per second\n";
+            print "graph_title ${TITLE_PREFIX}Requests Per second\n";
             print "graph_vlabel per \${graph_period}\n";
             print "graph_category search\n";
             print "graph_args -l 0\n";
@@ -156,6 +156,20 @@ switch ($0) {
 
         print "requests.value ". $hash->{'total_commands_processed'} ."\n";
         print "connections.value ". $hash->{'total_connections_received'} ."\n";
+    }
+
+    case "repl_backlog_size" {
+        if ( $config ) {
+            my $maxclients= get_config("maxclients")->{"maxclients"};
+            print "graph_title ${TITLE_PREFIX}replication backlog\n";
+            print "graph_vlabel replication backlog\n";
+            print "graph_category search\n";
+            print "graph_args -l 0\n";
+            print "repl_backlog_size.label bytes behind master\n";
+            exit 0;
+        }
+
+        print "repl_backlog_size.value " . $hash->{'repl_backlog_size'} . "\n";
     }
 
 
@@ -177,7 +191,7 @@ switch ($0) {
         print "used_memory_rss.value ". $hash->{'used_memory_rss'}  ."\n";
         print "used_memory_peak.value ". $hash->{'used_memory_peak'}  ."\n";
     }
-    
+
     case "used_keys" {
         my $dbs;
         foreach my $key (keys %{$hash}) {
@@ -210,18 +224,18 @@ switch ($0) {
 close ($sock);
 
 sub get_conn {
-    
+
     my $sock;
-    
+
     if( $UNIX_SOCKET && -S $UNIX_SOCKET ){
-	
+
 	$sock = IO::Socket::UNIX->new(
 		Type => SOCK_STREAM(),
 		Peer => $UNIX_SOCKET,
 	);
-	
+
     }else{
-	
+
 	$sock = IO::Socket::INET->new(
 		PeerAddr => $HOST,
 		PeerPort => $PORT,
@@ -229,7 +243,7 @@ sub get_conn {
 		Proto => 'tcp'
 	);
     }
-    
+
     if ( defined( $PASSWORD )  ) {
         print $sock "AUTH ", $PASSWORD, "\r\n";
         my $result = <$sock> || die "can't read socket: $!";
