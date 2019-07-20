@@ -1,11 +1,11 @@
-#!/bin/sh
+#!/bin/sh -u
 # -*- sh -*-
 
 : << =cut
 
 =head1 NAME
 
-ssl-certificate-expiry - Plugin to monitor CERTificate expiration on multiple services and ports
+ssl-certificate-expiry - Plugin to monitor Certificate expiration on multiple services and ports
 
 =head1 CONFIGURATION
 
@@ -29,13 +29,26 @@ For example:
   ssl-certificate-expiry_192.0.2.42_636
   ssl-certificate-expiry_2001:0DB8::badc:0fee_485
 
-=head1 AUTHOR
+=head2 Cron setup
 
-Pactrick Domack (ssl_)
-Olivier Mehani (ssl-certificate-expiry)
+To avoid having to run the SSL checks during the munin-update, it is possible
+to run it from cron, and save a cachefile to be read during the update, This is
+particularly useful when checking a large number of certificates, or when some
+of the hosts are slow.
 
-Copyright (C) 2013 Patrick Domack <patrickdk@patrickdk.com>
-Copyright (C) 2017 Olivier Mehani <shtrom+munin@ssji.net>
+To do so, add a cron job running the plugin with cron as the argument:
+
+   */5 * * * * <user> /usr/sbin/munin-run/ssl-certificate-expiry cron
+
+<user> should be the user that has write permission to the MUNIN_PLUGSTATE.
+
+=head1 AUTHORS
+
+ * Pactrick Domack (ssl_)
+ * Olivier Mehani (ssl-certificate-expiry)
+
+ * Copyright (C) 2013 Patrick Domack <patrickdk@patrickdk.com>
+ * Copyright (C) 2017, 2019 Olivier Mehani <shtrom+munin@ssji.net>
 
 =head1 LICENSE
 
@@ -44,11 +57,12 @@ Copyright (C) 2017 Olivier Mehani <shtrom+munin@ssji.net>
 # shellcheck disable=SC1090
 . "${MUNIN_LIBDIR}/plugins/plugin.sh"
 
-if [ "${MUNIN_DEBUG}" = 1 ]; then
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
     set -x
 fi
 
 HOSTPORT=${0##*ssl-certificate-expiry_}
+CACHEFILE="${MUNIN_PLUGSTATE}/$(basename "${0}").cache"
 
 if [ "${HOSTPORT}" != "${0}" ] \
 	&& [ ! -z "${HOSTPORT}" ]; then
@@ -59,11 +73,6 @@ fi
 # Read data including a certificate from stdin and output the (fractional) number of days left
 # until the expiry of this certificate. The output is empty if parsing failed.
 parse_valid_days_from_certificate() {
-    local input_data
-    local valid_until_string
-    local valid_until_epoch
-    local now_epoch
-    local input_data
     input_data=$(cat)
     if echo "$input_data" | grep -q -- "-----BEGIN CERTIFICATE-----"; then
         valid_until_string=$(echo "$input_data" | openssl x509 -noout -enddate \
@@ -81,8 +90,8 @@ parse_valid_days_from_certificate() {
 
 
 print_expire_days() {
-    local host="$1"
-    local port="$2"
+    host="$1"
+    port="$2"
 
     # Wrap IPv6 addresses in square brackets
     echo "$host" | grep -q ':' && host="[$host]"
@@ -92,36 +101,52 @@ print_expire_days() {
         | parse_valid_days_from_certificate
 }
 
+main() {
+    for service in $services; do
+	if echo "$service" | grep -q "_"; then
+	    host=$(echo "$service" | cut -f 1 -d "_")
+	    port=$(echo "$service" | cut -f 2 -d "_")
+	else
+	    host=$service
+	    port=443
+	fi
+	fieldname="$(clean_fieldname "$service")"
+	valid_days=$(print_expire_days "$host" "$port")
+	[ -z "$valid_days" ] && valid_days="U"
+	printf "%s.value %s\\n" "$fieldname" "$valid_days"
+    done
+}
 
-case $1 in
+case ${1:-} in
     config)
-
 	echo "graph_title SSL Certificates Expiration"
 	echo 'graph_args --base 1000'
 	echo 'graph_vlabel days left'
 	echo 'graph_category security'
-	echo "graph_info This graph shows the days left for the certificate"
+	echo "graph_info This graph shows the numbers of days before certificate expiry"
 	for service in $services; do
 	    fieldname=$(clean_fieldname "$service")
 	    echo "${fieldname}.label $(echo "${service}" | sed 's/_/:/')"
-	    print_thresholds "${fieldname}"
+	    print_thresholds "${fieldname}" warning critical
 	done
+
+	exit 0
+	;;
+    cron)
+	TMP=$(mktemp "${CACHEFILE}.XXXXXXXX")
+	trap 'rm -f "${TMP}"' EXIT
+	main > "${TMP}"
+	chmod 0644 "${TMP}"
+	mv "${TMP}" "${CACHEFILE}"
 
 	exit 0
 	;;
 esac
 
+if [ -e "${CACHEFILE}" ]; then
+	cat "${CACHEFILE}"
+	rm "${CACHEFILE}"
+	exit 0
+fi
 
-for service in $services; do
-    if echo "$service" | grep -q "_"; then
-        host=$(echo "$service" | cut -f 1 -d "_")
-        port=$(echo "$service" | cut -f 2 -d "_")
-    else
-        host=$service
-        port=443
-    fi
-    fieldname="$(clean_fieldname "$service")"
-    valid_days=$(print_expire_days "$host" "$port")
-    [ -z "$valid_days" ] && valid_days="U"
-    printf "%s.value %s\n" "$fieldname" "$valid_days"
-done
+main
