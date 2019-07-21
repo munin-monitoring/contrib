@@ -1,49 +1,65 @@
-#!/usr/bin/env python
-# bitcoind_ Munin plugin for Bitcoin Server Variables
-#
-# by Mike Koss
-# Feb 14, 2012, MIT License
-#
-# You need to be able to authenticate to the bitcoind server to issue rpc's.
-# This plugin supporst 2 ways to do that:
-#
-# 1) In /etc/munin/plugin-conf.d/bitcoin.conf place:
-#
-#      [bitcoind_*]
-#      user your-username
-#
-#    Then be sure your $HOME/.bitcoin/bitcoin.conf has the correct authentication info:
-#        rpcconnect, rpcport, rpcuser, rpcpassword
-#
-# 2) Place your bitcoind authentication directly in /etc/munin/plugin-conf.d/bitcoin.conf
-#
-#      [bitcoind_*]
-#      env.rpcport 8332
-#      env.rpcconnect 127.0.0.1
-#      env.rpcuser your-username-here
-#      env.rpcpassword your-password-here
-#
-# To install all available graphs:
-#
-#     sudo munin-node-configure --libdir=. --suggest --shell | sudo bash
-#
-# Leave out the "| bash" to get a list of commands you can select from to install
-# individual graphs.
-#
-# Munin plugin tags:
-#
-#%# family=auto
-#%# capabilities=autoconf suggest
+#!/usr/bin/env python3
 
+"""=cut
+=head1 NAME
+
+  bitcoind_ - Track Bitcoin Server Variables
+
+=head1 CONFIGURATION
+
+You need to be able to authenticate to the bitcoind server to issue rpc's.
+This plugin supports two ways to do that:
+
+1) In /etc/munin/plugin-conf.d/bitcoin.conf place:
+
+     [bitcoind_*]
+     user your-username
+     env.bitcoin_configfile /home/your-username/.bitcoin/bitcoin.conf
+
+   Then be sure that the file referenced above (typically: $HOME/.bitcoin/bitcoin.conf)
+   has the correct authentication info:
+       rpcconnect, rpcport, rpcuser, rpcpassword
+
+2) Place your bitcoind authentication directly in /etc/munin/plugin-conf.d/bitcoin.conf
+
+     [bitcoind_*]
+     env.rpcport 8332
+     env.rpcconnect 127.0.0.1
+     env.rpcuser your-username-here
+     env.rpcpassword your-password-here
+
+To install all available graphs:
+
+    sudo munin-node-configure --libdir=. --suggest --shell | sudo bash
+
+Leave out the "| bash" to get a list of commands you can select from to install
+individual graphs.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf suggest
+
+=head1 LICENSE
+
+MIT License
+
+=head1 AUTHOR
+
+Copyright (C) 2012 Mike Koss
+
+=cut"""
+
+import json
 import os
+import re
 import sys
 import time
-import re
-import urllib2
-import json
+import urllib.error
+import urllib.request
 
 
-DEBUG = False
+DEBUG = os.getenv('MUNIN_DEBUG') == '1'
 
 
 def main():
@@ -66,15 +82,15 @@ def main():
 
     if command == 'suggest':
         for var_name in request_labels.keys():
-            print var_name
+            print(var_name)
         return
 
     if command == 'config':
-        print 'graph_category htc'
-        print 'graph_title Bitcoin %s' % labels[0]
-        print 'graph_vlabel %s' % labels[1]
+        print('graph_category htc')
+        print('graph_title Bitcoin %s' % labels[0])
+        print('graph_vlabel %s' % labels[1])
         for label in line_labels:
-            print '%s.label %s' % (label, label)
+            print('%s.label %s' % (label, label))
         return
 
     # Munin should send connection options via environment vars
@@ -83,8 +99,16 @@ def main():
     bitcoin_options.rpcport = bitcoin_options.get('rpcport', '8332')
 
     if bitcoin_options.get('rpcuser') is None:
-        conf_file = os.path.join(os.path.expanduser('~/.bitcoin'), 'bitcoin.conf')
-        bitcoin_options = parse_conf(conf_file)
+        conf_file = os.getenv("bitcoin_configfile")
+        if not conf_file:
+            print("Missing environment settings (rpcuser/rcpassword or bitcoin_configfile)",
+                  file=sys.stderr)
+            sys.exit(1)
+        elif not os.path.exists(conf_file):
+            print("Configuration file does not exist: {}".format(conf_file), file=sys.stderr)
+            sys.exit(1)
+        else:
+            bitcoin_options = parse_conf(conf_file)
 
     bitcoin_options.require('rpcuser', 'rpcpassword')
 
@@ -97,11 +121,12 @@ def main():
 
     if error:
         if command == 'autoconf':
-            print 'no'
+            print('no')
             return
         else:
             # TODO: Better way to report errors to Munin-node.
-            raise ValueError("Could not connect to Bitcoin server.")
+            print("Could not connect to Bitcoin server.", file=sys.stderr)
+            sys.exit(1)
 
     if request_var in ('transactions', 'block_age'):
         (info, error) = bitcoin.getblockhash(info['blocks'])
@@ -115,11 +140,11 @@ def main():
             info['waiting'] = len(memory_pool)
 
     if command == 'autoconf':
-        print 'yes'
+        print('yes')
         return
 
     for label in line_labels:
-        print "%s.value %s" % (label, info[label])
+        print("%s.value %s" % (label, info[label]))
 
 
 def parse_conf(filename):
@@ -138,7 +163,8 @@ def parse_conf(filename):
                     continue
                 (var, value) = (m.group(1), m.group(2).strip())
                 options[var] = value
-    except:
+    except OSError:
+        # the config file may be missing
         pass
 
     return options
@@ -165,9 +191,9 @@ class Options(dict):
             if self.get(name) is None:
                 missing.append(name)
         if len(missing) > 0:
-            raise ValueError("Missing required setting%s: %s." %
-                             ('s' if len(missing) > 1 else '',
-                              ', '.join(missing)))
+            print("Missing required setting%s: %s."
+                  % ('s' if len(missing) > 1 else '', ', '.join(missing)), file=sys.stderr)
+            sys.exit(1)
 
 
 class ServiceProxy(object):
@@ -199,40 +225,40 @@ class Proxy(object):
     def __call__(self, *args):
         if DEBUG:
             arg_strings = [json.dumps(arg) for arg in args]
-            print "Calling %s(%s) @ %s" % (self.method,
+            print("Calling %s(%s) @ %s" % (self.method,
                                            ', '.join(arg_strings),
-                                           self.service.url)
+                                           self.service.url))
 
         data = {
             'method': self.method,
             'params': args,
             'id': self.id,
             }
-        request = urllib2.Request(self.service.url, json.dumps(data))
+        request = urllib.request.Request(self.service.url, json.dumps(data))
         if self.service.username:
             # Strip the newline from the b64 encoding!
             b64 = ('%s:%s' % (self.service.username, self.service.password)).encode('base64')[:-1]
             request.add_header('Authorization', 'Basic %s' % b64)
 
         try:
-            body = urllib2.urlopen(request).read()
-        except Exception, e:
+            body = urllib.request.urlopen(request).read()
+        except urllib.error.URLError as e:
             return (None, e)
 
         if DEBUG:
-            print 'RPC Response (%s): %s' % (self.method, json.dumps(body, indent=4))
+            print('RPC Response (%s): %s' % (self.method, json.dumps(body, indent=4)))
 
         try:
             data = json.loads(body)
-        except ValueError, e:
+        except ValueError as e:
             return (None, e.message)
         # TODO: Check that id matches?
         return (data['result'], data['error'])
 
 
 def get_json_url(url):
-    request = urllib2.Request(url)
-    body = urllib2.urlopen(request).read()
+    request = urllib.request.Request(url)
+    body = urllib.request.urlopen(request).read()
     data = json.loads(body)
     return data
 
