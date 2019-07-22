@@ -1,5 +1,6 @@
 #!/bin/sh -u
 # -*- sh -*-
+# shellcheck disable=SC2039
 
 : << =cut
 
@@ -73,6 +74,11 @@ fi
 # Read data including a certificate from stdin and output the (fractional) number of days left
 # until the expiry of this certificate. The output is empty if parsing failed.
 parse_valid_days_from_certificate() {
+    local input_data
+    local valid_until_string
+    local valid_until_epoch
+    local now_epoch
+    local input_data
     input_data=$(cat)
     if echo "$input_data" | grep -q -- "-----BEGIN CERTIFICATE-----"; then
         valid_until_string=$(echo "$input_data" | openssl x509 -noout -enddate \
@@ -90,8 +96,8 @@ parse_valid_days_from_certificate() {
 
 
 print_expire_days() {
-    host="$1"
-    port="$2"
+    local host="$1"
+    local port="$2"
 
     # Wrap IPv6 addresses in square brackets
     echo "$host" | grep -q ':' && host="[$host]"
