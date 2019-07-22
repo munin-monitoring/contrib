@@ -50,6 +50,7 @@ Copyright (C) 2012 Mike Koss
 
 =cut"""
 
+import base64
 import json
 import os
 import re
@@ -236,9 +237,9 @@ class Proxy(object):
             }
         request = urllib.request.Request(self.service.url, json.dumps(data))
         if self.service.username:
-            # Strip the newline from the b64 encoding!
-            b64 = ('%s:%s' % (self.service.username, self.service.password)).encode('base64')[:-1]
-            request.add_header('Authorization', 'Basic %s' % b64)
+            auth_string = '%s:%s' % (self.service.username, self.service.password)
+            auth_b64 = base64.urlsafe_b64encode(auth_string.encode()).decode()
+            request.add_header('Authorization', 'Basic %s' % auth_b64)
 
         try:
             body = urllib.request.urlopen(request).read()
