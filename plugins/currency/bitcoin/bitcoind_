@@ -99,27 +99,28 @@ def main():
     bitcoin_options.rpcconnect = bitcoin_options.get('rpcconnect', '127.0.0.1')
     bitcoin_options.rpcport = bitcoin_options.get('rpcport', '8332')
 
+    error = None
     if bitcoin_options.get('rpcuser') is None:
         conf_file = os.getenv("bitcoin_configfile")
         if not conf_file:
-            print("Missing environment settings (rpcuser/rcpassword or bitcoin_configfile)",
-                  file=sys.stderr)
-            return False
+            error = "Missing environment settings: rpcuser/rcpassword or bitcoin_configfile"
         elif not os.path.exists(conf_file):
-            print("Configuration file does not exist: {}".format(conf_file), file=sys.stderr)
-            return False
+            error = "Configuration file does not exist: {}".format(conf_file)
         else:
             bitcoin_options = parse_conf(conf_file)
 
-    bitcoin_options.require('rpcuser', 'rpcpassword')
+    if not error:
+        try:
+            bitcoin_options.require('rpcuser', 'rpcpassword')
+        except KeyError as exc:
+            error = str(exc).strip("'")
 
-    bitcoin = ServiceProxy('http://%s:%s' % (bitcoin_options.rpcconnect,
-                                             bitcoin_options.rpcport),
-                           username=bitcoin_options.rpcuser,
-                           password=bitcoin_options.rpcpassword)
-
-    (info, connect_error) = bitcoin.getinfo()
-    if connect_error:
+    if not error:
+        bitcoin = ServiceProxy('http://%s:%s' % (bitcoin_options.rpcconnect,
+                                                 bitcoin_options.rpcport),
+                               username=bitcoin_options.rpcuser,
+                               password=bitcoin_options.rpcpassword)
+        (info, connect_error) = bitcoin.getinfo()
         error = "Could not connect to Bitcoin server: {}".format(connect_error)
 
     if command == 'autoconf':
@@ -194,10 +195,8 @@ class Options(dict):
             if self.get(name) is None:
                 missing.append(name)
         if len(missing) > 0:
-            print("Missing required setting%s: %s." % ('s' if len(missing) > 1 else '',
-                                                       ', '.join(missing)),
-                  file=sys.stderr)
-            return False
+            raise KeyError("Missing required setting{}: {}."
+                           .format('s' if len(missing) > 1 else '', ', '.join(missing)))
 
 
 class ServiceProxy:
