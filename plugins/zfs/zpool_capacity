@@ -7,9 +7,10 @@
   zpool_capacity - Munin plugin to monitor ZFS capacity
 
   These functions are implemented:
-    capacity  : to monitor zpool capacity %
-    allocated : to monitor zpool allocated bytes
-    dedup     : to monitor zpool dedup and compress ratio
+    capacity      : to monitor zpool capacity %
+    fragmentation : to monitor zpool fragmantation %
+    allocated     : to monitor zpool allocated bytes
+    dedup         : to monitor zpool dedup and compress ratio
 
   Tested with Solaris 10 and 11, OpenIndiana Hipster, FreeBSD 11, CentOS 7
 
@@ -34,6 +35,8 @@
 
   K.Cima https://github.com/shakemid
 
+  Fragmentation graph by https://github.com/rantal
+
 =head1 LICENSE
 
   GPLv2
@@ -54,7 +57,7 @@ set -o nounset
 
 # Global variables
 plugin_name=zpool_capacity
-functions='capacity allocated dedup'
+functions='capacity fragmentation allocated dedup'
 zpool_cmd=/sbin/zpool
 zfs_cmd=/sbin/zfs
 
@@ -85,6 +88,20 @@ preconfig() {
             graph_info ZFS storage pool - Capacity
             warning ${warning}
             critical ${critical}
+        "
+        for p in $pool_list
+        do
+            data_attr="${data_attr}
+                ${p} GAUGE LINE2 ${p}"
+        done
+        ;;
+    fragmentation)
+        global_attr="
+            graph_title ZFS storage pool - Fragmentation
+            graph_category fs
+            graph_args --base 1000 --lower-limit 0 --upper-limit 100
+            graph_vlabel % fragmentation
+            graph_info ZFS storage pool - Fragmentation
         "
         for p in $pool_list
         do
@@ -167,6 +184,9 @@ get_stats() {
     case $func in
     capacity)
         "$zpool_cmd" list -H -o name,capacity | sed 's/%$//'
+        ;;
+    fragmentation)
+        "$zpool_cmd" list -H -o name,fragmentation | sed 's/%$//'
         ;;
     allocated)
         ( "$zpool_cmd" list -H -o name,allocated \
