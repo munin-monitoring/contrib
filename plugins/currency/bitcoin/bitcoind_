@@ -84,7 +84,7 @@ def main():
     if command == 'suggest':
         for var_name in request_labels.keys():
             print(var_name)
-        return
+        return True
 
     if command == 'config':
         print('graph_category htc')
@@ -92,7 +92,7 @@ def main():
         print('graph_vlabel %s' % labels[1])
         for label in line_labels:
             print('%s.label %s' % (label, label))
-        return
+        return True
 
     # Munin should send connection options via environment vars
     bitcoin_options = get_env_options('rpcconnect', 'rpcport', 'rpcuser', 'rpcpassword')
@@ -104,10 +104,10 @@ def main():
         if not conf_file:
             print("Missing environment settings (rpcuser/rcpassword or bitcoin_configfile)",
                   file=sys.stderr)
-            sys.exit(1)
+            return False
         elif not os.path.exists(conf_file):
             print("Configuration file does not exist: {}".format(conf_file), file=sys.stderr)
-            sys.exit(1)
+            return False
         else:
             bitcoin_options = parse_conf(conf_file)
 
@@ -123,11 +123,11 @@ def main():
     if error:
         if command == 'autoconf':
             print('no')
-            return
+            return True
         else:
             # TODO: Better way to report errors to Munin-node.
             print("Could not connect to Bitcoin server.", file=sys.stderr)
-            sys.exit(1)
+            return False
 
     if request_var in ('transactions', 'block_age'):
         (info, error) = bitcoin.getblockhash(info['blocks'])
@@ -142,7 +142,7 @@ def main():
 
     if command == 'autoconf':
         print('yes')
-        return
+        return True
 
     for label in line_labels:
         print("%s.value %s" % (label, info[label]))
@@ -197,7 +197,7 @@ class Options(dict):
             print("Missing required setting%s: %s." % ('s' if len(missing) > 1 else '',
                                                        ', '.join(missing)),
                   file=sys.stderr)
-            sys.exit(1)
+            return False
 
 
 class ServiceProxy:
@@ -268,4 +268,4 @@ def get_json_url(url):
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(0 if main() else 1)
