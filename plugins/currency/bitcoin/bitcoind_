@@ -118,16 +118,20 @@ def main():
                            username=bitcoin_options.rpcuser,
                            password=bitcoin_options.rpcpassword)
 
-    (info, error) = bitcoin.getinfo()
+    (info, connect_error) = bitcoin.getinfo()
+    if connect_error:
+        error = "Could not connect to Bitcoin server: {}".format(connect_error)
+
+    if command == 'autoconf':
+        if error:
+            print('no ({})'.format(error))
+        else:
+            print('yes')
+        return True
 
     if error:
-        if command == 'autoconf':
-            print('no')
-            return True
-        else:
-            # TODO: Better way to report errors to Munin-node.
-            print("Could not connect to Bitcoin server.", file=sys.stderr)
-            return False
+        print(error, file=sys.stderr)
+        return False
 
     if request_var in ('transactions', 'block_age'):
         (info, error) = bitcoin.getblockhash(info['blocks'])
@@ -139,10 +143,6 @@ def main():
         (memory_pool, error) = bitcoin.getrawmempool()
         if memory_pool:
             info['waiting'] = len(memory_pool)
-
-    if command == 'autoconf':
-        print('yes')
-        return True
 
     for label in line_labels:
         print("%s.value %s" % (label, info[label]))
