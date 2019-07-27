@@ -50,8 +50,10 @@ sub process_file {
     use v5.10.1;
 
     if ( -r "$file.nocheck") {
-        skip( sprintf("\nFile '%s' has a .nocheck flag. Ignoring\n", $file), 1);
-        pass("Not pretending everything is ok");
+    SKIP: {
+            skip( sprintf("\nFile '%s' has a .nocheck flag. Ignoring\n", $file), 1);
+            pass("Not pretending everything is ok");
+        }
     }
     elsif ( ! -x $file ) {
         # missing executable flag
