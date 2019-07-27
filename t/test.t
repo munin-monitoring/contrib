@@ -18,6 +18,7 @@ sub wanted {
 
     ( ( $dev, $ino, $mode, $nlink, $uid, $gid ) = lstat($_) )
         && -f _
+        && -s _
         && ( ( $interpreter, $arguments ) = hashbang("$_") )
         && ($interpreter)
         && ++$num_plugins
