@@ -48,7 +48,11 @@ sub process_file {
     my ( $file, $filename, $interpreter, $arguments ) = @_;
     use v5.10.1;
 
-    if ( ! -x $file ) {
+    if ( -r "$file.nocheck") {
+        skip( sprintf("\nFile '%s' has a .nocheck flag. Ignoring\n", $file), 1);
+        pass("Not pretending everything is ok");
+    }
+    elsif ( ! -x $file ) {
         # missing executable flag
         diag(
             sprintf("\nFile '%s' lacks executable permission bits. Maybe try 'chmod +x $file'?\n",
