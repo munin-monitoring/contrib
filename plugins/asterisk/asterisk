@@ -77,30 +77,32 @@ use strict;
 use Munin::Plugin;
 use IO::Socket;
 
+# See the following and its subpages for change history in the AMI protocol:
+# https://wiki.asterisk.org/wiki/display/AST/Asterisk+Manager+Interface+%28AMI%29+Changes
 sub asterisk_command {
   my ($socket, $command) = @_;
   my $line, my $reply;
 
   $socket->print("Action: command\nCommand: $command\n\n");
 
-  # Response: (Error|Follows|???)
+  # Response: (Error|Follows|Success)
   $line = $socket->getline;
-  if ($line !~ /^Response: Follows\r?\n$/) {
+  if ($line !~ /^Response: Success\r?\n$/) {
     while ( $line = $socket->getline and $line !~ /^\r?\n$/ ) {}
     return undef;
   }
 
-  # Privilege: Command
+  # Message: Command output follows
   $line = $socket->getline;
+  print STDERR "Command: got response: $line\n";
 
   # Until we get the --END COMMAND-- marker, it's the command's output.
-  while ( $line = $socket->getline and $line !~ /^--END COMMAND--\r?\n$/ ) {
+  while ( $line = $socket->getline and $line =~ /^Output:/ ) {
+  print STDERR "Command: got response: $line\n";
+    # Don't keep the "Output: " part of the response
+    substr($line, 0, 8, '');
     $reply .= $line;
   }
-
-  # And then wait for the empty line that says we're done
-  while ( $line = $socket->getline and $line !~ /^\r?\n$/ ) {}
-
   return $reply;
 }
 
@@ -237,13 +239,13 @@ my $meetme_response = asterisk_command($socket, "meetme list");
 #* Total number of MeetMe users: 1
 
 my $sipchannels_response = asterisk_command($socket, "sip show channels");
-#Peer             User/ANR    Call ID      Seq (Tx/Rx)   Format
-#192.168.1.135    yann        6902112b3e0  00101/00002   g729
+#Peer             User/ANR         Call ID          Format           Hold     Last Message    Expiry     Peer
+#192.168.1.135    yann             1341929961-161    00101/00002     No       Rx: INVITE                 g729
 #1 active SIP channel(s)
 
 my $iaxchannels_response = asterisk_command($socket, "iax2 show channels");
-#Channel               Peer             Username    ID (Lo/Rem)  Seq (Tx/Rx)  Lag      Jitter  JitBuf  Format
-#IAX2/rodolphe@rodolp  10.8.53.6        rodolphe    00003/01287  00006/00004  00000ms  0148ms  0000ms  gsm
+#Channel               Peer             Username    ID (Lo/Rem)  Seq (Tx/Rx)  Lag      Jitter  JitBuf  Format  FirstMsg    LastMsg
+#IAX2/rodolphe@rodolp  10.8.53.6        rodolphe    00003/01287  00006/00004  00000ms  0148ms  0000ms  gsm     Rx:NEW      Tx:ACK
 #1 active IAX channel(s)
 
 # After all the data is fetched we can proceed to process it, the
