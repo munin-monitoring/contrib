@@ -88,17 +88,19 @@ sub asterisk_command {
   # Response: (Error|Follows|Success)
   $line = $socket->getline;
   if ($line !~ /^Response: Success\r?\n$/) {
-    while ( $line = $socket->getline and $line !~ /^\r?\n$/ ) {}
+    while ( $line = $socket->getline and $line !~ /^\r?\n$/ ) {
+      print STDERR "COMMAND: Ignoring unwanted line: $line" if $Munin::Plugin::DEBUG;
+    }
     return undef;
   }
 
   # Message: Command output follows
   $line = $socket->getline;
-  print STDERR "Command: got response: $line\n";
+  print STDERR "COMMAND got response: $line" if $Munin::Plugin::DEBUG;
 
   # Until we get the --END COMMAND-- marker, it's the command's output.
   while ( $line = $socket->getline and $line =~ /^Output:/ ) {
-  print STDERR "Command: got response: $line\n";
+    print STDERR "COMMAND: got response: $line" if $Munin::Plugin::DEBUG;
     # Don't keep the "Output: " part of the response
     substr($line, 0, 8, '');
     $reply .= $line;
