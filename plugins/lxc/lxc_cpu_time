@@ -5,7 +5,7 @@
 
 =head1 NAME
 
-lxc_cpu_time - Plugin to monitor LXC CPU time usage
+lxc_cpu_time - Plugin to monitor LXC CPU time usage 
 
 =head1 CONFIGURATION
 
@@ -20,10 +20,12 @@ This plugin needs root privilege.
 
 vajtsz vajtsz@gmail.com
 mitty   mitty@mitty.jp
+(many changes schaefer@alphanet.ch)
 
 =head1 LICENSE
 
-Unknown license
+2-clause BSD License
+or GPLv3 license, at your option
 
 =head1 MAGIC MARKERS
 
@@ -34,48 +36,42 @@ Unknown license
 
 . $MUNIN_LIBDIR/plugins/plugin.sh
 
-guest_names=`lxc-ls | sort -u`
-for guest in $guest_names; do
- if lxc-info -n $guest 2>&1 | grep -qs RUNNING ; then
-  active="$active $guest"
- fi
-done
-guest_names="$active"
+. $MUNIN_LIBDIR/plugins/lxc-lib
 
-
-f_comm='lxc-cgroup  '
+active_guests=$(active_guests)
 
 if [ "$1" = "autoconf" ]; then
-	if [ -r /proc/stat ]; then
-		echo yes
-		exit 0
-	else
-		echo "no (no /proc/stat)"
-		exit 0
-	fi
+   if [ -r /proc/stat ]; then
+      echo yes
+      exit 0
+   else
+      echo "no (no /proc/stat)"
+      exit 0
+   fi
 fi
 
 if [ "$1" = "config" ]; then
+   cat <<EOF
+graph_title CPU time
+graph_args -l 0 --base 1000
+graph_vlabel nanosec
+graph_category lxc
+EOF
 
- echo 'graph_title CPU time '
- echo 'graph_args -l 0 --base 1000'
- echo 'graph_vlabel nanosec'
- echo 'graph_category cpu'
-
- for guest_name in $guest_names;
-  do
-   guest="$(clean_fieldname $guest_name)"
-   echo 'cpu_time_'$guest'.label '$guest_name': CPU time'
-   echo 'cpu_time_'$guest'.type DERIVE'
-   echo 'cpu_time_'$guest'.min 0'
-  done
- exit 0
+   for n in $active_guests
+   do 
+      g=$(lxc_clean_fieldname $n)
+      cat <<EOF
+cpu_time_${g}.label $n: CPU time
+cpu_time_${g}.type DERIVE
+cpu_time_${g}.min 0
+EOF
+   done
+   exit 0
 fi
 
- for guest_name in $guest_names;
-  do
-   guest="$(clean_fieldname $guest_name)"
-   tmp_g=`$f_comm -n $guest_name cpuacct.usage `
-   echo 'cpu_time_'$guest'.value '$tmp_g
-  done
-
+for n in $active_guests
+do
+   g=$(lxc_clean_fieldname $n)
+   echo "cpu_time_${g}.value $(lxc_cgroup -n $n cpuacct.usage)"
+done
