@@ -16,8 +16,11 @@ This plugin will produce multiple graphs showing:
  - the number of messages in all voicemail boxes (replaces
    asterisk_voicemail);
 
- - the number of active MeetMe conferences and users connected to them
-   (replace asterisk_meetme and asterisk_meetmeusers, respectively);
+ - DEPRECATED: the number of active MeetMe conferences and users connected to
+   them (replace asterisk_meetme and asterisk_meetmeusers, respectively);
+
+ - the number of active ConfBridge conferences (e.g. non-empty ones) and users
+   connected to them
 
  - the number of active channels for a given codec, for both SIP and
    IAX2 channels (replaces asterisk_sipchannels and asterisk_codecs).
@@ -191,6 +194,16 @@ END
 
 print <<END;
 
+multigraph asterisk_confbridge
+graph_title Asterisk ConfBridge statistics
+graph_args --base 1000 -l 0
+graph_category asterisk
+users.label Connected users
+conferences.label Active conferences
+END
+
+print <<END;
+
 multigraph asterisk_codecs
 graph_title Asterisk channels per codec
 graph_args --base 1000 -l 0
@@ -223,7 +236,7 @@ die $error if $error;
 my $channels_response = asterisk_command($socket, "core show channels");
 #Channel              Location             State   Application(Data)
 #Zap/pseudo-198641660 s@frompstn:1         Rsrvd   (None)
-#Zap/1-1              4@frompstn:1         Up      MeetMe(5500)
+#Zap/1-1              4@frompstn:1         Up      ConfBridge(5500)
 #2 active channels
 #1 active call
 
@@ -237,6 +250,11 @@ my $meetme_response = asterisk_command($socket, "meetme list");
 #Conf Num       Parties        Marked     Activity  Creation
 #5500           0001           N/A        00:00:03  Static
 #* Total number of MeetMe users: 1
+
+my $confbridge_response = asterisk_command($socket, "confbridge list");
+#Conference Bridge Name           Users  Marked Locked Muted
+#================================ ====== ====== ====== =====
+#3                                     1      0 No     No
 
 my $sipchannels_response = asterisk_command($socket, "sip show channels");
 #Peer             User/ANR         Call ID          Format           Hold     Last Message    Expiry     Peer
@@ -302,6 +320,33 @@ END
     print "users.value $users\n";
     print "conferences.value " . (scalar(@meetme_list)-1) . "\n";
   }
+}
+
+print "\nmultigraph asterisk_confbridge\n";
+if ( !$confbridge_response ) {
+  print <<END;
+users.value U
+conferences.value U
+END
+} else {
+  my @confbridge_list = split(/\r?\n/, $confbridge_response);
+  # Remove column headers, then line of =
+  shift(@confbridge_list);
+  shift(@confbridge_list);
+
+  my $users = 0;
+  foreach my $bridge (@confbridge_list) {
+    my @fields = split ' ', $bridge;
+    # yes we ARE parsing a command's output. if we end up getting some
+    # unexpected things, just break out to and avoid computing nonsense.
+    if (scalar(@fields) < 5 or $fields[1] !~ /^[0-9]+$/) {
+      last;
+    }
+    $users += $fields[1];
+  }
+
+  print "users.value $users\n";
+  print "conferences.value " . (scalar(@confbridge_list)) . "\n";
 }
 
 print "\nmultigraph asterisk_codecs\n";
