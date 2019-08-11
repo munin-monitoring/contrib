@@ -15,7 +15,7 @@ lxc-multigraph - Plugin to monitor LXC containers (v2.0)
     # memory usage of containers drawn as
     # stacked area charts (changes graph
     # order) -- defaults to false
-    # env.ram_areastack true
+    # env.ram_display_stacked true
 
     # lxc container path, default below
     #env.lxcpath /var/lib/lxc
@@ -84,6 +84,8 @@ or GPLv3 license or later, at your option
 . $MUNIN_LIBDIR/plugins/plugin.sh
 
 lxcpath=${lxcpath:-/var/lib/lxc}
+ram_display_stacked=${ram_display_stacked:-false}
+
 
 # --- FUNCTIONS
 
@@ -307,15 +309,16 @@ EOF
 
    for n in $active_guests
    do
-      cat <<EOF
-$(clean_fieldname "mem_usage__${n}").label ${n}: Mem usage
-$(clean_fieldname "mem_usage__${n}").type GAUGE
-EOF
-      if [ "$areastack" = "true" ]; then
-         echo $(clean_fieldname "mem_usage__${n}").draw AREASTACK
+      if [ "$ram_display_stacked" = "true" ]; then
+         draw_style="AREASTACK"
+      else
+         draw_style="LINE1"
       fi
 
       cat <<EOF
+$(clean_fieldname "mem_usage__${n}").label ${n}: Mem usage
+$(clean_fieldname "mem_usage__${n}").type GAUGE
+$(clean_fieldname "mem_usage__${n}").draw $draw_style
 $(clean_fieldname "mem_cache__${n}").label ${n}: Cache
 $(clean_fieldname "mem_cache__${n}").type GAUGE
 $(clean_fieldname "mem_active__${n}").label ${n}: Active
