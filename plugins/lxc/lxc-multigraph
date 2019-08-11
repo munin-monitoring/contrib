@@ -197,14 +197,14 @@ graph_vlabel USER_HZ
 graph_category lxc
 EOF
 
-   for n in $active_guests
+   for guest_name in $active_guests
    do
-      for i in user system
+      for cpu_usage in user system
       do
          cat <<EOF
-$(clean_fieldname "cpu_${i}__${n}").label $n: $(echo "${i:0:1}" | tr "[:lower:]" "[:upper:]")${i:1}
-$(clean_fieldname "cpu_${i}__${n}").type DERIVE
-$(clean_fieldname "cpu_${i}__${n}").min 0
+$(clean_fieldname "cpu_${cpu_usage}__${guest_name}").label $guest_name: $(echo "${cpu_usage:0:1}" | tr "[:lower:]" "[:upper:]")${cpu_usage:1}
+$(clean_fieldname "cpu_${cpu_usage}__${guest_name}").type DERIVE
+$(clean_fieldname "cpu_${cpu_usage}__${guest_name}").min 0
 EOF
       done
    done
@@ -218,12 +218,12 @@ graph_vlabel nanosec
 graph_category lxc
 EOF
 
-   for n in $active_guests
+   for guest_name in $active_guests
    do
       cat <<EOF
-$(clean_fieldname "cpu_time__${n}").label $n: CPU time
-$(clean_fieldname "cpu_time__${n}").type DERIVE
-$(clean_fieldname "cpu_time__${n}").min 0
+$(clean_fieldname "cpu_time__${guest_name}").label $guest_name: CPU time
+$(clean_fieldname "cpu_time__${guest_name}").type DERIVE
+$(clean_fieldname "cpu_time__${guest_name}").min 0
 EOF
    done
 
@@ -234,11 +234,11 @@ graph_title Logins
 graph_category lxc
 EOF
 
-   for n in $active_guests
+   for guest_name in $active_guests
    do
       cat <<EOF
-$(clean_fieldname "logins__${n}").label $n: logins
-$(clean_fieldname "logins__${n}").type GAUGE
+$(clean_fieldname "logins__${guest_name}").label $guest_name: logins
+$(clean_fieldname "logins__${guest_name}").type GAUGE
 EOF
    done
 
@@ -252,30 +252,30 @@ graph_category lxc
 graph_info This graph shows the traffic of active LXC containers.
 EOF
 
-   for n in $active_guests
+   for guest_name in $active_guests
    do
-      device=$(lxc_netdev "$n")
+      device=$(lxc_netdev "$guest_name")
       if [ -z "$device" ]; then
          continue
       fi
       cat <<EOF
-$(clean_fieldname "net__${n}_down").label $n
-$(clean_fieldname "net__${n}_down").type DERIVE
-$(clean_fieldname "net__${n}_down").graph no
-$(clean_fieldname "net__${n}_down").cdef $(clean_fieldname "net__${n}_down"),8,*
-$(clean_fieldname "net__${n}_down").min 0
-$(clean_fieldname "net__${n}_up").label $n
-$(clean_fieldname "net__${n}_up").type DERIVE
-$(clean_fieldname "net__${n}_up").negative $(clean_fieldname "net__${n}_down")
-$(clean_fieldname "net__${n}_up").cdef $(clean_fieldname "net__${n}_up"),8,*
-$(clean_fieldname "net__${n}_up").min 0
+$(clean_fieldname "net__${guest_name}_down").label $guest_name
+$(clean_fieldname "net__${guest_name}_down").type DERIVE
+$(clean_fieldname "net__${guest_name}_down").graph no
+$(clean_fieldname "net__${guest_name}_down").cdef $(clean_fieldname "net__${guest_name}_down"),8,*
+$(clean_fieldname "net__${guest_name}_down").min 0
+$(clean_fieldname "net__${guest_name}_up").label $guest_name
+$(clean_fieldname "net__${guest_name}_up").type DERIVE
+$(clean_fieldname "net__${guest_name}_up").negative $(clean_fieldname "net__${guest_name}_down")
+$(clean_fieldname "net__${guest_name}_up").cdef $(clean_fieldname "net__${guest_name}_up"),8,*
+$(clean_fieldname "net__${guest_name}_up").min 0
 EOF
       if [ -r "/sys/class/net/$device/speed" ]; then
          megabit_per_second=$(cat "/sys/class/net/$device/speed")
          bps=$((megabit_per_second * 1000 * 1000))
          cat <<EOF
-$(clean_fieldname "net__${n}_down").max $bps
-$(clean_fieldname "net__${n}_up").max $bps
+$(clean_fieldname "net__${guest_name}_down").max $bps
+$(clean_fieldname "net__${guest_name}_up").max $bps
 EOF
       fi
    done
@@ -288,12 +288,12 @@ graph_args -l 0 --base 1000
 graph_vlabel Number of processes
 graph_category lxc
 EOF
-   for n in $active_guests
+   for guest_name in $active_guests
    do
       cat <<EOF
-$(clean_fieldname "lxc_proc__${n}").label $n: processes
-$(clean_fieldname "lxc_proc__${n}").type GAUGE
-$(clean_fieldname "lxc_proc__${n}").min 0
+$(clean_fieldname "lxc_proc__${guest_name}").label $guest_name: processes
+$(clean_fieldname "lxc_proc__${guest_name}").type GAUGE
+$(clean_fieldname "lxc_proc__${guest_name}").min 0
 EOF
    done
 
@@ -306,7 +306,7 @@ graph_vlabel byte
 graph_category lxc
 EOF
 
-   for n in $active_guests
+   for guest_name in $active_guests
    do
       if [ "$ram_display_stacked" != "true" ]; then
          draw_style="LINE1"
@@ -315,15 +315,15 @@ EOF
       fi
 
       cat <<EOF
-$(clean_fieldname "mem_usage__${n}").label ${n}: Mem usage
-$(clean_fieldname "mem_usage__${n}").type GAUGE
-$(clean_fieldname "mem_usage__${n}").draw $draw_style
-$(clean_fieldname "mem_cache__${n}").label ${n}: Cache
-$(clean_fieldname "mem_cache__${n}").type GAUGE
-$(clean_fieldname "mem_active__${n}").label ${n}: Active
-$(clean_fieldname "mem_active__${n}").type GAUGE
-$(clean_fieldname "mem_inactive__${n}").label ${n}: Inactive
-$(clean_fieldname "mem_inactive__${n}").type GAUGE
+$(clean_fieldname "mem_usage__${guest_name}").label ${guest_name}: Mem usage
+$(clean_fieldname "mem_usage__${guest_name}").type GAUGE
+$(clean_fieldname "mem_usage__${guest_name}").draw $draw_style
+$(clean_fieldname "mem_cache__${guest_name}").label ${guest_name}: Cache
+$(clean_fieldname "mem_cache__${guest_name}").type GAUGE
+$(clean_fieldname "mem_active__${guest_name}").label ${guest_name}: Active
+$(clean_fieldname "mem_active__${guest_name}").type GAUGE
+$(clean_fieldname "mem_inactive__${guest_name}").label ${guest_name}: Inactive
+$(clean_fieldname "mem_inactive__${guest_name}").type GAUGE
 EOF
    done
 
@@ -333,30 +333,30 @@ fi
 # --- DATA OUTPUT
 
 echo "multigraph lxc_cpu"
-for n in $active_guests
+for guest_name in $active_guests
 do
-   for i in user system
+   for cpu_usage in user system
    do
-      echo "$(clean_fieldname "cpu_${i}__${n}").value $(lxc_cgroup -n "$n" cpuacct.stat | grep "$i" | awk '{ print $2; }')"
+      echo "$(clean_fieldname "cpu_${cpu_usage}__${guest_name}").value $(lxc_cgroup -n "$guest_name" cpuacct.stat | grep "$cpu_usage" | awk '{ print $2; }')"
    done
 done
 
 echo "multigraph lxc_cpu_time"
-for n in $active_guests
+for guest_name in $active_guests
 do
-   echo "$(clean_fieldname "cpu_time__${n}").value $(lxc_cgroup -n "$n" cpuacct.usage)"
+   echo "$(clean_fieldname "cpu_time__${guest_name}").value $(lxc_cgroup -n "$guest_name" cpuacct.usage)"
 done
 
 echo "multigraph lxc_logins"
-for n in $active_guests
+for guest_name in $active_guests
 do
-   echo "$(clean_fieldname "logins__${n}").value $(lxc-attach -n "$n" users | wc -w)"
+   echo "$(clean_fieldname "logins__${guest_name}").value $(lxc-attach -n "$guest_name" users | wc -w)"
 done
 
 echo "multigraph lxc_net"
-for n in $active_guests
+for guest_name in $active_guests
 do
-   device=$(lxc_netdev "$n")
+   device=$(lxc_netdev "$guest_name")
    if [ -z "$device" ]; then
       value_up="U"
       value_down="U"
@@ -366,24 +366,24 @@ do
    fi
 
    cat <<EOF
-$(clean_fieldname "net__${n}_up").value $value_up
-$(clean_fieldname "net__${n}_down").value $value_down
+$(clean_fieldname "net__${guest_name}_up").value $value_up
+$(clean_fieldname "net__${guest_name}_down").value $value_down
 EOF
 done
 
 echo "multigraph lxc_proc"
-for n in $active_guests
+for guest_name in $active_guests
 do
-   echo "$(clean_fieldname "lxc_proc__${n}").value $(lxc_count_processes "$n")"
+   echo "$(clean_fieldname "lxc_proc__${guest_name}").value $(lxc_count_processes "$guest_name")"
 done
 
 echo "multigraph lxc_ram"
-for n in $active_guests
+for guest_name in $active_guests
 do
    cat <<EOF
-$(clean_fieldname "mem_usage__${n}").value $(lxc_cgroup -n "$n" memory.usage_in_bytes)
-$(clean_fieldname "mem_cache__${n}").value $(lxc_cgroup -n "$n" memory.stat | grep total_cache | awk '{print $2;}')
-$(clean_fieldname "mem_active__${n}").value $(lxc_cgroup -n "$n" memory.stat | grep total_active_anon | awk '{print $2;}')
-$(clean_fieldname "mem_inactive__${n}").value $(lxc_cgroup -n "$n" memory.stat | grep total_inactive_anon | awk '{print $2;}')
+$(clean_fieldname "mem_usage__${guest_name}").value $(lxc_cgroup -n "$guest_name" memory.usage_in_bytes)
+$(clean_fieldname "mem_cache__${guest_name}").value $(lxc_cgroup -n "$guest_name" memory.stat | grep total_cache | awk '{print $2;}')
+$(clean_fieldname "mem_active__${guest_name}").value $(lxc_cgroup -n "$guest_name" memory.stat | grep total_active_anon | awk '{print $2;}')
+$(clean_fieldname "mem_inactive__${guest_name}").value $(lxc_cgroup -n "$guest_name" memory.stat | grep total_inactive_anon | awk '{print $2;}')
 EOF
 done
