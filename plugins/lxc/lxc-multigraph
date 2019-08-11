@@ -109,9 +109,11 @@ function active_guests {
 }
 
 
-function lxc_cgroup {
+function get_lxc_cgroup_info {
+   local guest_name="$1"
+   local field="$2"
    # lxc3 (lxc < 3: may output some warnings if there is cruft in your config dir)
-   lxc-cgroup -o /dev/stdout -l INFO $* | sed 's/^.*lxc_cgroup.c:main:[0-9][0-9]* - //'
+   lxc-cgroup -o /dev/stdout -l INFO -n "$guest_name" "$field" | sed 's/^.*lxc_cgroup.c:main:[0-9][0-9]* - //'
 }
 
 
@@ -164,7 +166,7 @@ lxc_count_processes () {
    if [ -e /usr/bin/cgm ]; then
       cgm getvalue cpu "lxc/$guest_name" tasks 2>/dev/null | wc -l
    else
-      lxc_cgroup -n "$guest_name" tasks | wc -l
+      get_lxc_cgroup_info "$guest_name" "tasks" | wc -l
    fi
 }
 
@@ -337,14 +339,14 @@ for guest_name in $active_guests
 do
    for cpu_usage in user system
    do
-      echo "$(clean_fieldname "cpu_${cpu_usage}__${guest_name}").value $(lxc_cgroup -n "$guest_name" cpuacct.stat | grep "$cpu_usage" | awk '{ print $2; }')"
+      echo "$(clean_fieldname "cpu_${cpu_usage}__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "cpuacct.stat" | grep "$cpu_usage" | awk '{ print $2; }')"
    done
 done
 
 echo "multigraph lxc_cpu_time"
 for guest_name in $active_guests
 do
-   echo "$(clean_fieldname "cpu_time__${guest_name}").value $(lxc_cgroup -n "$guest_name" cpuacct.usage)"
+   echo "$(clean_fieldname "cpu_time__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "cpuacct.usage")"
 done
 
 echo "multigraph lxc_logins"
@@ -381,9 +383,9 @@ echo "multigraph lxc_ram"
 for guest_name in $active_guests
 do
    cat <<EOF
-$(clean_fieldname "mem_usage__${guest_name}").value $(lxc_cgroup -n "$guest_name" memory.usage_in_bytes)
-$(clean_fieldname "mem_cache__${guest_name}").value $(lxc_cgroup -n "$guest_name" memory.stat | grep total_cache | awk '{print $2;}')
-$(clean_fieldname "mem_active__${guest_name}").value $(lxc_cgroup -n "$guest_name" memory.stat | grep total_active_anon | awk '{print $2;}')
-$(clean_fieldname "mem_inactive__${guest_name}").value $(lxc_cgroup -n "$guest_name" memory.stat | grep total_inactive_anon | awk '{print $2;}')
+$(clean_fieldname "mem_usage__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.usage_in_bytes")
+$(clean_fieldname "mem_cache__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.stat" | grep total_cache | awk '{print $2;}')
+$(clean_fieldname "mem_active__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.stat" | grep total_active_anon | awk '{print $2;}')
+$(clean_fieldname "mem_inactive__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.stat" | grep total_inactive_anon | awk '{print $2;}')
 EOF
 done
