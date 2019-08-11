@@ -95,20 +95,13 @@ cgrouppath=${cgrouppath:-}
 # --- FUNCTIONS
 
 function active_guests {
-   local guest_name i ok
+   local excludes="$1"
+   local guest_name
    for guest_name in $(lxc-ls)
    do
       # handle optional exclude list in $1
-      ok=1
-      for i in $1
-      do
-         if [ "$i" = "$guest_name" ]; then
-            ok=0
-         fi
-      done
-
-      if [ "$ok" = 1 ]; then
-         if lxc-info -n "$guest_name" 2>&1 | grep -qs RUNNING; then
+      if ! echo "$excludes" | grep -qwF "$guest_name"; then
+         if lxc-info -n "$guest_name" --state 2>/dev/null | grep -qw RUNNING; then
             echo "$guest_name"
          fi
       fi
