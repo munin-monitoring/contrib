@@ -95,21 +95,21 @@ cgrouppath=${cgrouppath:-}
 # --- FUNCTIONS
 
 function active_guests {
-   local g active i ok
-   for g in $(lxc-ls | sort -u)
+   local guest_name active i ok
+   for guest_name in $(lxc-ls | sort -u)
    do
       # handle optional exclude list in $1
       ok=1
       for i in $1
       do
-         if [ "$i" = "$g" ]; then
+         if [ "$i" = "$guest_name" ]; then
             ok=0
          fi
       done
 
       if [ "$ok" = 1 ]; then
-         if lxc-info -n "$g" 2>&1 | grep -qs RUNNING; then
-            active="$active $g"
+         if lxc-info -n "$guest_name" 2>&1 | grep -qs RUNNING; then
+            active="$active $guest_name"
          fi
       fi
    done
@@ -125,12 +125,12 @@ function lxc_cgroup {
 
 
 function lxc_netdev {
-   local g=$1 dev
+   local guest_name="$1"
 
-   if [ -f "$lxcpath/$g/config" ]; then
+   if [ -f "$lxcpath/$guest_name/config" ]; then
       # lxc 3 vs < 3
-      (egrep '^lxc.net.0.veth.pair' "$lxcpath/$g/config" 2>/dev/null \
-         || egrep '^lxc.network.veth.pair' "$lxcpath/$g/config"
+      (egrep '^lxc.net.0.veth.pair' "$lxcpath/$guest_name/config" 2>/dev/null \
+         || egrep '^lxc.network.veth.pair' "$lxcpath/$guest_name/config"
       ) | awk '{print $NF;}'
    fi
 }
