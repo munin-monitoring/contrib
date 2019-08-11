@@ -81,7 +81,8 @@ or GPLv3 license or later, at your option
 
 =cut
 
-. $MUNIN_LIBDIR/plugins/plugin.sh
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
 
 lxcpath=${lxcpath:-/var/lib/lxc}
 # containers to be ignored
@@ -106,14 +107,14 @@ function active_guests {
          fi
       done
 
-      if [ $ok = 1 ]; then
-         if lxc-info -n $g 2>&1 | grep -qs RUNNING; then
+      if [ "$ok" = 1 ]; then
+         if lxc-info -n "$g" 2>&1 | grep -qs RUNNING; then
             active="$active $g"
          fi
       fi
    done
 
-   echo $active
+   echo "$active"
 }
 
 
@@ -126,10 +127,10 @@ function lxc_cgroup {
 function lxc_netdev {
    local g=$1 dev
 
-   if [ -f $lxcpath/$g/config ]; then
+   if [ -f "$lxcpath/$g/config" ]; then
       # lxc 3 vs < 3
-      (egrep '^lxc.net.0.veth.pair' $lxcpath/$g/config 2>/dev/null \
-         || egrep '^lxc.network.veth.pair' $lxcpath/$g/config
+      (egrep '^lxc.net.0.veth.pair' "$lxcpath/$g/config" 2>/dev/null \
+         || egrep '^lxc.network.veth.pair' "$lxcpath/$g/config"
       ) | awk '{print $NF;}'
    else
       echo unknown
@@ -152,20 +153,20 @@ lxc_count_processes () {
 
    if [ -n "$cgrouppath" ]; then
       SYSFS="$cgrouppath/$guest_name/tasks"
-      if [ -e $SYSFS ]; then
+      if [ -e "$SYSFS" ]; then
          wc -l <"$SYSFS"
          return
       fi
    fi
 
    for SYSFS in \
-      /sys/fs/cgroup/"$guest_name"/tasks \
-      /sys/fs/cgroup/lxc/"$guest_name"/tasks \
-      /sys/fs/cgroup/systemd/lxc/"$guest_name"/tasks \
-      /sys/fs/cgroup/cpuacct/lxc/"$guest_name"/tasks \
-      /sys/fs/cgroup/cpuacct/sysdefault/lxc/"$guest_name"/tasks
+      "/sys/fs/cgroup/$guest_name/tasks" \
+      "/sys/fs/cgroup/lxc/$guest_name/tasks" \
+      "/sys/fs/cgroup/systemd/lxc/$guest_name/tasks" \
+      "/sys/fs/cgroup/cpuacct/lxc/$guest_name/tasks" \
+      "/sys/fs/cgroup/cpuacct/sysdefault/lxc/$guest_name/tasks"
    do
-      if [ -e $SYSFS ]; then
+      if [ -e "$SYSFS" ]; then
          wc -l <"$SYSFS"
          return
       fi
@@ -212,7 +213,7 @@ EOF
       for i in user system
       do
          cat <<EOF
-$(clean_fieldname "cpu_${i}__${n}").label $n: $(echo ${i:0:1} | tr "[:lower:]" "[:upper:]")${i:1}
+$(clean_fieldname "cpu_${i}__${n}").label $n: $(echo "${i:0:1}" | tr "[:lower:]" "[:upper:]")${i:1}
 $(clean_fieldname "cpu_${i}__${n}").type DERIVE
 $(clean_fieldname "cpu_${i}__${n}").min 0
 EOF
@@ -269,8 +270,8 @@ EOF
          continue
       fi
       bps="U"
-      if [ -r /sys/class/net/$device/speed ]; then
-         bps=$(($(cat /sys/class/net/$device/speed) * 1000 * 1000))
+      if [ -r "/sys/class/net/$device/speed" ]; then
+         bps=$(($(cat "/sys/class/net/$device/speed") * 1000 * 1000))
       fi
       cat <<EOF
 $(clean_fieldname "net__${n}_down").label $n
@@ -345,20 +346,20 @@ for n in $active_guests
 do
    for i in user system
    do
-      echo $(clean_fieldname "cpu_${i}__${n}").value $(lxc_cgroup -n "$n" cpuacct.stat | grep $i | awk '{ print $2; }')
+      echo "$(clean_fieldname "cpu_${i}__${n}").value $(lxc_cgroup -n "$n" cpuacct.stat | grep "$i" | awk '{ print $2; }')"
    done
 done
 
 echo "multigraph lxc_cpu_time"
 for n in $active_guests
 do
-   echo $(clean_fieldname "cpu_time__${n}").value $(lxc_cgroup -n "$n" cpuacct.usage)
+   echo "$(clean_fieldname "cpu_time__${n}").value $(lxc_cgroup -n "$n" cpuacct.usage)"
 done
 
 echo "multigraph lxc_logins"
 for n in $active_guests
 do
-   echo $(clean_fieldname "logins__${n}").value $(lxc-attach -n "$n" users | wc -w)
+   echo "$(clean_fieldname "logins__${n}").value $(lxc-attach -n "$n" users | wc -w)"
 done
 
 echo "multigraph lxc_net"
