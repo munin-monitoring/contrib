@@ -16,8 +16,11 @@ This plugin will produce multiple graphs showing:
  - the number of messages in all voicemail boxes (replaces
    asterisk_voicemail);
 
- - the number of active MeetMe conferences and users connected to them
-   (replace asterisk_meetme and asterisk_meetmeusers, respectively);
+ - DEPRECATED: the number of active MeetMe conferences and users connected to
+   them (replace asterisk_meetme and asterisk_meetmeusers, respectively);
+
+ - the number of active ConfBridge conferences (e.g. non-empty ones) and users
+   connected to them
 
  - the number of active channels for a given codec, for both SIP and
    IAX2 channels (replaces asterisk_sipchannels and asterisk_codecs).
@@ -27,13 +30,15 @@ This plugin will produce multiple graphs showing:
 The following configuration parameters are used by this plugin
 
  [asterisk]
-  env.host     - hostname to connect to
-  env.port     - port number to connect to
-  env.username - username used for authentication
-  env.secret   - secret used for authentication
-  env.channels - The channel types to look for
-  env.codecsx  - List of codec IDs (hexadecimal values)
-  env.codecs   - List of codecs names, matching codecsx order
+  env.host              - hostname to connect to
+  env.port              - port number to connect to
+  env.username          - username used for authentication
+  env.secret            - secret used for authentication
+  env.channels          - The channel types to look for
+  env.codecsx           - List of codec IDs (hexadecimal values)
+  env.codecs            - List of codecs names, matching codecsx order
+  env.enable_meetme     - Set to 1 to enable graphs for the MeetMe application
+  env.enable_confbridge - Set to 1 to enable graphs for the ConfBridge application
 
 The "username" and "secret" parameters are mandatory, and have no
 defaults.
@@ -46,6 +51,8 @@ defaults.
   env.channels Zap IAX2 SIP
   env.codecsx 0x2 0x4 0x8
   env.codecs gsm ulaw alaw
+  env.enable_meetme 0
+  env.enable_confbridge 1
 
 =head2 WILDCARD CONFIGURATION
 
@@ -121,10 +128,13 @@ my @CHANNELS = exists $ENV{'channels'} ? split ' ',$ENV{'channels'} : qw(Zap IAX
 my @CODECS = exists $ENV{'codecs'} ? split ' ',$ENV{'codecs'} : qw(gsm ulaw alaw);
 my @CODECSX = exists $ENV{'codecsx'} ? split ' ',$ENV{'codecsx'} : qw(0x2 0x4 0x8);
 
+my $meetme_enabled = $ENV{'enable_meetme'} || '0';
+my $confbridge_enabled = $ENV{'enable_confbridge'} || '1';
+
 my $line, my $error;
 my $socket = new IO::Socket::INET(PeerAddr => $peeraddr,
-				  PeerPort => $peerport,
-				  Proto => 'tcp')
+                                  PeerPort => $peerport,
+                                  Proto => 'tcp')
   or $error = "Could not create socket: $!";
 
 if ( $socket ) {
@@ -181,7 +191,8 @@ graph_category voip
 total.label Total messages
 END
 
-print <<END;
+if ($meetme_enabled == '1') {
+  print <<END;
 
 multigraph asterisk_meetme
 graph_title Asterisk meetme statistics
@@ -190,6 +201,19 @@ graph_category voip
 users.label Connected users
 conferences.label Active conferences
 END
+}
+
+if ($confbridge_enabled == '1') {
+  print <<END;
+
+multigraph asterisk_confbridge
+graph_title Asterisk ConfBridge statistics
+graph_args --base 1000 -l 0
+graph_category asterisk
+users.label Connected users
+conferences.label Active conferences
+END
+}
 
 print <<END;
 
@@ -225,7 +249,7 @@ die $error if $error;
 my $channels_response = asterisk_command($socket, "core show channels");
 #Channel              Location             State   Application(Data)
 #Zap/pseudo-198641660 s@frompstn:1         Rsrvd   (None)
-#Zap/1-1              4@frompstn:1         Up      MeetMe(5500)
+#Zap/1-1              4@frompstn:1         Up      ConfBridge(5500)
 #2 active channels
 #1 active call
 
@@ -235,10 +259,21 @@ my $voicemail_response = asterisk_command($socket, "voicemail show users");
 #other      1234  Company2 User                             0
 #2 voicemail users configured.
 
-my $meetme_response = asterisk_command($socket, "meetme list");
-#Conf Num       Parties        Marked     Activity  Creation
-#5500           0001           N/A        00:00:03  Static
-#* Total number of MeetMe users: 1
+my $meetme_response;
+if ($meetme_enabled eq '1') {
+  $meetme_response = asterisk_command($socket, "meetme list");
+  #Conf Num       Parties        Marked     Activity  Creation
+  #5500           0001           N/A        00:00:03  Static
+  #* Total number of MeetMe users: 1
+}
+
+my $confbridge_response;
+if ($confbridge_enabled eq '1') {
+  $confbridge_response = asterisk_command($socket, "confbridge list");
+  #Conference Bridge Name           Users  Marked Locked Muted
+  #================================ ====== ====== ====== =====
+  #3                                     1      0 No     No
+}
 
 my $sipchannels_response = asterisk_command($socket, "sip show channels");
 #Peer             User/ANR         Call ID          Format           Hold     Last Message    Expiry     Peer
@@ -283,26 +318,57 @@ if ( !$voicemail_response or $voicemail_response =~ /no voicemail users/ ) {
   print "total.value $messages\n";
 }
 
-print "\nmultigraph asterisk_meetme\n";
-if ( !$meetme_response ) {
-  print <<END;
+if ($meetme_enabled == '1') {
+  print "\nmultigraph asterisk_meetme\n";
+  if ( !$meetme_response ) {
+    print <<END;
 users.value U
 conferences.value U
 END
-} else {
-  if ( $meetme_response =~ /No active/ ) {
-    print <<END;
+  } else {
+    if ( $meetme_response =~ /No active/ ) {
+      print <<END;
 users.value 0
 conferences.value 0
 END
-  } else {
-    my @meetme_list = split(/\r?\n/, $meetme_response);
+    } else {
+      my @meetme_list = split(/\r?\n/, $meetme_response);
 
-    my $users = pop(@meetme_list);
-    $users =~ s/^Total number of MeetMe users: ([0-9]+)$/$1/;
+      my $users = pop(@meetme_list);
+      $users =~ s/^Total number of MeetMe users: ([0-9]+)$/$1/;
+
+      print "users.value $users\n";
+      print "conferences.value " . (scalar(@meetme_list)-1) . "\n";
+    }
+  }
+}
+
+if ($confbridge_enabled == '1') {
+  print "\nmultigraph asterisk_confbridge\n";
+  if ( !$confbridge_response ) {
+    print <<END;
+users.value U
+conferences.value U
+END
+  } else {
+    my @confbridge_list = split(/\r?\n/, $confbridge_response);
+    # Remove column headers, then line of =
+    shift(@confbridge_list);
+    shift(@confbridge_list);
+
+    my $users = 0;
+    foreach my $bridge (@confbridge_list) {
+      my @fields = split ' ', $bridge;
+      # yes we ARE parsing a command's output. if we end up getting some
+      # unexpected things, just break out to and avoid computing nonsense.
+      if (scalar(@fields) < 5 or $fields[1] !~ /^[0-9]+$/) {
+        last;
+      }
+      $users += $fields[1];
+    }
 
     print "users.value $users\n";
-    print "conferences.value " . (scalar(@meetme_list)-1) . "\n";
+    print "conferences.value " . (scalar(@confbridge_list)) . "\n";
   }
 }
 
@@ -339,9 +405,9 @@ END
     }
     foreach my $codec (@CODECSX) {
       if ($fields[4] eq "$codec") {
-	$results[$i] = $results[$i] + 1;
-	$found = 1;
-	last;
+        $results[$i] = $results[$i] + 1;
+        $found = 1;
+        last;
       }
       $i++;
     }
@@ -362,9 +428,9 @@ END
     }
     foreach my $codec (@CODECS) {
       if ($fields[8] eq "$codec") {
-	$results[$i] = $results[$i] + 1;
-	$found = 1;
-	last;
+        $results[$i] = $results[$i] + 1;
+        $found = 1;
+        last;
       }
       $i++;
     }
