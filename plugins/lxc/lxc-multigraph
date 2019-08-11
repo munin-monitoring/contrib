@@ -110,10 +110,12 @@ function active_guests {
    echo $active
 }
 
+
 function lxc_cgroup {
    # lxc3 (lxc < 3: may output some warnings if there is cruft in your config dir)
    lxc-cgroup -o /dev/stdout -l INFO $* | sed 's/^.*lxc_cgroup.c:main:[0-9][0-9]* - //'
 }
+
 
 function lxc_netdev {
    local g=$1 dev
@@ -127,6 +129,7 @@ function lxc_netdev {
       echo unknown
    fi
 }
+
 
 # find proper sysfs and count it
 # Debian 6.0: /sys/fs/cgroup/<container>/tasks
@@ -165,6 +168,7 @@ lxc_count_processes () {
     
     return 0
 }
+
 
 # --- BASIC DEFINES
 
@@ -218,7 +222,7 @@ graph_category lxc
 EOF
 
    for n in $active_guests
-   do 
+   do
       cat <<EOF
 $(clean_fieldname "cpu_time__${n}").label $n: CPU time
 $(clean_fieldname "cpu_time__${n}").type DERIVE
@@ -275,7 +279,7 @@ $(clean_fieldname "net__${n}_up").cdef $(clean_fieldname "net__${n}_up"),8,*
 $(clean_fieldname "net__${n}_up").min 0
 $(clean_fieldname "net__${n}_up").max $bps
 EOF
-   done   
+   done
 
    cat <<EOF
 
@@ -286,7 +290,7 @@ graph_vlabel Number of processes
 graph_category lxc
 EOF
    for n in $active_guests
-   do 
+   do
       cat <<EOF
 $(clean_fieldname "lxc_proc__${n}").label $n: processes
 $(clean_fieldname "lxc_proc__${n}").type GAUGE
@@ -330,9 +334,9 @@ fi
 
 echo "multigraph lxc_cpu"
 for n in $active_guests
-do 
+do
    for i in user system
-   do 
+   do
       echo $(clean_fieldname "cpu_${i}__${n}").value $(lxc_cgroup -n "$n" cpuacct.stat | grep $i | awk '{ print $2; }')
    done
 done
@@ -345,7 +349,7 @@ done
 
 echo "multigraph lxc_logins"
 for n in $active_guests
-do 
+do
    echo $(clean_fieldname "logins__${n}").value $(lxc-attach -n "$n" users | wc -w | bc)
 done
 
