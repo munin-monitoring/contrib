@@ -12,9 +12,17 @@ lxc_ram - Plugin to monitor LXC memory usage.
   [lxc_*]
     user root
 
+  [lxc_ram]
+    env.areastack true
+
 =head1 INTERPRETATION
 
 This plugin needs root privilege.
+
+If env.areastack is set to true, all memory usages of containers will be
+drawn as stacked area charts.
+This option changes graph order, all of 'Mem usage' comes first and then others.
+(default: false)
 
 =head1 AUTHOR
 
@@ -40,6 +48,9 @@ or GPLv3 license, at your option
 
 active_guests=$(active_guests)
 
+# configurable: true/false
+areastack=${areastack:-false}
+
 if [ "$1" = "autoconf" ]; then
    lxc_autoconf
 fi
@@ -58,6 +69,12 @@ EOF
       cat <<EOF
 mem_usage_${g}.label ${n}: Mem usage
 mem_usage_${g}.type GAUGE
+<<EOF
+      if [ "$areastack" = "true" ]; then
+         echo "mem_usage_${g}.draw AREASTACK"
+      fi
+
+      cat <<EOF
 mem_cache_${g}.label ${n}: Cache
 mem_cache_${g}.type GAUGE
 mem_active_${g}.label ${n}: Active
