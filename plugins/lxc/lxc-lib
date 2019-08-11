@@ -40,28 +40,40 @@ function active_guests {
 }
 
 function lxc_cgroup {
-   # lxc3
+   # lxc3 (lxc < 3: may output some warnings if there is cruft in your config dir)
    lxc-cgroup -o /dev/stdout -l INFO $* | sed 's/^.*lxc_cgroup.c:main:[0-9][0-9]* - //'
-
-   # lxc < 3
-#   lxc-cgroup $*
 }
 
 function lxc_clean_fieldname {
-   # workaround for bug leaving out the first number
-   echo $(clean_fieldname ${1::1}$1)
+   # clean_fieldname should be used on the whole identifier, not just the
+   # lxc instance ID, because if it is only numeric, the first digit will
+   # be replaced with a "_"; this is a work-around
+   case "${1::1}" in
+      [0-9]) echo $(clean_fieldname ${1::1}$1);; # 104 -> __104
+      *) echo $(clean_fieldname $1);;
+   esac
 }
 
 function lxc_netdev {
    local g=$1 dev
 
    if [ -f $lxcpath/$g/config ]; then
-      # lxc3
-      egrep '^lxc.net.0.veth.pair' $lxcpath/$g/config | awk '{print $NF;}'
-
-      # lxc < 3
-#      egrep '^lxc.network.veth.pair' $lxcpath/$g/config | awk '{print $NF;}'
+      # lxc 3 vs < 3
+      egrep '^lxc.net.0.veth.pair' $lxcpath/$g/config 2>/dev/null | awk '{print $NF;}' \
+         || egrep '^lxc.network.veth.pair' $lxcpath/$g/config | awk '{print $NF;}'
    else
       echo unknown
+   fi
+}
+
+# BUGS
+#    - I don't think this is enough or even appropriate
+function lxc_autoconf {
+   if [ -r /proc/stat ]; then
+      echo yes
+      exit 0
+   else
+      echo "no (no /proc/stat)"
+      exit 0
    fi
 }
