@@ -178,13 +178,7 @@ title_case() {
 }
 
 
-# --- BASIC DEFINES
-
-active_guests=$(get_active_guests "$exclude")
-
-# --- AUTOCONF
-
-if [ "$1" = "autoconf" ]; then
+do_autoconf() {
    if [ ! -r /proc/net/dev ]; then
       echo "no (/proc/net/dev cannot be read)"
    elif [ ! -e "$lxcpath" ]; then
@@ -192,12 +186,13 @@ if [ "$1" = "autoconf" ]; then
    else
       echo yes
    fi
-   exit 0
-fi
+}
 
-# --- CONFIG OUTPUT
 
-if [ "$1" = "config" ]; then
+do_config() {
+   local active_guests guest_name draw_style
+   active_guests=$(get_active_guests "$exclude")
+
    cat <<EOF
 multigraph lxc_cpu
 graph_title CPU Usage
@@ -335,64 +330,85 @@ $(clean_fieldname "mem_inactive__${guest_name}").label ${guest_name}: Inactive
 $(clean_fieldname "mem_inactive__${guest_name}").type GAUGE
 EOF
    done
+}
 
-   exit 0
-fi
 
-# --- DATA OUTPUT
+do_fetch() {
+   local active_guests cpu_usage device value_up value_down
+   active_guests=$(get_active_guests "$exclude")
 
-echo "multigraph lxc_cpu"
-for guest_name in $active_guests
-do
-   for cpu_usage in user system
+   echo "multigraph lxc_cpu"
+   for guest_name in $active_guests
    do
-      echo "$(clean_fieldname "cpu_${cpu_usage}__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "cpuacct.stat" | grep "$cpu_usage" | awk '{ print $2; }')"
+      for cpu_usage in user system
+      do
+         echo "$(clean_fieldname "cpu_${cpu_usage}__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "cpuacct.stat" | grep "$cpu_usage" | awk '{ print $2; }')"
+      done
    done
-done
 
-echo "multigraph lxc_cpu_time"
-for guest_name in $active_guests
-do
-   echo "$(clean_fieldname "cpu_time__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "cpuacct.usage")"
-done
+   echo "multigraph lxc_cpu_time"
+   for guest_name in $active_guests
+   do
+      echo "$(clean_fieldname "cpu_time__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "cpuacct.usage")"
+   done
 
-echo "multigraph lxc_logins"
-for guest_name in $active_guests
-do
-   echo "$(clean_fieldname "logins__${guest_name}").value $(lxc-attach -n "$guest_name" users | wc -w)"
-done
+   echo "multigraph lxc_logins"
+   for guest_name in $active_guests
+   do
+      echo "$(clean_fieldname "logins__${guest_name}").value $(lxc-attach -n "$guest_name" users | wc -w)"
+   done
 
-echo "multigraph lxc_net"
-for guest_name in $active_guests
-do
-   device=$(lxc_netdev "$guest_name")
-   if [ -z "$device" ]; then
-      value_up="U"
-      value_down="U"
-   else
-      value_up=$(grep -E "^ *${device}:" /proc/net/dev | awk '{print $10;}')
-      value_down=$(grep -E "^ *${device}:" /proc/net/dev | awk '{print $2;}')
-   fi
+   echo "multigraph lxc_net"
+   for guest_name in $active_guests
+   do
+      device=$(lxc_netdev "$guest_name")
+      if [ -z "$device" ]; then
+         value_up="U"
+         value_down="U"
+      else
+         value_up=$(grep -E "^ *${device}:" /proc/net/dev | awk '{print $10;}')
+         value_down=$(grep -E "^ *${device}:" /proc/net/dev | awk '{print $2;}')
+      fi
 
-   cat <<EOF
-$(clean_fieldname "net__${guest_name}_up").value $value_up
-$(clean_fieldname "net__${guest_name}_down").value $value_down
+      cat <<EOF
+   $(clean_fieldname "net__${guest_name}_up").value $value_up
+   $(clean_fieldname "net__${guest_name}_down").value $value_down
 EOF
-done
+   done
 
-echo "multigraph lxc_proc"
-for guest_name in $active_guests
-do
-   echo "$(clean_fieldname "lxc_proc__${guest_name}").value $(lxc_count_processes "$guest_name")"
-done
+   echo "multigraph lxc_proc"
+   for guest_name in $active_guests
+   do
+      echo "$(clean_fieldname "lxc_proc__${guest_name}").value $(lxc_count_processes "$guest_name")"
+   done
 
-echo "multigraph lxc_ram"
-for guest_name in $active_guests
-do
-   cat <<EOF
-$(clean_fieldname "mem_usage__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.usage_in_bytes")
-$(clean_fieldname "mem_cache__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.stat" | grep total_cache | awk '{print $2;}')
-$(clean_fieldname "mem_active__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.stat" | grep total_active_anon | awk '{print $2;}')
-$(clean_fieldname "mem_inactive__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.stat" | grep total_inactive_anon | awk '{print $2;}')
+   echo "multigraph lxc_ram"
+   for guest_name in $active_guests
+   do
+      cat <<EOF
+   $(clean_fieldname "mem_usage__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.usage_in_bytes")
+   $(clean_fieldname "mem_cache__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.stat" | grep total_cache | awk '{print $2;}')
+   $(clean_fieldname "mem_active__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.stat" | grep total_active_anon | awk '{print $2;}')
+   $(clean_fieldname "mem_inactive__${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.stat" | grep total_inactive_anon | awk '{print $2;}')
 EOF
-done
+   done
+}
+
+
+case "${1:-}" in
+   autoconf)
+      do_autoconf
+      exit 0
+      ;;
+   config)
+      do_config
+      exit 0
+      ;;
+   "")
+      do_fetch
+      exit 0
+      ;;
+   *)
+      echo >&2 "Invalid action requested (none of: autoconf / config / '')"
+      exit 1
+esac
