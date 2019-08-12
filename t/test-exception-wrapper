@@ -1,0 +1,55 @@
+#!/bin/sh
+#
+# Run a check for a given file.  A failure is tolerated (and expected), if the filename is listed
+# in a file containing expected failures.
+#
+# Parameters:  SHELL_DIALECT  SCRIPT_FILENAME
+#
+# See EXPECTED_FAILURES_LIST_FILENAME for the filename pattern of a file, containing the relative
+# names of all scripts, that are expected to fail.  This wrapper script will fail, if the exit
+# status of the test does not match the expectated result (i.e. it fails but should pass or it
+# passes while being listed in the EXPECTED_FAILURES_LIST_FILENAME file).
+#
+
+set -eu
+
+[ $# -lt 2 ] && echo >&2 "Insufficient number of arguments: expecting SCRIPT_FILENAME and one or more COMMAND tokens" && exit 1
+
+
+SCRIPT_FILENAME="$1"
+shift
+EXPECTED_FAILURES_LIST_FILENAME="$0.expected-failures"
+
+REPOSITORY_DIR=$(cd "$(dirname "$0")/.." && pwd)
+
+
+[ ! -e "$SCRIPT_FILENAME" ] && echo >&2 "Failed to find script: $SCRIPT_FILENAME" && exit 3
+
+
+# determine, whether the script is mentioned in the exclusion file
+relative_script_filename=$(realpath --relative-to "$REPOSITORY_DIR" "$SCRIPT_FILENAME")
+if grep --quiet --line-regexp --fixed-strings --no-messages "$relative_script_filename" "$EXPECTED_FAILURES_LIST_FILENAME"; then
+    is_expected_to_fail=1
+else
+    is_expected_to_fail=0
+fi
+
+# check the returncode of the test
+if "$@" "$SCRIPT_FILENAME"; then
+    has_failed=0
+else
+    has_failed=1
+fi
+
+
+# complain, if the result did not meet our expectation
+if [ "$is_expected_to_fail" = "$has_failed" ]; then
+    # the check returned the expected result
+    exit 0
+elif [ "$has_failed" = "1" ]; then
+    echo >&2 "ERROR: the script '$SCRIPT_FILENAME' should pass the test, but it failed"
+    exit 4
+else
+    echo >&2 "ERROR: the script '$SCRIPT_FILENAME' was expected to fail the test, but it passed"
+    exit 5
+fi

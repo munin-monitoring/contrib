@@ -25,7 +25,7 @@ sub wanted {
         && process_file( $_, $name, $interpreter, $arguments );
 }
 
-File::Find::find( { wanted => \&wanted }, 'plugins' );
+File::Find::find( { wanted => \&wanted, no_chdir => 1 }, 'plugins' );
 
 sub hashbang {
     my ($filename) = @_;
@@ -64,7 +64,7 @@ sub process_file {
     }
     elsif ( $interpreter =~ m{/bin/sh} ) {
         subtest $filename => sub {
-            plan tests => 2;
+            plan tests => 3;
             run_check(
                 {   command     => [ 'sh', '-n', $file ],
                     description => 'sh syntax check'
@@ -89,6 +89,11 @@ sub process_file {
                     description => 'checkbashisms'
                 }
             );
+            run_check(
+                {   command     => [ 't/test-exception-wrapper', $file, 'shellcheck', '--exclude=SC1090,SC2009,SC2126,SC2230', '--shell=dash' ],
+                    description => 'shellcheck'
+                }
+            );
         };
     }
     elsif ( $interpreter =~ m{/bin/ksh} ) {
@@ -101,19 +106,27 @@ sub process_file {
                 }
             );
             run_check(
-                {   command     => [ 'shellcheck', $file ],
+                {   command     => [ 't/test-exception-wrapper', $file, 'shellcheck', '--shell=ksh' ],
                     description => 'shellcheck'
                 }
             );
         }
     }
     elsif ( $interpreter =~ m{bash} ) {
-        run_check(
-            {   command     => [ 'bash', '-n', $file ],
-                description => 'bash syntax check',
-                filename    => $filename
-            }
-        );
+        subtest $filename => sub {
+            plan tests => 2;
+            run_check(
+                {   command     => [ 'bash', '-n', $file ],
+                    description => 'bash syntax check',
+                    filename    => $filename
+                }
+            );
+            run_check(
+                {   command     => [ 't/test-exception-wrapper', $file, 'shellcheck', '--exclude=SC1090,SC2009,SC2126,SC2230', '--shell=bash' ],
+                    description => 'shellcheck'
+                }
+            );
+        }
     }
     elsif ( $interpreter =~ m{/bin/zsh} ) {
         run_check(
@@ -139,20 +152,36 @@ sub process_file {
         );
     }
     elsif ( $interpreter =~ m{python3} ) {
-        run_check(
-            {   command     => [ 'python3', '-m', 'py_compile', $file ],
-                description => 'python3 compile',
-                filename    => $filename
-            }
-        );
+        subtest $filename => sub {
+            plan tests => 2;
+            run_check(
+                {   command     => [ 'python3', '-m', 'py_compile', $file ],
+                    description => 'python3 compile',
+                    filename    => $filename
+                }
+            );
+            run_check(
+                {   command     => [ 't/test-exception-wrapper', $file, 'python3', '-m', 'flake8' ],
+                    description => 'python3-flake8'
+                }
+            );
+        }
     }
     elsif ( $interpreter =~ m{python} ) {
-        run_check(
-            {   command     => [ 'python', '-m', 'py_compile', $file ],
-                description => 'python compile',
-                filename    => $filename
-            }
-        );
+        subtest $filename => sub {
+            plan tests => 2;
+            run_check(
+                {   command     => [ 'python', '-m', 'py_compile', $file ],
+                    description => 'python compile',
+                    filename    => $filename
+                }
+            );
+            run_check(
+                {   command     => [ 't/test-exception-wrapper', $file, 'python', '-m', 'flake8' ],
+                    description => 'python-flake8'
+                }
+            );
+        }
     }
     elsif ( $interpreter =~ m{php} ) {
         run_check(
