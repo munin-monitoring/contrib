@@ -50,6 +50,10 @@ MIT License
 
 =head1 AUTHOR
 Pierre-Alain TORET <pierre-alain.toret@protonmail.com>
+
+=head1 MAGIC MARKERS
+  #%# family=auto
+  #%# capabilities=autoconf suggest
 '''
 
 from __future__ import print_function
@@ -74,10 +78,6 @@ default_torgeoippath = '/usr/share/GeoIP/GeoIP.dat'
 default_tormaxcountries = 15
 default_torport = 9051
 default_torsocket = '/var/run/tor/control'
-
-#%# family=auto
-#%# capabilities=autoconf suggest
-
 
 
 class ConnectionError(Exception):
@@ -110,11 +110,14 @@ def authenticate(controller):
 def gen_controller():
     connect_method = os.environ.get('torconnectmethod', default_torconnectmethod)
     if connect_method == 'port':
-        return stem.control.Controller.from_port(port=int(os.environ.get('torport', default_torport)))
+        return stem.control.Controller.from_port(port=int(os.environ.get('torport',
+                                                                         default_torport)))
     elif connect_method == 'socket':
-        return stem.control.Controller.from_socket_file(path=os.environ.get('torsocket', default_torsocket))
+        return stem.control.Controller.from_socket_file(path=os.environ.get('torsocket',
+                                                                            default_torsocket))
     else:
-        print("env.torconnectmethod contains an invalid value. Please specify either 'port' or 'socket'.", file=sys.stderr)
+        print("env.torconnectmethod contains an invalid value. "
+              "Please specify either 'port' or 'socket'.", file=sys.stderr)
         sys.exit(1)
 
 
@@ -149,7 +152,7 @@ class TorPlugin(object):
             print('no (failed to import the required python module "stem": {})'.format(e))
 
         try:
-            import GeoIP
+            import GeoIP  # noqa: F401
 
         except ImportError as e:
             print('no (failed to import the required python module "GeoIP": {})'.format(e))
@@ -167,7 +170,8 @@ class TorPlugin(object):
 
     @staticmethod
     def suggest():
-        options = ['bandwidth', 'connections', 'countries', 'dormant', 'flags', 'routers', 'traffic']
+        options = ['bandwidth', 'connections', 'countries', 'dormant', 'flags', 'routers',
+                   'traffic']
 
         for option in options:
             print(option)
@@ -262,8 +266,8 @@ class TorCountries(TorPlugin):
         # Configure plugin
         self.cache_dir_name = os.environ.get('torcachedir', None)
         if self.cache_dir_name is not None:
-            self.cache_dir_name = os.path.join(self.cache_dir_name,
-                                               os.environ.get('torcachefile', default_torcachefile))
+            self.cache_dir_name = os.path.join(
+                self.cache_dir_name, os.environ.get('torcachefile', default_torcachefile))
 
         max_countries = os.environ.get('tormaxcountries', default_tormaxcountries)
         self.max_countries = int(max_countries)
@@ -300,7 +304,7 @@ class TorCountries(TorPlugin):
         try:
             with open(self.cache_dir_name) as f:
                 countries_num = json.load(f)
-        except:
+        except (IOError, ValueError):
             # Fallback if cache_dir_name is not set, unreadable or any other
             # error
             countries_num = self.top_countries()
@@ -425,9 +429,7 @@ class TorRouters(TorPlugin):
                  'vlabel': 'routers',
                  'category': 'network',
                  'info': 'known Tor onion routers'}
-        labels = {'routers': {'label': 'routers', 'min': 0, 'type': 'GAUGE'} }
-
-
+        labels = {'routers': {'label': 'routers', 'min': 0, 'type': 'GAUGE'}}
         TorPlugin.conf_from_dict(graph, labels)
 
     def fetch(self):
@@ -437,8 +439,6 @@ class TorRouters(TorPlugin):
             except stem.connection.AuthenticationFailure as e:
                 print('Authentication failed ({})'.format(e))
                 return
-
-
             response = controller.get_info('ns/all', None)
             if response is None:
                 print("Error while reading ns/all from Tor daemon", file=sys.stderr)
@@ -524,7 +524,8 @@ def main():
         elif __file__.endswith('_traffic'):
             provider = TorTraffic()
         else:
-            print('Unknown plugin name, try "suggest" for a list of possible ones.', file=sys.stderr)
+            print('Unknown plugin name, try "suggest" for a list of possible ones.',
+                  file=sys.stderr)
             sys.exit(1)
 
         if param == 'config':
@@ -534,6 +535,7 @@ def main():
         else:
             print('Unknown parameter "{}"'.format(param), file=sys.stderr)
             sys.exit(1)
+
 
 if __name__ == '__main__':
     main()
