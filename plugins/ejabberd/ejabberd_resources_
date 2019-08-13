@@ -27,8 +27,8 @@
 #%# capabilities=autoconf suggest
 
 EJABBERDCTL_CFG=${ejabberdctl_cfg:-/etc/ejabberd/ejabberdctl.cfg}
-source $EJABBERDCTL_CFG 2>/dev/null
-source $MUNIN_LIBDIR/plugins/plugin.sh
+. "$EJABBERDCTL_CFG" 2>/dev/null
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
 
 EJABBERDCTL=${ejabberdctl:-$(which ejabberdctl)}
 
@@ -45,7 +45,7 @@ function ejabberd_exec() {
 	echo "$1" | su - ejabberd -c "$ERL_CALL -e -n $ERLANG_NODE" | sed -re 's/^\{ok, (.*)\}$/\1/'
 }
 
-SCRIPT_NAME=$(basename $0)
+SCRIPT_NAME=$(basename "$0")
 RESOURCE_TYPE="${SCRIPT_NAME/ejabberd_resources_/}"
 RESOURCE_BASE=1000
 [ "$RESOURCE_TYPE" = "memory" ] && RESOURCE_BASE=1024
@@ -57,8 +57,10 @@ function hosts_list() {
 function ejabberd_report_online_users() {
 	[ "$1" = "config" ] && echo 'graph_vlabel users'
 	for host in $(hosts_list); do
-		local clean_host=$(clean_fieldname $host)
-		local ejabberd_command="length(ejabberd_sm:get_vh_session_list(\"$host\"))"
+		local clean_host
+		local ejabberd_command
+		clean_host=$(clean_fieldname "$host")
+		ejabberd_command="length(ejabberd_sm:get_vh_session_list(\"$host\"))"
 		if [ "$1" = "config" ]; then
 			cat <<CONFIG
 ${clean_host}.draw AREASTACK
@@ -66,7 +68,7 @@ ${clean_host}.label $host
 ${clean_host}.info $ejabberd_command
 CONFIG
 		else
-			echo "$clean_host.value $(ejabberd_exec ${ejabberd_command}.)"
+			echo "$clean_host.value $(ejabberd_exec "${ejabberd_command}.")"
 		fi
 	done
 }
@@ -74,8 +76,10 @@ CONFIG
 function ejabberd_report_registered_users() {
 	[ "$1" = "config" ] && echo 'graph_vlabel users'
 	for host in $(hosts_list); do
-		local clean_host=$(clean_fieldname $host)
-		local ejabberd_command="ejabberd_auth:get_vh_registered_users_number(\"$host\")"
+		local clean_host
+		local ejabberd_command
+		clean_host=$(clean_fieldname "$host")
+		ejabberd_command="ejabberd_auth:get_vh_registered_users_number(\"$host\")"
 		if [ "$1" = "config" ]; then
 			cat <<CONFIG
 ${clean_host}.draw AREASTACK
@@ -83,7 +87,7 @@ ${clean_host}.label $host
 ${clean_host}.info $ejabberd_command
 CONFIG
 		else
-			echo "$clean_host.value $(ejabberd_exec ${ejabberd_command}.)"
+			echo "$clean_host.value $(ejabberd_exec "${ejabberd_command}.")"
 		fi
 	done
 }
@@ -116,10 +120,11 @@ code.info The total amount of memory currently allocated for Erlang code. This m
 ets.info The total amount of memory currently allocated for ets tables. This memory is part of the memory presented as system memory.
 INFO_FROM_DOC
 	else
-		local pid=$(<$EJABBERD_PID_PATH)
+		local pid
+		pid=$(<"$EJABBERD_PID_PATH")
 		for memory_type in rss vsz; do
-			memory_value=$(ps -p $pid -o $memory_type=)
-			let memory_value=$memory_value*1024
+			memory_value=$(ps -p "$pid" -o "$memory_type=")
+			memory_value=$((memory_value * 1024))
 			echo "$memory_type.value $memory_value"
 		done
 		ejabberd_exec 'io_lib:format("~p", [erlang:memory()]).' | grep -Eo '"[a-z_0-9]+"' |
@@ -128,9 +133,10 @@ INFO_FROM_DOC
 }
 
 function ejabberd_report_ports() {
-	local limit=$(ejabberd_exec 'os:getenv("ERL_MAX_PORTS").' | tr '"' ' ')
+	local limit
+	limit=$(ejabberd_exec 'os:getenv("ERL_MAX_PORTS").' | tr '"' ' ')
 	# string "false" indicates that this variable is not defined, thus a default of 1024
-	[ $limit = false ] && limit=1024
+	[ "$limit" = false ] && limit=1024
 	if [ "$1" = "config" ]; then
 		cat <<CONFIG
 graph_vlabel ports
@@ -141,14 +147,15 @@ limit.draw LINE2
 limit.label limit
 limit.info ERL_MAX_PORTS environment variable inside ejabberd
 CONFIG
-		warning='80%' critical='90%' print_adjusted_thresholds open $limit
+		warning='80%' critical='90%' print_adjusted_thresholds open "$limit"
 		[ -n "$ERL_MAX_PORTS" ] && cat <<CONFIG_CONFIGURED
 configured.draw LINE
 configured.label configured
 configured.info Configuration file value ERL_MAX_PORTS
 CONFIG_CONFIGURED
 	else
-		local open=$(ejabberd_exec 'length(erlang:ports()).')
+		local open
+		open=$(ejabberd_exec 'length(erlang:ports()).')
 		cat <<DATA
 open.value $open
 limit.value $limit
@@ -173,16 +180,16 @@ function ejabberd_report_mnesia() {
 		[ "$2" = bytes ] && draw=AREASTACK
 
 		$EJABBERDCTL mnesia info | sed -re 's/'"$sed_re"'/\1 \5/;tx;d;:x' |
-			while read table_name table_storage; do
+			while read -r table_name table_storage; do
 				echo "${table_name}_${table_storage}.draw $draw"
 				echo "${table_name}_${table_storage}.label $table_name ($table_storage)"
 			done
 	else
 		if [ "$2" = recs ]; then
-			$EJABBERDCTL mnesia info | sed -re 's/'"$sed_re"'/\1_\5.value \2/;tx;d;:x'
+			"$EJABBERDCTL" mnesia info | sed -re 's/'"$sed_re"'/\1_\5.value \2/;tx;d;:x'
 		else
 			long_bits=$(getconf LONG_BIT)
-			$EJABBERDCTL mnesia info |
+			"$EJABBERDCTL" mnesia info |
 				sed -re 's/'"$sed_re"'/\1_\5.value \3 \4/;tx;d;:x' |
 				awk "
 					/ words\$/ {
@@ -230,12 +237,13 @@ function open_files_counter_util() {
 }
 
 function open_files_number() {
-	echo $[$($(open_files_counter_util) -np $(<$EJABBERD_PID_PATH) | wc -l)-1]
+	echo "$(( $("$(open_files_counter_util)" -np "$(<"$EJABBERD_PID_PATH")" | wc -l) - 1))"
 }
 
 function ejabberd_report_open_files() {
 	# this spawns a child process, but in most cases the open files limit is inherited
-	local limit=$(ejabberd_exec 'os:cmd("ulimit -n").' | tr '"\\n' ' ')
+	local limit
+	limit=$(ejabberd_exec 'os:cmd("ulimit -n").' | tr '"\\n' ' ')
 	if [ "$1" = "config" ]; then
 		cat <<CONFIG
 graph_vlabel open files
@@ -246,7 +254,7 @@ limit.draw LINE2
 limit.label limit
 limit.info "ulimit -n" from inside of ejabberd
 CONFIG
-		warning='80%' critical='90%' print_adjusted_thresholds open $limit
+		warning='80%' critical='90%' print_adjusted_thresholds open "$limit"
 	else
 		cat <<DATA
 open.value $(open_files_number)
@@ -256,7 +264,8 @@ DATA
 }
 
 function ejabberd_report_processes() {
-	local limit=$(ejabberd_exec 'erlang:system_info(process_limit).')
+	local limit
+	limit=$(ejabberd_exec 'erlang:system_info(process_limit).')
 	if [ "$1" = "config" ]; then
 		cat <<CONFIG
 graph_vlabel processes
@@ -267,14 +276,15 @@ limit.draw LINE2
 limit.label limit
 limit.info erlang:system_info(process_limit)
 CONFIG
-		warning='80%' critical='90%' print_adjusted_thresholds active $limit
+		warning='80%' critical='90%' print_adjusted_thresholds active "$limit"
 		[ -n "$ERL_PROCESSES" ] && cat <<CONFIG_CONFIGURED
 configured.draw LINE
 configured.label configured
 configured.info Configuration file value ERL_PROCESSES
 CONFIG_CONFIGURED
 	else
-		local active=$(ejabberd_exec 'erlang:system_info(process_count).')
+		local active
+		active=$(ejabberd_exec 'erlang:system_info(process_count).')
 		cat <<DATA
 active.value $active
 limit.value $limit
@@ -311,4 +321,4 @@ CONFIG
 		;;
 esac
 
-ejabberd_report_${RESOURCE_TYPE} $1
+"ejabberd_report_${RESOURCE_TYPE}" "$1"
