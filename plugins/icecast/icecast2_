@@ -1,6 +1,12 @@
 #! /usr/bin/python
 # -*- coding: iso-8859-1 -*-
 
+import os
+import sys
+import urllib2
+from xml.dom import minidom
+
+
 # Hostname of Icecast server
 # Just canonical name, no http:// nor ending /
 host = "foo.bar.com"
@@ -21,14 +27,13 @@ oggbitrates = [56, 128, 172]
 # well the total number of listeners for any configured stream.
 # For each stream with multiple bitrates, create one
 # icecast2_streamname
-# If the name contains a "-" exchange it with a "_", and the script will change it back for you. This is to satisfy internal requirements of Munin.
+# If the name contains a "-" exchange it with a "_", and the script will change it back for you.
+# This is to satisfy internal requirements of Munin.
 # For each streamname, the plugin will check for the configured bitrates
 # Expecting the mountpoints to be on the form of
 # /streamname_<bitrate> for mp3
 # /streamname_<bitrate>.ogg for Ogg/Vorbis
 
-import urllib2, os.path, time, sys
-from xml.dom import minidom
 
 def hent_XML():
     auth_handler = urllib2.HTTPBasicAuthHandler()
@@ -45,106 +50,108 @@ def hent_XML():
     xmldoc = minidom.parseString(xml)
     xmldoc = xmldoc.firstChild
 
-    #Totalt antall lyttere
+    # Totalt antall lyttere
     total_lyttere = xmldoc.getElementsByTagName("clients")[0].firstChild.nodeValue
-    #Totalt antall kilder
+    # Totalt antall kilder
     total_kilder = xmldoc.getElementsByTagName("sources")[0].firstChild.nodeValue
-    #Status for enkelt strøm
+    # Status for enkelt strøm
     sources = xmldoc.getElementsByTagName("source")
     sourcelist = {}
     for source in sources:
         mount = source.getAttribute("mount")
         listeners = source.getElementsByTagName("listeners")[0].firstChild.nodeValue
         name = source.getElementsByTagName("server_name")[0].firstChild.nodeValue
-	mount = mount.replace("-", "_")
+        mount = mount.replace("-", "_")
         sourcelist[mount[1:]] = (listeners, name)
 
     sourcename = sys.argv[0].split("/")[-1][len("icecast2_"):]
     if len(sys.argv) == 1:
-	sys.argv.append("")
+        sys.argv.append("")
     if sys.argv[1] == "autoconf":
-	print "yes"
+        print "yes"
     elif sys.argv[1] == "config":
-	if sourcename == "total":
-	    print "graph_title Totalt antall lyttere"
+        if sourcename == "total":
+            print "graph_title Totalt antall lyttere"
             print "graph_vlabel lyttere"
-	    print "graph_category streaming"
-	    print "totallyttere.label Totalt antall lyttere"
-	    print "totalkilder.label Totalt antall kilder"
-	    chanlist = {}
-	    for a, b, filelist in os.walk("/etc/munin/plugins"):
-	    	for file in filelist:
-		    if file.find("icecast2_") != -1:
-			channelname = file[len("icecast2_"):]
-			if channelname != "total" and chanlist.has_key(channelname) != 1:
-			    chanlist[channelname] = 0
-	    chanlist = chanlist.keys()
-   	    chanlist.sort()
-	    for chan in chanlist:
-		graphtitle = ""
-	    	for key in sourcelist.keys():
-		    if key.find(chan) != -1:
-		    	l, graphtitle = sourcelist[key]
-		    	break
-		if graphtitle == "":
-			graphtitle = chan
-		print "%s.label %s" % (chan, graphtitle)
+            print "graph_category streaming"
+            print "totallyttere.label Totalt antall lyttere"
+            print "totalkilder.label Totalt antall kilder"
+            chanlist = {}
+            for a, b, filelist in os.walk("/etc/munin/plugins"):
+                for file in filelist:
+                    if file.find("icecast2_") != -1:
+                        channelname = file[len("icecast2_"):]
+                        if channelname != "total" and channelname not in chanlist:
+                            chanlist[channelname] = 0
+            chanlist = chanlist.keys()
+            chanlist.sort()
+            for chan in chanlist:
+                graphtitle = ""
+                for key in sourcelist.keys():
+                    if key.find(chan) != -1:
+                        l, graphtitle = sourcelist[key]
+                        break
+                if graphtitle == "":
+                    graphtitle = chan
+                print "%s.label %s" % (chan, graphtitle)
 
-	else:
-	    sumstring = ""
-	    graphtitle = ""
-	    for key in sourcelist.keys():
-		if key.find(sourcename) != -1:
-		    l, graphtitle = sourcelist[key]
-		    break
-	    if graphtitle == "":
-		graphtitle = sourcename
-	    print "graph_title %s" % graphtitle
-	    print "graph_vlabel lyttere"
-	    print "graph_category streaming"
-	    for bitrate in mp3bitrates:
-		print "%s_%s.label %s-%s" % (sourcename, bitrate, "/" + sourcename.replace("_", "-"), bitrate)
-		sumstring += "%s_%s " % (sourcename, bitrate)
-		print "%s_%s.critical -0.5:" % (sourcename, bitrate)
-	    for bitrate in oggbitrates:
-		print "%s_%s_ogg.label %s-%s.ogg" % (sourcename, bitrate, "/" + sourcename.replace("_", "-"), bitrate)
-		print "%s_%s_ogg.critical -0.5:" % (sourcename, bitrate)
-		sumstring += "%s_%s_ogg " % (sourcename, bitrate)
-	    print "%slyttere.label Totalt antall lyttere" % sourcename
+        else:
+            sumstring = ""
+            graphtitle = ""
+            for key in sourcelist.keys():
+                if key.find(sourcename) != -1:
+                    l, graphtitle = sourcelist[key]
+                    break
+            if graphtitle == "":
+                graphtitle = sourcename
+            print "graph_title %s" % graphtitle
+            print "graph_vlabel lyttere"
+            print "graph_category streaming"
+            for bitrate in mp3bitrates:
+                print "%s_%s.label %s-%s" % (sourcename, bitrate,
+                                             "/" + sourcename.replace("_", "-"), bitrate)
+                sumstring += "%s_%s " % (sourcename, bitrate)
+                print "%s_%s.critical -0.5:" % (sourcename, bitrate)
+            for bitrate in oggbitrates:
+                print "%s_%s_ogg.label %s-%s.ogg" % (sourcename, bitrate,
+                                                     "/" + sourcename.replace("_", "-"), bitrate)
+                print "%s_%s_ogg.critical -0.5:" % (sourcename, bitrate)
+                sumstring += "%s_%s_ogg " % (sourcename, bitrate)
+            print "%slyttere.label Totalt antall lyttere" % sourcename
             print "%slyttere.sum %s" % (sourcename, sumstring)
     elif sys.argv[1] != "config":
-	if sourcename == "total":
-	    print "totallyttere.value %s" % total_lyttere
-       	    print "totalkilder.value %s" % total_kilder
-	    statslist = {}
-	    for a, b, filelist in os.walk("/etc/munin/plugins"):
-	    	for file in filelist:
-		    if file.find("icecast2_") != -1:
-			channelname = file[len("icecast2_"):]
-			if channelname != "total" and statslist.has_key(channelname) != 1:
-			    statslist[channelname] = 0
+        if sourcename == "total":
+            print "totallyttere.value %s" % total_lyttere
+            print "totalkilder.value %s" % total_kilder
+            statslist = {}
+            for a, b, filelist in os.walk("/etc/munin/plugins"):
+                for file in filelist:
+                    if file.find("icecast2_") != -1:
+                        channelname = file[len("icecast2_"):]
+                        if channelname != "total" and channelname not in statslist:
+                            statslist[channelname] = 0
 
-	    for source in sourcelist:
-		listeners, name = sourcelist[source]
-		if not statslist.has_key(source[:source.rfind("_")]):
-		    statslist[source[:source.rfind("_")]] = 0
-		statslist[source[:source.rfind("_")]] += int(listeners)
-	    for stat in statslist:
-		print "%s.value %s" % (stat, statslist[stat])
-	else:
-	    for bitrate in mp3bitrates:
-		if sourcelist.has_key("%s_%s" % (sourcename, bitrate)):
-		    listeners = sourcelist["%s_%s" % (sourcename, bitrate)][0]
-		    print listeners
-		else:
-		    listeners = -1
-		print "%s_%s.value %s" % (sourcename, bitrate, listeners)
-	    for bitrate in oggbitrates:
-		if sourcelist.has_key("%s_%s.ogg" % (sourcename, bitrate)):
-		    listeners = sourcelist["%s_%s.ogg" % (sourcename, bitrate)][0]
-		else:
-		    listeners = -1
-		print "%s_%s_ogg.value %s" % (sourcename, bitrate, listeners)
+            for source in sourcelist:
+                listeners, name = sourcelist[source]
+                if source[:source.rfind("_")] not in statslist:
+                    statslist[source[:source.rfind("_")]] = 0
+                statslist[source[:source.rfind("_")]] += int(listeners)
+            for stat in statslist:
+                print "%s.value %s" % (stat, statslist[stat])
+        else:
+            for bitrate in mp3bitrates:
+                if ("%s_%s" % (sourcename, bitrate)) in sourcelist:
+                    listeners = sourcelist["%s_%s" % (sourcename, bitrate)][0]
+                    print listeners
+                else:
+                    listeners = -1
+                print "%s_%s.value %s" % (sourcename, bitrate, listeners)
+            for bitrate in oggbitrates:
+                if ("%s_%s.ogg" % (sourcename, bitrate)) in sourcelist:
+                    listeners = sourcelist["%s_%s.ogg" % (sourcename, bitrate)][0]
+                else:
+                    listeners = -1
+                print "%s_%s_ogg.value %s" % (sourcename, bitrate, listeners)
     else:
         print sys.argv[1]
 
