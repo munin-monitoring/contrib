@@ -20,18 +20,20 @@
 # ** WARNING **
 # For now this plugin does not allow "_" in the name of a zpool or filesystems
 #
+#  #%# capabilities=autoconf
+#
 
 myname=$(basename "$0" | sed 's/^zfs_fs_//g' | sed -e 's/_/\//g')
 
 if [ "$1" = "autoconf" ]; then
-    # Makes little sense to autoconf if you can't suggest
-    echo no
+    if which zfs >/dev/null; then
+        echo yes
+    else
+        echo "no (missing executable 'zfs')"
+    fi
     exit 0
 fi
 
-if [ "$1" = "suggest" ]; then
-	exit 0
-fi
 
 read -r -a values <<<"$(zfs get -p usedbydataset,usedbychildren,usedbysnapshots,usedbyrefreservation,available,quota "$myname" \
     | awk 'BEGIN {total=0;} { if( NR==1 ) next; } !/quota/ {total=total+$3;} {print $3} END{print total;}')"
