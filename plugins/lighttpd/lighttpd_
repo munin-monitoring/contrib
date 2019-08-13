@@ -1,73 +1,100 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # vim: set fileencoding=utf-8
-#
-# Munin plugin to monitor lighttpd web-server.
-#
-# Copyright Igor Borodikhin
-#
-# License : GPLv3
-#
-# Configuration parameters:
-# env.status_url - url of lighty's server-status (optional, default is http://127.0.0.1/server-status)
-# env.username - username to provide if status_url requires authentication (optional, default - no authentication)
-# env.password - password to provide if status_url requires authentication (optional, default - no authentication)
-# env.auth_type - the authentication mechanism to use -- either 'basic' (default) or 'digest'.
-#
-# Note: If HTTP authentication is required you should specify both username and password.
-#
-# ## Installation
-# Copy file to directory /usr/share/munin/plugins/
-# Because this plugin has suggest capability the last step is to run
-#     # munin-node-configure --suggest --shell | sh -x
-#
-#%# family=contrib
-#%# capabilities=autoconf suggest
+"""
 
-import os, sys, urllib2
+=head1 NAME
+
+Munin plugin to monitor lighttpd web-server.
+
+
+=head1 CONFIGURATION
+
+Configuration parameters:
+
+    [lighttpd_]
+    env.status_url - url of lighty's server-status
+                     (optional, default is http://127.0.0.1/server-status)
+    env.username - username to provide if status_url requires authentication
+                   (optional, default - no authentication)
+    env.password - password to provide if status_url requires authentication
+                   (optional, default - no authentication)
+    env.auth_type - the authentication mechanism to use -- either 'basic' (default) or 'digest'.
+
+Note: If HTTP authentication is required you should specify both username and password.
+
+
+=head1 INSTALLTION
+
+Copy file to directory /usr/share/munin/plugins/
+Because this plugin has "suggest" capability the last step is to run
+
+    munin-node-configure --suggest --shell | sh -x
+
+
+=head1 AUTHOR
+
+Copyright Igor Borodikhin
+
+
+=head1 LICENSE
+
+GPLv3
+
+
+=head1 MAGIC MARKERS
+  #%# family=contrib
+  #%# capabilities=autoconf suggest
+"""
+
+import os
+import sys
+import urllib2
+
 
 program = sys.argv[0]
 graph_type = program[program.rfind("_")+1:]
 graph_types = {
-    "accesses" : [
+    "accesses": [
         {
-            "title" : "Total accesses",
-            "type" : "COUNTER",
-            "args" : "--base 1000 -l 0",
-            "fields" : ["accesses"]
+            "title": "Total accesses",
+            "type": "COUNTER",
+            "args": "--base 1000 -l 0",
+            "fields": ["accesses"]
         }
     ],
-    "kbytes" : [
+    "kbytes": [
         {
-            "title" : "Total kBytes",
-            "type" : "COUNTER",
-            "args" : "--base 1024 -l 0",
-            "fields" : ["kbytes"]
+            "title": "Total kBytes",
+            "type": "COUNTER",
+            "args": "--base 1024 -l 0",
+            "fields": ["kbytes"]
         }
     ],
-    "uptime" : [
+    "uptime": [
         {
-            "title" : "Uptime",
-            "type" : "GAUGE",
-            "args" : "--base 1000 -l 0",
-            "fields" : ["uptime"]
+            "title": "Uptime",
+            "type": "GAUGE",
+            "args": "--base 1000 -l 0",
+            "fields": ["uptime"]
         }
     ],
-    "status" : [
+    "status": [
         {
-            "title" : "Status",
-            "type" : "GAUGE",
-            "args" : "--base 1000 -l 0",
-            "fields" : ["busy", "idle"]
+            "title": "Status",
+            "type": "GAUGE",
+            "args": "--base 1000 -l 0",
+            "fields": ["busy", "idle"]
         }
     ]
 }
+
 
 if len(sys.argv) == 2 and sys.argv[1] == "autoconf":
     print "yes"
 elif len(sys.argv) == 2 and sys.argv[1] == "config":
     if graph_type not in graph_types.keys():
-        raise Exception("Unknown graph type '%s'"%graph_type)
+        raise Exception("Unknown graph type '%s'" % graph_type)
     params = graph_types[graph_type]
     for item in params:
         print "graph_title %s" % item["title"]
@@ -96,10 +123,10 @@ else:
     data = {}
     for line in info.split("\n"):
         try:
-           (title, value) = line.split(": ")
-           data[title] = value
-        except Exception:
-           pass
+            (title, value) = line.split(": ")
+            data[title] = value
+        except ValueError:
+            pass
 
     if graph_type == "accesses":
         print "accesses.value %s" % data["Total Accesses"]
