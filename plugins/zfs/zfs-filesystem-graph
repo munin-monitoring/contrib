@@ -21,7 +21,7 @@
 # For now this plugin does not allow "_" in the name of a zpool or filesystems
 #
 
-myname=`basename $0 | sed 's/^zfs_fs_//g' | sed -e 's/_/\//g'`
+myname=$(basename "$0" | sed 's/^zfs_fs_//g' | sed -e 's/_/\//g')
 
 if [ "$1" = "autoconf" ]; then
     # Makes little sense to autoconf if you can't suggest
@@ -33,7 +33,9 @@ if [ "$1" = "suggest" ]; then
 	exit 0
 fi
 
-values=( $(zfs get -p usedbydataset,usedbychildren,usedbysnapshots,usedbyrefreservation,available,quota $myname | awk 'BEGIN {total=0;} { if( NR==1 ) next; } !/quota/ {total=total+$3;} {print $3} END{print total;}') )
+read -r -a values <<<"$(zfs get -p usedbydataset,usedbychildren,usedbysnapshots,usedbyrefreservation,available,quota "$myname" \
+    | awk 'BEGIN {total=0;} { if( NR==1 ) next; } !/quota/ {total=total+$3;} {print $3} END{print total;}')"
+
 
 if [ "$1" = "config" ]; then
 

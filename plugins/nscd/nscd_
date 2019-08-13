@@ -33,19 +33,23 @@
 #%# family=auto
 #%# capabilities=autoconf suggest
 
-source $MUNIN_LIBDIR/plugins/plugin.sh
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
 NSCD_CFG=${nscd_cfg:-/etc/nscd.conf}
 AUTOCONF_CHECK=$(nscd -g | grep -ic 'yes.*cache is enabled')
-SUGGEST_CHECK=$(nscd -g | grep -iB2 'yes.*cache is enabled' | awk {'print $1'} | head -1)
-MODE=$(basename $0 | sed 's/^nscd_//g' | tr '_' '.')
+SUGGEST_CHECK=$(nscd -g | grep -iB2 'yes.*cache is enabled' | awk '{print $1}' | head -1)
+MODE=$(basename "$0" | sed 's/^nscd_//g' | tr '_' '.')
 
 case $1 in
 	autoconf)
-		[ -r "$NSCD_CFG" ] && [ $AUTOCONF_CHECK -gt 0 ] && echo yes || echo "no (nscd config not found or no database enabled)"
+		if [ -r "$NSCD_CFG" ] && [ "$AUTOCONF_CHECK" -gt 0 ]; then
+			echo yes
+		else
+			echo "no (nscd config not found or no database enabled)"
+		fi
 		exit 0
 		;;
 	suggest)
-		echo $SUGGEST_CHECK
+		echo "$SUGGEST_CHECK"
 		exit 0
 		;;
 	config)
@@ -66,7 +70,7 @@ CONFIG
 		;;
 	fetch|*)
 			nscd -g | awk "/^$MODE cache/ {printline = 1; print; next} /^.*cache:/ {printline = 0} printline" | \
-			egrep '(suggested size|cache hit rate|current number of cached values|maximum number of cached values)' | \
-			sed 's/%//' | awk {' if (NR==1) print "suggestedsize.value " $1; if (NR==2) print "cachehitrate.value " $1; if (NR==3) print "currnumber.value " $1; if (NR==4) print "maxnumber.value " $1'}
+			grep -E '(suggested size|cache hit rate|current number of cached values|maximum number of cached values)' | \
+			sed 's/%//' | awk '{ if (NR==1) print "suggestedsize.value " $1; if (NR==2) print "cachehitrate.value " $1; if (NR==3) print "currnumber.value " $1; if (NR==4) print "maxnumber.value " $1}'
 		;;
 esac
