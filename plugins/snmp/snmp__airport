@@ -49,23 +49,26 @@ Please install the Python bindings for libsnmp.
 On Debian/Ubuntu machines this package is named 'libsnmp-python'"""
     sys.exit(-3)
 
-DEBUG=None
-CMDS=['type', 'rates', 'time', 'lastrefresh', 'signal', 'noise', 'rate', 'rx',
-      'tx', 'rxerr', 'txerr']
-CMD=None
-DESTHOST=None
-NUMCLIENTS=None
-NUMDHCPCLIENTS=None
-WANIFINDEX=None
+DEBUG = None
+CMDS = ['type', 'rates', 'time', 'lastrefresh', 'signal', 'noise', 'rate', 'rx', 'tx', 'rxerr',
+        'txerr']
+CMD = None
+DESTHOST = None
+NUMCLIENTS = None
+NUMDHCPCLIENTS = None
+WANIFINDEX = None
+
 
 def dbg(text):
     """Print some debugging text if DEBUG=1 is in our environment"""
     if DEBUG is not None:
         print "DEBUG: %s" % text
 
+
 def usage():
     """Print some usage information about ourselves"""
     print __doc__
+
 
 def parseName(name):
     """Examing argv[0] (i.e. the name of this script) for the hostname we should
@@ -87,6 +90,7 @@ def parseName(name):
     else:
         dbg("parseName found an inconsistent name: '%s'" % name)
         return None
+
 
 def tableToDict(table, num):
     """The netsnmp library returns a tuple with all of the data, it is not in any
@@ -129,6 +133,7 @@ def tableToDict(table, num):
 
     return clientTable
 
+
 def getNumClients():
     """Returns the number of wireless clients connected to the Airport we are
     examining. This will only ever be polled via SNMP once per invocation. If
@@ -147,6 +152,7 @@ def getNumClients():
 
     dbg("getNumClients: found %d clients" % NUMCLIENTS)
     return NUMCLIENTS
+
 
 def getNumDHCPClients():
     """Returns the number of DHCP clients with currently active leases. This
@@ -167,6 +173,7 @@ def getNumDHCPClients():
     dbg("getNumDHCPClients: found %d clients" % NUMDHCPCLIENTS)
     return NUMDHCPCLIENTS
 
+
 def getExternalInterface():
     """Returns the index of the WAN interface of the Airport. This will only
     ever be polled via SNMP once per invocation, per getNum*Clients(). See
@@ -176,8 +183,8 @@ def getExternalInterface():
 
     if WANIFINDEX is None:
         interfaces = list(netsnmp.snmpwalk(netsnmp.Varbind(iFaceNames),
-                                          Version=2, DestHost=DESTHOST,
-                                          Community='public'))
+                                           Version=2, DestHost=DESTHOST,
+                                           Community='public'))
         dbg("getExternalInterface: found interfaces: %s" % interfaces)
         try:
             WANIFINDEX = interfaces.index('mgi1') + 1
@@ -189,13 +196,16 @@ def getExternalInterface():
     dbg("getExternalInterface: found mgi1 at index: %d" % WANIFINDEX)
     return WANIFINDEX
 
+
 def getExternalInOctets():
     """Returns the number of octets of inbound traffic on the WAN interface"""
     return getOctets('In')
 
+
 def getExternalOutOctets():
     """Returns the number of octets of outbound traffic on the WAN interface"""
     return getOctets('Out')
+
 
 def getOctets(direction):
     """Returns the number of octets of traffic on the WAN interface in the
@@ -211,6 +221,7 @@ def getOctets(direction):
                                Version=2, DestHost=DESTHOST,
                                Community='public')[0])
 
+
 def getWanSpeed():
     """Returns the speed of the WAN interface"""
     ifSpeed = "1.3.6.1.2.1.2.2.1.5.%s" % getExternalInterface()
@@ -219,11 +230,12 @@ def getWanSpeed():
         wanSpeed = int(netsnmp.snmpget(netsnmp.Varbind(ifSpeed),
                                        Version=2, DestHost=DESTHOST,
                                        Community='public')[0])
-    except:
+    except:  # noqa: E722 (TODO: specify the expected exceptions)
         dbg("getWanSpeed: Unable to probe for data, defaultint to 10000000")
         wanSpeed = 10000000
 
     return wanSpeed
+
 
 def getData():
     """Returns a dictionary populated with all of the wireless clients and their
@@ -246,6 +258,7 @@ def getData():
 
     return clients
 
+
 def main(clients=None):
     """This function fetches metadata about wireless clients if needed, then
     displays whatever values have been requested"""
@@ -262,6 +275,7 @@ def main(clients=None):
     else:
         for client in clients:
             print "MAC_%s.value %s" % (client, clients[client][CMD])
+
 
 if __name__ == '__main__':
     clients = None
@@ -352,4 +366,3 @@ send.min 0""" % (speed, speed)
             sys.exit(0)
     else:
         main(clients)
-
