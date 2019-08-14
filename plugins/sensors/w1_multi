@@ -1,0 +1,104 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+w1_multi - Plugin to monitor multiple 1-wire temperature sensors (DS1820)
+
+
+=head1 CONFIGURATION
+
+The following environment variables are used by this plugin
+
+ warning         - Warning limit for alarm notification
+ critical        - Critical limit for alarm notification
+ sensor_*_label  - Human readable name of a sensor
+
+The warning/critical ranges for specific sensors can be overridden
+individually (e.g. "sensor_foo_warning").
+
+
+=head1 AUTHOR
+
+Copyright (C) 2016 Roland Steinbach
+Copyright (C) 2019 Lars Kruse
+
+
+=head1 LICENSE
+
+GPLv2
+
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+=cut
+
+set -eu
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+
+get_all_sensor_ids() {
+    [ -r /sys/bus/w1/devices ] || return
+    find /sys/bus/w1/devices -maxdepth 1 -mindepth 1 -type f -not -path "*bus_master*" -print0 \
+        | xargs -0 -r -n 1 basename
+}
+
+
+do_autoconf() {
+        if [ -r /sys/bus/w1/devices ]; then
+            echo yes
+        else
+            echo "no (/sys/bus/w1/devices not found)"
+        fi
+}
+
+
+do_config() {
+    local sensor_id fieldname custom_label
+    echo "graph_title Temperature Sensors"
+    echo 'graph_args --base 1000 -l 0'
+    echo 'graph_vlabel temperature (°C)'
+    echo 'graph_category sensors'
+    echo 'graph_info This graph shows 1-wire sensor temperatures.'
+    get_all_sensor_ids | while read -r sensor_id; do
+        fieldname=$(clean_fieldname "sensor_$sensor_id")
+        # retrieve an optional custom label (fallback: the sensor ID)
+        custom_label=$(eval "echo \"\${${fieldname}_label}\"")
+        echo "${fieldname}.label ${custom_label:-$fieldname}"
+        print_warning "$fieldname"
+        print_critical "$fieldname"
+    done
+}
+
+
+do_fetch() {
+    local sensor_id
+    get_all_sensor_ids | while read -r sensor_id; do
+        fieldname=$(clean_fieldname "sensor_$sensor_id")
+        sed  -n '/t=/ s/.*t=//p' "/sys/bus/w1/devices/$sensor_id/w1_slave" \
+            | awk '{print "'"$fieldname"'.value", $1/1000}'
+    done
+}
+
+
+case "${1:-}" in
+    autoconf)
+        do_autoconf
+        ;;
+    config)
+        do_config
+        if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = "1" ]; then do_fetch; fi
+        ;;
+    "")
+        do_fetch
+        ;;
+    *)
+        echo 2> "Invalid action requested: $1"
+        ;;
+esac
+exit 0
