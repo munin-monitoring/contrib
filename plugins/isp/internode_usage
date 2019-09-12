@@ -1,4 +1,4 @@
-#!/bin/sh -u
+#!/bin/sh -eu
 # -*- sh -*-
 
 : << =cut
@@ -45,7 +45,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # shellcheck disable=SC1090
 . "${MUNIN_LIBDIR:-.}/plugins/plugin.sh"
 
+CURL_ARGS='-s'
 if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    CURL_ARGS='-v'
     set -x
 fi
 
@@ -67,47 +69,73 @@ if [ -z "${internode_api_url:-}" ]; then
 fi
 
 xpath_extract() {
-	xpath="$1"
-	xpath -q -n -e "${xpath}" | \
-		sed 's/<\([^>]*\)>\([^<]*\)<[^>]*>/\2/'
+	# shellcheck disable=SC2039
+	local xpath="$1"
+	# shellcheck disable=SC2039
+	local node="$(xpath -q -n -e "${xpath}")" \
+		|| { echo "error extracting ${xpath}" >&2; false; }
+	echo "${node}" | sed 's/<\([^>]*\)>\([^<]*\)<[^>]*>/\2/;s^N/A^U^'
 }
 
 xpath_extract_attribute() {
-	xpath="$1"
-	xpath -q -n -e "${xpath}" | \
-		sed 's/.*="\([^"]\+\)".*/\1/'
+	# shellcheck disable=SC2039
+	local xpath="$1"
+	# shellcheck disable=SC2039
+	local node="$(xpath -q -n -e "${xpath}")" \
+		|| { echo "error extracting attribute at ${xpath}" >&2; false; }
+	echo "${node}" | sed 's/.*="\([^"]\+\)".*/\1/'
 }
 
 fetch() {
 	# shellcheck disable=SC2154
-	curl -u "${internode_api_login}:${internode_api_password}" -s "$@"
+	curl -u "${internode_api_login}:${internode_api_password}" -f ${CURL_ARGS} "$@" \
+		|| { echo "error fetching ${*} for user ${internode_api_login}" >&2; false; }
 }
 
 get_data() {
-	SERVICE_XML="$(fetch "${internode_api_url}/${SERVICE_ID}/service")"
-	SERVICE_USERNAME="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/username")"
-	SERVICE_QUOTA="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/quota")"
-	SERVICE_PLAN="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/plan")"
-	SERVICE_ROLLOVER="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/rollover")"
-	SERVICE_INTERVAL="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/plan-interval" | sed 's/ly$//')"
+	SERVICE_USERNAME='n/a'
+	SERVICE_QUOTA='n/a'
+	SERVICE_PLAN='n/a'
+	SERVICE_ROLLOVER='n/a'
+	IDEAL_USAGE=''
+	USAGE_CRITICAL=''
+	SERVICE_XML="$(fetch "${internode_api_url}/${SERVICE_ID}/service" \
+		|| true)"
+	if [ -n "${SERVICE_XML}" ]; then
+		SERVICE_USERNAME="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/username")"
+		SERVICE_QUOTA="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/quota")"
+		SERVICE_PLAN="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/plan")"
+		SERVICE_ROLLOVER="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/rollover")"
+		SERVICE_INTERVAL="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/plan-interval" | sed 's/ly$//')"
 
-	HISTORY_XML="$(fetch "${internode_api_url}/${SERVICE_ID}/history")"
-	TODAY_TIMESTAMP="$(date +%s)"
-	DAILY_DATE="$(date +%Y-%m-%d -d yesterday)"
-	DAILY_TIMESTAMP="$(date -d "${DAILY_DATE} $(date +%H:%M:%S)" +%s)"
-	DAILY_USAGE="$(echo "${HISTORY_XML}" | xpath_extract "internode/api/usagelist/usage[@day=\"${DAILY_DATE}\"]/traffic")"
+		TODAY="$(date +%s)"
+		FIRST_DAY="$(date +%s --date "${SERVICE_ROLLOVER} -1 ${SERVICE_INTERVAL}")"
+		LAST_DAY="$(date +%s --date "${SERVICE_ROLLOVER}")"
+		BILLING_PERIOD="(${LAST_DAY}-${FIRST_DAY})"
+		IDEAL_USAGE="$(echo "${SERVICE_QUOTA}-(${SERVICE_QUOTA}*(${LAST_DAY}-${TODAY})/${BILLING_PERIOD})" | bc -ql)"
 
-	USAGE_XML="$(fetch "${internode_api_url}/${SERVICE_ID}/usage")"
-	SERVICE_USAGE="$(echo "${USAGE_XML}" | xpath_extract "internode/api/traffic")"
+		USAGE_CRITICAL="${SERVICE_QUOTA}"
+	fi
 
-	USAGE_CRITICAL="${SERVICE_QUOTA}"
-	USAGE_WARNING="$(echo "${SERVICE_QUOTA}*.75" | bc -ql)"
+	DAILY_TIMESTAMP=N
+	DAILY_USAGE=U
+	HISTORY_XML="$(fetch "${internode_api_url}/${SERVICE_ID}/history" \
+		|| true)"
+	if [ -n "${HISTORY_XML}" ]; then
+		DAILY_USAGE="$(echo "${HISTORY_XML}" | xpath_extract "internode/api/usagelist/usage[last()-1]/traffic")"
+		DAILY_DATE="$(echo "${HISTORY_XML}" | xpath_extract_attribute "internode/api/usagelist/usage[last()-1]/@day")"
+		DAILY_TIMESTAMP="$(date -d "${DAILY_DATE} $(date +%H:%M:%S)" +%s \
+			|| echo N)"
+	fi
 
-	TODAY="$(date +%s)"
-	FIRST_DAY="$(date +%s --date "${SERVICE_ROLLOVER} -1 ${SERVICE_INTERVAL}")"
-	LAST_DAY="$(date +%s --date "${SERVICE_ROLLOVER}")"
-	BILLING_PERIOD="(${LAST_DAY}-${FIRST_DAY})"
-	IDEAL_USAGE="$(echo "${SERVICE_QUOTA}-(${SERVICE_QUOTA}*(${LAST_DAY}-${TODAY})/${BILLING_PERIOD})" | bc -ql)"
+	SERVICE_USAGE='U'
+	USAGE_XML="$(fetch "${internode_api_url}/${SERVICE_ID}/usage" \
+		|| true)"
+	if [ -n "${USAGE_XML}" ]; then
+		SERVICE_USAGE="$(echo "${USAGE_XML}" | xpath_extract "internode/api/traffic")"
+
+
+	fi
 }
 
 graph_config() {
@@ -178,14 +206,14 @@ graph_data() {
 	echo "multigraph internode_usage_${SERVICE_ID}${graph}"
 	case "${graph}" in
 		.current)
-			echo "hourly_rate.value ${TODAY_TIMESTAMP}:${SERVICE_USAGE:-U}"
+			echo "hourly_rate.value ${SERVICE_USAGE:-U}"
 			;;
 		.daily)
 			echo "daily_rate.value ${DAILY_TIMESTAMP}:${DAILY_USAGE:-U}"
 			;;
 		*)
-			echo "usage.value ${TODAY_TIMESTAMP}:${SERVICE_USAGE:-U}"
-			echo "ideal.value ${TODAY_TIMESTAMP}:${IDEAL_USAGE:-U}"
+			echo "usage.value ${SERVICE_USAGE:-U}"
+			echo "ideal.value ${IDEAL_USAGE:-U}"
 			;;
 	esac
 	echo
@@ -214,11 +242,16 @@ main() {
 # Determine the service ID from the name of the symlink
 SERVICE_ID="$(echo "${0}" | sed -n 's/^.*internode_usage_//p')"
 if [ -z "${SERVICE_ID}" ]; then
-	API_XML="$(fetch "${internode_api_url}")"
 	# Otherwise, get the first service in the list
+	API_XML="$(fetch "${internode_api_url}" \
+		|| true)"
+	if [ -z "${API_XML}" ]; then
+		echo "unable to determine service ID for user ${internode_api_login}" >&2
+		exit 1
+	fi
 	SERVICE_ID="$(echo "${API_XML}" | xpath_extract "internode/api/services/service")"
 fi
 
 get_data
 
-main ${1:-}
+main "${1:-}"
