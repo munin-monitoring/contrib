@@ -11,7 +11,12 @@ ssl-certificate-expiry - Plugin to monitor Certificate expiration on multiple se
 =head1 CONFIGURATION
 
   [ssl-certificate-expiry]
-    env.services www.service.tld blah.example.net_PORT
+    env.services www.service.tld blah.example.net_PORT foo.example.net_PORT_STARTTLS
+
+PORT is the TCP port number
+STARTTLS is passed to openssl as "-starttls" argument. Useful for services like SMTP or IMAP implementing StartTLS.
+  Current known values are ftp, imap, pop3 and smtp
+  PORT is mandatory if STARTTLS is used.
 
 To set warning and critical levels do like this:
 
@@ -29,6 +34,7 @@ For example:
   ssl-certificate-expiry_www.example.org_443
   ssl-certificate-expiry_192.0.2.42_636
   ssl-certificate-expiry_2001:0DB8::badc:0fee_485
+  ssl-certificate-expiry_mail.example.net_25_smtp
 
 =head2 Cron setup
 
@@ -102,12 +108,18 @@ parse_valid_days_from_certificate() {
 print_expire_days() {
     local host="$1"
     local port="$2"
+    local starttls="$3"
 
     # Wrap IPv6 addresses in square brackets
     echo "$host" | grep -q ':' && host="[$host]"
 
+    local s_client_args=
+    [ -n "$starttls" ] && s_client_args="-starttls $starttls"
+
+    # shellcheck disable=SC2086
     echo "" | openssl s_client -CApath /etc/ssl/certs \
-            -servername "$host" -connect "${host}:${port}" 2>/dev/null \
+            -servername "$host" -connect "${host}:${port}" \
+            $s_client_args 2>/dev/null \
         | parse_valid_days_from_certificate
 }
 
@@ -116,12 +128,13 @@ main() {
 	if echo "$service" | grep -q "_"; then
 	    host=$(echo "$service" | cut -f 1 -d "_")
 	    port=$(echo "$service" | cut -f 2 -d "_")
+	    starttls=$(echo "$service" | cut -f 3 -d "_")
 	else
 	    host=$service
 	    port=443
 	fi
 	fieldname="$(clean_fieldname "$service")"
-	valid_days=$(print_expire_days "$host" "$port")
+	valid_days=$(print_expire_days "$host" "$port" "$starttls")
 	[ -z "$valid_days" ] && valid_days="U"
 	printf "%s.value %s\\n" "$fieldname" "$valid_days"
         echo "${fieldname}.extinfo Last checked: $(date)"
