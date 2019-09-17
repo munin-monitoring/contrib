@@ -15,7 +15,7 @@ ssl-certificate-expiry - Plugin to monitor Certificate expiration on multiple se
 
 PORT is the TCP port number
 STARTTLS is passed to openssl as "-starttls" argument. Useful for services like SMTP or IMAP implementing StartTLS.
-  Current know values are ftp, imap, pop3 and smtp
+  Current known values are ftp, imap, pop3 and smtp
   PORT is mandatory if STARTTLS is used.
 
 To set warning and critical levels do like this:
@@ -113,15 +113,13 @@ print_expire_days() {
     # Wrap IPv6 addresses in square brackets
     echo "$host" | grep -q ':' && host="[$host]"
 
-    if [ -n "$starttls" ]; then
-        echo "" | openssl s_client -CApath /etc/ssl/certs \
-	        -servername "$host" -connect "${host}:${port}" -starttls "$starttls" 2>/dev/null \
-	    | parse_valid_days_from_certificate
-    else
-        echo "" | openssl s_client -CApath /etc/ssl/certs \
-            -servername "$host" -connect "${host}:${port}" 2>/dev/null \
+    local s_client_args=
+    [ -n "$starttls" ] && s_client_args="-starttls $starttls"
+
+    echo "" | openssl s_client -CApath /etc/ssl/certs \
+            -servername "$host" -connect "${host}:${port}" \
+            $s_client_args 2>/dev/null \
         | parse_valid_days_from_certificate
-    fi
 }
 
 main() {
