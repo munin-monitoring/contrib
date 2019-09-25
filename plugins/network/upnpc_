@@ -62,6 +62,7 @@ SUPPORTED_MODES=$(
 		s/.*Packets.*/pkts/p; \
 		s/.*uptime=.*/uptime/p; \
 	")
+HOST=$(echo "${DATA}" | sed -n "s#.*desc: http://\([^/:]\+\).*#\1#p")
 
 autoconf() {
 	test -n "${DATA}" && echo yes || echo "no (No UPnP router detected)"
@@ -79,7 +80,7 @@ config () {
 	case ${1} in
 		"uptime")
 			cat << EOF
-graph_title Uplink connection uptime
+graph_title Uplink connection uptime (${HOST})
 graph_args -l 0
 graph_category network
 graph_scale no
@@ -91,7 +92,7 @@ EOF
 			;;
 		"bitrate")
 			cat << EOF
-graph_title [DEPRECATED] Uplink bitrate
+graph_title [DEPRECATED] Uplink bitrate (${HOST})
 graph_args --base 1000 -l 0
 graph_category network
 graph_vlabel bitrate down (-) / up (+)
@@ -102,12 +103,10 @@ up.negative down
 EOF
 			;;
 		"traffic")
-			# ${graph_period} is not a shell variable
-			cat << 'EOF'
-graph_title Uplink traffic
+			cat << EOF
+graph_title Uplink traffic (${HOST})
 graph_args --base 1000 -l 0
 graph_category network
-graph_vlabel bytes in (-) / out (+) per ${graph_period}
 EOF
 			if [ "${traffic_remove_max:-false}" != 'true' ]; then
 				cat << EOF
@@ -132,11 +131,15 @@ EOF
 			;;
 		"pkts")
 			# ${graph_period} is not a shell variable
-			cat << 'EOF'
-graph_title Uplink packets
+			cat << EOF
+graph_title Uplink packets (${HOST})
 graph_args --base 1000 -l 0
 graph_category network
-graph_vlabel packets in (-) / out (+) per ${graph_period}
+EOF
+			# ${graph_period} is not a shell variable
+			# shellcheck disable=SC2016
+			echo 'graph_vlabel packets in (-) / out (+) per ${graph_period}'
+			cat << EOF
 down.label pps
 down.type DERIVE
 down.min 0
