@@ -8,7 +8,8 @@
 upnpc_ - Plugin to monitor routers via UPnP
 
 This plugin uses the upnpc utility (package miniupnpc in Debian), to monitor an
-router using UPnP. It can monitor the following aspects, and plot them as separate graphs:
+router using UPnP. It can monitor the following aspects, and plot them as
+separate graphs, or a single multigraph (if linked at upnpc or upnpc_multi:
 * uptime: how long the link has been up;
 * bitrate: the up and downlink bitrate (e.g., sync speed for DSL);
 * traffic: the actual up and downstream traffic rate;
@@ -66,10 +67,12 @@ autoconf() {
 	test -n "${DATA}" && echo yes || echo "no (No UPnP router detected)"
 }
 
+
 suggest () {
 	for mode in ${SUPPORTED_MODES}; do
 		echo "${mode}"
 	done
+	echo "multi"
 }
 
 config () {
@@ -144,6 +147,14 @@ down.graph no
 up.negative down
 EOF
 			;;
+		"multi"|"upnpc")
+			echo "multigraph ${PLUGIN_NAME}"
+			config "traffic"
+			for mode in ${SUPPORTED_MODES}; do
+				echo "multigraph ${PLUGIN_NAME}.${mode}"
+				config "${mode}"
+			done
+			;;
 		*)
 			echo "unknown mode '${1}'" >&2
 			exit 1
@@ -169,6 +180,14 @@ fetch () {
 			;;
 		"pkts")
 		echo "${DATA}" | sed -n "s/^Packets:\s*Sent:\s*\([0-9]\+\).*Recv:\s*\([0-9]\+\).*/up.value \1\ndown.value \2/p"
+			;;
+		"multi"|"upnpc")
+			echo "multigraph ${PLUGIN_NAME}"
+			fetch "traffic"
+			for mode in ${SUPPORTED_MODES}; do
+				echo "multigraph ${PLUGIN_NAME}.${mode}"
+				fetch "${mode}"
+			done
 			;;
 		*)
 			echo "unknown mode '${1}'" >&2
