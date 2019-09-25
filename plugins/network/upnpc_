@@ -20,7 +20,11 @@ Linux systems with upnpc installed (miniupnpc package).
 
 =head1 CONFIGURATION
 
-None needed.
+If you do not want to show the link maximum bitrates, add the following
+plugin-configuration:
+
+  [upnpc*]
+    env.traffic_remove_max true
 
 =head1 AUTHOR
 
@@ -54,7 +58,6 @@ DATA="$(upnpc -s)"
 SUPPORTED_MODES=$(
 	echo "${DATA}" | sed -n " \
 		s/.*Bytes.*/traffic/p; \
-		s/.*MaxBitRate.*/bitrate/p; \
 		s/.*Packets.*/pkts/p; \
 		s/.*uptime=.*/uptime/p; \
 	")
@@ -85,7 +88,7 @@ EOF
 			;;
 		"bitrate")
 			cat << EOF
-graph_title Uplink bitrate
+graph_title [DEPRECATED] Uplink bitrate
 graph_args --base 1000 -l 0
 graph_category network
 graph_vlabel bitrate down (-) / up (+)
@@ -99,15 +102,27 @@ EOF
 			# ${graph_period} is not a shell variable
 			cat << 'EOF'
 graph_title Uplink traffic
-graph_args --base 1024 -l 0
+graph_args --base 1000 -l 0
 graph_category network
 graph_vlabel bytes in (-) / out (+) per ${graph_period}
-down.label Bps
+EOF
+			if [ "${traffic_remove_max:-false}" != 'true' ]; then
+				cat << EOF
+maxdown.label bps (max)
+maxup.label bps (max)
+maxdown.graph no
+maxup.negative maxdown
+EOF
+			fi
+			cat << EOF
+down.label bps
 down.type DERIVE
 down.min 0
-up.label Bps
+down.cdef down,8,*
+up.label bps
 up.type DERIVE
 up.min 0
+up.cdef up,8,*
 down.graph no
 up.negative down
 EOF
@@ -145,7 +160,12 @@ fetch () {
 		echo "${DATA}" | sed -n "s/^MaxBitRateDown : \([0-9]\+\) bps.*MaxBitRateUp \([0-9]\+\) bps.*/down.value \1\nup.value \2/p"
 			;;
 		"traffic")
-		echo ${DATA} | sed -n "s/^Bytes:\s*Sent:\s*\([0-9]\+\).*Recv:\s*\([0-9]\+\).*/up.value \1\ndown.value \2/p"
+		echo "${DATA}" | sed -n "
+		s/^Bytes:\s*Sent:\s*\([0-9]\+\).*Recv:\s*\([0-9]\+\).*/up.value \1\ndown.value \2/p"
+		if [ "${traffic_remove_max:-false}" != 'true' ]; then
+			echo "${DATA}" | sed -n "
+			s/^MaxBitRateDown : \([0-9]\+\) bps.*MaxBitRateUp \([0-9]\+\) bps.*/maxdown.value \1\nmaxup.value \2/p"
+		fi
 			;;
 		"pkts")
 		echo "${DATA}" | sed -n "s/^Packets:\s*Sent:\s*\([0-9]\+\).*Recv:\s*\([0-9]\+\).*/up.value \1\ndown.value \2/p"
