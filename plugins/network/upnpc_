@@ -27,6 +27,19 @@ plugin-configuration:
   [upnpc*]
     env.traffic_remove_max true
 
+You can display the graph on another host (e.g., the actual router) than the
+one running upnpc. To do so, first configure the plugin to use a different
+hostname.
+
+    env.host_name router
+
+Then configure munin (in /etc/munin/munin-conf or /etc/munin/munin-conf.d), to
+support a new host.
+
+  [example.net;router]
+    address 127.0.0.1
+    use_node_name no
+
 =head1 AUTHOR
 
 Olivier Mehani
@@ -62,7 +75,17 @@ SUPPORTED_MODES=$(
 		s/.*Packets.*/pkts/p; \
 		s/.*uptime=.*/uptime/p; \
 	")
-HOST=$(echo "${DATA}" | sed -n "s#.*desc: http://\([^/:]\+\).*#\1#p")
+
+HOST=${host_name:-}
+HOST_TITLE=""
+HOST_NAME="host_name ${HOST}"
+if [ -z "${HOST}" ]; then
+	HOST=$(echo "${DATA}" | sed -n "s#.*desc: http://\([^/:]\+\).*#\1#p")
+	# Only add the host name to the title if autodetected
+	HOST_TITLE=" ($HOST)"
+	# ...but not as a separate host
+	HOST_NAME=""
+fi
 
 autoconf() {
 	test -n "${DATA}" && echo yes || echo "no (No UPnP router detected)"
@@ -80,7 +103,7 @@ config () {
 	case ${1} in
 		"uptime")
 			cat << EOF
-graph_title Uplink connection uptime (${HOST})
+graph_title Uplink connection uptime${HOST_TITLE}
 graph_args -l 0
 graph_category network
 graph_scale no
@@ -88,11 +111,12 @@ graph_vlabel uptime in hours
 uptime.label uptime
 uptime.draw AREA
 uptime.cdef uptime,3600,/
+${HOST_NAME}
 EOF
 			;;
 		"bitrate")
 			cat << EOF
-graph_title [DEPRECATED] Uplink bitrate (${HOST})
+graph_title [DEPRECATED] Uplink bitrate${HOST_TITLE}
 graph_args --base 1000 -l 0
 graph_category network
 graph_vlabel bitrate down (-) / up (+)
@@ -100,11 +124,12 @@ down.label bps
 up.label bps
 down.graph no
 up.negative down
+${HOST_NAME}
 EOF
 			;;
 		"traffic")
 			cat << EOF
-graph_title Uplink traffic (${HOST})
+graph_title Uplink traffic${HOST_TITLE}
 graph_args --base 1000 -l 0
 graph_category network
 EOF
@@ -127,12 +152,13 @@ up.min 0
 up.cdef up,8,*
 down.graph no
 up.negative down
+${HOST_NAME}
 EOF
 			;;
 		"pkts")
 			# ${graph_period} is not a shell variable
 			cat << EOF
-graph_title Uplink packets (${HOST})
+graph_title Uplink packets${HOST_TITLE}
 graph_args --base 1000 -l 0
 graph_category network
 EOF
@@ -148,9 +174,13 @@ up.type DERIVE
 up.min 0
 down.graph no
 up.negative down
+${HOST_NAME}
 EOF
 			;;
 		"multi"|"upnpc")
+			echo "${HOST_NAME}"
+			# Don't repeat HOST_NAME in sub-configs
+			HOST_NAME=""
 			echo "multigraph ${PLUGIN_NAME}"
 			config "traffic"
 			for mode in ${SUPPORTED_MODES}; do
