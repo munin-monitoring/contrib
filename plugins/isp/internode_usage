@@ -106,6 +106,7 @@ fetch() {
 }
 
 get_data() {
+	CURRENT_TIMESTAMP="$(date +%s)"
 	SERVICE_USERNAME='n/a'
 	SERVICE_QUOTA='n/a'
 	SERVICE_PLAN='n/a'
@@ -121,11 +122,10 @@ get_data() {
 		SERVICE_ROLLOVER="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/rollover")"
 		SERVICE_INTERVAL="$(echo "${SERVICE_XML}" | xpath_extract "internode/api/service/plan-interval" | sed 's/ly$//')"
 
-		TODAY="$(date +%s)"
 		FIRST_DAY="$(date +%s --date "${SERVICE_ROLLOVER} -1 ${SERVICE_INTERVAL}")"
 		LAST_DAY="$(date +%s --date "${SERVICE_ROLLOVER}")"
 		BILLING_PERIOD="(${LAST_DAY}-${FIRST_DAY})"
-		IDEAL_USAGE="$(echo "${SERVICE_QUOTA}-(${SERVICE_QUOTA}*(${LAST_DAY}-${TODAY})/${BILLING_PERIOD})" | bc -ql)"
+		IDEAL_USAGE="$(echo "${SERVICE_QUOTA}-(${SERVICE_QUOTA}*(${LAST_DAY}-${CURRENT_TIMESTAMP})/${BILLING_PERIOD})" | bc -ql)"
 
 		USAGE_CRITICAL="${SERVICE_QUOTA}"
 	fi
@@ -219,14 +219,14 @@ graph_data() {
 	echo "multigraph internode_usage_${SERVICE_ID}${graph}"
 	case "${graph}" in
 		.current)
-			echo "hourly_rate.value ${SERVICE_USAGE:-U}"
+			echo "hourly_rate.value ${CURRENT_TIMESTAMP}:${SERVICE_USAGE:-U}"
 			;;
 		.daily)
 			echo "daily_rate.value ${DAILY_TIMESTAMP}:${DAILY_USAGE:-U}"
 			;;
 		*)
-			echo "usage.value ${SERVICE_USAGE:-U}"
-			echo "ideal.value ${IDEAL_USAGE:-U}"
+			echo "usage.value ${CURRENT_TIMESTAMP}:${SERVICE_USAGE:-U}"
+			echo "ideal.value ${CURRENT_TIMESTAMP}:${IDEAL_USAGE:-U}"
 			;;
 	esac
 	echo
@@ -240,8 +240,8 @@ main() {
 			fi
 			graph_config
 			graph_config usage
-			graph_config current
 			graph_config daily
+			graph_config current
 			if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = "1" ]; then
 				main
 			fi
@@ -249,8 +249,8 @@ main() {
 		*)
 			graph_data
 			graph_data usage
-			graph_data current
 			graph_data daily
+			graph_data current
 			;;
 	esac
 }
