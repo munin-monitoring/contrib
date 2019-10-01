@@ -61,34 +61,36 @@ if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
     set -x
 fi
 
-if ! command -v upnpc >/dev/null; then
-	echo "upnpc not found (miniupnpc package)" >&2
-	exit 1
-fi
-
 PLUGIN_NAME="$(basename "${0}")"
 MODE="$(echo "${PLUGIN_NAME}" | sed 's/.*_//')"
-DATA="$(upnpc -s)"
-SUPPORTED_MODES=$(
+# If called without a mode, default to multigraph
+[ "$MODE" = "upnpc" ] && MODE="multi"
+
+get_data() {
+	if ! command -v upnpc >/dev/null; then
+		echo "upnpc not found (miniupnpc package)" >&2
+		exit 1
+	fi
+
+	upnpc -s
+}
+
+get_supported_modes() {
+	DATA=$1
 	echo "${DATA}" | sed -n " \
 		s/.*Bytes.*/traffic/p; \
 		s/.*Packets.*/pkts/p; \
 		s/.*uptime=.*/uptime/p; \
-	")
-
-HOST=${host_name:-}
-HOST_TITLE=""
-HOST_NAME="host_name ${HOST}"
-if [ -z "${HOST}" ]; then
-	HOST=$(echo "${DATA}" | sed -n "s#.*desc: http://\([^/:]\+\).*#\1#p")
-	# Only add the host name to the title if autodetected
-	HOST_TITLE=" ($HOST)"
-	# ...but not as a separate host
-	HOST_NAME=""
-fi
+		"
+}
 
 autoconf() {
-	test -n "${DATA}" && echo yes || echo "no (No UPnP router detected)"
+	if ! command -v upnpc >/dev/null; then
+		echo "no (upnpc not found [miniupnpc package])"
+		return
+	fi
+	upnpc -s 2>/dev/null | grep -q 'List.*devices.*found' && echo yes \
+		|| echo "no (No UPnP router detected)"
 }
 
 
@@ -177,7 +179,7 @@ up.negative down
 ${HOST_NAME}
 EOF
 			;;
-		"multi"|"upnpc")
+		"multi")
 			echo "${HOST_NAME}"
 			# Don't repeat HOST_NAME in sub-configs
 			HOST_NAME=""
@@ -229,10 +231,29 @@ fetch () {
 	esac
 }
 
+if [ "${1:-}" = "autoconf" ]; then
+	autoconf
+	exit 0
+fi
+
+# do data-based detection here, rather than in
+# config() as we don't want to do this multiple times
+# when the function calls itself for multigraphs
+DATA=$(get_data)
+SUPPORTED_MODES=$(get_supported_modes "${DATA}")
+
+HOST=${host_name:-}
+HOST_TITLE=""
+HOST_NAME="host_name ${HOST}"
+if [ -z "${HOST}" ]; then
+	HOST=$(echo "${DATA}" | sed -n "s#.*desc: http://\([^/:]\+\).*#\1#p")
+	# Only add the host name to the title if autodetected
+	HOST_TITLE=" ($HOST)"
+	# ...but not as a separate host
+	HOST_NAME=""
+fi
+
 case ${1:-} in
-	"autoconf")
-		autoconf
-		;;
 	"suggest")
 		suggest
 		;;
