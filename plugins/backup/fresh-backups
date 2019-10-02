@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -u
 
 : << =cut
 
@@ -51,18 +51,22 @@ GPLv2
 
 =cut
 
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
 # Configuration directives, edit before first use.
 BACKUP_DIR=${backup_dir:-/data/backup}
 ARCHIVE_PATTERN="${archive_pattern:-*.tar.bz2}"
-# How old backups should be considered as non-yound anymore in [days].
+# How old backups should be considered as non-young anymore in [days].
 LIFETIME=${lifetime:-2}
 # Critical states will be issued when the number of fresh backups archives is below `backup_number`,
-# and warnings below `backup_number*lifetime`
+# and warnings below `backup_number*lifetime - 1`
 CRIT=${backup_number:-1}
-WARN=$((CRIT*LIFETIME))
+# We should have at least LIFETIME-1 complete backups when the new one is in progress
+WARN=$((CRIT*(LIFETIME-1)))
 
 # The situation is critical if there are no young files, the backup is down.
-case $1 in
+case ${1:-} in
    config)
         cat << EOF
 graph_title Fresh (<=${LIFETIME}d) backups archives in ${BACKUP_DIR}
@@ -77,6 +81,6 @@ EOF
 esac
 
 printf "freshcount.value "
-find "${BACKUP_DIR}" -name "${ARCHIVE_PATTERN}" -a -mtime "-${LIFETIME}" | wc  -l
+find "${BACKUP_DIR}" -name "${ARCHIVE_PATTERN}" -mmin "-$(((LIFETIME+1)*60*24))" | wc  -l
 printf "freshcount.extinfo "
 du -sh "${BACKUP_DIR}"
