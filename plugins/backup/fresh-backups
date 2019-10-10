@@ -1,4 +1,4 @@
-#!/bin/sh -u
+#!/bin/bash -u
 
 : << =cut
 
@@ -39,17 +39,20 @@ An example configuration snippet for backup-manager [0] follows.
 
 =head1 AUTHOR
 
-Olivier Mehani <shtrom+munin@ssji.net>
+Copyright (C) 2016,2019 Olivier Mehani <shtrom+munin@ssji.net>
 
 =head1 LICENSE
 
-GPLv2
+SPDX-License-Identifier: GPL-3.0-or-later
 
 =head1 MAGIC MARKERS
 
  #%# family=manual
 
 =cut
+
+# Bash is needed for this array to work
+COLOUR=(00FF00 24DA00 48B600 6D9100 916D00 B64800 DA2400 FF0000)  # green to red
 
 if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
     set -x
@@ -73,14 +76,47 @@ graph_title Fresh backups
 graph_info Number of fresh (<=${LIFETIME}d) backups archives in ${BACKUP_DIR}
 graph_args -l 0
 graph_category backup
-freshcount.label files fresher than ${LIFETIME}d
+age0.label today
+age0.draw AREA
+age0.colour ${COLOUR[0]}
+age0.critical :
+age0.warning :
+EOF
+for AGE in $(seq 1 "${LIFETIME}"); do
+	cat << EOF
+age${AGE}.label older than $((AGE*24))h
+age${AGE}.draw STACK
+age${AGE}.colour ${COLOUR[$AGE]}
+age${AGE}.warning :
+age${AGE}.critical :
+EOF
+done
+cat << EOF
+freshcount.label ${ARCHIVE_PATTERN} files fresher than ${LIFETIME}d
 freshcount.critical ${CRIT}:
 freshcount.warning ${WARN}:
+freshcount.colour 0080FF
 EOF
         exit 0;;
 esac
 
-printf "freshcount.value "
-find "${BACKUP_DIR}" -name "${ARCHIVE_PATTERN}" -mmin "-$(((LIFETIME+1)*60*24))" | wc  -l
-printf "freshcount.extinfo "
-du -sh "${BACKUP_DIR}"
+for AGE in $(seq 0 "${LIFETIME}"); do
+	FILES=$(find "${BACKUP_DIR}" \
+		-name "${ARCHIVE_PATTERN}" \
+		-mmin "-$(((AGE+1)*60*24))" \
+		-not -mmin "-$(((AGE)*60*24))" \
+		)
+	COUNT="$(echo "${FILES}" \
+		 | wc -l)"
+	echo "age${AGE}.value $((COUNT))"
+	# shellcheck disable=SC2086
+	echo "age${AGE}.extinfo $(echo ${FILES}  | sort | sed "s^${BACKUP_DIR}^^g")"
+done
+
+COUNT=$(find "${BACKUP_DIR}" \
+	-name "${ARCHIVE_PATTERN}" \
+	-mmin "-$(((LIFETIME+1)*60*24))" \
+	| wc -l)
+# The last count is also our total count
+echo "freshcount.value ${COUNT}"
+echo "freshcount.extinfo $(du -sh "${BACKUP_DIR}")"
