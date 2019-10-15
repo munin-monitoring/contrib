@@ -76,19 +76,18 @@ graph_title Fresh backups
 graph_info Number of fresh (<=${LIFETIME}d) backups archives in ${BACKUP_DIR}
 graph_args -l 0
 graph_category backup
-age0.label today
-age0.draw AREA
-age0.colour ${COLOUR[0]}
-age0.critical :
-age0.warning :
 EOF
-for AGE in $(seq 1 "${LIFETIME}"); do
+for AGE in $(seq "${LIFETIME}" -1 0); do
+	if [ "${AGE}" = 0 ]; then
+		echo "age${AGE}.label today"
+	else
+		echo "age${AGE}.label older than $((AGE*24))h"
+	fi
 	cat << EOF
-age${AGE}.label older than $((AGE*24))h
-age${AGE}.draw STACK
+age${AGE}.draw AREASTACK
 age${AGE}.colour ${COLOUR[$AGE]}
-age${AGE}.warning :
-age${AGE}.critical :
+age${AGE}.warning 
+age${AGE}.critical 
 EOF
 done
 cat << EOF
@@ -100,7 +99,7 @@ EOF
         exit 0;;
 esac
 
-for AGE in $(seq 0 "${LIFETIME}"); do
+for AGE in $(seq "${LIFETIME}" -1 0); do
 	FILES=$(find "${BACKUP_DIR}" \
 		-name "${ARCHIVE_PATTERN}" \
 		-mmin "-$(((AGE+1)*60*24))" \
