@@ -95,6 +95,7 @@ None known.
 
 Kjetil Torgrim Homme <kjetil.homme@redpill-linpro.com>
 Andreas Perhab, WT-IO-IT GmbH <andreas.perhab@wt-io-it.at>
+Temperature support by Air
 
 =head1 LICENSE
 
@@ -347,6 +348,20 @@ $_.max 100
 EOF
         my_print_thresholds($_, 'nvme_spare', $device, '10:', '3:');
     }
+    print <<'EOF';
+multigraph nvme_temperature
+graph_title NVME Temperature
+graph_order $sn_list
+graph_vlabel Temperature
+graph_category disk
+graph_info Temperature
+EOF
+    for (@sn) {
+        print <<"EOF";
+$_.label $list->{$_}->{device} temperature
+$_.type GAUGE
+EOF
+    }
 } else {
     for (@sn) {
         $list->{$_}->{smart} = smart_log($list->{$_}->{device});
@@ -381,5 +396,12 @@ EOF
         my $spare = $info->{smart}->{available_spare};
         $spare =~ s/%//;
         print "$_.value $spare\n";
+    }
+    print "multigraph nvme_temperature\n";
+    for (@sn) {
+        my $info = $list->{$_};
+        my $temperature = $info->{smart}->{temperature};
+        $temperature =~ s/^(\d+).*/$1/;
+        print "$_.value $temperature\n";
     }
 }
