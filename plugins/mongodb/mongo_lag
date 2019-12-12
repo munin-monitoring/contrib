@@ -7,9 +7,11 @@
     replication lag for all connected members.
 
     munin-node.conf:
-    [mongodb_lag]
+    [mongo_lag]
     env.host 127.0.0.1
     env.port 27017
+    env.username user
+    env.password P@55w0rd
 
     :author: Stefan Andersen <stefan@stefanandersen.dk>
     :license: The Beer Ware License (Revision 42)
@@ -25,8 +27,15 @@ import pymongo
 def _get_members():
     host = os.environ.get('host', '127.0.0.1')
     port = os.environ.get('port', 27017)
-    conn = pymongo.MongoClient(host,port)
-    repl_status = conn.admin.command("replSetGetStatus")
+    username = os.environ.get('username', '')
+    password = os.environ.get('password', '')
+    conn = pymongo.MongoClient(host,int(port))
+    if username:
+        connAuth = conn['admin']
+        connAuth.authenticate(username, password)
+        repl_status = conn.admin.command("replSetGetStatus")
+    else:
+        repl_status = conn.admin.command("replSetGetStatus")
 
     members = {}
     for member in repl_status['members']:
