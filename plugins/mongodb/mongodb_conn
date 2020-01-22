@@ -1,12 +1,12 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
     MongoDB Connection Count Plugin
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     Connects to a single mongo instance and retrieve
-    replication lag for all connected connections.
+    replication lag for all connected connections. Working on mongodb v4.
 
-    munin-node.conf:
+    munin-node.conf (defauts for host is 127.0.0.1 and port 27017 and will work without being defined) :
     [mongodb_conn]
     env.host 127.0.0.1
     env.port 27017
@@ -24,6 +24,7 @@ import os
 import sys
 import pymongo
 
+
 def _get_connections():
     host = os.environ.get('host', '127.0.0.1')
     port = os.environ.get('port', 27017)
@@ -38,24 +39,26 @@ def _get_connections():
     conn_status = conn.admin.command("serverStatus")['connections']
     return conn_status
 
+
 def run():
     connections = _get_connections();
     for connection, value in connections.items():
-        print connection + ".value", value
+        print(connection + ".value", value)
+
 
 def config():
-    print """
+    print("""
 graph_title MongoDB Connections Count
 graph_vlabel Connections count
-graph_category mongodb
+graph_category db
 graph_args --base 1000 -l 0
 current.label current
-current.draw LINE1
+current.draw AREASTACK
 available.label available
-available.draw LINE2
+available.draw AREASTACK
 active.label active
-active.draw LINE3
-"""
+active.draw AREASTACK
+""")
 
 """ Bonus (not included by default) :
 totalCreated.type DERIVE
@@ -63,6 +66,7 @@ totalCreated.label totalCreated
 totalCreated.draw LINE
 totalCreated.min 0
 """
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "config":
