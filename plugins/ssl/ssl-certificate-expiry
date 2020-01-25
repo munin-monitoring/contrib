@@ -94,9 +94,15 @@ parse_valid_days_from_certificate() {
         valid_until_string=$(echo "$input_data" | openssl x509 -noout -enddate \
             | grep "^notAfter=" | cut -f 2 -d "=")
         if [ -n "$valid_until_string" ]; then
-            valid_until_epoch=$(date --date="$valid_until_string" +%s)
-            if [ -n "$valid_until_epoch" ]; then
+            # FreeBSD requires special arguments for "date"
+            if uname | grep -q ^FreeBSD; then
+                valid_until_epoch=$(date -j -f '%b %e %T %Y %Z' "$valid_until_string" +%s)
+                now_epoch=$(date -j +%s)
+            else
+                valid_until_epoch=$(date --date="$valid_until_string" +%s)
                 now_epoch=$(date +%s)
+            fi
+            if [ -n "$valid_until_epoch" ]; then
                 # calculate the number of days left
                 echo "$valid_until_epoch" "$now_epoch" | awk '{ print(($1 - $2) / (24 * 3600)); }'
             fi
