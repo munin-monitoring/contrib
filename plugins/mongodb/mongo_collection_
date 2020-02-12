@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # vim: set sts=4 sw=4 encoding=utf-8
 
@@ -29,8 +29,8 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#%# family=auto
-#%# capabilities=suggest autoconf
+# %# family=auto
+# %# capabilities=suggest autoconf
 
 
 import pymongo
@@ -88,40 +88,39 @@ typeIndex['indexsize']['category'] = 'db'
 
 
 def getCollstats(graphtype):
-        if settings_mongodb_uri:
-                con = pymongo.MongoClient(settings_mongodb_uri)
-        else:
-                con = pymongo.MongoClient(settings_host, int(settings_port))
+    if settings_mongodb_uri:
+        con = pymongo.MongoClient(settings_mongodb_uri)
+    else:
+        con = pymongo.MongoClient(settings_host, int(settings_port))
 
-        if settings_user:
-                db = con[settings_db]
-                db.authenticate(settings_user, settings_password)
+    if settings_user:
+        db = con[settings_db]
+        db.authenticate(settings_user, settings_password)
 
-        stats_tmp = {}
-        for dbname in con.list_database_names():
-                if dbname in settings_ignoredb:
-                    continue
-                db = con[dbname]
-                for coll in db.list_collection_names():
-                        if coll.startswith('system.'):
-                                continue
-                        stats = db.command("collstats", coll)
-                        collname = dbname + "_" + coll.replace('.', '_')
-                        if not collname in stats_tmp:
-                                stats_tmp[collname] = {}
-                                stats_tmp[collname]['value'] = 0
-                                stats_tmp[collname]['dbname'] = dbname
-                        if typeIndex[graphtype]['index'] in stats:
-                            stats_tmp[collname]['value'] += int(stats[typeIndex[graphtype]['index']])
+    stats_tmp = {}
+    for dbname in con.list_database_names():
+        if dbname in settings_ignoredb:
+            continue
+        db = con[dbname]
+        for coll in db.list_collection_names():
+            if coll.startswith('system.'):
+                continue
+            stats = db.command("collstats", coll)
+            collname = dbname + "_" + coll.replace('.', '_')
+            if collname not in stats_tmp:
+                stats_tmp[collname] = {}
+                stats_tmp[collname]['value'] = 0
+                stats_tmp[collname]['dbname'] = dbname
+            if typeIndex[graphtype]['index'] in stats:
+                stats_tmp[collname]['value'] += int(stats[typeIndex[graphtype]['index']])
+
+    con.close()
+
+    for collname, item in sorted(stats_tmp.items()):
+        yield ("%s" % collname, item['value'], item['dbname'])
 
 
-        con.close()
-
-        for collname, item in sorted(stats_tmp.items()):
-                yield ("%s" % collname, item['value'], item['dbname'])
-
-
-def doData(base,graphtype):
+def doData(base, graphtype):
     lastdb = ""
     for coll, stats, db in sorted(getCollstats(graphtype), key=itemgetter(2)):
         if lastdb != db:
@@ -130,10 +129,10 @@ def doData(base,graphtype):
         print("%s_%s.value %s" % (graphtype, coll, stats))
 
 
-def doConfig(base,graphtype):
+def doConfig(base, graphtype):
 
     lastdb = ""
-    for k,v,d in sorted(getCollstats(graphtype), key=itemgetter(2)):
+    for k, v, d in sorted(getCollstats(graphtype), key=itemgetter(2)):
         if lastdb != d:
             print("multigraph " + base + "_" + graphtype + "_" + d)
             lastdb = d
@@ -145,15 +144,16 @@ def doConfig(base,graphtype):
         print("%s_%s.min 0" % (graphtype, k))
         print("%s_%s.draw LINE1" % (graphtype, k))
 
+
 def doSuggest():
-        print("keys")
-        for k in typeIndex.keys():
-                print(k)
+    print("keys")
+    for k in typeIndex.keys():
+        print(k)
 
 
 if __name__ == "__main__":
-    from sys import argv,exit
-    from os import environ,path
+    from sys import argv, exit
+    from os import environ, path
     import re
 
     # Could be done by a for loop
@@ -172,9 +172,9 @@ if __name__ == "__main__":
         settings_ignoredb = environ['ignoredb'].split(',')
     m = re.search('^(.*)_([a-zA-Z0-9]*)$', path.basename(argv[0]))
     if len(argv) < 2:
-        doData(m.group(1),m.group(2))
+        doData(m.group(1), m.group(2))
     elif argv[1] == "config":
-        doConfig(m.group(1),m.group(2))
+        doConfig(m.group(1), m.group(2))
     elif argv[1] == "autoconf":
         print("yes")
     elif argv[1] == "suggest":
