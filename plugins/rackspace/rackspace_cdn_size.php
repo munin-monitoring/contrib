@@ -16,8 +16,8 @@ $api_url='https://auth.api.rackspacecloud.com/v1.0/';
 
 function SplitTwice($content,$first,$second) {
         $s1=split($first,$content);
-        $splitted=split($second,$s1[1]);
-        return trim($splitted[0]);
+        $tokens=split($second,$s1[1]);
+        return trim($tokens[0]);
     }
 
 
