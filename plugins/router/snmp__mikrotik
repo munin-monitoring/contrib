@@ -1,0 +1,139 @@
+#!/usr/bin/perl -w
+
+=head1 NAME
+
+snmp__mikrotik - monitor Mikrotik routers via SNMP
+
+=head1 APPLICABLE SYSTEMS
+
+Mikrotik Routers
+
+=head1 CONFIGURATION
+
+As a rule SNMP plugins need site specific configuration.  The default
+configuration (shown here) will only work on insecure sites/devices.
+   [snmp_*]
+        env.version 2
+        env.community public
+
+=head1 MAGIC MARKERS
+
+#%# family=snmpauto
+#%# capabilities=snmpconf
+
+=head1 BUGS
+
+None known.
+
+=head1 AUTHOR
+
+Copyright (C) 2020 Alejandro Suarez (teconecta.es)
+Based on snmp__if_  plugin.
+
+=head1 LICENSE
+
+GPLv2.
+
+=cut
+
+use strict;
+use Net::SNMP;
+
+my $DEBUG = 0;
+
+my $host      = $ENV{host}      || undef;
+my $port      = $ENV{port}      || 161;
+my $community = $ENV{community} || "public";
+
+my $sysFlashUsageOID = "1.3.6.1.2.1.25.2.3.1.6.131072";
+my $sysFlashTotalOID = "1.3.6.1.2.1.25.2.3.1.5.131072";
+my $sysRAMUsageOID = "1.3.6.1.2.1.25.2.3.1.6.65536";
+my $sysRAMTotalOID = "1.3.6.1.2.1.25.2.3.1.5.65536";
+
+my $response;
+
+if (defined $ARGV[0] and $ARGV[0] eq "snmpconf") {
+    print "require $sysFlashUsageOID\n";
+    print "require $sysFlashTotalOID\n";
+    print "require $sysRAMUsageOID\n";
+    print "require $sysRAMTotalOID\n";
+    exit 0;
+}
+
+if ($0 =~ /^(?:|.*\/)snmp_([^_]+)_mikrotik$/) {
+    $host  = $1;
+    if ($host =~ /^([^:]+):(\d+)$/) {
+        $host = $1;
+        $port = $2;
+    }
+} elsif (!defined($host)) {
+    print "# Debug: $0 -- $1\n" if $DEBUG;
+    die "# Error: couldn't understand what I'm supposed to monitor.";
+}
+
+my ($session, $error) = Net::SNMP->session(
+                -hostname  => $host,
+                -community => $community,
+                -port      => $port
+        );
+
+
+die "Croaking: $error" unless (defined ($session));
+
+
+if ($ARGV[0] and $ARGV[0] eq "config") {
+    print "host_name $host\n";
+    $response = $session->get_request($sysFlashTotalOID);
+    if (defined $response) {
+        print "multigraph flash\n";
+        print "graph_args --base 1024 -l 0 --vertical-label Bytes --upper-limit " . ($response->{$sysFlashTotalOID} * 1024) . "\n";
+        print "graph_title Flash disk usage\n";
+        print "graph_category system\n";
+        print "graph_info This graph shows the router's flash disk usage.\n";
+        print "graph_order Total Used\n";
+        print "graph_vlabel bytes\n";
+        print "sysFlashTotal.label Total Memory\n";
+        print "sysFlashTotal.draw AREA\n";
+        print "sysFlashUsage.label Used Memory\n";
+        print "sysFlashUsage.draw AREA\n";
+    }
+
+    $response = $session->get_request($sysRAMTotalOID);
+    if (defined $response) {
+        print "multigraph ram\n";
+        print "graph_args --base 1024 -l 0 --vertical-label Bytes --upper-limit " . ($response->{$sysRAMTotalOID} * 1024) . "\n";
+        print "graph_title RAM usage\n";
+        print "graph_category system\n";
+        print "graph_info This graph shows the router's memory usage.\n";
+        print "graph_order Total Used\n";
+        print "graph_vlabel bytes\n";
+        print "sysRAMTotal.label Total Memory\n";
+        print "sysRAMTotal.draw AREA\n";
+        print "sysRAMUsage.label Used Memory\n";
+        print "sysRAMUsage.draw AREA\n";
+    }
+    exit 0 unless (($ENV{MUNIN_CAP_DIRTYCONFIG} || 0) == 1);
+}
+
+
+print "multigraph flash\n";
+$response = $session->get_request(-varbindlist => [$sysFlashUsageOID, $sysFlashTotalOID]);
+if (defined $response) {
+        print "sysFlashUsage.value ", $response->{$sysFlashUsageOID}*1024, "\n";
+        print "sysFlashTotal.value ", $response->{$sysFlashTotalOID}*1024, "\n";
+} else {
+        print "sysFlashUsage.value U\n";
+        print "sysFlashTotal.value U\n";
+}
+
+print "multigraph ram\n";
+$response = $session->get_request(-varbindlist => [$sysRAMUsageOID, $sysRAMTotalOID]);
+if (defined $response) {
+        print "sysRAMUsage.value ", $response->{$sysRAMUsageOID}*1024, "\n";
+        print "sysRAMTotal.value ", $response->{$sysRAMTotalOID}*1024, "\n";
+} else {
+        print "sysRAMUsage.value U\n";
+        print "sysRAMTotal.value U\n";
+}
+
+# vim:syntax=perl
