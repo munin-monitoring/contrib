@@ -27,6 +27,7 @@
 #	ip		rTorrent's ip address			- using scgi_port	- needed, when "src" is NOT set to "socket"
 #	port		rTorrent's scgi port (scgi_port)	- using scgi_port	- needed, when "src" is NOT set to "socket"
 #	category        Change graph category
+#	api		use "pre09" (pre 0.9.0) or "current" (0.9.0+, the default) API calls
 #
 # Configuration example
 #
@@ -63,10 +64,16 @@ my $src 	= $ENV{"src"} || "";
 my $ip		= $ENV{"ip"} || "127.0.0.1";
 my $port	= $ENV{"port"} || "5000";
 my $socket	= $ENV{"socket"} || "";
+my $api         = $ENV{"api"} || "current";
 
 my $pattern	= qr/<value><(int|i4|i8|ex\.i8)>(\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
+my $line        = "";
+if ($api =~ /pre09/) {
+  $line		= "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>get_memory_usage</methodName></methodCall>";
+} else {
+  $line         = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>pieces.memory.current</methodName></methodCall>";
+}
 
-my $line	= "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>get_memory_usage</methodName></methodCall>";
 my $llen	= length $line;
 my $header	= "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
 my $hlen	= length $header;

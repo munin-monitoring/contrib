@@ -39,6 +39,7 @@
 #	port		rTorrent's scgi port (scgi_port)	- using scgi_port	- needed, when "src" is NOT set to "socket"
 #	category        Change graph category
 #	diff		"yes" for using bps for upload and Bps for download, or anything else for using Bps for both
+#	api		use "pre09" (pre 0.9.0) or "current" (0.9.0+, the default) API calls
 #
 #
 # Configuration example
@@ -102,10 +103,17 @@ my $src 	= $ENV{"src"} || "";
 my $ip		= $ENV{"ip"} || "127.0.0.1";
 my $port	= $ENV{"port"} || "5000";
 my $socket	= $ENV{"socket"} || "";
+my $api         = $ENV{"api"} || "current";
 
 my $pattern	= qr/<value><(int|i4|i8|ex\.i8)>([-]{0,1}\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
 
-my $line	= "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>system.multicall</methodName><params><param><value><array><data><value><struct><member><name>methodName</name><value><string>get_up_total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_down_total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_upload_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_download_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value></data></array></value></param></params></methodCall>";
+my $line        = "";
+if ($api =~ /pre09/) {
+  $line		= "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>system.multicall</methodName><params><param><value><array><data><value><struct><member><name>methodName</name><value><string>get_up_total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_down_total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_upload_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>get_download_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value></data></array></value></param></params></methodCall>";
+} else {
+  $line         = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>system.multicall</methodName><params><param><value><array><data><value><struct><member><name>methodName</name><value><string>throttle.global_up.total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>throttle.global_down.total</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>throttle.global_up.max_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>throttle.global_down.max_rate</string></value></member><member><name>params</name><value><array><data/></array></value></member></struct></value></data></array></value></param></params></methodCall>";
+}
+
 my $llen	= length $line;
 my $header	= "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
 my $hlen	= length $header;
