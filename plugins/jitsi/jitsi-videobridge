@@ -1,0 +1,67 @@
+#!/bin/bash
+# -*- sh -*-
+
+: <<=cut
+
+=head1 NAME
+
+jitsi-videobridge-conferences - Jitsi conferences
+
+=head1 APPLICABLE SYSTEMS
+
+Any system with jitsi-videobridge installed and enabled colibri 
+statistics
+
+=head1 CONFIGURATION
+
+No configuration necessary.
+
+=head1 INTERPRETATION
+
+This plugin collects statistics from the jitsi-videobridge HTTP-API.
+
+=head1 MAGIC MARKERS
+
+  #%# family=manual
+  #%# capabilities=autoconf
+
+=head1 BUGS
+
+None known
+
+=head1 AUTHOR
+
+benedikt.wegmann@gwdg.de
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+        echo "graph_title conferences"
+        echo "graph_category jitsi-videobridge"
+        echo 'graph_args --base 1000 -l 0'
+fi
+
+XSTATS=$(curl -s -f -m 3 http://localhost:8080/colibri/stats)
+
+for STAT in participants total_channels videochannels audiochannels total_failed_conferences total_conferences_completed total_conferences_created total_partially_failed_conferences conferences; do
+  if [ "$1" = "config" ]; then
+    echo "jitsi_${STAT}.label ${STAT}"
+    echo "jitsi_${STAT}.draw LINE2"
+  else
+    echo "jitsi_${STAT}.value "$(echo $XSTATS | jq ".$STAT")
+  fi
+done
+
+exit 0
+
