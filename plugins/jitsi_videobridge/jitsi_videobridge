@@ -45,25 +45,17 @@ GPLv2
 
 COLIBRI_URL=${url:-"http://127.0.0.1:8080/colibri/stats"}
 
-get_json_data() {
-    echo $(curl -s -f -m 2 "$COLIBRI_URL")
-}
-
 case $1 in
 
     autoconf)
         if [ -x /usr/bin/curl ]; then
             if [ -x /usr/bin/jq ]; then
-                get_json_data || echo "no (no valid env.url)" && exit 0
-                echo "yes"
-                exit 0
+	        curl -s -f -m 2 -I "$COLIBRI_URL" > /dev/null && echo "yes" && exit 0 || echo "no (no valid env.url)" && exit 0
             else
-                echo "no (jq not found)"
-                exit 0
+                echo "no (jq not found)" && exit 0
             fi
         else
-            echo "no (/usr/bin/curl not found)"
-            exit 0
+            echo "no (/usr/bin/curl not found)" && exit 0
         fi
         ;;
 
@@ -120,7 +112,7 @@ case $1 in
 
 esac
 
-JSONSTATS=$(get_json_data)
+JSONSTATS=$(curl -s -f -m 2 "$COLIBRI_URL")
 
 echo "multigraph jitsi_videobridge_sessions"
 for KEY in videochannels audiochannels videostreams conferences participants; do
