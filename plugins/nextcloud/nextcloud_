@@ -1,0 +1,235 @@
+#!/bin/sh
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+nextcloud_ - Monitor usage of nextcloud instances
+
+=head1 APPLICABLE SYSTEMS
+
+Nexcloud instances
+
+=head1 CONFIGURATION
+
+Requires installed curl and jq, a command-line json processor.
+
+This is a wildcard plugin. To monitor a nextcloud instance, link
+nextcloud_<nextcloud-domain> to this file. You can even append a port 
+(:8443) to the file if needed. For example,
+
+  ln -s /usr/share/munin/plugins/nextcloud_ \
+        /etc/munin/plugins/nextcloud_cloud.domain.tld
+
+Set username and password in your munin-node configuration
+
+[nextcloud_cloud.domain.tld]
+env.username <nexcloud_user>
+env.password <nextcloud_password>
+
+It's advised to set an app password (for this plugin) in your nextcloud 
+instance and not to use the "real" password of your nextcloud user.
+
+=head1 AUTHOR
+
+Copyright (C) 2020 Sebastian L. (https://momou.ch)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+API_PATH="/ocs/v2.php/apps/serverinfo/api/v1/info?format=json"
+DOMAIN="${0##*nextcloud_}"
+CLEANDOMAIN="$(clean_fieldname "$DOMAIN")"
+USERNAME="${username:-}"
+PASSWORD="${password:-}"
+
+print_json_data() {
+    local FIRST="$1"
+    [ -z "$FIRST" ] && exit 0
+    shift 1
+    for KEY in "$@"; do
+        VALUE=$(echo "$FIRST" | jq -cr ".$KEY")
+        echo "$KEY.value $VALUE"
+   done
+}
+
+test_https() {
+    [ -z "$DOMAIN" ] && exit 0
+    curl -s -f -m 2 -I "https://$DOMAIN" > /dev/null && echo true && exit 0
+}
+
+case $1 in
+
+    autoconf)
+        if [ -x /usr/bin/curl ]; then
+            if [ -x /usr/bin/jq ]; then
+                [ "$(test_https)" ] && DOMAIN="https://$DOMAIN" || DOMAIN="http://$DOMAIN"
+                curl -s -f -m 2 -u "$USERNAME:$PASSWORD" -I "$DOMAIN$API_PATH" | grep -iq "Content-Type: application/json" && echo "yes" && exit 0 || echo "no (invalid or empty response from nextlcoud serverinfo api)" && exit 0
+            else
+                echo "no (jq not found)" && exit 0
+            fi
+        else
+            echo "no (/usr/bin/curl not found)" && exit 0
+        fi
+        ;;
+
+   config)
+
+cat << EOM
+multigraph nextcloud_users_$CLEANDOMAIN
+graph_title Nextcloud users on $DOMAIN
+graph_args --base 1000 -l 0
+graph_printf %.0lf
+graph_vlabel connected users
+graph_info number of connected user
+graph_category cloud
+last5minutes.label last 5 minutes
+last5minutes.info users connected in the last 5 minutes
+last5minutes.min 0
+last1hour.label last hour
+last1hour.info users connected in the last hour
+last1hour.min 0
+last24hours.label last 24 hours
+last24hours.info users connected in the last 24 hours
+last24hours.min 0
+num_users.label number of users
+num_users.info total number of users
+num_users.min 0
+multigraph nextcloud_files_$CLEANDOMAIN
+graph_title Nextcloud files on $DOMAIN
+graph_args --base 1000 -l 0
+graph_printf %.0lf
+graph_vlabel number of files
+graph_info number of files
+graph_category cloud
+num_files.label number of files
+num_files.info current number of files
+num_files.min 0
+multigraph nextcloud_shares_$CLEANDOMAIN
+graph_title Nextcloud shares on $DOMAIN
+graph_args --base 1000 -l 0
+graph_printf %.0lf
+graph_vlabel number of shares
+graph_info number of shares
+graph_category cloud
+num_shares.label total number of shares
+num_shares.info current over all total of shares
+num_shares.min 0
+num_shares_user.label user shares
+num_shares_user.info current total of user shares
+num_shares_user.min 0
+num_shares_groups.label group shares
+num_shares_groups.info current total of group shares
+num_shares_groups.min 0
+num_shares_link.label link shares
+num_shares_link.info current total of link shares
+num_shares_link.min 0
+num_shares_mail.label mail shares
+num_shares_mail.info current total of mail shares
+num_shares_mail.min 0
+num_shares_room.label room shares
+num_shares_room.info current total of room shares
+num_shares_room.min 0
+num_shares_link_no_password.label link shares without password protection
+num_shares_link_no_password.info current total of link shares without password protection
+num_shares_link_no_password.min 0
+num_fed_shares_sent.label federated shares sent
+num_fed_shares_sent.info current total of federated shares sent
+num_fed_shares_sent.min 0
+num_fed_shares_received.label federated shares received
+num_fed_shares_received.info current total of federated shares received
+num_fed_shares_received.min 0
+multigraph nextcloud_dbsize_$CLEANDOMAIN
+graph_title Nextcloud database size on $DOMAIN
+graph_args --base 1024 -l 0
+graph_vlabel size in bytes
+graph_info database database size in bytes
+graph_category cloud
+db_size.label database size in bytes
+db_size.info database size in bytes
+db_size.draw AREA
+db_size.min 0
+multigraph nextcloud_storages_$CLEANDOMAIN
+graph_title Nextcloud storages on $DOMAIN
+graph_args --base 1000 -l 0
+graph_printf %.0lf
+graph_vlabel number
+graph_info number of storages
+graph_category cloud
+num_storages.label total number of storages
+num_storages.info current total of storages
+num_storages.min 0
+num_storages_local.label number of local storages
+num_storages_local.info current number of local storages
+num_storages_local.min 0
+num_storages_home.label number of home storages
+num_storages_home.info current number of home storages
+num_storages_home.min 0
+num_storages_other.label number of other storages
+num_storages_other.info current number of other storages
+num_storages_other.min 0
+multigraph nextcloud_app_$CLEANDOMAIN
+graph_title Nextcloud apps on $DOMAIN
+graph_args --base 1000 -l 0
+graph_printf %.0lf
+graph_vlabel apps
+graph_info number of installed and updatable apps
+graph_category cloud
+num_updates_available.label available app updates
+num_updates_available.info number of available app updates
+num_updates_available.min 0
+num_updates_available.warning 1
+num_installed.label installed apps
+num_installed.info number of installed apps
+num_installed.min 0
+EOM
+	exit 0
+        ;;
+
+esac
+
+# Get JSON data
+[ "$(test_https)" ] && DOMAIN="https://$DOMAIN" || DOMAIN="http://$DOMAIN"
+JSONSTATS=$(curl -s -f -m 2 -u "$USERNAME:$PASSWORD" "$DOMAIN$API_PATH" | sed 's/\\/\\\\/g' | jq -cr ".ocs.data")
+USERS=$(echo "$JSONSTATS" | jq -cr ".activeUsers")
+STORAGE=$(echo "$JSONSTATS" | jq -cr ".nextcloud.storage")
+SHARES=$(echo "$JSONSTATS" | jq -cr ".nextcloud.shares")
+DBSIZE=$(echo "$JSONSTATS" | jq -cr ".server.database.size")
+APPS=$(echo "$JSONSTATS" | jq -cr ".nextcloud.system.apps")
+
+# users
+echo "multigraph nextcloud_users_$CLEANDOMAIN"
+print_json_data "$USERS" last5minutes last1hour last24hours
+print_json_data "$STORAGE" num_users
+
+# files
+echo "multigraph nextcloud_files_$CLEANDOMAIN"
+print_json_data "$STORAGE" num_files
+
+# storages
+echo "multigraph nextcloud_storages_$CLEANDOMAIN"
+print_json_data "$STORAGE" num_storages num_storages_local num_storages_home num_storages_other
+
+# shares
+echo "multigraph nextcloud_shares_$CLEANDOMAIN"
+print_json_data "$SHARES" num_shares num_shares_user num_shares_groups num_shares_link num_shares_mail num_shares_room num_shares_link_no_password num_fed_shares_sent num_fed_shares_received
+
+# dbsize
+echo "multigraph nextcloud_dbsize_$CLEANDOMAIN"
+echo "db_size.value $DBSIZE"
+
+# apps
+echo "multigraph nextcloud_app_updates_$CLEANDOMAIN"
+print_json_data "$APPS" num_installed num_updates_available
