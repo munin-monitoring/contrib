@@ -64,10 +64,6 @@ case $1 in
         echo "graph_title Current jitsi-videobridge sessions"
         echo "graph_info Current jitsi-videobridge sessions"
         echo "graph_vlabel current sesssions"
-        echo "jitsi_videostreams.label videostreams"
-        echo "jitsi_videostreams.info current number of videostreams"
-        echo "jitsi_videostreams.min 0"
-        echo "jitsi_videostreams.draw AREA"
         echo "graph_args --base 1000 -l 0"
         echo "jitsi_videochannels.label videochannels"
         echo "jitsi_videochannels.info current number of videochannels"
@@ -85,6 +81,14 @@ case $1 in
         echo "jitsi_participants.info current number of participants"
         echo "jitsi_participants.min 0"
         echo "jitsi_participants.draw LINE2"
+        echo "multigraph jitsi_videobridge_streams"
+        echo "graph_title Current jitsi-videobridge videostreams"
+        echo "graph_info Current jitsi-videobridge videostreams"
+        echo "graph_vlabel current videostreams"
+        echo "graph_args --base 1000 -l 0"
+        echo "jitsi_videostreams.label videostreams"
+        echo "jitsi_videostreams.info current number of videostreams"
+        echo "jitsi_videostreams.min 0"
         echo "multigraph jitsi_videobridge_conferences"
         echo "graph_title Total of jitsi-videobridge conferences"
         echo "graph_info Total of jitsi-videobridge conferences"
@@ -115,10 +119,14 @@ esac
 JSONSTATS=$(curl -s -f -m 2 "$COLIBRI_URL")
 
 echo "multigraph jitsi_videobridge_sessions"
-for KEY in videochannels audiochannels videostreams conferences participants; do
+for KEY in videochannels audiochannels conferences participants; do
     VALUE=$(echo "$JSONSTATS" | jq -r ".$KEY // \"U\"")
     echo "jitsi_${KEY}.value $VALUE"
 done
+
+echo "multigraph jitsi_videobridge_streams"
+VALUE=$(echo "$JSONSTATS" | jq -r ".videostreams // \"U\"")
+echo "jitsi_videostreams.value $VALUE"
 
 echo "multigraph jitsi_videobridge_conferences"
 for KEY in total_conferences_created total_failed_conferences total_partially_failed_conferences total_conferences_completed; do
