@@ -1,0 +1,160 @@
+
+		<!--
+			File: partial/search_and_reload.tmpl
+
+			Used: All views, generates the search functionality, and the auto-reload stuff.
+		-->
+
+		<script>
+			// $('img').each(function(){ if (this.src.length > 0) {
+			//         console.log(this.src);
+			// 	} });
+
+
+
+			// This is used to build the navigation quick search - there is no backend, so we have to do 
+			// it all client side.
+			//
+			// As a curious side note, commenting out the template loops and whatnot allows vscode to parse
+			// the javascript - so please note that the commented out TMPL directives STILL FUNCTION.
+			var gen_basegroups = {
+				// <TMPL_LOOP NAME="ROOTGROUPS">
+					"<TMPL_VAR NAME='NAME' />" : {
+						"baseurl" :  "<TMPL_VAR NAME='R_PATH' />/<TMPL_VAR NAME='URL'>",
+						"compare" : {
+							// <TMPL_IF NAME="COMPARE">
+								"Day"   : "<TMPL_VAR NAME='R_PATH' />/<TMPL_LOOP NAME='PATH' /><TMPL_IF NAME='pathname'><TMPL_VAR ESCAPE='URL' NAME='PATHNAME' />/</TMPL_IF></TMPL_LOOP>comparison-day.html",
+								"Week"  : "<TMPL_VAR NAME='R_PATH' />/<TMPL_LOOP NAME='PATH' /><TMPL_IF NAME='pathname'><TMPL_VAR ESCAPE='URL' NAME='PATHNAME' />/</TMPL_IF></TMPL_LOOP>comparison-week.html",
+								"Month" : "<TMPL_VAR NAME='R_PATH' />/<TMPL_LOOP NAME='PATH' /><TMPL_IF NAME='pathname'><TMPL_VAR ESCAPE='URL' NAME='PATHNAME' />/</TMPL_IF></TMPL_LOOP>comparison-month.html",
+								"Year"  : "<TMPL_VAR NAME='R_PATH' />/<TMPL_LOOP NAME='PATH' /><TMPL_IF NAME='pathname'><TMPL_VAR ESCAPE='URL' NAME='PATHNAME' />/</TMPL_IF></TMPL_LOOP>comparison-year.html"
+							// </TMPL_IF>
+						}
+					},
+				// </TMPL_LOOP>
+			};
+			var gen_hosts = {
+				// <TMPL_LOOP NAME="ROOTGROUPS">
+					// <TMPL_LOOP NAME="GROUPS">
+						// <TMPL_IF NAME="NCATEGORIES">
+							"<TMPL_VAR ESCAPE='HTML' NAME='NAME' />" : {
+								"baseurl" : "<TMPL_VAR NAME='R_PATH' />/<TMPL_VAR NAME='URL'>",
+								"services" : {
+								// <TMPL_LOOP NAME="CATEGORIES">
+									"<TMPL_VAR ESCAPE='HTML' NAME='NAME' />" : "<TMPL_VAR NAME='R_PATH' />/<TMPL_VAR NAME='URL' />",
+								// </TMPL_LOOP>
+								}
+							},
+						// </TMPL_IF>
+					// </TMPL_LOOP>
+				// </TMPL_LOOP>
+			};
+			var gen_cats = {
+				// <TMPL_LOOP NAME="GLOBALCATS">
+					"Category :: <TMPL_VAR NAME='NAME'> :: Day" : {
+						"baseurl" : "<TMPL_VAR NAME='R_PATH' />/<TMPL_VAR NAME='URLDAY'>"
+					},
+					"Category :: <TMPL_VAR NAME='NAME'> :: Week" : {
+						"baseurl" : "<TMPL_VAR NAME='R_PATH' />/<TMPL_VAR NAME='URLWEEK'>"
+					},
+					"Category :: <TMPL_VAR NAME='NAME'> :: Month" : {
+						"baseurl" : "<TMPL_VAR NAME='R_PATH' />/<TMPL_VAR NAME='URLMONTH'>"
+					},
+					"Category :: <TMPL_VAR NAME='NAME'> :: Year" : {
+						"baseurl" : "<TMPL_VAR NAME='R_PATH' />/<TMPL_VAR NAME='URLYEAR'>"
+					},
+				// </TMPL_LOOP>
+			};
+
+			function absolute(p,o){var t=p.split("/"),n=o.split("/");t.pop();for(var r=0;r<n.length;r++)"."!=n[r]&&(".."==n[r]?t.pop():t.push(n[r]));return t.join("/")}
+
+			var navMap = [];
+
+			$.each( gen_cats, function( name, obby ) {
+				navMap.push( { "name" : name, "link" : absolute( location.href, obby.baseurl ) } );
+			});
+
+			$.each( gen_hosts, function( name, obby ) {
+				var host_name = name;
+				navMap.push( { "name" : "Host :: " + name, "link" : absolute( location.href, obby.baseurl ) } );
+				$.each( obby.services, function( svcname, url ) {
+					navMap.push( { "name" : "Service :: " + host_name + " :: " + svcname, "link" : absolute( location.href, url ) } );
+				});
+			});
+
+			$.each( gen_basegroups, function( name, obby ) {
+				var host_name = name;
+				navMap.push( { "name" : "Host :: " + name, "link" : absolute( location.href, obby.baseurl ) } );
+				$.each( obby.compare, function( svcname, url ) {
+					navMap.push( { "name" : "Compare :: " + host_name + " :: " + svcname, "link" : absolute(location.href, url) } );
+				});
+			});
+
+			var navMapB = new Bloodhound({
+				datumTokenizer: function ( d ) { return Bloodhound.tokenizers.whitespace( d.name ); },
+				queryTokenizer: Bloodhound.tokenizers.whitespace,
+				identify: function ( obj ) { return obj.link; },
+				local: navMap
+			});
+
+			$(document).ready(function(){
+				$( "#findthehost" ).typeahead({
+					hint      : true,
+					highlight : true,
+					minLength : 2,
+				},
+				{
+					name      : "navMap",
+					limit     : 10,
+					display   : "link",
+					source    : navMapB,
+					templates : {
+						suggestion : function ( data ) {
+							return "<div>" + data.name + "</div>";
+						}
+					}
+				}
+				);
+
+				$( "#findthehost" ).on( "typeahead:select", function() { $( "#formy1" ).submit(); } );
+
+				$( "#formy1" ).on( "submit", function() {
+					inputVal = $( "#findthehost" ).val();
+
+					if ( inputVal.substring( 0, 4 ) == "http" ) {
+						window.location.href = inputVal;
+					} else {
+						$( "#findthehost" ).typeahead( "val", "" );
+					}
+					return false;
+				});
+			});
+
+			function autoRefImages() {
+				$( "img" ).each(function () {
+					if ( this.src.length > 0 && (! $( this ).hasClass( "no-refresh" )) ) {
+						var thisURL = new URL( this.src );
+						thisURL.searchParams.set( "tt", new Date().getTime() );
+						this.src = thisURL.href;
+					}
+				});
+			}
+
+			$( document ).ready( function() {
+				if ( Cookies.get( "autorefreshimg" ) == 0 ) {
+					$( "#autorefimg" ).prop( "checked", false );
+				} else {
+					$( "#autorefimg" ).prop( "checked", true);
+					Cookies.set("autorefreshimg", "1", { expires: 60 });
+					window.autoreftimeout = setInterval( autoRefImages, 300000 );
+				}
+
+				$( "#autorefimg" ).on( "change", function() {
+					Cookies.set( "autorefreshimg", "0", { expires: 60 } )
+					clearInterval( window.autoreftimeout );
+					if ( $( "#autorefimg" ).is( ":checked" ) ) {
+						Cookies.set( "autorefreshimg", "1", { expires: 60 } );
+						window.autoreftimeout = setInterval( autoRefImages, 300000 );
+					}
+				});
+			})
+		</script>
