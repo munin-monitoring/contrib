@@ -50,6 +50,7 @@ https://docs.docker.com/compose/reference/envvars/):
 import os
 import sys
 import docker
+from multiprocessing import Process, Queue
 
 
 def print_containers_status(client):
@@ -84,9 +85,26 @@ def print_containers_status(client):
     print('dead.value', dead)
 
 
-def print_containers_cpu(client):
+def get_container_stats(container, q):
+    q.put(container.stats(stream=False))
+
+
+def parallel_container_stats(client):
+    proc_list = []
+    stats = {}
     for container in client.containers.list():
-        stats = container.stats(stream=False)
+        q = Queue()
+        p = Process(target=get_container_stats, args=(container, q))
+        proc_list.append({'proc': p, 'queue': q, 'container': container})
+        p.start()
+    for proc in proc_list:
+        proc['proc'].join()
+        stats[proc['container']] = proc['queue'].get()
+    return stats.items()
+
+
+def print_containers_cpu(client):
+    for container, stats in parallel_container_stats(client):
         cpu_count = len(stats["cpu_stats"]["cpu_usage"]["percpu_usage"])
         cpu_percent = 0.0
         cpu_delta = float(stats["cpu_stats"]["cpu_usage"]["total_usage"]) \
@@ -99,9 +117,8 @@ def print_containers_cpu(client):
 
 
 def print_containers_memory(client):
-    for container in client.containers.list():
-        stats = container.stats(stream=False)['memory_stats']
-        print(container.name + '.value', stats['stats']['total_rss'])
+    for container, stats in parallel_container_stats(client):
+        print(container.name + '.value', stats['memory_stats']['stats']['total_rss'])
 
 
 def main():
