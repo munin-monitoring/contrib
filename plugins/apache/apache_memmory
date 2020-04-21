@@ -56,12 +56,11 @@ if [ "$1" = "config" ]; then
     exit 0
 fi
 
-VAL1=`ps auxf | grep ${PROCS} | grep ^${USR} | grep -v grep | wc -l`
+matched_processes=$(ps auxf | grep -- "$PROCS" | grep "^$USR" | grep -v grep)
+if [ -n "$matched_processes" ]; then
+    average_memory=$(printf '%s' "$matched_processes" | awk '{count+=1; sum+=$6} END {print sum/count}')
+else
+    average_memory="U"
+fi
 
-VAL2=`ps auxf | grep ${PROCS} | grep ^${USR} | grep -v grep | awk '{s+=$6} END {print s}'`
-
-VAL3=`expr $VAL2 / $VAL1`
-
-echo "servers.value $VAL3"
-
-
+echo "servers.value $average_memory"
