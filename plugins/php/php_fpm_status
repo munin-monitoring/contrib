@@ -1,0 +1,103 @@
+#!/bin/sh
+
+: <<=cut
+
+=head CONFIGURATION
+
+    Plugin to monitor php-fpm process manager, php-fpm >=5.3.3 is required
+
+    INSTALLATION
+    1. Install curl or wget
+    2. Configure PHP to respond to status request by setting pm.status_path in your php fpm config file. 
+    3. Configure your websever to respond to this path, it's advisable to restrict
+    this to localhost
+    4. Configure munin-node with a url environment variable for the url you wish to test
+
+    You can use symlinks and config files to monitor multiple pools
+    ln -s /usr/share/munin/php_fpm_status /usr/share/munin/php_fpm_status_www
+    ln -s /usr/share/munin/php_fpm_status /usr/share/munin/php_fpm_status_www2
+
+    [php_fpm_status_www]
+    env.url http://127.0.0.1/fpm-status-www
+    [php_fpm_status_www2]
+    env.url http://127.0.0.1/fpm-status-www2
+
+=head COPYRIGHT
+
+    Copyright (C) 2020 Rowan Wookey <https://www.rwky.net>
+    Copyright (C) 2011 Daniel Caillibaud
+    Copyright (C) 2010 radar AT aol DOT pl
+
+=head LICENSE
+
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+=head MAGIC MARKERS
+
+    #%# family=auto
+    #%# capabilities=autoconf
+
+=cut
+
+url=${url:-'http://127.0.0.1/fpm-status'}
+
+if command -v wget > /dev/null 2>&1
+then
+    data=$(wget -O - -q "$url")
+elif command -v curl > /dev/null 2>&1
+then
+    data=$(curl -s "$url")
+else
+    echo "wget or curl must be installed" >&2
+    exit 1
+fi
+
+pool=$(echo "$data" | awk '/pool/{print $2}')
+
+if [ "$1" = "autoconf" ]
+then
+    if [ -n "$pool" ]
+    then
+        echo 'yes'
+    fi
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    echo "graph_title php-fpm status $pool"
+    echo "graph_args --base 1000 -l 0"
+    echo "graph_vlabel Processes"
+    echo "graph_scale yes"
+    echo "graph_category webserver"
+    echo "graph_info This graph shows the php-fpm process manager status from pool: $pool"
+    echo "active.label Active processes"
+    echo "active.type GAUGE"
+    echo "active.draw AREA"
+    echo "active.info The number of active processes"
+    echo "idle.label Idle processes"
+    echo "idle.type GAUGE"
+    echo "idle.draw STACK"
+    echo "idle.info The number of idle processes"
+    echo "total.label Total processes"
+    echo "total.type GAUGE"
+    echo "total.draw LINE2"
+    echo "total.info The number of idle + active processes"
+    exit 0
+else
+    echo "$data" | awk '
+    /^idle/	{print "idle.value " $3}
+    /^active/{print "active.value "   $3}
+    /^total/ {print "total.value "  $3}
+    '
+fi
