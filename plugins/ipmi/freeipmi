@@ -68,7 +68,7 @@ my $hostname = $1;
 my $help_output = `$IPMISENSORS --help`;
 
 $IPMISENSORS .= " --output-sensor-thresholds" if $help_output =~ /--output-sensor-thresholds/;
-$IPMISENSORS .= " --quiet-cache --comma-separated-output --no-header-output --ignore-not-available-sensors --sensor-types=Temperature,Fan,Current,Voltage";
+$IPMISENSORS .= " --quiet-cache --comma-separated-output --no-header-output --ignore-not-available-sensors --sensor-types=Temperature,Fan,Current,Other_Units_Based_Sensor,Voltage";
 $IPMISENSORS .= " --hostname=$hostname" if defined($hostname);
 $IPMISENSORS .= " --username=$ENV{IPMI_USERNAME}" if defined($ENV{IPMI_USERNAME});
 $IPMISENSORS .= " --password=$ENV{IPMI_PASSWORD}" if defined($ENV{IPMI_PASSWORD});
@@ -147,7 +147,9 @@ foreach my $line (@data) {
     $type = "temp";
   } elsif ( $dataline[2] eq "Fan" ) {
     $type = "fan"
-  } elsif ( $dataline[2] eq "Current" and $dataline[4] eq "W" ) {
+  } elsif ( $dataline[2] eq "Current" and $dataline[4] =~ /^[W%]$/ ) {
+    $type = "power";
+  } elsif ( $dataline[2] eq "Other Units Based Sensor" and $dataline[4] eq "W" ) {
     $type = "power";
   } elsif ( $dataline[2] eq "Current" and $dataline[4] eq "A" ) {
     $type = "current";
