@@ -11,7 +11,12 @@ ssl-certificate-expiry - Plugin to monitor Certificate expiration on multiple se
 =head1 CONFIGURATION
 
   [ssl-certificate-expiry]
-    env.services www.service.tld blah.example.net_PORT
+    env.services www.service.tld blah.example.net_PORT foo.example.net_PORT_STARTTLS
+
+PORT is the TCP port number
+STARTTLS is passed to openssl as "-starttls" argument. Useful for services like SMTP or IMAP implementing StartTLS.
+  Current known values are ftp, imap, pop3 and smtp
+  PORT is mandatory if STARTTLS is used.
 
 To set warning and critical levels do like this:
 
@@ -29,6 +34,7 @@ For example:
   ssl-certificate-expiry_www.example.org_443
   ssl-certificate-expiry_192.0.2.42_636
   ssl-certificate-expiry_2001:0DB8::badc:0fee_485
+  ssl-certificate-expiry_mail.example.net_25_smtp
 
 =head2 Cron setup
 
@@ -67,7 +73,8 @@ if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
 fi
 
 HOSTPORT=${0##*ssl-certificate-expiry_}
-CACHEFILE="${MUNIN_PLUGSTATE}/$(basename "${0}").cache"
+#XXXXXCACHEFILE="${MUNIN_PLUGSTATE}/$(basename "${0}").cache"
+CACHEFILE=/tmp/xxxxxxxxxxxxxxxx
 
 if [ "${HOSTPORT}" != "${0}" ] \
 	&& [ -n "${HOSTPORT}" ]; then
@@ -84,13 +91,20 @@ parse_valid_days_from_certificate() {
     local now_epoch
     local input_data
     input_data=$(cat)
+
     if echo "$input_data" | grep -q -- "-----BEGIN CERTIFICATE-----"; then
         valid_until_string=$(echo "$input_data" | openssl x509 -noout -enddate \
             | grep "^notAfter=" | cut -f 2 -d "=")
         if [ -n "$valid_until_string" ]; then
-            valid_until_epoch=$(date --date="$valid_until_string" +%s)
-            if [ -n "$valid_until_epoch" ]; then
+            # FreeBSD requires special arguments for "date"
+            if uname | grep -q ^FreeBSD; then
+                valid_until_epoch=$(date -j -f '%b %e %T %Y %Z' "$valid_until_string" +%s)
+                now_epoch=$(date -j +%s)
+            else
+                valid_until_epoch=$(date --date="$valid_until_string" +%s)
                 now_epoch=$(date +%s)
+            fi
+            if [ -n "$valid_until_epoch" ]; then
                 # calculate the number of days left
                 echo "$valid_until_epoch" "$now_epoch" | awk '{ print(($1 - $2) / (24 * 3600)); }'
             fi
@@ -102,13 +116,42 @@ parse_valid_days_from_certificate() {
 print_expire_days() {
     local host="$1"
     local port="$2"
+    local starttls="$3"
 
     # Wrap IPv6 addresses in square brackets
     echo "$host" | grep -q ':' && host="[$host]"
 
-    echo "" | openssl s_client -CApath /etc/ssl/certs \
-            -servername "$host" -connect "${host}:${port}" 2>/dev/null \
-        | parse_valid_days_from_certificate
+    local s_client_args=
+    [ -n "$starttls" ] && s_client_args="-starttls $starttls"
+
+    # shellcheck disable=SC2086
+
+    # The original code only extracted the server certificate,
+    # but the end date also depends on intermediate certs. Therefore
+    # we want to check intermediate certs as well.
+    #
+    # The following cryptic lines do:
+    # - invoke openssl and connect to a port
+    # - print certs, not only the server cert
+    # - extract each certificate as a single line
+    # - pipe each cert to the parse_valid_days_from_certificate
+    #   function, which basically is 'openssl x509 -enddate'
+    # - get a list of the parse_valid_days_from_certificate
+    #   results and sort them
+    echo "" | openssl s_client \
+	-servername "$host" -connect "${host}:${port}" \
+	-showcerts \
+	$s_client_args 2>/dev/null | \
+	awk '{
+  	  if ($0 == "-----BEGIN CERTIFICATE-----") cert=""
+  	  else if ($0 == "-----END CERTIFICATE-----") print cert
+  	  else cert=cert$0
+	  }' | ( \
+	while read CERT; do
+	    echo "-----BEGIN CERTIFICATE-----\n${CERT}\n-----END CERTIFICATE-----" | \
+		parse_valid_days_from_certificate
+        done ) | sort -n -r | head -n 1
+	
 }
 
 main() {
@@ -116,12 +159,14 @@ main() {
 	if echo "$service" | grep -q "_"; then
 	    host=$(echo "$service" | cut -f 1 -d "_")
 	    port=$(echo "$service" | cut -f 2 -d "_")
+	    starttls=$(echo "$service" | cut -f 3 -d "_")
 	else
 	    host=$service
 	    port=443
+	    starttls=""
 	fi
 	fieldname="$(clean_fieldname "$service")"
-	valid_days=$(print_expire_days "$host" "$port")
+	valid_days=$(print_expire_days "$host" "$port" "$starttls")
 	[ -z "$valid_days" ] && valid_days="U"
 	printf "%s.value %s\\n" "$fieldname" "$valid_days"
         echo "${fieldname}.extinfo Last checked: $(date)"
