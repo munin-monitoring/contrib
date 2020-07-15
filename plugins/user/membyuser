@@ -2,10 +2,18 @@
 #
 # Plugin to monitor Memory usage inspired by cpubyuser
 #
-# 2012-05-23 Sebastien Campion
+# Usage: Place in /etc/munin/plugins/ (or link it there using ln -s)
+#	Add this to your /etc/munin/plugin-conf.d/munin-node:
+#		[membyuser]
+#		user root # required if /proc can't be read from by any user!
 
-LU=`ps auh | cut -d' ' -f 1  | sort -u`
-USERS=`echo $LU`
+## 2012-05-23 Sebastien Campion
+# changed on 2019-08-30 by pcy <pcy@ulyssis.org>:
+# - change category from 'memory' to 'system' (so it appears next to cpubyuser)
+# - use rss instead of vsz
+# - more robust username enumeration
+
+USERS="$(ps ax --format uname | tail +2 | sort -u | grep -v -e '^root$')"
 
 if [ "$1" = "autoconf" ]; then
 	if [ -n "$USERS" ]; then
@@ -17,12 +25,11 @@ if [ "$1" = "autoconf" ]; then
 fi
 
 if [ "$1" = "config" ]; then
-	echo "graph_args --base 1000 -r --lower-limit 0"
+	echo "graph_args --base 1024"
 	echo "graph_title Memory usage, by user"
 	echo "graph_category memory"
 	echo "graph_info This graph shows memory usage, for monitored users."
-	echo "graph_vlabel KB"
-	echo "graph_scale no"
+	echo "graph_vlabel Bytes"
 	echo "graph_period second"
 	_USERS=${USERS//[-.]/_}
 	echo "graph_order $_USERS others"
@@ -32,17 +39,12 @@ if [ "$1" = "config" ]; then
 		echo "${_USER}.label $USER"
 		echo "${_USER}.info Memory used by user $USER"
 		echo "${_USER}.type GAUGE"
-		if [ $FIRSTUSER -eq 1 ]; then
-			echo "${_USER}.draw AREA"
-			FIRSTUSER=0
-		else
-			echo "${_USER}.draw STACK"
-		fi
+		echo "${_USER}.draw AREASTACK"
 	done
 	exit
 fi
 
-ps -e -o "%z%U" | \
+ps -e -o rss,user | \
 	awk -v USERS="$USERS" '
 		{ if ($2 != "USER") MEM_USER[$2]+=$1 }
 		END {
@@ -52,9 +54,9 @@ ps -e -o "%z%U" | \
 				if (m != 0) {
 					_user=user
 					gsub(/[-.]/,"_", _user);
-					print _user".value", MEM_USER[user]
+					print _user".value", (MEM_USER[user] * 1024)
 				} else
-					others_sum += MEM_USER[user]
+					others_sum += (MEM_USER[user] * 1024)
 			}
 		print "others.value", others_sum;
 	}'
