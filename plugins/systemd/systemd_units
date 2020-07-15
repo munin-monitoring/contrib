@@ -31,6 +31,8 @@ C<grep -E>):
 
 An example configuration might be something like this:
 
+=over 2
+
  [systemd_units]
  env.failed_warning 0
  env.failed_critical 5
@@ -38,10 +40,15 @@ An example configuration might be something like this:
  env.inactive_critical 20
  env.exclude boring
  env.inactive_exclude sleepy
+ env.silence_active_extinfo 1
+
+=back
 
 In the example above, we've overridden the default warning and critical levels for failed units, added warning
 and critical levels for inactive units, then filtered out boring units from all results and filtered out sleepy
-units from results for the inactive state.
+units from results for the inactive state. In addition to that, only more extensive info of non-active units
+are displayed in order to quickly see which units are failing and why in the webui. (By default, all extra info
+about all units is displayed.)
 
 =head1 AUTHOR
 
@@ -63,6 +70,7 @@ GPLv2
 
 failed_warning="${failed_warning:-0}"
 failed_critical="${failed_critical:-10}"
+silence_active_extinfo="${silence_active_extinfo:-0}"
 
 states="active \
 	reloading \
@@ -123,8 +131,14 @@ fetch () {
 		count=$(echo "$state_unit_list" | grep -c "$state$")
 		echo "$state.value $count"
 		extinfo=$(echo "$state_unit_list" | grep "$state$" | cut -d " " -f 1 | tr '\n' ' ')
-		if [ -n "$extinfo" ]; then
-			echo "$state.extinfo" "$extinfo"
+		if [ "$silence_active_extinfo" = "0" ]; then
+			if [ -n "$extinfo" ]; then
+				echo "$state.extinfo" "$extinfo"
+			fi
+		else
+			if [ -n "$extinfo" ] && [ "$state" != "active" ]; then
+				echo "$state.extinfo" "$extinfo"
+			fi
 		fi
 	done
 }
