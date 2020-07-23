@@ -62,10 +62,13 @@ for my $i (1 .. $#containers)
    my @fields = split / +/, $containers[$i];
    my $id = $fields[0];
    my $name = $fields[$#fields];
+   my $label = $name;
    # manage container name containing arithmetic operators and dots. E.g, my-container.
    $name =~ s/[-\+*\/\.]/_/g;
    # truncate container name with "," character.
    $name =~ s/,.*//g;
+   # prefix if container starts with 0-9
+   $name =~ s/^([0-9])/c$1/;
    if (open(my $file, '<', "/sys/fs/cgroup/cpuacct/docker/$id/cpuacct.usage"))
    {
       my $total_cpu_ns = <$file>;
@@ -75,7 +78,7 @@ for my $i (1 .. $#containers)
       {
          my @ncpu = split / /, <$file>;
          close $file;
-         push @result, {'name'=>$name, 'total_cpu_ns'=>$total_cpu_ns, 'ncpu'=>$#ncpu};
+         push @result, {'name'=>$name, 'label'=>$label, 'total_cpu_ns'=>$total_cpu_ns, 'ncpu'=>$#ncpu};
       }
    }
 }
@@ -100,7 +103,7 @@ if (defined $ARGV[0] and $ARGV[0] eq "config")
 
    foreach(@result)
    {
-      print "$$_{'name'}.label $$_{'name'}\n";
+      print "$$_{'name'}.label $$_{'label'}\n";
       print "$$_{'name'}.draw LINE2\n";
       print "$$_{'name'}.min 0\n";
       print "$$_{'name'}.type DERIVE\n";
