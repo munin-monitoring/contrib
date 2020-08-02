@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""
+=head1 NAME
+    MongoDB Connection Count Plugin
+
+=head1 APPLICABLE SYSTEMS
+
+    MongoDB 3.X and 4.X with pymongo installed.
+
+=head1 CONFIGURATION
+
+    munin-node.conf
+    defaults for host is 127.0.0.1 and port 27017
+    and will work without being defined :
+
+    [mongodb_conn]
+    env.host 127.0.0.1
+    env.port 27017
+    env.username user
+    env.password P@55w0rd
+
+=head1 AUTHOR
+
+    Alban Espie-Guillon <alban.espie@alterway.fr>
+    based on Stefan Andersen <stefan@stefanandersen.dk> work.
+
+=head1 LICENSE
+    The Beer Ware License (Revision 42)
+    <alban.espie@alterway.fr> wrote this file. As long
+    as you retain this notice you can do whatever you want
+    with this stuff. If we meet some day, and you think
+    this stuff is worth it, you can buy me a beer in return.
+"""
+import os
+import sys
+import pymongo
+
+
+def _get_connections():
+    host = os.environ.get('host', '127.0.0.1')
+    port = os.environ.get('port', 27017)
+    username = os.environ.get('username', '')
+    password = os.environ.get('password', '')
+    conn = pymongo.MongoClient(host, int(port))
+    if username:
+        connAuth = conn['admin']
+        connAuth.authenticate(username, password)
+
+    """ cli : db.serverStatus().connections """
+    conn_status = conn.admin.command("serverStatus")['connections']
+    return conn_status
+
+
+def run():
+    connections = _get_connections()
+    for c, v in connections.items():
+        print(str(c) + ".value " + str(v))
+
+
+def config():
+    print("""
+graph_title MongoDB Connections Count
+graph_vlabel Connections count
+graph_category db
+graph_args --base 1000 -l 0
+current.label current
+current.draw AREASTACK
+available.label available
+available.draw AREASTACK
+active.label active
+active.draw AREASTACK
+""")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "config":
+        config()
+    else:
+        run()

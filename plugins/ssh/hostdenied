@@ -44,32 +44,34 @@
 
 # ------------------------------------------------------------------------------------------------------
 DENY="/etc/hosts.deny"
-NAME="$(basename $0)"                                        # component of naming temporary files
+NAME="$(basename "$0")"                                        # component of naming temporary files
 STATEFILE="$MUNIN_PLUGSTATE/$NAME.state"
 COLOUR=(FF0000 DA0024 B60048 91006D 6D0091 4800B6 2400DA 0000FF)  # hot to cold colours
 # ------------------------------------------------------------------------------------------------------
 
 run_autoconf()  {
-        RUN="no"
-        which grep denyhosts basename > /dev/null && RUN="yes"             # only run when grep and denyhost are present
+        RUN="no (denyhosts not found)"
+        command -v denyhosts > /dev/null && RUN="yes"             # only run when denyhosts is present
         echo "$RUN"
 }
 
 
 run_config()  {
-cat << EOF
-graph_title denied sshd access in $DENY
+	cat << EOF
+graph_title Hosts denied sshd access
+graph_info Hosts denied sshd access in $DENY
 graph_args --base 1000 -l 0
 graph_vlabel Hosts denied
 graph_category security
-age0.label added last 24h
-age0.draw AREA
-age0.colour ${COLOUR[0]}
 EOF
-for AGE in {1..7}; do
-cat << EOF
-age${AGE}.label older than $((AGE*24))h
-age${AGE}.draw STACK
+for AGE in {7..0}; do
+	if [ "${AGE}" = 0 ]; then
+		echo "age${AGE}.label added last 24h"
+	else
+		echo "age${AGE}.label older than $((AGE*24))h"
+	fi
+	cat << EOF
+age${AGE}.draw AREASTACK
 age${AGE}.colour ${COLOUR[$AGE]}
 EOF
 done
@@ -80,17 +82,17 @@ run_fetch()   {
    TOTAL=0
    NOW=$(date +%s)
    sed -n 's/^\# DenyHosts: //;s/ | .*//gp' $DENY |         # strip all but date
-   while read DATE; do
+   while read -r DATE; do
       echo $(((NOW - $(date -d "$DATE" +%s))/86400))        # calculate rule age
-   done > $STATEFILE                                        # rather than going through temp file, the age could be
-   for AGE in {0..6} ; do                                   # used to increment an array element with that index.
-      COUNT="$(grep -c "^$AGE$" $STATEFILE)"                # That'd save grepping for counting from temp file.
+   done > "$STATEFILE"                                      # rather than going through temp file, the age could be
+   for AGE in {6..0} ; do                                   # used to increment an array element with that index.
+      COUNT="$(grep -c "^$AGE$" "$STATEFILE")"              # That'd save grepping for counting from temp file.
       echo "age${AGE}.value $COUNT"                         # produce values for all but oldest
       ((TOTAL+=COUNT))
    done
-   echo "age7.value $(($(grep -c . $STATEFILE)-TOTAL))"     # all non-printed are older
-   rm $STATEFILE
+   echo "age7.value $(($(grep -c . "$STATEFILE")-TOTAL))"   # all non-printed are older
+   rm "$STATEFILE"
 }
 
-run_${1:-"fetch"}
+run_"${1:-fetch}"
 exit 0

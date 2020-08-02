@@ -79,12 +79,50 @@ my $ip		= $ENV{"ip"} || "127.0.0.1";
 my $port	= $ENV{"port"} || "5000";
 my $socket	= $ENV{"socket"} || "";
 
+# detect rtorrent version
+use version;
+my $rtorrent_version;
+sub rtorrent_version_lower_than {
+	if (not length $rtorrent_version){
+		if ( ( defined $src ) && ( $src eq "socket" ) ) {
+			socket( SOCK, PF_UNIX, SOCK_STREAM, 0 ) or die;
+			connect( SOCK, sockaddr_un( $socket ) ) or die $!;
+		} else {
+			socket( SOCK, PF_INET, SOCK_STREAM, getprotobyname( "tcp" ) );
+			connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
+		}
+		my $line_version= "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>system.client_version</methodName></methodCall>";
+		my $llen	= length $line_version;
+		my $header	= "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
+		my $hlen	= length $header;
+		$line_version= "${hlen}:${header},${line_version}";
+		print SOCK $line_version;
+		flush SOCK;
+		my $pattern	= qr/<value><string>([0-9.]+)<\/string><\/value>/;
+		while ( $line = <SOCK> ) {
+			if ( $line =~ /$pattern/ ) {
+				$rtorrent_version = $1;
+			}
+		}
+		close (SOCK);
+	}
+	if(defined $_[0]){
+		return version->parse($rtorrent_version) < version->parse($_[0]);
+	}
+}
+# init rtorrent_version
+rtorrent_version_lower_than();
+
 my $pattern	= qr/<value><string>([A-Z0-9]+)<\/string><\/value>/;
 
 my $line;
 my $llenmy;
 my $header;
 my $hlen;
+
+my $function_multicall;
+my $function_multicall_arg;
+my $function_hash;
 
 my $num;
 foreach ( @views ) {
@@ -96,7 +134,11 @@ foreach ( @views ) {
 		connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
 	}
 
-	$line	= "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>d.multicall</methodName><params><param><value><string>${_}</string></value></param><param><value><string>d.get_hash=</string></value></param></params></methodCall>";
+	$function_multicall	= rtorrent_version_lower_than('0.9.0')? 'd.multicall' : 'd.multicall2';
+	$function_multicall_arg	= rtorrent_version_lower_than('0.9.0') ? '' : '<param><value><string></string></value></param>';
+	$function_hash	= rtorrent_version_lower_than('0.9.0')? 'd.get_hash=' : 'd.hash=';
+	$line	= "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>$function_multicall</methodName><params>$function_multicall_arg<param><value><string>${_}</string></value></param><param><value><string>$function_hash</string></value></param></params></methodCall>";
+
 	$llen	= length $line;
 	$header	= "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
 	$hlen	= length $header;

@@ -1,0 +1,202 @@
+#!/usr/bin/python3
+"""
+=head1 NAME
+
+puppetdb - Create a graph out of PuppetDB's JVM memory usage.
+
+=head1 CONFIGURATION
+
+This plugin does not need to run with a privileged user.
+
+By default, the plugin will send requests to a PuppetDB instance on localhost.
+
+Plugin configuration parameters:
+
+  * pdburl:
+    Set the URL to your PuppetDB instance. This url should point to the mbeans
+    endpoint. By default this has a value of
+    http://localhost:8080/metrics/v1/mbeans
+
+  * timeout:
+    Time in seconds (int) to wait for a result when querying the REST API. By
+    default, wait for 2 seconds
+
+  * ca:
+    Path to the Certificate Authority used for verifying a cert received from
+    the PuppetDB server during an https connection. This can be useful if the
+    cert used by PuppetDB was signed by the puppetmaster's CA. This option is
+    not necessary if a plaintext connection is used (e.g. if pdburl starts
+    with 'http://').
+
+  * cert:
+    Path to the TLS certificate file used for establishing client
+    communication for an https connection. This option should be paired with
+    the `key` option. This option is not necessary if a plaintext connection
+    is used (e.g. if pdburl starts with 'http://').
+
+  * key:
+    Path to the TLS private key used for establishing client communication for
+    an https connection. This option should be paired with the `cert` option.
+    This option is not necessary if a plaintext connection is used (e.g. if
+    pdburl starts with 'http://').
+
+Example:
+
+  [puppetdb]
+    env.pdburl https://puppetdb.example.com:8080/metrics/v1/mbeans
+    env.timeout 5
+    env.ca /etc/puppetboard/ca.pem
+    env.cert /etc/puppetboard/client_cert.pem
+    env.key /etc/puppetboard/client_key.pem
+
+=head1 DEPENDENCIES
+
+python3-requests
+
+=head1 COMPATIBILITY
+
+  * PuppetDB 6.x: https://puppet.com/docs/puppetdb/6.0/api/metrics/v1/mbeans.html#jvm-metrics
+
+=head1 AUTHOR
+
+Copyright (c) 2020, Gabriel Filion, gabster@lelutin.ca
+
+=head1 LICENSE
+
+This code is licensed under GPLv3+
+
+"""
+
+import os
+import sys
+import requests
+
+
+class WrongStatusCode(Exception):
+    pass
+
+
+def rest_request(url, timeout, ca, key_pair):
+    """Make a GET request to URL. We expect a 200 response.
+    This function will let exceptions from requests raise through to indicate
+    request failure.
+    If response code is not 200, it will raise a WrongStatusCode exception.
+    """
+    headers = {'content-type': 'application/json', 'Accept-Charset': 'UTF-8'}
+
+    ssl_options = {}
+    if ca:
+        ssl_options['verify'] = ca
+    if key_pair:
+        ssl_options['cert'] = key_pair
+
+    resp = requests.get(url, headers=headers, timeout=timeout, **ssl_options)
+    if resp.status_code != 200:
+        err = f"GET Request to '{url}' returned code {resp.status_code}; expected 200."  # noqa: E501
+        raise WrongStatusCode(err)
+    return resp
+
+
+def config():
+    """Print all graph configuration for munin."""
+    print("graph_title PuppetDB JVM Memory usage")
+    print("graph_args --base 1024")
+    print("graph_vlabel Bytes")
+    print("graph_info This graph shows how much memory from the JVM "
+          + "Heapspace is being used by PuppetDB")
+    print("graph_category other")
+    print("graph_order jvm_mem_max jvm_mem_committed jvm_mem_used")
+
+    # Fields
+    print("jvm_mem_max.min 0")
+    print("jvm_mem_max.label JVM Max mem")
+    print("jvm_mem_max.info Maximum memory allocated to the JVM")
+
+    print("jvm_mem_committed.label JVM Committed mem")
+    print("jvm_mem_committed.min 0")
+    print("jvm_mem_committed.info Memory currently committed by the JVM")
+
+    print("jvm_mem_used.label JVM Used mem")
+    print("jvm_mem_used.min 0")
+    print("jvm_mem_used.info Memory currently used by objects in the JVM")
+    print("jvm_mem_used.draw AREA")
+
+
+def fetch_field_values(mbeans_url, timeout, ca, key_pair):
+    """Get values from PuppetDB and print them out."""
+    memory_url = f"{mbeans_url}/java.lang:type=Memory"
+
+    try:
+        mem_req = rest_request(memory_url, timeout, ca, key_pair)
+    except Exception as e:
+        print(f"HTTP Request did not complete successfully: {e}",
+              file=sys.stderr)
+        exit(1)
+
+    try:
+        memory = mem_req.json()
+    except Exception as e:
+        print(f"Could not parse JSON, can't find the info we need: {e}",
+              file=sys.stderr)
+        exit(1)
+
+    try:
+        heap = memory['HeapMemoryUsage']
+        mem_max = heap['max']
+        mem_committed = heap['committed']
+        mem_used = heap['used']
+    except Exception as e:
+        print(f"Memory values were not found in the reply JSON: {e}",
+              file=sys.stderr)
+        exit(1)
+
+    print(f"jvm_mem_max.value {mem_max}")
+    print(f"jvm_mem_committed.value {mem_committed}")
+    print(f"jvm_mem_used.value {mem_used}")
+
+
+if __name__ == '__main__':
+    mbeans_url = os.environ.get('pdburl', 'http://localhost:8080/metrics/v1/mbeans')
+    try:
+        timeout = int(os.environ.get('timeout', '2'))
+    except ValueError as e:
+        print(f"Invalid value for timeout: {e}", file=sys.stderr)
+        exit(1)
+
+    ca = os.environ.get('ca', None)
+    if ca:
+        if not os.path.exists(ca):
+            print(f"CA file '{ca}' not found.", file=sys.stderr)
+            exit(1)
+
+    cert = os.environ.get('cert', None)
+    key = os.environ.get('key', None)
+    if cert or key:
+        if cert and key:
+            if not os.path.exists(cert):
+                print(f"Certificate file '{cert}' not found.", file=sys.stderr)
+                exit(1)
+            if not os.path.exists(key):
+                print(f"Key file '{key}' not found.", file=sys.stderr)
+                exit(1)
+        else:
+            print("Only one of 'cert' and 'key' supplied. "
+                  "Both are needed for client authentication.",
+                  file=sys.stderr)
+            exit(1)
+
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        try:
+            dummy = rest_request(mbeans_url, timeout, ca, (cert, key))
+        except Exception as e:
+            print(f"no ({e})")
+            exit(0)
+
+        print("yes")
+        exit(0)
+
+    if len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config()
+        exit(0)
+
+    fetch_field_values(mbeans_url, timeout, ca, (cert, key))

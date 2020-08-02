@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""
+=head1 NAME
+
+docker_ - Docker wildcard-plugin to monitor a L<Docker|https://www.docker.com> host.
+
+This wildcard plugin provides at the moment only the suffixes C<containers>, C<images>, C<status>,
+C<volumes>, C<cpu> and C<memory>.
+
+=head1 INSTALLATION
+
+- Copy this plugin in your munin plugins directory
+- Install Python3 "docker" package
+
+=over 2
+
+    ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_containers
+    ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_cpu
+    ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_images
+    ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_memory
+    ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_status
+    ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_volumes
+
+=back
+
+After the installation you need to restart your munin-node:
+
+=over 2
+
+    systemctl restart munin-node
+
+=back
+
+=head1 CONFIGURATION
+
+This plugin need to run as root, you need to create a file named docker placed in the
+directory /etc/munin/plugin-conf.d/ with the following config (you can also use
+Docker environment variables here as described in
+https://docs.docker.com/compose/reference/envvars/):
+
+=over 2
+
+    [docker_*]
+    user root
+    env.DOCKER_HOST unix://var/run/docker.sock
+
+=back
+"""
+
+import os
+import sys
+import docker
+from multiprocessing import Process, Queue
+
+
+def print_containers_status(client):
+    running = 0
+    paused = 0
+    created = 0
+    restarting = 0
+    removing = 0
+    exited = 0
+    dead = 0
+    for container in client.containers.list():
+        if container.status == 'running':
+            running += 1
+        elif container.status == 'paused':
+            paused += 1
+        elif container.status == 'created':
+            created += 1
+        elif container.status == 'restarting':
+            restarting += 1
+        elif container.status == 'removing':
+            removing += 1
+        elif container.status == 'exited':
+            exited += 1
+        elif container.status == 'dead':
+            dead += 1
+    print('running.value', running)
+    print('paused.value', paused)
+    print('created.value', created)
+    print('restarting.value', restarting)
+    print('removing.value', removing)
+    print('exited.value', exited)
+    print('dead.value', dead)
+
+
+def get_container_stats(container, q):
+    q.put(container.stats(stream=False))
+
+
+def parallel_container_stats(client):
+    proc_list = []
+    stats = {}
+    for container in client.containers.list():
+        q = Queue()
+        p = Process(target=get_container_stats, args=(container, q))
+        proc_list.append({'proc': p, 'queue': q, 'container': container})
+        p.start()
+    for proc in proc_list:
+        proc['proc'].join()
+        stats[proc['container']] = proc['queue'].get()
+    return stats.items()
+
+
+def print_containers_cpu(client):
+    for container, stats in parallel_container_stats(client):
+        cpu_count = len(stats["cpu_stats"]["cpu_usage"]["percpu_usage"])
+        cpu_percent = 0.0
+        cpu_delta = float(stats["cpu_stats"]["cpu_usage"]["total_usage"]) \
+            - float(stats["precpu_stats"]["cpu_usage"]["total_usage"])
+        system_delta = float(stats["cpu_stats"]["system_cpu_usage"]) \
+            - float(stats["precpu_stats"]["system_cpu_usage"])
+        if system_delta > 0.0:
+            cpu_percent = cpu_delta / system_delta * 100.0 * cpu_count
+        print(container.name + '.value', cpu_percent)
+
+
+def print_containers_memory(client):
+    for container, stats in parallel_container_stats(client):
+        print(container.name + '.value', stats['memory_stats']['stats']['total_rss'])
+
+
+def main():
+    try:
+        mode = sys.argv[1]
+    except IndexError:
+        mode = ""
+    wildcard = sys.argv[0].split("docker_")[1].split("_")[0]
+
+    if mode == "suggest":
+        print("containers")
+        print("cpu")
+        print("images")
+        print("memory")
+        print("status")
+        print("volumes")
+
+    client = docker.from_env()
+
+    if wildcard == "status":
+        if mode == "config":
+            print("graph_title Docker status")
+            print("graph_vlabel containers")
+            print("graph_category virtualization")
+            print("running.label RUNNING")
+            print("paused.label PAUSED")
+            print("created.label CREATED")
+            print("restarting.label RESTARTING")
+            print("removing.label REMOVING")
+            print("exited.label EXITED")
+            print("dead.label DEAD")
+        else:
+            print_containers_status(client)
+    elif wildcard == "containers":
+        if mode == "config":
+            print("graph_title Docker containers")
+            print("graph_vlabel containers")
+            print("graph_category virtualization")
+            print("containers_quantity.label Containers")
+        else:
+            print('containers_quantity.value', len(client.containers.list()))
+    elif wildcard == "images":
+        if mode == "config":
+            print("graph_title Docker images")
+            print("graph_vlabel images")
+            print("graph_category virtualization")
+            print("images_quantity.label Images")
+        else:
+            print('images_quantity.value', len(client.images.list()))
+    elif wildcard == "volumes":
+        if mode == "config":
+            print("graph_title Docker volumes")
+            print("graph_vlabel volumes")
+            print("graph_category virtualization")
+            print("volumes_quantity.label Volumes")
+        else:
+            print('volumes_quantity.value', len(client.volumes.list()))
+    elif wildcard == "cpu":
+        if mode == "config":
+            graphlimit = str(os.cpu_count() * 100)
+            print("graph_title Docker containers CPU usage")
+            print("graph_args --base 1000 -r --lower-limit 0 --upper-limit " + graphlimit)
+            print("graph_scale no")
+            print("graph_period second")
+            print("graph_vlabel CPU usage (%)")
+            print("graph_category virtualization")
+            print("graph_info This graph shows docker container CPU usage.")
+            for container in client.containers.list():
+                print("{}.label {}".format(container.name, container.name))
+        else:
+            print_containers_cpu(client)
+    elif wildcard == "memory":
+        if mode == "config":
+            print("graph_title Docker containers memory usage")
+            print("graph_args --base 1024 -l 0")
+            print("graph_vlabel Bytes")
+            print("graph_category virtualization")
+            print("graph_info This graph shows docker container memory usage.")
+            for container in client.containers.list():
+                print("{}.label {}".format(container.name, container.name))
+        else:
+            print_containers_memory(client)
+
+
+if __name__ == '__main__':
+    main()

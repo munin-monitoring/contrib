@@ -1,49 +1,83 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
+"""
+=head1 NAME
+    MongoDB mem Plugin
 
-## GENERATED FILE - DO NOT EDIT
+=head1 APPLICABLE SYSTEMS
 
-import urllib2
+    MongoDB 3.X and 4.X with pymongo installed.
+
+=head1 CONFIGURATION
+
+    munin-node.conf
+    defaults for host is 127.0.0.1 and port 27017
+    and will work without being defined :
+
+    [mongo_mem]
+    env.host 127.0.0.1
+    env.port 27017
+    env.username user
+    env.password P@55w0rd
+    env.db dbname
+
+    or
+
+    [mongodb_mem]
+    env.MONGO_DB_URI mongodb://user:password@host:port/dbname
+
+=head1 AUTHOR
+
+    Original script there : https://github.com/comerford/mongo-munin
+    Updated by Alban Espie-Guillon <alban.espie@alterway.fr>
+"""
 import sys
-
-try:
-    import json
-except ImportError:
-    import simplejson as json
-
+import os
+import pymongo
 
 def getServerStatus():
-    raw = urllib2.urlopen( "http://127.0.0.1:28017/_status" ).read()
-    return json.loads( raw )["serverStatus"]
+    if 'MONGO_DB_URI' in os.environ:
+      c = pymongo.MongoClient(os.environ['MONGO_DB_URI'])
+
+    elif 'username' and 'password' in os.environ:
+      host = os.environ.get('host', '127.0.0.1')
+      port = os.environ.get('port', 27017)
+      username = os.environ.get('username', '')
+      password = os.environ.get('password', '')
+      c = pymongo.MongoClient(host, int(port))
+      if username:
+        cAuth = c['admin']
+        cAuth.authenticate(username, password)
+
+    else:
+      c = pymongo.MongoClient()
+
+    return c.admin.command('serverStatus', workingSet=True)
 
 def ok(s):
     return s == "resident" or s == "virtual" or s == "mapped"
 
 def doData():
-    for k,v in getServerStatus()["mem"].iteritems():
+    for k,v in getServerStatus()["mem"].items():
         if ok(k):
             print( str(k) + ".value " + str(v * 1024 * 1024) )
 
-def doConfig():
 
-    print "graph_title MongoDB memory usage"
-    print "graph_args --base 1024 -l 0 --vertical-label Bytes"
-    print "graph_category db"
+def doConfig():
+    print("""
+graph_title MongoDB memory usage
+graph_args --base 1024 -l 0 --vertical-label Bytes
+graph_category mongodb
+""")
 
     for k in getServerStatus()["mem"]:
         if ok( k ):
-            print k + ".label " + k
-            print k + ".draw LINE1"
-
-
-
-
-
+            print(k + ".label " + k)
+            print(k + ".draw LINE1")
 
 
 if __name__ == "__main__":
+
     if len(sys.argv) > 1 and sys.argv[1] == "config":
         doConfig()
     else:
         doData()
-
-

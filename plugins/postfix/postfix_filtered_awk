@@ -94,21 +94,16 @@ if [ "$1" = "config" ]; then
 fi
 
 
-
-
 $LOGTAIL ${MAIL_LOG} $STATEFILE | \
-awk 'BEGIN { na= 0; nb= 0; nc= 0; nd= 0; ne= 0; nf= 0; ng= 0; nh= 0 ; st= ENVIRON["POLICY"] }
-
-	{
-               if (index($0, "queued as")) { na++ }
-               else if (index($0, "Relay access denied")) { nb++ }
-               else if (index($0, "blocked using")) { nc++ }
-               else if (index($0, "Helo command rejected")) { nd++ }
-               else if (index($0, "Client host rejected")) { ne++ }
-               else if (index($0, "Sender address rejected")) { nf++ }
-               else if (index($0, "Recipient address rejected")) { ng++ }
-	       else if (st && index($0, st)) { nh++ }
-	}
-	END { print "allowed.value " na"\nrelay.value " nb"\nrbl.value " nc"\nhelo.value " nd"\nclient.value " ne"\nsender.value " nf"\nrecipient.value " ng ; if (st) print "policy.value " nh }'
-
-
+awk 'BEGIN { allowed_count=0; relay_denied_count=0; rbl_count=0; helo_rejected_count=0; client_rejected_count=0; sender_rejected_count=0; reciepient_rejected_count=0; policy_count=0 ; st=ENVIRON["POLICY"] }
+        {
+               if (index($0, "queued as")) { allowed_count++ }
+               else if (index($0, "Relay access denied")) { relay_denied_count++ }
+               else if (index($0, "blocked using")) { rbl_count++ }
+               else if (index($0, "Helo command rejected")) { helo_rejected_count++ }
+               else if (index($0, "Client host rejected")) { client_rejected_count++ }
+               else if (index($0, "Sender address rejected")) { sender_rejected_count++ }
+               else if (index($0, "Recipient address rejected")) { reciepient_rejected_count++ }
+               else if (st && index($0, st)) { policy_count++ }
+        }
+        END { print "allowed.value " allowed_count"\nrelay.value " relay_denied_count"\nrbl.value " rbl_count"\nhelo.value " helo_rejected_count"\nclient.value " client_rejected_count"\nsender.value " sender_rejected_count"\nrecipient.value " reciepient_rejected_count ; if (st) print "policy.value " policy_count }'
