@@ -27,7 +27,6 @@
 #       ip              rTorrent's ip address                   - using scgi_port       - needed, when "src" is NOT set to "socket"
 #       port            rTorrent's scgi port (scgi_port)        - using scgi_port       - needed, when "src" is NOT set to "socket"
 #       category        Change graph category
-#       api             use "pre09" (pre 0.9.0) or "current" (0.9.0+, the default) API calls
 #
 # Configuration example
 #
@@ -36,7 +35,6 @@
 #       env.src socket
 #       env.socket /home/user/torrent/.socket/rpc.socket,/home/user/torrent/.socket/rpc.socket
 #       env.category Category
-#       env.api current
 #
 #       [rtom_allsessions_*]
 #       user username
@@ -64,27 +62,73 @@ my $src         = $ENV{"src"} || "";
 my @sockets     = split /,/, $ENV{"socket"} || "";
 my $ip          = $ENV{"ip"} || "127.0.0.1";
 my @ports       = split /,/, $ENV{"port"} || "";
-my $api         = $ENV{"api"} || "current";
 
-my $mem         = 0;
-my $pattern     = qr/<value><(int|i4|i8|ex\.i8)>(\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
-my $line        = "";
-if ($api =~ /pre09/) {
-  $line         = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>get_memory_usage</methodName></methodCall>";
-} else {
-  $line         = "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>pieces.memory.current</methodName></methodCall>";
+# detect rtorrent version
+use version;
+my %rtorrent_version;
+sub get_rtorrent_version {
+	my $version;
+	my $line_version= "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>system.client_version</methodName></methodCall>";
+	my $llen	= length $line_version;
+	my $header	= "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
+	my $hlen	= length $header;
+	$line_version= "${hlen}:${header},${line_version}";
+	print SOCK $line_version;
+	flush SOCK;
+	my $pattern	= qr/<value><string>([0-9.]+)<\/string><\/value>/;
+	while ( $line = <SOCK> ) {
+		if ( $line =~ /$pattern/ ) {
+			$version = $1;
+		}
+	}
+	close (SOCK);
+	$rtorrent_version{$_[0]} = $version;
 }
-my $llen        = length $line;
-my $header      = "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
-my $hlen        = length $header;
+sub rtorrent_version_lower_than {
+	if (keys %rtorrent_version == 0 && not defined $_[0]){
+		if ( ( defined $src ) && ( $src eq "socket" ) ) {
+		  for $socket (@sockets)
+		  {
+		    socket( SOCK, PF_UNIX, SOCK_STREAM, 0 ) or die;
+		    connect( SOCK, sockaddr_un( $socket ) ) or die $!;
+		    get_rtorrent_version $socket;
+		    close (SOCK);
+		  }
+		} else {
+		  for $port (@ports)
+		  {
+		    socket( SOCK, PF_INET, SOCK_STREAM, getprotobyname( "tcp" ) );
+		    connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
+		    get_rtorrent_version $port;
+		    close (SOCK);
+		  }
+		}
+	}
+	if(defined $_[1]){
+		return version->parse($rtorrent_version{$_[0]}) < version->parse($_[1]);
+	}
+}
+# init rtorrent_version
+rtorrent_version_lower_than();
+
+my $pattern     = qr/<value><(int|i4|i8|ex\.i8)>(\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
+my $mem         = 0;
+sub construct_line {
+	my $function	= rtorrent_version_lower_than($_[0], '0.9.0') ? 'get_memory_usage' : 'pieces.memory.current';
+	my $line	= "<?xml version=\"1.0\" encoding=\"utf-8\"?><methodCall><methodName>$function</methodName></methodCall>";
+	my $llen        = length $line;
+	my $header      = "CONTENT_LENGTH\000${llen}\000SCGI\001\000";
+	my $hlen        = length $header;
+	$line = "${hlen}:${header},${line}";
+	return $line;
+}
 
 if ( ( defined $src ) && ( $src eq "socket" ) ) {
   for $socket (@sockets)
   {
     socket( SOCK, PF_UNIX, SOCK_STREAM, 0 ) or die;
     connect( SOCK, sockaddr_un( $socket ) ) or die $!;
-    my $line = "${hlen}:${header},${line}";
-    print SOCK $line;
+    print SOCK construct_line($socket);
     flush SOCK;
     while ( $line = <SOCK> ) {
       if ( $line =~ /$pattern/ ) {
@@ -98,8 +142,7 @@ if ( ( defined $src ) && ( $src eq "socket" ) ) {
   {
     socket( SOCK, PF_INET, SOCK_STREAM, getprotobyname( "tcp" ) );
     connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
-    my $line = "${hlen}:${header},${line}";
-    print SOCK $line;
+    print SOCK construct_line($port);
     flush SOCK;
     while ( $line = <SOCK> ) {
       if ( $line =~ /$pattern/ ) {

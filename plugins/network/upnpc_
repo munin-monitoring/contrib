@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -u
 # -*- sh -*-
 
 : << =cut
@@ -8,7 +8,8 @@
 upnpc_ - Plugin to monitor routers via UPnP
 
 This plugin uses the upnpc utility (package miniupnpc in Debian), to monitor an
-router using UPnP. It can monitor the following aspects, and plot them as separate graphs:
+router using UPnP. It can monitor the following aspects, and plot them as
+separate graphs, or a single multigraph (if linked at upnpc or upnpc_multi:
 * uptime: how long the link has been up;
 * bitrate: the up and downlink bitrate (e.g., sync speed for DSL);
 * traffic: the actual up and downstream traffic rate;
@@ -16,19 +17,38 @@ router using UPnP. It can monitor the following aspects, and plot them as separa
 
 =head1 APPLICABLE SYSTEMS
 
-Linux systems with upnpc installed.
+Linux systems with upnpc installed (miniupnpc package).
 
 =head1 CONFIGURATION
 
-None needed.
+If you do not want to show the link maximum bitrates, add the following
+plugin-configuration:
+
+  [upnpc*]
+    env.traffic_remove_max true
+
+You can display the graph on another host (e.g., the actual router) than the
+one running upnpc. To do so, first configure the plugin to use a different
+hostname.
+
+    env.host_name router
+
+Then configure munin (in /etc/munin/munin-conf or /etc/munin/munin-conf.d), to
+support a new host.
+
+  [example.net;router]
+    address 127.0.0.1
+    use_node_name no
 
 =head1 AUTHOR
 
-Olivier Mehani <shtrom+munin@ssji.net>
+Olivier Mehani
+
+Copyright (C) 2016,2019 Olivier Mehani <shtrom+munin@ssji.net>
 
 =head1 LICENSE
 
-SPDX-License-Identifier: GPL-2.0-or-later
+SPDX-License-Identifier: GPL-3.0-or-later
 
 =head1 MAGIC MARKERS
 
@@ -37,24 +57,55 @@ SPDX-License-Identifier: GPL-2.0-or-later
 
 =cut
 
-autoconf() {
-	which upnpc >/dev/null && upnpc -s >/dev/null 2>&1 && echo yes || echo "no (No upnpc or no UPnP router)"
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+
+PLUGIN_NAME="$(basename "${0}")"
+MODE="$(echo "${PLUGIN_NAME}" | sed 's/.*_//')"
+# If called without a mode, default to multigraph
+[ "$MODE" = "upnpc" ] && MODE="multi"
+
+get_data() {
+	if ! command -v upnpc >/dev/null; then
+		echo "upnpc not found (miniupnpc package)" >&2
+		exit 1
+	fi
+
+	upnpc -s
 }
 
-suggest () {
-	upnpc -s | sed -n " \
-		s/.*uptime=.*/uptime/p; \
-		s/.*MaxBitRate.*/bitrate/p; \
+get_supported_modes() {
+	DATA=$1
+	echo "${DATA}" | sed -n " \
 		s/.*Bytes.*/traffic/p; \
 		s/.*Packets.*/pkts/p; \
-			"
+		s/.*uptime=.*/uptime/p; \
+		"
+}
+
+autoconf() {
+	if ! command -v upnpc >/dev/null; then
+		echo "no (upnpc not found [miniupnpc package])"
+		return
+	fi
+	upnpc -s 2>/dev/null | grep -q 'List.*devices.*found' && echo yes \
+		|| echo "no (No UPnP router detected)"
+}
+
+
+suggest () {
+	for mode in ${SUPPORTED_MODES}; do
+		echo "${mode}"
+	done
+	echo "multi"
 }
 
 config () {
-	case $1 in
+	case ${1} in
 		"uptime")
 			cat << EOF
-graph_title Uplink connection uptime
+graph_title Uplink connection uptime${HOST_TITLE}
 graph_args -l 0
 graph_category network
 graph_scale no
@@ -62,48 +113,62 @@ graph_vlabel uptime in hours
 uptime.label uptime
 uptime.draw AREA
 uptime.cdef uptime,3600,/
+${HOST_NAME}
 EOF
 			;;
 		"bitrate")
 			cat << EOF
-graph_title Uplink bitrate
+graph_title [DEPRECATED] Uplink bitrate${HOST_TITLE}
 graph_args --base 1000 -l 0
 graph_category network
 graph_vlabel bitrate down (-) / up (+)
 down.label bps
-down.warning 4194304:
-down.critical 1048576:
 up.label bps
-up.warning 524288:
-up.critical 131072:
 down.graph no
 up.negative down
+${HOST_NAME}
 EOF
 			;;
 		"traffic")
-			# ${graph_period} is not a shell variable
-			cat << 'EOF'
-graph_title Uplink traffic
-graph_args --base 1024 -l 0
+			cat << EOF
+graph_title Uplink traffic${HOST_TITLE}
+graph_args --base 1000 -l 0
 graph_category network
-graph_vlabel bytes in (-) / out (+) per ${graph_period}
-down.label Bps
+graph_vlabel bits per second in (-) / out (+)
+EOF
+			if [ "${traffic_remove_max:-false}" != 'true' ]; then
+				cat << EOF
+maxdown.label bps (max)
+maxup.label bps (max)
+maxdown.graph no
+maxup.negative maxdown
+EOF
+			fi
+			cat << EOF
+down.label bps
 down.type DERIVE
 down.min 0
-up.label Bps
+down.cdef down,8,*
+up.label bps
 up.type DERIVE
 up.min 0
+up.cdef up,8,*
 down.graph no
 up.negative down
+${HOST_NAME}
 EOF
 			;;
 		"pkts")
 			# ${graph_period} is not a shell variable
-			cat << 'EOF'
-graph_title Uplink packets
+			cat << EOF
+graph_title Uplink packets${HOST_TITLE}
 graph_args --base 1000 -l 0
 graph_category network
-graph_vlabel packets in (-) / out (+) per ${graph_period}
+EOF
+			# ${graph_period} is not a shell variable
+			# shellcheck disable=SC2016
+			echo 'graph_vlabel packets in (-) / out (+) per ${graph_period}'
+			cat << EOF
 down.label pps
 down.type DERIVE
 down.min 0
@@ -112,47 +177,94 @@ up.type DERIVE
 up.min 0
 down.graph no
 up.negative down
+${HOST_NAME}
 EOF
 			;;
-		"*")
-			echo "$0: unknown mode '$1'" >&2
+		"multi")
+			echo "${HOST_NAME}"
+			# Don't repeat HOST_NAME in sub-configs
+			HOST_NAME=""
+			echo "multigraph ${PLUGIN_NAME}"
+			config "traffic"
+			for mode in ${SUPPORTED_MODES}; do
+				echo "multigraph ${PLUGIN_NAME}.${mode}"
+				config "${mode}"
+			done
+			;;
+		*)
+			echo "unknown mode '${1}'" >&2
 			exit 1
+			;;
 	esac
 }
 
 fetch () {
-	case $1 in
+	case "${1}" in
 		"uptime")
-		upnpc -s | sed -n "s/.*uptime=\([0-9]\+\)s.*/uptime.value \1/p"
+		echo "${DATA}" | sed -n "s/.*uptime=\([0-9]\+\)s.*/uptime.value \1/p"
 			;;
 		"bitrate")
-		upnpc -s | sed -n "s/^MaxBitRateDown : \([0-9]\+\) bps.*MaxBitRateUp \([0-9]\+\) bps.*/down.value \1\nup.value \2/p"
+		echo "${DATA}" | sed -n "s/^MaxBitRateDown : \([0-9]\+\) bps.*MaxBitRateUp \([0-9]\+\) bps.*/down.value \1\nup.value \2/p"
 			;;
 		"traffic")
-		upnpc -s | sed -n "s/^Bytes:\s*Sent:\s*\([0-9]\+\).*Recv:\s*\([0-9]\+\).*/up.value \1\ndown.value \2/p"
+		echo "${DATA}" | sed -n "
+		s/^Bytes:\s*Sent:\s*\([0-9]\+\).*Recv:\s*\([0-9]\+\).*/up.value \1\ndown.value \2/p"
+		if [ "${traffic_remove_max:-false}" != 'true' ]; then
+			echo "${DATA}" | sed -n "
+			s/^MaxBitRateDown : \([0-9]\+\) bps.*MaxBitRateUp \([0-9]\+\) bps.*/maxdown.value \1\nmaxup.value \2/p"
+		fi
 			;;
 		"pkts")
-		upnpc -s | sed -n "s/^Packets:\s*Sent:\s*\([0-9]\+\).*Recv:\s*\([0-9]\+\).*/up.value \1\ndown.value \2/p"
+		echo "${DATA}" | sed -n "s/^Packets:\s*Sent:\s*\([0-9]\+\).*Recv:\s*\([0-9]\+\).*/up.value \1\ndown.value \2/p"
 			;;
-		"*")
-			echo "$0: unknown mode '$1'" >&2
+		"multi"|"upnpc")
+			echo "multigraph ${PLUGIN_NAME}"
+			fetch "traffic"
+			for mode in ${SUPPORTED_MODES}; do
+				echo "multigraph ${PLUGIN_NAME}.${mode}"
+				fetch "${mode}"
+			done
+			;;
+		*)
+			echo "unknown mode '${1}'" >&2
 			exit 1
+			;;
 	esac
 }
 
-mode=`echo $0 | sed 's/.*_//'`
+if [ "${1:-}" = "autoconf" ]; then
+	autoconf
+	exit 0
+fi
 
-case $1 in
-	"autoconf")
-		autoconf
-		;;
+# do data-based detection here, rather than in
+# config() as we don't want to do this multiple times
+# when the function calls itself for multigraphs
+DATA=$(get_data)
+SUPPORTED_MODES=$(get_supported_modes "${DATA}")
+
+HOST=${host_name:-}
+HOST_TITLE=""
+HOST_NAME="host_name ${HOST}"
+if [ -z "${HOST}" ]; then
+	HOST=$(echo "${DATA}" | sed -n "s#.*desc: http://\([^/:]\+\).*#\1#p")
+	# Only add the host name to the title if autodetected
+	HOST_TITLE=" ($HOST)"
+	# ...but not as a separate host
+	HOST_NAME=""
+fi
+
+case ${1:-} in
 	"suggest")
 		suggest
 		;;
 	"config")
-		config $mode
+		config "${MODE}"
+		if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = "1" ]; then
+			fetch "${MODE}"
+		fi
 		;;
 	*)
-		fetch $mode
+		fetch "${MODE}"
 		;;
 esac

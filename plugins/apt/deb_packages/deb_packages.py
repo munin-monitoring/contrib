@@ -84,7 +84,7 @@ def Property(func):
 
 class Apt(object):
     """
-        lazy helperclass i need in this statisticprogram, which have alle the apt_pkg stuff
+        lazy helperclass i need in this statisticprogram, which has all the apt_pkg stuff
     """
 
     def __init__(self):
@@ -575,7 +575,7 @@ class PacketHandler(object):
 
     def adder(self, package, packageStat, *args, **kwords):
         """
-        take the package and add it tho the packageStat dictionary in defined way
+        take the package and add it to the packageStat dictionary in defined way
         """
         pass
 
@@ -868,7 +868,7 @@ deb_packages - plugin to monitor update resources and pending packages on Debian
 
 This plugin has checked on Debian - Wheezy and squeeze. If you want to use it
 on older installations, tell me whether it works or which errors you had. It
-shoud run past python-apt 0.7 and python 2.5.
+should run past python-apt 0.7 and python 2.5.
 
 =head1 DESCRIPTION
 

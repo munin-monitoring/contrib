@@ -48,10 +48,6 @@ use strict;
 my $COMMAND;
 my $MYSQLADMIN = $ENV{mysqladmin} || "mysql";
 
-my %WANTED = ( "Index"  => "index",
-               "Datas" => "datas",
-             );
-
 my $arg = shift();
 
 if ($arg eq 'config') {
@@ -69,14 +65,12 @@ if ($arg eq 'config') {
 sub getDBList;
 foreach my $db (getDBList()) {
 
-  my $datas = 0;
-  my $indexes = 0;
   my (@infos,$info,$i_data,$i_index);
 
   $COMMAND = "$MYSQLADMIN $ENV{mysqlopts} $db -e 'show table status;' | head -n 1";
 
   open(SERVICE, "$COMMAND |")
-    or die("Coult not execute '$COMMAND': $!");
+    or die("Could not execute '$COMMAND': $!");
 
   while (<SERVICE>) {
       (@infos)  = split;
@@ -100,20 +94,16 @@ foreach my $db (getDBList()) {
     $COMMAND = "$MYSQLADMIN $ENV{mysqlopts} $db -e 'show table status;' | cut -f $i_data,$i_index | grep -v leng";
 
     open(SERVICE, "$COMMAND |")
-      or die("Coult not execute '$COMMAND': $!");
+      or die("Could not execute '$COMMAND': $!");
 
     while (<SERVICE>) {
         (m/(\d+).*?(\d+(?:\.\d+)?)/);
-        $datas += $1;
-        $indexes += $2;
+        $total_size += $1 + $2;
     }
     close(SERVICE);
 
-    $total_size = $datas+$indexes;
   }
   print("$db.value $total_size\n");
-#   print("datas.value $datas\n");
-#   print("index.value $indexes\n");
 }
 
 

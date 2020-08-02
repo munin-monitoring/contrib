@@ -32,7 +32,7 @@ Paul Saunders L<darac+munin@darac.org.uk>
 
 =cut
 
-declare -a ARRY
+declare -a TOKENS
 shopt -s nocasematch
 
 case $1 in
@@ -42,12 +42,12 @@ graph_title XFS fragmentation
 graph_vlabel Percent
 graph_category disk
 EOF
-		cat /etc/mtab | awk '{print $2 " " $3}' | while read LINE
-		do
-			ARRY=($LINE)
-			if [[ ${ARRY[1]} =~ xfs ]]; then
-				FIELDNAME=$(echo ${ARRY[0]} | sed 's/^[^A-Za-z_]/_/; s/[^A-Za-z0-9_]/_/g')
-				echo "$FIELDNAME.label ${ARRY[0]}"
+		awk '{print $2 " " $3}' </etc/mtab | while read -r LINE; do
+			# shellcheck disable=SC2206
+			TOKENS=($LINE)
+			if [[ ${TOKENS[1]} =~ xfs ]]; then
+				FIELDNAME=$(echo "${TOKENS[0]}" | sed 's/^[^A-Za-z_]/_/; s/[^A-Za-z0-9_]/_/g')
+				echo "$FIELDNAME.label ${TOKENS[0]}"
 				echo "$FIELDNAME.type GAUGE"
 			fi
 		done
@@ -55,13 +55,12 @@ EOF
 		;;
 esac
 
-cat /etc/mtab | awk '{print $2 " " $3 " " $1}' | while read LINE
-do
-	ARRY=($LINE)
-	if [[ ${ARRY[1]} =~ xfs ]]; then
-		FIELDNAME=$(echo ${ARRY[0]} | sed 's/^[^A-Za-z_]/_/; s/[^A-Za-z0-9_]/_/g')
-		FRAG=$(xfs_db -c frag -r ${ARRY[2]} | sed 's/.*fragmentation factor \(.*\)%.*/\1/')
-		echo $FIELDNAME.value $FRAG
+awk '{print $2 " " $3 " " $1}' </etc/mtab | while read -r LINE; do
+	# shellcheck disable=SC2206
+	TOKENS=($LINE)
+	if [[ ${TOKENS[1]} =~ xfs ]]; then
+		FIELDNAME=$(echo "${TOKENS[0]}" | sed 's/^[^A-Za-z_]/_/; s/[^A-Za-z0-9_]/_/g')
+		FRAG=$(xfs_db -c frag -r "${TOKENS[2]}" | sed 's/.*fragmentation factor \(.*\)%.*/\1/')
+		echo "$FIELDNAME.value $FRAG"
 	fi
 done
-

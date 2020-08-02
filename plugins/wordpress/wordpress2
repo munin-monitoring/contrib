@@ -109,13 +109,26 @@ $comments  = 0;
 $pingbacks = 0;
 
 // GET DATA
-mysql_connect($d["host"], $d["user"], $d["pass"]) or die("Error: Failed to connect to the MySQL database!");
-mysql_select_db($d["dbnm"]) or die("Error: Failed to select database!");
+if(function_exists('mysql_connect')) {
+	mysql_connect($d["host"], $d["user"], $d["pass"]) or die("Error: Failed to connect to the MySQL database!");
+	mysql_select_db($d["dbnm"]) or die("Error: Failed to select database!");
 
-$users     = mysql_result(mysql_query("SELECT COUNT(*) FROM ".$d["tbpf"]."users;"), 0);
-$posts     = mysql_result(mysql_query("SELECT COUNT(*) FROM ".$d["tbpf"]."posts    WHERE post_status='publish' AND post_password='' AND post_type='post';"), 0);
-$comments  = mysql_result(mysql_query("SELECT COUNT(*) FROM ".$d["tbpf"]."comments WHERE comment_approved='1' AND comment_type='';"), 0);
-$pingbacks = mysql_result(mysql_query("SELECT COUNT(*) FROM ".$d["tbpf"]."comments WHERE comment_approved='1' AND comment_type='pingback';"), 0);
+	$users     = mysql_result(mysql_query("SELECT COUNT(*) FROM ".$d["tbpf"]."users;"), 0);
+	$posts     = mysql_result(mysql_query("SELECT COUNT(*) FROM ".$d["tbpf"]."posts    WHERE post_status='publish' AND post_password='' AND post_type='post';"), 0);
+	$comments  = mysql_result(mysql_query("SELECT COUNT(*) FROM ".$d["tbpf"]."comments WHERE comment_approved='1' AND comment_type='';"), 0);
+	$pingbacks = mysql_result(mysql_query("SELECT COUNT(*) FROM ".$d["tbpf"]."comments WHERE comment_approved='1' AND comment_type='pingback';"), 0);
+}else{
+	$mysqli = new mysqli($d["host"], $d["user"], $d["pass"], $d["dbnm"]);
+	if ($mysqli->connect_errno) {
+		die("Error: Failed to connect to the MySQL database!");
+	}
+
+	$users     = $mysqli->query("SELECT COUNT(*) AS cnt FROM ".$d["tbpf"]."users;")->fetch_object()->cnt;
+	$posts     = $mysqli->query("SELECT COUNT(*) AS cnt FROM ".$d["tbpf"]."posts    WHERE post_status='publish' AND post_password='' AND post_type='post';")->fetch_object()->cnt;
+	$comments  = $mysqli->query("SELECT COUNT(*) AS cnt FROM ".$d["tbpf"]."comments WHERE comment_approved='1' AND comment_type='';")->fetch_object()->cnt;
+	$pingbacks = $mysqli->query("SELECT COUNT(*) AS cnt FROM ".$d["tbpf"]."comments WHERE comment_approved='1' AND comment_type='pingback';")->fetch_object()->cnt;
+	$mysqli->close();
+}
 
 // OUTPUT DATA
 echo     "users.value ".$users    ."\n";

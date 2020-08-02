@@ -63,13 +63,51 @@ import urllib.request
 DEBUG = os.getenv('MUNIN_DEBUG') == '1'
 
 
+def _get_version(info):
+    # v0.15.2 version is represented as 150200
+    return info['version'] // 10000
+
+
+def _rpc_get_initial_info(connection):
+    (info, connect_error) = connection.getnetworkinfo()
+    if connect_error:
+        if isinstance(connect_error, urllib.error.HTTPError) and connect_error.code == 404:
+            # getinfo RPC exists in version <= 0.15
+            (info, connect_error) = connection.getinfo()
+            if connect_error:
+                return (None, None, connect_error)
+        else:
+            return (None, None, connect_error)  # pass all other not-404 errors
+
+    return (info, _get_version(info), None)
+
+
+def _rpc_get_balance(info, minor_version, connection):
+    # see https://github.com/bitcoin/bitcoin/blob/239d199667888e5d60309f15a38eed4d3afe56c4/
+    # doc/release-notes/release-notes-0.19.0.1.md#new-rpcs
+    if minor_version >= 19:
+        # we use getbalance*s* (plural) as old getbalance is being deprecated,
+        # and we have to calculate total balance (owned and watch-only) manually now.
+        (result, error) = connection.getbalances()
+
+        total = sum(result[wallet_mode]['trusted']
+                    for wallet_mode in ('mine', 'watchonly')
+                    if wallet_mode in result)
+
+        info['balance'] = total
+        return info
+    else:
+        (result, error) = connection.getbalance()
+        info['balance'] = result
+        return info
+
+
 def main():
     # getinfo variable is read from command name - probably the sym-link name.
     request_var = sys.argv[0].split('_', 1)[1] or 'balance'
     command = sys.argv[1] if len(sys.argv) > 1 else None
     request_labels = {'balance': ('Wallet Balance', 'BTC'),
                       'connections': ('Peer Connections', 'Connections'),
-                      'fees': ("Tip Offered", "BTC"),
                       'transactions': ("Transactions", "Transactions",
                                        ('confirmed', 'waiting')),
                       'block_age': ("Last Block Age", "Seconds"),
@@ -120,8 +158,9 @@ def main():
                                                  bitcoin_options.rpcport),
                                username=bitcoin_options.rpcuser,
                                password=bitcoin_options.rpcpassword)
-        (info, connect_error) = bitcoin.getinfo()
-        error = "Could not connect to Bitcoin server: {}".format(connect_error)
+        (info, minor_version, connect_error) = _rpc_get_initial_info(bitcoin)
+        if connect_error:
+            error = "Could not connect to Bitcoin server: {}".format(connect_error)
 
     if command == 'autoconf':
         if error:
@@ -134,19 +173,26 @@ def main():
         print(error, file=sys.stderr)
         return False
 
+    if request_var == 'balance':
+        info = _rpc_get_balance(info, minor_version, bitcoin)
+
     if request_var in ('transactions', 'block_age'):
-        (info, error) = bitcoin.getblockhash(info['blocks'])
-        (info, error) = bitcoin.getblock(info)
+        (info, error) = bitcoin.getblockchaininfo()
+        (info, error) = bitcoin.getblock(info['bestblockhash'])
         info['block_age'] = int(time.time()) - info['time']
         info['confirmed'] = len(info['tx'])
 
-    if request_var in ('fees', 'transactions'):
-        (memory_pool, error) = bitcoin.getrawmempool()
-        if memory_pool:
-            info['waiting'] = len(memory_pool)
+    if request_var == 'difficulty':
+        (info, error) = bitcoin.getblockchaininfo()
+
+    if request_var == 'transactions':
+        (memory_pool, error) = bitcoin.getmempoolinfo()
+        info['waiting'] = memory_pool['size']
 
     for label in line_labels:
         print("%s.value %s" % (label, info[label]))
+
+    return True
 
 
 def parse_conf(filename):
@@ -236,7 +282,7 @@ class Proxy:
             'method': self.method,
             'params': args,
             'id': self.id,
-            }
+        }
         request = urllib.request.Request(self.service.url, json.dumps(data).encode())
         if self.service.username:
             auth_string = '%s:%s' % (self.service.username, self.service.password)
@@ -249,7 +295,7 @@ class Proxy:
             return (None, e)
 
         if DEBUG:
-            print('RPC Response (%s): %s' % (self.method, json.dumps(body, indent=4)))
+            print('RPC Response (%s): %s' % (self.method, json.dumps(json.loads(body), indent=4)))
 
         try:
             data = json.loads(body)

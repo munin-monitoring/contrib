@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 # Copyright (c) 2010 Christoph Heer (Christoph.Heer@googlemail.com)
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
@@ -57,20 +56,20 @@ def main():
         else:
             connection_count_re = re.compile(r"Total:\s(\d+)\s")
             telnet = telnetlib.Telnet(host, port)
-            telnet.write("c2s:show_secure()\n")
-            telnet_response = telnet.read_until("secure client connections", 5)
-            parsed_info = connection_count_re.findall(telnet_response)
+            telnet.write(b"c2s:show_secure()\n")
+            telnet_response = telnet.read_until(b"secure client connections", 5)
+            parsed_info = connection_count_re.findall(telnet_response.decode('ascii'))
             secure_client_connections = int(parsed_info[0])
             print("secure_client_connections.value %s" % secure_client_connections)
 
-            telnet.write("c2s:show_insecure()\n")
-            telnet_response = telnet.read_until("insecure client connections", 5)
-            parsed_info = connection_count_re.findall(telnet_response)
+            telnet.write(b"c2s:show_insecure()\n")
+            telnet_response = telnet.read_until(b"insecure client connections", 5)
+            parsed_info = connection_count_re.findall(telnet_response.decode('ascii'))
             insecure_client_connections = int(parsed_info[0])
             print("insecure_client_connections.value %s" % insecure_client_connections)
             all_client_connections = secure_client_connections + insecure_client_connections
             print("all_client_connections.value %s" % (all_client_connections))
-            telnet.write("quit\n")
+            telnet.write(b"quit\n")
 
     elif wildcard == "s2s":
         if mode == "config":
@@ -85,12 +84,12 @@ def main():
         else:
             server_connections_re = re.compile(r"(\d+) outgoing, (\d+)")
             telnet = telnetlib.Telnet(host, port)
-            telnet.write("s2s:show()\n")
-            telnet_response = telnet.read_until("connections", 5)
-            parsed_info = server_connections_re.findall(telnet_response)
+            telnet.write(b"s2s:show()\n")
+            telnet_response = telnet.read_until(b"connections", 5)
+            parsed_info = server_connections_re.findall(telnet_response.decode('ascii'))
             print("outgoing_connections.value %s" % (parsed_info[0][0]))
             print("incoming_connections.value %s" % (parsed_info[0][1]))
-            telnet.write("quit\n")
+            telnet.write(b"quit\n")
 
     elif wildcard == "presence":
         if mode == "config":
@@ -98,7 +97,7 @@ def main():
             print("graph_vlabel clients")
             print("graph_category chat")
 
-            print("available.label Avaible Clients")
+            print("available.label Available Clients")
             print("chat.label Ready for Chat Clients")
             print("away.label Away Clients")
             print("xa.label Extended Away Clients")
@@ -106,17 +105,17 @@ def main():
             sys.exit(0)
 
         else:
-            client_presence_re = re.compile(r"[-\]] (.*?)\(\d+\)")
+            client_presence_re = re.compile("[\]] (.*?)\(\d+\)")
             telnet = telnetlib.Telnet(host, port)
-            telnet.write("c2s:show()\n")
-            telnet_response = telnet.read_until("clients", 5)
-            parsed_info = client_presence_re.findall(telnet_response)
+            telnet.write(b"c2s:show()\n")
+            telnet_response = telnet.read_until(b"clients", 5)
+            parsed_info = client_presence_re.findall(telnet_response.decode('ascii'))
             print("available.value %s" % parsed_info.count("available"))
             print("chat.value %s" % (parsed_info.count("chat")))
             print("away.value %s" % (parsed_info.count("away")))
             print("xa.value %s" % (parsed_info.count("xa")))
             print("dnd.value %s" % (parsed_info.count("dnd")))
-            telnet.write("quit\n")
+            telnet.write(b"quit\n")
 
     elif wildcard == "uptime":
         if mode == "config":
@@ -136,13 +135,13 @@ def main():
         else:
             uptime_re = re.compile(r"\d+")
             telnet = telnetlib.Telnet(host, port)
-            telnet.write("server:uptime()\n")
-            telnet_response = telnet.read_until("minutes (", 5)
-            parsed_info = uptime_re.findall(telnet_response)
-            uptime_value = (float(parsed_info[0]) + float(parsed_info[1])/24
-                            + float(parsed_info[2])/60/24)
+            telnet.write(b"server:uptime()\n")
+            telnet_response = telnet.read_until(b"minutes (", 5)
+            parsed_info = uptime_re.findall(telnet_response.decode('ascii'))
+            uptime_value = (float(parsed_info[0]) + float(parsed_info[1]) / 24
+                            + float(parsed_info[2]) / 60 / 24)
             print("uptime.value %s" % (uptime_value))
-            telnet.write("quit\n")
+            telnet.write(b"quit\n")
 
     elif wildcard == "users":
         if mode == "config":

@@ -1,11 +1,14 @@
-#!/bin/bash
+#!/bin/sh -eu
 #
 # Plugin to monitor the number of hosts in /etc/hosts.deny
-# that are deined access to sshd
+# that are denied access to sshd
 #
 # Based on denyhosts plugin by tjansson (2009)
 #
 # Copyright (C) 2009 Kåre Hartvig Jensen (kaare.hartvig.jensen@gmail.com)
+# Copyright (C) 2019 Olivier Mehani <shtrom+munin@ssji.net>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,24 +23,43 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
+LOG=${LOG:-/etc/hosts.deny}
 
-if [ "$1" = "autoconf" ]; then
-        if [ -r "$LOG" ]; then
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+
+if [ "${1:-}" = "autoconf" ]; then
+        if [ -r "${LOG}" ]; then
                 echo yes
         else
-                echo no
+		echo "no (${LOG} not readable or non-existent)"
         fi
         exit 0
 fi
 
-if [ "$1" = "config" ]; then
+COUNTS=$(sed -n 's/^\([^#]\+\):.*/\1/p' "${LOG}" \
+	| sort \
+	| uniq -c \
+	| sed "s/^.*\s\([0-9]\+\)\s\(.*\)/\2.value \1/"
+	)
 
-        echo 'graph_title Hosts denied sshd access in /etc/hosts.deny'
+if [ "${1:-}" = "config" ]; then
+
+        echo 'graph_title Hosts denied access'
+        echo "graph_info Hosts denied access in ${LOG}"
         echo 'graph_args --base 1000 -l 0'
         echo 'graph_vlabel Hosts denied '
-        echo 'graph_category system'
-        echo 'HostsDenied.label Hosts denied'
-        exit 0
+        echo 'graph_category security'
+	# Assume we always have SSH
+        echo 'sshd.label sshd'
+        echo 'sshd.draw AREA'
+	echo "${COUNTS}" \
+		| sed '/ssh/d; # skip ssh
+		       s/^\([^\.]\+\)\..*/\1.label \1\n\1.draw STACK/'
+	if [ "${MUNIN_DIRTYCONFIG:-0}" != 1 ]; then
+		exit 0
+	fi
 fi
 
-echo HostsDenied.value  `cat /etc/hosts.deny | grep sshd | wc -l`
+echo "${COUNTS}"

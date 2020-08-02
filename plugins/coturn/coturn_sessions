@@ -1,0 +1,109 @@
+#!/bin/sh
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+coturn_sessions - Simple plugin to monitor sessions on coturn server
+
+=head1 CONFIGURATION
+
+This plugin requires a password set in /etc/turnserver.conf for telnet 
+cli access. A telnet client has to be installed. Optionally you can 
+specify the port of the cli interface.
+
+[coturn_sessions]
+env.password VERYSECUREPASSWORD
+env.port PORT
+
+=head1 AUTHOR
+
+Copyright (C) 2020 Sebastian L. (https://momou.ch)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+cliport=${port:-5766}
+clipassword=${password:-}
+
+get_coturn_stats() {
+	echo "open 127.0.0.1 $cliport"
+	sleep 1
+	echo "$clipassword"
+	sleep 1
+	for i in udp tcp dtls tls
+	do
+		echo "pu $i"
+		sleep 1
+	done
+}
+
+pick_line() {
+    local result
+    result=$(echo "$1" | sed -n "$2"p )
+    echo "${result:-"U"}"
+}
+
+
+case $1 in
+    autoconf)
+        if [ -x /usr/bin/turnserver ]; then
+            if [ -z "$(command -v telnet)" ]; then
+                echo "no (telnet not found)"
+                exit 0
+            else
+                echo "yes"
+                exit 0
+            fi
+        else
+            echo "no (/usr/bin/turnserver not found)"
+            exit 0
+        fi
+        ;;
+   config)
+
+		echo "graph_title Sessions on coturn server"
+		echo "graph_vlabel turn sessions by protocols"
+		echo "graph_info This graph shows active sessions sorted by different protocols on the coturn server."
+		echo "graph_args --base 1000 --lower-limit 0"
+		echo "udp_sessions.label udp sessions"
+		echo "udp_sessions.draw AREASTACK"
+		echo "udp_sessions.info Current number of udp sessions"
+		echo "udp_sessions.min 0"
+		echo "tcp_sessions.label tcp sessions"
+		echo "tcp_sessions.draw AREASTACK"
+		echo "tcp_sessions.info Current number of tcp sessions"
+		echo "tcp_sessions.min 0"
+		echo "dtls_sessions.label dtls sessions"
+		echo "dtls_sessions.draw AREASTACK"
+		echo "dtls_sessions.info Current number of dtls sessions"
+		echo "dtls_sessions.min 0"
+		echo "tls_sessions.label tls sessions"
+		echo "tls_sessions.draw AREASTACK"
+		echo "tls_sessions.info Current number of tls sessions"
+		echo "tls_sessions.min 0"
+
+        exit 0
+        ;;
+
+esac
+
+SESSIONS=$(get_coturn_stats | telnet 2> /dev/null | grep "Total sessions: " | sed 's/  Total sessions: //')
+
+echo "udp_sessions.value $(pick_line "$SESSIONS" 1)"
+echo "tcp_sessions.value $(pick_line "$SESSIONS" 2)"
+echo "dtls_sessions.value $(pick_line "$SESSIONS" 3)"
+echo "tls_sessions.value $(pick_line "$SESSIONS" 4)"
+

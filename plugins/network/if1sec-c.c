@@ -23,7 +23,7 @@ int fail(char* msg) {
 }
 
 /* Returns the ifname from a /proc/net/dev line
- * It will return an inside pointer to line, and modifiy the end with a \0
+ * It will return an inside pointer to line, and modify the end with a \0
  */
 char* get_ifname_from_procstatline(char* line) {
 	char *ifname;
