@@ -38,11 +38,22 @@ directory /etc/munin/plugin-conf.d/ with the following config (you can also use
 Docker environment variables here as described in
 https://docs.docker.com/compose/reference/envvars/):
 
+You can use the EXCLUDE_CONTAINER_NAME environment variable to specify a regular expression
+which if matched will exclude the matching containers from the memory and cpu graphs.
+
+For example
+
+env.EXCLUDE_CONTAINER_NAME runner
+
+Would exclude all containers with the word "runner" in the name.
+
+
 =over 2
 
     [docker_*]
     user root
     env.DOCKER_HOST unix://var/run/docker.sock
+    env.EXCLUDE_CONTAINER_NAME regexp
 
 =back
 """
@@ -50,6 +61,7 @@ https://docs.docker.com/compose/reference/envvars/):
 import os
 import sys
 import docker
+import re
 from multiprocessing import Process, Queue
 
 
@@ -92,7 +104,10 @@ def get_container_stats(container, q):
 def parallel_container_stats(client):
     proc_list = []
     stats = {}
+    exclude = os.getenv('EXCLUDE_CONTAINER_NAME')
     for container in client.containers.list():
+        if exclude and re.search(exclude, container.name):
+            break
         q = Queue()
         p = Process(target=get_container_stats, args=(container, q))
         proc_list.append({'proc': p, 'queue': q, 'container': container})
