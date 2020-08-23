@@ -1,0 +1,140 @@
+#!/usr/bin/python3 
+#
+# This file contains a munin-plugin to gather btrfs statistics per device.
+#
+# This is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this plugin.  If not, see <http://www.gnu.org/licenses/>.
+
+
+import btrfs
+import sys
+
+
+def munin_config(fs):
+    fsid = str(fs.fsid).replace('-', '_')
+    print("multigraph btrfs_device_stats_" + fsid)
+    print("graph_args --base 1000 -l 0")
+    print("graph_vlabel total btrfs attribute value")
+    print("graph_title btrfs total device stats for " + fs.path)
+    print("graph_category disk")
+    print("graph_info This graph shows the total stats of devices used by btrfs")
+    
+    print("corruption_errs_total.label Corruption Errors")
+    print("flush_errs_total.label Flush Errors")
+    print("generation_errs_total.label Generation Errors")
+    print("read_errs_total.label Read Errors")
+    print("write_errs_total.label Write Errors")
+    print("nr_items_total.label Nr. of Items")
+    print("flags_total.label Nr. of Flags")
+    
+    print("")
+    
+    devices = fs.devices()
+    for this_device in devices:
+        this_dev_info = fs.dev_info(this_device.devid)
+        this_dev_name = this_dev_info.path.replace('/dev/', '')
+        print("multigraph btrfs_device_stats_" + fsid + "." + str(this_device.devid))
+        print("graph_args --base 1000 -l 0")
+        print("graph_vlabel btrfs attribute value")
+        print("graph_title btrfs device stats for " + this_dev_name)
+        print("graph_category disk")
+        print("graph_info This graph shows stats of devices used by btrfs")
+        
+        print("corruption_errs.label Corruption Errors")
+        print("corruption_errs.warming 1")
+        print("flush_errs.label Flush Errors")
+        print("flush_errs.warming 1")
+        print("generation_errs.label Generation Errors")
+        print("generation_errs.warming 1")
+        print("read_errs.label Read Errors")
+        print("read_errs.warming 1")
+        print("write_errs.label Write Errors")
+        print("write_errs.warming 1")
+        print("nr_items.label Nr. of Items")
+        print("flags.label Nr. of Flags")
+        print("flags.warming 1")
+        
+        print("")
+
+
+def munin_values(fs):
+    corruption_errs_total = 0
+    flush_errs_total = 0
+    generation_errs_total = 0
+    read_errs_total = 0
+    write_errs_total = 0
+    nr_items_total = 0
+    flags_total = 0
+    
+    fsid = str(fs.fsid).replace('-', '_')
+    devices = fs.devices()
+    
+    for this_device in devices:
+        this_dev_info = fs.dev_info(this_device.devid)
+        this_dev_name = this_dev_info.path.replace('/dev/', '')
+        this_dev_stat = fs.dev_stats(this_device.devid, False)
+        
+        corruption_errs = this_dev_stat.corruption_errs
+        flush_errs = this_dev_stat.flush_errs
+        generation_errs = this_dev_stat.generation_errs
+        read_errs = this_dev_stat.read_errs
+        write_errs = this_dev_stat.write_errs
+        nr_items = this_dev_stat.nr_items
+        flags = this_dev_stat.flags
+        
+        corruption_errs_total = corruption_errs_total + corruption_errs
+        flush_errs_total = flush_errs_total + flush_errs
+        generation_errs_total = generation_errs_total + generation_errs
+        read_errs_total = read_errs_total + read_errs
+        write_errs_total = write_errs_total + write_errs
+        nr_items_total = nr_items_total + nr_items
+        flags_total = flags_total + flags
+        
+        print("multigraph btrfs_device_stats_" + fsid + "." + str(this_device.devid))
+        
+        print("corruption_errs.value " + str(corruption_errs))
+        print("flush_errs.value " + str(flush_errs))
+        print("generation_errs.value " + str(generation_errs))
+        print("read_errs.value " + str(read_errs))
+        print("write_errs.value " + str(write_errs))
+        print("nr_items.value " + str(nr_items))
+        print("flags.value " + str(flags))
+        
+        print("")
+    
+    print("multigraph btrfs_device_stats_" + fsid)
+    
+    print("corruption_errs_total.value " + str(corruption_errs_total))
+    print("flush_errs_total.value " + str(flush_errs_total))
+    print("generation_errs_total.value " + str(generation_errs_total))
+    print("read_errs_total.value " + str(read_errs_total))
+    print("write_errs_total.value " + str(write_errs_total))
+    print("nr_items_total.value " + str(nr_items_total))
+    print("flags_total.value " + str(flags_total))
+    
+    print("")
+
+
+def main():
+    for path in btrfs.utils.mounted_filesystem_paths():
+        with btrfs.FileSystem(path) as fs:
+            if len(sys.argv) > 1 and sys.argv[1] == "config":
+                munin_config(fs)
+            else:
+                munin_values(fs)
+
+
+if __name__ == "__main__":
+    main()
+
+exit(0)
