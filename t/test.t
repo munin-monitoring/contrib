@@ -192,12 +192,21 @@ sub process_file {
         );
     }
     elsif ( $interpreter =~ m{j?ruby} ) {
-        run_check(
-            {   command     => [ 'ruby', '-cw', $file ],
-                description => 'ruby syntax check',
-                filename    => $filename
-            }
-        );
+        subtest $filename => sub {
+            plan tests => 2;
+            run_check(
+                {   command     => [ 'ruby', '-cw', $file ],
+                    description => 'ruby syntax check',
+                    filename    => $filename
+                }
+            );
+            run_check(
+                {   command     => [ 'rubocop', $file ],
+                    description => 'ruby style and syntax check',
+                    filename    => $filename
+                }
+            );
+        }
     }
     elsif ( $interpreter =~ m{gawk} ) {
         run_check(
