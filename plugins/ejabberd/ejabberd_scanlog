@@ -21,9 +21,9 @@ require 'yaml'
 #
 
 LOG_FILE = ENV['log'] || '/var/log/ejabberd/ejabberd.log'
-CACHE_FILE = '/tmp/ejabberd_scanlog_cache' # cache file position
+CACHE_FILE = '/tmp/ejabberd_scanlog_cache'.freeze # cache file position
 
-DEFAULT_CACHE = { :start => 0 }
+DEFAULT_CACHE = { start: 0 }.freeze
 
 $debug_mode = ARGV.first == 'debug'
 
@@ -32,7 +32,7 @@ if $debug_mode
 else
   begin
     log_info = YAML.load IO.read(CACHE_FILE)
-  rescue
+  rescue StandardError
     log_info = DEFAULT_CACHE
   end
 
@@ -43,7 +43,7 @@ else
 end
 
 if ARGV.first == 'reset'
-  log_info = { :start => File.size(LOG_FILE) - 1 }
+  log_info = { start: File.size(LOG_FILE) - 1 }
   puts 'Log reset'
 end
 
@@ -80,8 +80,8 @@ KNOWN_LOG_TYPES = [
    ['mysql',
     'Failed connecting to']],
   ['Timeout while running a hook',
-   ['ejabberd_hooks',
-    'timeout']],
+   %w[ejabberd_hooks
+      timeout]],
   ['SQL transaction restarts exceeded',
    ['SQL transaction restarts exceeded']],
   ['Unexpected info',
@@ -89,8 +89,8 @@ KNOWN_LOG_TYPES = [
   ['Other sql_cmd timeout',
    ['sql_cmd']],
   ['System limit hit: ports', # check with length(erlang:ports())., set in ejabberdctl config file
-   ['system_limit',
-    'open_port']],
+   %w[system_limit
+      open_port]],
   ['Other system limit hit', # processes? check with erlang:system_info(process_count)., erlang:system_info(process_limit)., set in ejabberdctl cfg
    ['system_limit']],
   ['Generic server terminating',
@@ -115,20 +115,22 @@ KNOWN_LOG_TYPES = [
    ['mysql_conn: init failed receiving data']],
   ['TCP Error',
    ['Failed TCP']]
-]
+].freeze
 
 def log_type(text)
-  KNOWN_LOG_TYPES.find_index { |entry|
+  KNOWN_LOG_TYPES.find_index do |entry|
     entry[1].all? { |substr| text.include? substr }
-  }
+  end
 end
 
-new_data.split("\n=").each { |report|
+new_data.split("\n=").each do |report|
   next if report.empty?
 
   report =~ /\A(\w+) REPORT==== (.*) ===\n(.*)\z/m
-  type, time, text = $1, $2, $3
-  next unless type and time and text
+  type = Regexp.last_match(1)
+  time = Regexp.last_match(2)
+  text = Regexp.last_match(3)
+  next unless type && time && text
 
   log_info[type] = (log_info[type] || 0) + 1
   if sub_type = log_type(text)
@@ -136,7 +138,7 @@ new_data.split("\n=").each { |report|
   elsif $debug_mode
     warn "Unparsed log entry #{type}: #{text} at #{time}"
   end
-}
+end
 
 log_info[:start] += new_data.size
 File.open(CACHE_FILE, 'w') { |f| f.write log_info.to_yaml } unless $debug_mode
@@ -150,7 +152,7 @@ if ARGV.first == 'config'
   CONFIG
 end
 
-(KNOWN_LOG_TYPES + %w(ERROR WARNING INFO DEBUG)).each.with_index { |log_type, index|
+(KNOWN_LOG_TYPES + %w[ERROR WARNING INFO DEBUG]).each.with_index do |log_type, index|
   label, index = if log_type.is_a? Array
                    [log_type.first, index]
                  else
@@ -162,4 +164,4 @@ end
   else
     puts "T#{index}.value #{log_info[index] or 0}"
   end
-}
+end

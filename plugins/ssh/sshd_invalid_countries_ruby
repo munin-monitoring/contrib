@@ -33,7 +33,6 @@ env.loadpath /usr/local/lib/ruby/gems/1.9.1/gems/geoip-0.8.8/lib/
 
 =end
 
-
 require (ENV['loadpath'] || '') + 'geoip'
 
 SYSLOG   = ENV['syslog'] || '/var/log/secure'
@@ -45,28 +44,26 @@ AWK_CMD  = 'awk \'/sshd\[.*Did not receive identification string/{print $12} ' +
 def getInvalids
   c = {}
   wholeips = `#{AWK_CMD}`.split("\n")
-  uniqueips = wholeips.inject({}) do |hash, key|
-    hash.include?(key) ? hash[key] += 1 : hash[key] = 1;
-    hash
+  uniqueips = wholeips.each_with_object({}) do |key, hash|
+    hash.include?(key) ? hash[key] += 1 : hash[key] = 1
   end
   geoip = GeoIP.new(GEOIP_DB)
   uniqueips.each do |ip, cnt|
     begin
       country = geoip.country(ip)[5]
       c[country] = c[country] ? c[country] + cnt : cnt
-    rescue
+    rescue StandardError
       c['Unknown'] = c['Unknown'] ? c['Unknown'] + cnt : cnt
     end
   end
-  c = c.to_a.sort { |a, b| a[0] <=> b[0] }
-  c
+  c.to_a.sort { |a, b| a[0] <=> b[0] }
 end
 
 case ARGV[0]
 when 'autoconf'
   begin
     fh = open(SYSLOG, 'r')
-  rescue
+  rescue StandardError
     puts 'no'
     exit 0
   else
@@ -79,7 +76,7 @@ when 'config'
   puts 'graph_vlabel number of invalid access per country'
   puts 'graph_category security'
   puts 'graph_info This graph shows the countries of invalid access to sshd.'
-  getInvalids.each { |k, v| puts k + '.label ' + k }
+  getInvalids.each { |k, _v| puts k + '.label ' + k }
   exit 0
 else
   getInvalids.each { |k, v| puts k + '.value ' + v.to_s }

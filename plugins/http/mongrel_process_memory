@@ -28,27 +28,24 @@ Contributors: Adam Jacob (<adam@hjksolutions.com>)
 
 =end
 
-
 module Munin
   class MongrelProcessMemory
     def run
-      h = get_pids()
-      ps_output = ""
+      h = get_pids
+      ps_output = ''
       # I have no doubt that this is a terrible way of doing this.
-      h.each do |k, v|
-        ps_output = ps_output + `ps --no-heading l #{k}`
+      h.each do |k, _v|
+        ps_output += `ps --no-heading l #{k}`
       end
 
       if ps_output
-        port_list = Hash.new
+        port_list = {}
         ps_output.each_line do |l|
-          if l =~ /-p (\d+)/
-            port = $1
-            l_ary = l.split(/\s+/)
-            if l_ary.length > 6
-              port_list[port] = l_ary[7].to_i * 1024
-            end
-          end
+          next unless l =~ /-p (\d+)/
+
+          port = Regexp.last_match(1)
+          l_ary = l.split(/\s+/)
+          port_list[port] = l_ary[7].to_i * 1024 if l_ary.length > 6
         end
         port_list.sort.each do |port|
           puts "mongrel_#{port[0]}.value #{port[1]}"
@@ -58,14 +55,14 @@ module Munin
     end
 
     def get_pids
-      h = Hash.new
+      h = {}
       pids = []
       pids = `pgrep mongrel_rails`
-      pids.each { |p|
+      pids.each do |p|
         l = `ps #{p}`
         l =~ /-p (\d+)/
-        h[p] = $1
-      }
+        h[p] = Regexp.last_match(1)
+      end
       h
     end
 
@@ -78,25 +75,25 @@ end
 mpm = Munin::MongrelProcessMemory.new
 
 case ARGV[0]
-when "config"
-  puts "graph_title Mongrel Memory"
-  puts "graph_vlabel RSS"
-  puts "graph_category memory"
-  puts "graph_args --base 1024 -l 0"
-  puts "graph_scale yes"
-  puts "graph_info Tracks the size of individual mongrel processes"
+when 'config'
+  puts 'graph_title Mongrel Memory'
+  puts 'graph_vlabel RSS'
+  puts 'graph_category memory'
+  puts 'graph_args --base 1024 -l 0'
+  puts 'graph_scale yes'
+  puts 'graph_info Tracks the size of individual mongrel processes'
   mpm.get_pids.values.sort.each do |port|
     puts "mongrel_#{port}.label mongrel_#{port}"
     puts "mongrel_#{port}.info Process memory"
     puts "mongrel_#{port}.type GAUGE"
     puts "mongrel_#{port}.min 0"
   end
-when "autoconf"
+when 'autoconf'
   if mpm.autoconf
-    puts "yes"
+    puts 'yes'
     exit 0
   end
-  puts "no"
+  puts 'no'
   exit 0
 else
   mpm.run

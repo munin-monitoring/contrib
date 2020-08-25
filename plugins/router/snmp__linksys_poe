@@ -65,45 +65,43 @@ rights to this plugin are waived.  Do with it as you wish.
 
 require 'snmp'
 
-idx_oid = "enterprises.3955.89.108.1.1.2"
-max_oid = "enterprises.3955.89.108.1.1.6"
-cur_oid = "enterprises.3955.89.108.1.1.5"
+idx_oid = 'enterprises.3955.89.108.1.1.2'
+max_oid = 'enterprises.3955.89.108.1.1.6'
+cur_oid = 'enterprises.3955.89.108.1.1.5'
 
-community = ENV['community'] || "public"
+community = ENV['community'] || 'public'
 version = ENV['version'] == '1' ? :SNMPv1 : :SNMPv2c
 
 case ARGV[0]
-when "snmpconf"
-  puts "require 1.3.6.1.4.1.3955.89.108.1.1.2.1. [0-9]"
-  puts "require 1.3.6.1.4.1.3955.89.108.1.1.5.1. [0-9]"
-  puts "require 1.3.6.1.4.1.3955.89.108.1.1.6.1. [0-9]"
-  exit 0;
-when "config"
+when 'snmpconf'
+  puts 'require 1.3.6.1.4.1.3955.89.108.1.1.2.1. [0-9]'
+  puts 'require 1.3.6.1.4.1.3955.89.108.1.1.5.1. [0-9]'
+  puts 'require 1.3.6.1.4.1.3955.89.108.1.1.6.1. [0-9]'
+  exit 0
+when 'config'
   host = $0.match('^(?:|.*\/)snmp_([^_]+)')[1]
   puts "host_name #{host}"
-  puts "graph_title PoE Power Usage"
-  puts "graph_vlabel Watts"
-  puts "graph_category sensors"
+  puts 'graph_title PoE Power Usage'
+  puts 'graph_vlabel Watts'
+  puts 'graph_category sensors'
   max_current = 0
-  SNMP::Manager.open(:Host => host,
-                     :Community => community,
-                     :Version => version) do |manager|
+  SNMP::Manager.open(Host: host,
+                     Community: community,
+                     Version: version) do |manager|
     manager.walk([idx_oid, max_oid]) do |row|
       puts "iface_#{row[0].value}.label Port #{row[0].value}"
       puts "iface_#{row[0].value}.cdef iface_#{row[0].value},1000,/"
       puts "iface_#{row[0].value}.line #{row[1].value.to_f / 1000}"
-      if row[1].value > max_current
-        max_current = row[1].value
-      end
+      max_current = row[1].value if row[1].value > max_current
     end
   end
   puts "graph_args --upper-limit #{max_current.to_f / 1000}"
   exit 0
 else
   host = $0.match('^(?:|.*\/)snmp_([^_]+)')[1]
-  SNMP::Manager.open(:Host => host,
-                     :Community => community,
-                     :Version => version) do |manager|
+  SNMP::Manager.open(Host: host,
+                     Community: community,
+                     Version: version) do |manager|
     manager.walk([idx_oid, cur_oid]) do |row|
       puts "iface_#{row[0].value}.value #{row[1].value}"
     end
