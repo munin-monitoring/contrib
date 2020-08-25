@@ -201,7 +201,7 @@ sub process_file {
                 }
             );
             run_check(
-                {   command     => [ 'rubocop', $file ],
+                {   command     => [ 't/test-exception-wrapper', $file, 'rubocop' ],
                     description => 'ruby style and syntax check',
                     filename    => $filename
                 }
