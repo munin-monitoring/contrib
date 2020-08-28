@@ -1,4 +1,6 @@
-This is the repository for all user contributed stuff
+This is the repository for all user contributed stuff related to
+[munin](http://munin-monitoring.org).
+
 
 # contrib/plugins/ - 3rd-party plugins
 
@@ -18,8 +20,8 @@ Feel free to update templates here, or even to create new ones.
 
 Bonus points for mobile-friendly ones :)
 
-Note that the one named `official` is a loose-synced copy of the one in SVN trunk. 
-It should serves as a base for small editions that can be resynced in SVN trunk, so for that : 
+Note that the one named `official` is a loose-synced copy of the one distributed with munin.
+It should serves as a base for small editions that can be merged into munin, so for that:
 
 * don't copy the whole template
 * directly edit files in this directory
@@ -30,7 +32,6 @@ It should serves as a base for small editions that can be resynced in SVN trunk,
 Here, you can put just any kind of tool. Please use this directory instead of a random place on the internet.
 It makes things way more easy to search for others.
 
-And, it serves as an incubator of SVN `trunk/contrib` :-)
 
 # contrib/samples/ - 3rd-party examples of configs
 
