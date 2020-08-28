@@ -25,7 +25,7 @@ Please note, that this repository is not supposed to be a dumping site for rando
     * please avoid code copies - they are a maintenance burden
 2. add [documentation](http://guide.munin-monitoring.org/en/latest/develop/documenting.html#plugin-documentation) including configuration, author, license and [magic markers](http://guide.munin-monitoring.org/en/latest/architecture/syntax.html#magic-markers)
 3. pick a suitable [category](http://guide.munin-monitoring.org/en/latest/reference/graph-category.html)
-5. use style check tools for the language of the plugin (e.g. `shellcheck` for shell and `flake8` for Python)
+5. use style check tools for the language of the plugin (e.g. perl: `perlcritic`, shell: `shellcheck`, python: `flake8`, ruby: `rubocop`)
 6. pick a suitable [name and location](#Plugin_name_and_location)
 7. bonus:
     * use the [multigraph approach](http://guide.munin-monitoring.org/en/latest/plugin/multigraphing.html#plugin-multigraphing) for non-trivial plugins
