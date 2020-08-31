@@ -28,6 +28,8 @@ Set username and password in your munin-node configuration
 [nextcloud_cloud.domain.tld]
 env.username <nexcloud_user>
 env.password <nextcloud_password>
+env.api_path <default: /ocs/v2.php/apps/serverinfo/api/v1/info>
+env.timeout <default: 2s>
 
 It's advised to set an app password (for this plugin) in your nextcloud 
 instance and not to use the "real" password of your nextcloud user.
@@ -47,15 +49,22 @@ GPLv2
 
 =cut
 
+# shellcheck disable=SC1090
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
-API_PATH="/ocs/v2.php/apps/serverinfo/api/v1/info?format=json"
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+
+API_PATH="${api_path:-/ocs/v2.php/apps/serverinfo/api/v1/info}?format=json"
 DOMAIN="${0##*nextcloud_}"
+TIMEOUT="${timeout:-2}"
 CLEANDOMAIN="$(clean_fieldname "$DOMAIN")"
 USERNAME="${username:-}"
 PASSWORD="${password:-}"
 
 print_json_data() {
+    # shellcheck disable=SC2039
     local FIRST="$1"
     [ -z "$FIRST" ] && exit 0
     shift 1
@@ -67,7 +76,7 @@ print_json_data() {
 
 test_https() {
     [ -z "$DOMAIN" ] && exit 0
-    curl -s -f -m 2 -I "https://$DOMAIN" > /dev/null && echo true && exit 0
+    curl -s -f -m "${TIMEOUT}" -I "https://$DOMAIN" > /dev/null && echo true && exit 0
 }
 
 case $1 in
@@ -76,7 +85,7 @@ case $1 in
         if [ -x /usr/bin/curl ]; then
             if [ -x /usr/bin/jq ]; then
                 [ "$(test_https)" ] && DOMAIN="https://$DOMAIN" || DOMAIN="http://$DOMAIN"
-                curl -s -f -m 2 -u "$USERNAME:$PASSWORD" -I "$DOMAIN$API_PATH" | grep -iq "Content-Type: application/json" && echo "yes" && exit 0 || echo "no (invalid or empty response from nextlcoud serverinfo api)" && exit 0
+                curl -s -f -m "${TIMEOUT}" -u "$USERNAME:$PASSWORD" -I "$DOMAIN$API_PATH" | grep -iq "Content-Type: application/json" && echo "yes" && exit 0 || echo "no (invalid or empty response from nextlcoud serverinfo api)" && exit 0
             else
                 echo "no (jq not found)" && exit 0
             fi
@@ -202,7 +211,7 @@ esac
 
 # Get JSON data
 [ "$(test_https)" ] && DOMAIN="https://$DOMAIN" || DOMAIN="http://$DOMAIN"
-JSONSTATS=$(curl -s -f -m 2 -u "$USERNAME:$PASSWORD" "$DOMAIN$API_PATH" | sed 's/\\/\\\\/g' | jq -cr ".ocs.data")
+JSONSTATS=$(curl -s -f -m "${TIMEOUT}" -u "$USERNAME:$PASSWORD" "$DOMAIN$API_PATH" | sed 's/\\/\\\\/g' | jq -cr ".ocs.data")
 USERS=$(echo "$JSONSTATS" | jq -cr ".activeUsers")
 STORAGE=$(echo "$JSONSTATS" | jq -cr ".nextcloud.storage")
 SHARES=$(echo "$JSONSTATS" | jq -cr ".nextcloud.shares")
