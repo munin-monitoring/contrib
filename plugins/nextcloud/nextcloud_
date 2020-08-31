@@ -74,23 +74,26 @@ print_json_data() {
    done
 }
 
-test_https() {
-    [ -z "$DOMAIN" ] && exit 0
-    curl -s -f -m "${TIMEOUT}" -I "https://$DOMAIN" > /dev/null && echo true && exit 0
+fetch_url () {
+    curl -s -f -m "${TIMEOUT}" "$@"
 }
 
 case $1 in
 
     autoconf)
-        if [ -x /usr/bin/curl ]; then
-            if [ -x /usr/bin/jq ]; then
-                [ "$(test_https)" ] && DOMAIN="https://$DOMAIN" || DOMAIN="http://$DOMAIN"
-                curl -s -f -m "${TIMEOUT}" -u "$USERNAME:$PASSWORD" -I "$DOMAIN$API_PATH" | grep -iq "Content-Type: application/json" && echo "yes" && exit 0 || echo "no (invalid or empty response from nextlcoud serverinfo api)" && exit 0
+	if [ -x "$(command -v curl)" ]; then
+	    if [ -x "$(command -v jq)" ]; then
+		    (fetch_url -I -u "$USERNAME:$PASSWORD" -I "https://${DOMAIN}${API_PATH}" \
+			    | grep -iq "Content-Type: application/json" \
+			    || fetch_url -I -u "$USERNAME:$PASSWORD" -I "http://${DOMAIN}${API_PATH}" \
+			    | grep -iq "Content-Type: application/json") \
+			    && echo "yes" && exit 0 \
+			|| echo "no (invalid or empty response from nextlcoud serverinfo api)" && exit 0
             else
                 echo "no (jq not found)" && exit 0
             fi
         else
-            echo "no (/usr/bin/curl not found)" && exit 0
+            echo "no (curl not found)" && exit 0
         fi
         ;;
 
@@ -210,8 +213,10 @@ EOM
 esac
 
 # Get JSON data
-[ "$(test_https)" ] && DOMAIN="https://$DOMAIN" || DOMAIN="http://$DOMAIN"
-JSONSTATS=$(curl -s -f -m "${TIMEOUT}" -u "$USERNAME:$PASSWORD" "$DOMAIN$API_PATH" | sed 's/\\/\\\\/g' | jq -cr ".ocs.data")
+JSONSTATS=$(
+	fetch_url -u "$USERNAME:$PASSWORD" "https://${DOMAIN}${API_PATH}" | sed 's/\\/\\\\/g' | jq -cr ".ocs.data" 2>&1 \
+	|| fetch_url -u "$USERNAME:$PASSWORD" "http://${DOMAIN}${API_PATH}" | sed 's/\\/\\\\/g' | jq -cr ".ocs.data"
+)
 USERS=$(echo "$JSONSTATS" | jq -cr ".activeUsers")
 STORAGE=$(echo "$JSONSTATS" | jq -cr ".nextcloud.storage")
 SHARES=$(echo "$JSONSTATS" | jq -cr ".nextcloud.shares")
