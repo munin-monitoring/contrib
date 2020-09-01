@@ -125,9 +125,7 @@ print_expire_days() {
     local s_client_args=
     [ -n "$starttls" ] && s_client_args="-starttls $starttls"
 
-    # shellcheck disable=SC2086
-
-    # The original code only extracted the server certificate,
+    # We extract and check the server certificate,
     # but the end date also depends on intermediate certs. Therefore
     # we want to check intermediate certs as well.
     #
@@ -139,6 +137,8 @@ print_expire_days() {
     #   function, which basically is 'openssl x509 -enddate'
     # - get a list of the parse_valid_days_from_certificate
     #   results and sort them
+    
+    # shellcheck disable=SC2086
     echo "" | openssl s_client \
 	-servername "$host" -connect "${host}:${port}" \
 	-showcerts \
@@ -147,11 +147,11 @@ print_expire_days() {
   	  if ($0 == "-----BEGIN CERTIFICATE-----") cert=""
   	  else if ($0 == "-----END CERTIFICATE-----") print cert
   	  else cert=cert$0
-	  }' | ( \
-	while read -r CERT; do
-	    (echo "-----BEGIN CERTIFICATE-----"; echo ${CERT}; echo "-----END CERTIFICATE-----") | \
-		parse_valid_days_from_certificate
-        done ) | sort -n | head -n 1
+	  }' | \
+	  while read -r CERT; do
+	      (printf '\n-----BEGIN CERTIFICATE-----\n%s\n-----END CERTIFICATE-----\n' "$CERT") | \
+	  	  parse_valid_days_from_certificate
+          done | sort -n | head -n 1
 	
 }
 
