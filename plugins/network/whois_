@@ -1,0 +1,136 @@
+#!/bin/sh
+# shellcheck shell=dash
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+whois_ - Plugin to monitor expiry dates of domain in the WHOIS database
+
+Though the plugin will be called every 5 minutes, it will keep a cache, and
+only query the WHOIS database every hour.
+
+=head1 CONFIGURATION
+
+None is needed, just
+
+	ln -s /path/to/whois_ whois_domain.tld
+
+in Munin's installed plugins directory will suffice to start monitoring
+C<domain.tld>.
+
+However, a few parameters, all optional, can be set if needed
+
+	[whois_domain.tld]
+	env.extract_re s/PATTERN/REPL/
+	env.warning_days <default: 7 days>
+	env.critical_days <default: 3 days>
+
+The C<extract_re> will be used in C<sed> to extract the relevant expiry date. It
+default to C<s/^.*[Ee]xpir.*: //>. Only lines for which a replacement has
+happened will be considered, and the pattern should take care to only output
+one line. While the default RegExp just finds a leader pattern and removes it,
+it is possible to write more complex logic to format the date. The extracted
+date needs to be in a format supported by C<date(1)>'s C<--date> parameter.
+
+=head1 AUTHOR
+
+Olivier Mehani
+
+Copyright (C) 2020 Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+set -eu
+
+# shellcheck disable=SC1090
+. "${MUNIN_LIBDIR}/plugins/plugin.sh"
+
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+	set -x
+fi
+
+EXTRACT_RE=${extract_re:-'s/^.*[Ee]xpir.*: //'}
+WARNING=${warning_days:-7}
+CRITICAL=${critical_days:-3}
+CACHE_EXPIRY=60 # minutes
+
+# Args: domain name (optional, for title)
+graph_config() {
+	NAMETITLE=${1:+ for ${1}}
+	cat << EOF
+graph_title Domain registration expiry${NAMETITLE}
+graph_category network
+graph_vlabel days
+EOF
+}
+
+# Args: domain name
+# Separated from graph_config so we can easily extend the plugin to support multiple domains.
+config() {
+	local NAME=${1}
+	local FIELDNAME
+
+	FIELDNAME="$(clean_fieldname "${NAME}")"
+
+	cat << EOF
+${FIELDNAME}.label expiry
+${FIELDNAME}.cdef ${FIELDNAME},86400,/
+${FIELDNAME}.warning ${WARNING}:
+${FIELDNAME}.critical ${CRITICAL}:
+EOF
+}
+
+# Args: domain name
+fetch() {
+	local NAME=${1}
+	local FIELDNAME
+	local CACHEFILE
+
+	FIELDNAME="$(clean_fieldname "${NAME}")"
+
+	CACHEFILE="${MUNIN_PLUGSTATE}/$(basename "${0}").${FIELDNAME}.cache"
+
+	if [ -z "$(find "${CACHEFILE}" -mmin -${CACHE_EXPIRY} 2>/dev/null)" ]; then
+		EXPIRY="$(whois "${NAME}" 2>/dev/null | sed -n "${EXTRACT_RE}p")"
+		DELTA_TS=U
+		if [ -n "${EXPIRY}" ]; then
+			EXPIRY_TS="$(date +%s -d "${EXPIRY}")"
+
+			NOW_TS="$(date +%s)"
+			DELTA_TS=$((EXPIRY_TS-NOW_TS))
+		fi
+
+		echo "${FIELDNAME}.value ${DELTA_TS}" > "${CACHEFILE}"
+	fi
+
+	cat "${CACHEFILE}"
+}
+
+main() {
+	local MODE="${1:-}"
+	local NAME
+
+	NAME="$(echo "${0}" | sed 's/.*_//')"
+
+	case "${MODE}" in
+		'config')
+			graph_config "${NAME}"
+			config "${NAME}"
+			;;
+		*)
+			fetch "${NAME}"
+			;;
+	esac
+}
+
+main "$@"
