@@ -789,7 +789,7 @@ sub do_values_xfer_by_radio {
 		if ( $Data{'device'}{$thisDevice}->{'type'} ne "uap" ) { next; }
 
 		foreach ( @{$Data{'device'}{$thisDevice}{'radio'}} ) {
-			print $thisDevice , "_" , $_->{"name"} , "_pack.value " , $_->{"pckt"} , "\n";;
+			print $thisDevice , "_" , $_->{"name"} , "_pack.value " , ($_->{"pckt"} // 0), "\n";;
 		}
 	}
 
@@ -801,9 +801,9 @@ sub do_values_xfer_by_radio {
 		print "multigraph unifi_xfer_per_radio.$thisDevice\n";
 
 		foreach ( @{$Data{'device'}{$thisDevice}{'radio'}} ) {
-			print $_->{"name"} , "_pkt.value "  , $_->{"pckt"} , "\n";
-			print $_->{"name"} , "_dret.value " , $_->{"dret"} , "\n";
-			print $_->{"name"} , "_err.value "  , $_->{"err"}  , "\n";
+			print $_->{"name"} , "_pkt.value "  , ($_->{"pckt"} // 0) , "\n";
+			print $_->{"name"} , "_dret.value " , ($_->{"dret"} // 0) , "\n";
+			print $_->{"name"} , "_err.value "  , ($_->{"err"} // 0) , "\n";
 		}
 	}
 	return 1;
@@ -816,16 +816,16 @@ sub do_values_xfer_by_network {
 	print "multigraph unifi_xfer_per_network\n";
 
 	foreach my $thisNet ( sort keys %{$Data{'networks'}} ) {
-		print $thisNet , "_rxbytes.value " , $Data{'networks'}{$thisNet}->{"rx"} , "\n";
-		print $thisNet , "_txbytes.value " , $Data{'networks'}{$thisNet}->{"tx"} , "\n";
+		print $thisNet , "_rxbytes.value " , ($Data{'networks'}{$thisNet}->{"rx"} // 0) , "\n";
+		print $thisNet , "_txbytes.value " , ($Data{'networks'}{$thisNet}->{"tx"} // 0) , "\n";
 	}
 
 	if ( ! $PluginConfig{'enable_detail_xfer_network'} ) { return 1; }
 
 	foreach my $thisNet ( sort keys %{$Data{'networks'}} ) {
 		print "multigraph unifi_xfer_per_network.$thisNet\n";
-		print "rxbyte.value " , $Data{'networks'}{$thisNet}->{"rx"} , "\n";
-		print "txbyte.value " , $Data{'networks'}{$thisNet}->{"tx"} , "\n";
+		print "rxbyte.value " , ($Data{'networks'}{$thisNet}->{"rx"} // 0) , "\n";
+		print "txbyte.value " , ($Data{'networks'}{$thisNet}->{"tx"} // 0) , "\n";
 	}
 	return 1;
 }
@@ -1026,14 +1026,14 @@ sub make_data {
 				my $name  = make_safe( $thisRadio->{'name'}, "" );
 				my $label = ( $thisRadio->{'channel'} < 12 ) ? '2.4Ghz' : '5Ghz';
 
-				$_ = $thisDevice->{'stat'};
+				$_ = $thisDevice->{'stat'}->{'ap'};
 
 				push @theseRadios, {
 					'name'  => $name,
 					'label' => $label . '-' . $thisDevice->{'name'},
-					'pckt'  => $_->{$name . '-rx_packets'} + $_->{$name . '-tx_packets'},
-					'dret'  => $_->{$name . '-rx_dropped'} + $_->{$name . '-tx_retries'} + $_->{$name . '-tx_dropped'},
-					'err'   => ($_->{$name . '-rx_errors'} || 0) + ($_->{$name . '-tx_errors'} || 0),
+					'pckt'  => ($_->{$name . '-rx_packets'} // 0) + ($_->{$name . '-tx_packets'} // 0),
+					'dret'  => ($_->{$name . '-rx_dropped'} // 0) + ($_->{$name . '-tx_retries'} // 0) + ($_->{$name . '-tx_dropped'} // 0),
+					'err'   => ($_->{$name . '-rx_errors'} // 0) + ($_->{$name . '-tx_errors'} // 0),
 					'type'  => $label
 				};
 			}
