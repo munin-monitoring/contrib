@@ -30,6 +30,7 @@ Set username and password in your munin-node configuration
 env.username <nexcloud_user>
 env.password <nextcloud_password>
 env.api_path <default: /ocs/v2.php/apps/serverinfo/api/v1/info>
+env.scheme <default: https>
 env.timeout <default: 2s>
 env.updates_warning <default: 1>
 
@@ -60,6 +61,7 @@ fi
 
 API_PATH="${api_path:-/ocs/v2.php/apps/serverinfo/api/v1/info}?format=json"
 DOMAIN="${0##*nextcloud_}"
+SCHEME="${scheme:-https}://"
 TIMEOUT="${timeout:-2}"
 UPDATES_WARNING="${updates_warning:-1}"
 CLEANDOMAIN="$(clean_fieldname "$DOMAIN")"
@@ -68,7 +70,7 @@ PASSWORD="${password:-}"
 
 print_json_data() {
     local FIRST="$1"
-    [ -z "$FIRST" ] && exit 0
+    [ -z "$FIRST" ] && (echo "incorrect call to print_json_data $*">&2; exit 1)
     shift 1
     for KEY in "$@"; do
         VALUE=$(echo "$FIRST" | jq -cr ".$KEY")
@@ -83,22 +85,18 @@ fetch_url () {
 case $1 in
 
     autoconf)
-	if [ -x "$(command -v curl)" ]; then
-	    if [ -x "$(command -v jq)" ]; then
-		    (fetch_url -I -u "$USERNAME:$PASSWORD" -I "https://${DOMAIN}${API_PATH}" \
+	    if [ ! -x "$(command -v curl)" ]; then
+		    echo "no (curl not found)"
+	    elif [ ! -x "$(command -v jq)" ]; then
+		    echo "no (jq not found)"exit 0
+	    else
+		    fetch_url -I -u "$USERNAME:$PASSWORD" -I "${SCHEME}${DOMAIN}${API_PATH}" \
 			    | grep -iq "Content-Type: application/json" \
-			    || fetch_url -I -u "$USERNAME:$PASSWORD" -I "http://${DOMAIN}${API_PATH}" \
-			    | grep -iq "Content-Type: application/json") \
-			    && echo "yes" && exit 0 \
-			|| echo "no (invalid or empty response from nextlcoud serverinfo api)" && exit 0
-            else
-                echo "no (jq not found)" && exit 0
-            fi
-        else
-            echo "no (curl not found)" && exit 0
-        fi
-        ;;
-
+			    && echo "yes" \
+			    || echo "no (invalid or empty response from nextlcoud serverinfo api)"
+	    fi
+	    exit 0
+	    ;;
    config)
 
 cat << EOM
@@ -216,8 +214,7 @@ esac
 
 # Get JSON data
 JSONSTATS=$(
-	fetch_url -u "$USERNAME:$PASSWORD" "https://${DOMAIN}${API_PATH}" | sed 's/\\/\\\\/g' | jq -cr ".ocs.data" 2>&1 \
-	|| fetch_url -u "$USERNAME:$PASSWORD" "http://${DOMAIN}${API_PATH}" | sed 's/\\/\\\\/g' | jq -cr ".ocs.data"
+	fetch_url -u "$USERNAME:$PASSWORD" "${SCHEME}${DOMAIN}${API_PATH}" | sed 's/\\/\\\\/g' | jq -cr ".ocs.data" 2>&1
 )
 USERS=$(echo "$JSONSTATS" | jq -cr ".activeUsers")
 STORAGE=$(echo "$JSONSTATS" | jq -cr ".nextcloud.storage")
