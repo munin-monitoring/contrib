@@ -8,10 +8,10 @@
 #
 
 # set path to your rails app
-RAILS_ROOT = "/path/to/rails/app"
+RAILS_ROOT = '/path/to/rails/app'.freeze
 
 # set name to your unicorn.pid
-PID_NAME = "unicorn.pid"
+PID_NAME = 'unicorn.pid'.freeze
 
 module Munin
   class UnicornMemoryStatus
@@ -30,9 +30,11 @@ module Munin
       ps_output = `ps w --ppid #{master_pid}`
       ps_output.split("\n").each do |line|
         chunks = line.strip.split(/\s+/, 5)
-        pid, pcmd = chunks[0], chunks[4]
-        next if pid !~ /\A\d+\z/ or pcmd !~ /worker/
-          result << pid.to_i
+        pid = chunks[0]
+        pcmd = chunks[4]
+        next if pid !~ /\A\d+\z/ || pcmd !~ /worker/
+
+        result << pid.to_i
       end
       result
     end
@@ -41,18 +43,18 @@ module Munin
       result = 0
       memory = memory_usage
       result += memory[:master][master_pid]
-      memory[:worker].each do |pid, worker_memory|
+      memory[:worker].each do |_pid, worker_memory|
         result += worker_memory
       end
       result
     end
 
     def memory_usage
-      result = { :master => {master_pid => nil}, :worker => {} }
+      result = { master: { master_pid => nil }, worker: {} }
       ps_output = `ps auxw | grep unicorn`
       ps_output.split("\n").each do |line|
         chunks = line.strip.split(/\s+/, 11)
-        pid, pmem_rss, _ = chunks.values_at(1, 5, 10)
+        pid, pmem_rss, = chunks.values_at(1, 5, 10)
         pmem = pmem_rss.to_i * 1024
         pid = pid.to_i
 
@@ -68,15 +70,15 @@ module Munin
 end
 
 case ARGV[0]
-when "autoconf"
-  puts "yes"
-when "config"
+when 'autoconf'
+  puts 'yes'
+when 'config'
   puts "graph_title Unicorn [#{File.basename(__FILE__).gsub(/^unicorn_memory_status_/, '')}] - Memory usage"
-  puts "graph_args --base 1024 -l 0"
-  puts "graph_vlabel bytes"
-  puts "graph_category webserver"
-  puts "total_memory.label total_memory"
-  puts "total_memory.draw LINE2"
+  puts 'graph_args --base 1024 -l 0'
+  puts 'graph_vlabel bytes'
+  puts 'graph_category webserver'
+  puts 'total_memory.label total_memory'
+  puts 'total_memory.draw LINE2'
 else
   m = Munin::UnicornMemoryStatus.new(ENV['rails_root'] || RAILS_ROOT, ENV['pid_name'] || PID_NAME)
   puts "total_memory.value #{m.total_memory}"

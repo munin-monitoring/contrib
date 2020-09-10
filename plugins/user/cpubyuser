@@ -2,15 +2,26 @@
 #
 # Plugin to monitor CPU usage, for a selected set of users
 #
-# Usage: Place in /etc/munin/node.d/ (or link it there using ln -s)
+# Usage: Place in /etc/munin/plugins/ (or link it there using ln -s)
 #	Add this to your /etc/munin/plugin-conf.d/munin-node:
 #		[cpubyuser]
+#		user root # required if /proc can't be read from by any user!
 #		env.USERS root yann
+#		env.OTHER_FIELD others # enable 'others'-list, set the label/field name
 #
-#	If env.USERS is set to ALL, count all logged in users.
+#	root and yann being a list of the users to monitor.
 #
-#	 root and yann being a list of the users to monitor.
-#	 You need to also make sure that awk is installed
+#	If env.USERS is set to ALL, count all logged in users, and if set to
+#	ALLPROC, *all* users with a running process will be listed, except for root.
+#
+#	You need to also make sure that awk is installed
+#
+# 2019-08-30 v 1.4 pcy <pcy@ulyssis.org>:
+#				- add USERS=ALLPROC, not relying on a tty or pty being present for user detection
+#				- OTHERS_FIELD now defaults to disabled, explicitly give it a
+#				  value to re-enable it (eg. 'others')
+#				- use ps(1) instead of top(1) for easier and more robust
+#				  parsing/summary calculation
 #
 # 2008-12-08 v 1.3.1 Hanisch Elián:
 #				- support for dots in user names.
@@ -39,9 +50,12 @@
 
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
-OTHER_FIELD="others"
-[ "$USERS" = "ALL" ] && USERS=$(w --no-header | awk '{ print $1 }' | sort | uniq)
-
+[ -z "$USERS" ] && USERS=ALL
+if [ "$USERS" = "ALLPROC" ]; then
+	USERS="$(ps ax --format uname | tail +2 | sort -u | grep -v -e '^root$')"
+elif [ "$USERS" = "ALL" ]; then
+	USERS="$(w --no-header | cut -d' ' -f 1 | sort -u)"
+fi
 
 if [ "$1" = "autoconf" ]; then
 	if [ -n "$USERS" ]; then
@@ -61,44 +75,42 @@ if [ "$1" = "config" ]; then
 	echo "graph_scale no"
 	echo "graph_period second"
 	user_fields="$(for user in $USERS; do clean_fieldname "$user" | tr '\n' ' '; done)"
-	echo "graph_order $user_fields $OTHER_FIELD"
+	echo "graph_order $user_fields $(clean_fieldname "$OTHER_FIELD")"
 	for user in $USERS "$OTHER_FIELD"; do
-		user_field="$(clean_fieldname "$user")"
-		echo "${user_field}.label $user"
-		echo "${user_field}.info CPU used by user $user"
-		echo "${user_field}.type GAUGE"
-		echo "${user_field}.draw AREASTACK"
+		if [ -n "$user" ]; then
+			user_field="$(clean_fieldname "$user")"
+			echo "${user_field}.label $user"
+			echo "${user_field}.info CPU used by user $user"
+			echo "${user_field}.type GAUGE"
+			echo "${user_field}.draw AREASTACK"
+		fi
 	done
 	exit
 fi
 
-top -b -n 1 | sed '1,/^ *PID /d' | \
+OTHER_PRINT=""
+[ -z "$OTHER_FIELD" ] || OTHER_PRINT="print \"$(clean_fieldname "$OTHER_FIELD")\", others_sum;"
+
+ps ax --format "%cpu user" | tail +2 | \
 	awk -v USERS="$USERS" '
 		# Store the CPU usage of each process - the mapping to the
 		# user happens later. We cannot use the second column
 		# (username) directly, since it may be abbreviated (ending
 		# with "+").
-		{ CPU_PER_PID[$1]=$9 }
+		{ CPU_USER[$2]=$1 }
 		END {
-			split(USERS, user_array)
-			for (user_index in user_array) {
-				user = user_array[user_index]
-				# retrieve all process IDs belonging to the user
-				"ps -u "user" -o pid --no-headers 2>/dev/null | tr \"\n\" \" \"" | getline pids
-				user_cpu = 0
-				split(pids, pid_array)
-				# summarize the cpu usage of this usage
-				for (pid_index in pid_array) {
-					pid = pid_array[pid_index]
-					user_cpu += CPU_PER_PID[pid]
-					delete CPU_PER_PID[pid]
-				}
-				print user, user_cpu
-			}
-			# add all remaining cpu usages into "others"
 			others_sum = 0
-			for (other_usage in CPU_PER_PID) others_sum+=CPU_PER_PID[other_usage]
-			print "'"$OTHER_FIELD"'", others_sum;
+			split(USERS, user_array)
+			for (user in CPU_USER) {
+				m = match(USERS,user)
+				if (m != 0) {
+					_user=user
+					gsub(/[-.]/,"_",_user);
+					print _user, (CPU_USER[user])
+				} else
+					others_sum += CPU_USER[user]
+			}
+			'"$OTHER_PRINT"'
 		}' | while read -r user count; do
 			# apply fieldname cleanup
 			echo "$(clean_fieldname "$user").value $count"

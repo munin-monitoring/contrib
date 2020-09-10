@@ -2,21 +2,22 @@
 #
 # Munin Plugin
 # to count logins to your dovecot mailserver
-# 
+#
 # Created by Dominik Schulz <lkml@ds.gauner.org>
 # http://developer.gauner.org/munin/
 # Contributions by:
 # - Stephane Enten <tuf@delyth.net>
 # - Steve Schnepp <steve.schnepp@pwkf.org>
-# 
+# - pcy <pcy@ulyssis.org> (make 'Connected Users' DERIVE, check existence of logfile in autoconf)
+#
 # Parameters understood:
 #
 #	config		(required)
 #	autoconf 	(optional - used by munin-config)
-# 
+#
 # Config variables:
 #
-#       logfile      - Where to find the syslog file
+#       logfile        - Where to find the syslog file
 #
 # Add the following line to a file in /etc/munin/plugin-conf.d:
 # 	env.logfile /var/log/your/logfile.log
@@ -34,7 +35,7 @@ LOGFILE=${logfile:-/var/log/mail.log}
 ######################
 
 if [ "$1" = "autoconf" ]; then
-	echo yes
+	[ -f "$LOGFILE" ] && echo yes || echo "no (logfile $LOGFILE not found)"
 	exit 0
 fi
 
@@ -53,6 +54,7 @@ if [ "$1" = "config" ]; then
 	done
 
 	echo 'connected.label Connected Users'
+	echo "connected.type DERIVE"
 
 	exit 0
 fi
@@ -86,7 +88,7 @@ echo -n
 echo -en "login_tls.value "
 VALUE=$(egrep -c '[dovecot]?.*Login.*TLS' $LOGFILE)
 if [ ! -z "$VALUE" ]; then
-        echo "$VALUE"
+	echo "$VALUE"
 else
 	echo "0"
 fi
@@ -97,7 +99,7 @@ echo -n
 echo -en "login_ssl.value "
 VALUE=$(egrep -c '[dovecot]?.*Login.*SSL' $LOGFILE)
 if [ ! -z "$VALUE" ]; then
-        echo "$VALUE"
+	echo "$VALUE"
 else
 	echo "0"
 fi
@@ -108,7 +110,7 @@ echo -n
 echo -en "login_imap.value "
 VALUE=$(egrep -c '[dovecot]?.*imap.*Login' $LOGFILE)
 if [ ! -z "$VALUE" ]; then
-        echo "$VALUE"
+	echo "$VALUE"
 else
 	echo "0"
 fi
@@ -119,8 +121,9 @@ echo -n
 echo -en "login_pop3.value "
 VALUE=$(egrep -c '[dovecot]?.*pop3.*Login' $LOGFILE)
 if [ ! -z "$VALUE" ]; then
-        echo "$VALUE"
+	echo "$VALUE"
 else
 	echo "0"
 fi
 echo -n
+

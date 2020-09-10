@@ -91,7 +91,7 @@ $cmd_arg = $ARGV[0] || '';
 config() if($cmd_arg eq "config");
 autoconf() if ($cmd_arg eq 'autoconf');
 
-for my $host (@hosts) { 
+for my $host (@hosts) {
     threads->new(\&ping_host, $host)
 }
 
@@ -105,9 +105,12 @@ sub ping_host {
 
     $p=Net::Ping->new("tcp", $defaults{timeout});
     $p->hires();
+    $p->service_check(1);
     $p->{port_num} = $host->[1] || $defaults{port};
 
-    ($ret, $time, $ip) = $p->ping($host->[0]);
+    eval {
+        ($ret, $time, $ip) = $p->ping($host->[0]);
+    };
 
     $time = $defaults{unreachable} if !$ret;
     print "${addr}.value $time\n";

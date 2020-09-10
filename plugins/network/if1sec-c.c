@@ -23,7 +23,7 @@ int fail(char* msg) {
 }
 
 /* Returns the ifname from a /proc/net/dev line
- * It will return an inside pointer to line, and modifiy the end with a \0
+ * It will return an inside pointer to line, and modify the end with a \0
  */
 char* get_ifname_from_procstatline(char* line) {
 	char *ifname;
@@ -38,8 +38,8 @@ char* get_ifname_from_procstatline(char* line) {
 
 int config() {
 	/* Get the number of if */
-	int f;
-	if ( !(f=open(PROC_STAT, O_RDONLY)) ) {
+	int f = open(PROC_STAT, O_RDONLY);
+	if ( f == -1 ) {
 		return fail("cannot open " PROC_STAT);
 	}
 
@@ -78,7 +78,7 @@ int config() {
 			"down.graph no" "\n"
 			"down.cdef down,8,*" "\n"
 			"down.min 0" "\n"
-					        
+
 			"up.label bps" "\n"
 			"up.type DERIVE" "\n"
 			"up.negative down" "\n"
@@ -120,7 +120,12 @@ int acquire() {
 	/* fork ourselves if not asked otherwise */
 	char* no_fork = getenv("no_fork");
 	if (! no_fork || strcmp("1", no_fork)) {
-		if (fork()) return;
+		pid_t child_pid = fork();
+		if (child_pid) {
+			printf("# acquire() launched as PID %d\n", child_pid);
+			return 0;
+		}
+
 		// we are the child, complete the daemonization
 
 		/* Close standard IO */
@@ -139,9 +144,15 @@ int acquire() {
 
 	/* Reading /proc/stat */
 	int f = open(PROC_STAT, O_RDONLY);
+	if ( f == -1 ) {
+		return fail("cannot open " PROC_STAT);
+	}
 
 	/* open the spoolfile */
 	int cache_file = open(cache_filename, O_CREAT | O_APPEND | O_WRONLY, S_IRUSR | S_IWUSR);
+	if ( cache_file == -1 ) {
+		return fail("# cannot open cache_file");
+	}
 
 	/* loop each second */
 	while (1) {
@@ -175,10 +186,10 @@ int acquire() {
 			char if_id[64];
 			uint_fast64_t r_bytes, r_packets, r_errs, r_drop, r_fifo, r_frame, r_compressed, r_multicast;
 			uint_fast64_t t_bytes, t_packets, t_errs, t_drop, t_fifo, t_frame, t_compressed, t_multicast;
-			sscanf(line, "%s" 
+			sscanf(line, "%s"
 				" "
-				"%llu %llu %llu %llu %llu %llu %llu %llu" 
-				" " 
+				"%llu %llu %llu %llu %llu %llu %llu %llu"
+				" "
 				"%llu %llu %llu %llu %llu %llu %llu %llu"
 				, if_id
 				, &r_bytes, &r_packets, &r_errs, &r_drop, &r_fifo, &r_frame, &r_compressed, &r_multicast
@@ -189,11 +200,11 @@ int acquire() {
 			if_id[strlen(if_id) - 1] = '\0';
 
 			char out_buffer[1024];
-			sprintf(out_buffer, 
+			sprintf(out_buffer,
 				"multigraph if_%s_1sec" "\n"
 				"up.value %ld:%llu" "\n"
 				"down.value %ld:%llu" "\n"
-				, if_id 
+				, if_id
 				, epoch, r_bytes
 				, epoch, t_bytes
 			);
@@ -213,6 +224,9 @@ int acquire() {
 
 int fetch() {
 	FILE* cache_file = fopen(cache_filename, "r+");
+	if ( !cache_file ) {
+		return acquire();
+	}
 
 	/* lock */
 	flock(fileno(cache_file), LOCK_EX);
@@ -262,7 +276,7 @@ int main(int argc, char **argv) {
 }
 
 /***** DEMO
- 
+
 /proc/net/dev sample
 
 Inter-|   Receive                                                |  Transmit

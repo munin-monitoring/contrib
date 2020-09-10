@@ -13,24 +13,22 @@
 # To show tenant name plugin must run as root
 #
 # Magic markers
-#%# capabilities=autoconf suggest
-#%# family=auto
+#  #%# capabilities=autoconf suggest
+#  #%# family=auto
 
 import sys
 import os
 
-try: 
+try:
     from sqlalchemy.orm import joinedload
     import sqlalchemy.exc
-    
+
     from glance.common.cfg import CommonConfigOpts
     from glance.registry.db import models
     from glance.registry.db.api import get_session, configure_db
 
     from keystone.common import utils
-    from keystone import config
-    from keystone import exception
-    from keystone import identity
+    from keystone import config, exception, identity
 
 except ImportError:
     successful_import = False
@@ -40,7 +38,7 @@ else:
 
 def get_name_from_tenant(tenant):
     try:
-        KEYSTONE_CONF = config.CONF(config_files=[utils.find_config('keystone.conf')])
+        config.CONF(config_files=[utils.find_config('keystone.conf')])
     except:
         # keystone configuration can not be loaded, use id as name"
         return tenant
@@ -53,65 +51,67 @@ def get_name_from_tenant(tenant):
         # keystone database can not be connected, use id as name"
         return tenant
 
-    if not tenant_info: 
+    if not tenant_info:
         return tenant
     else:
         return tenant_info["name"]
 
-    
+
 def load_conf():
-    CONF = CommonConfigOpts(project="glance", prog="glance-registry")
-    CONF()
+    loaded_config = CommonConfigOpts(project="glance", prog="glance-registry")
+    loaded_config()
 
     # Hide missing logger warning message
     sys.stderr = open(os.devnull, 'w')
-    configure_db(CONF)
+    configure_db(loaded_config)
     sys.stderr = sys.__stderr__
 
 
 def print_config(tenant):
     if tenant == "Global":
-        print 'graph_title Glance used size for all tenants'
-        print 'graph_info This graph shows the used size in glance for all tenants'
+        print('graph_title Glance used size for all tenants')
+        print('graph_info This graph shows the used size in glance for all tenants')
     else:
-        print 'graph_title Glance used size for tenant %s' % get_name_from_tenant(tenant)
-        print 'graph_info This graph shows the used size in glance for tenant %s' % tenant
-    print 'graph_vlabel Bytes'
-    print 'graph_args --base 1024 --lower-limit 0'
-    print 'graph_category cloud'
-    print '%s.label %s' % (tenant, get_name_from_tenant(tenant))
-    print '%s.draw LINE2' % tenant
-    print '%s.info %s MBytes' % (tenant, tenant)
+        print('graph_title Glance used size for tenant %s' % get_name_from_tenant(tenant))
+        print('graph_info This graph shows the used size in glance for tenant %s' % tenant)
+    print('graph_vlabel Bytes')
+    print('graph_args --base 1024 --lower-limit 0')
+    print('graph_category cloud')
+    print('%s.label %s' % (tenant, get_name_from_tenant(tenant)))
+    print('%s.draw LINE2' % tenant)
+    print('%s.info %s MBytes' % (tenant, tenant))
+
 
 def request(**kwargs):
 
     session = get_session()
     try:
-        query = session.query(models.Image).\
-                        options(joinedload(models.Image.properties)).\
-                        options(joinedload(models.Image.members))
+        query = session.query(models.Image).options(joinedload(models.Image.properties)).options(
+            joinedload(models.Image.members))
         if kwargs:
-           query = query.filter_by(**kwargs)
+            query = query.filter_by(**kwargs)
 
         images = query.all()
 
-    except exc.NoResultFound:
+    except exception.NoResultFound:
         return []
     return images
 
+
 def print_suggest():
-    print "Global"
-    print "\n".join(set( image["owner"] for image in request(deleted=False) ))
+    print("Global")
+    print("\n".join(set(image["owner"] for image in request(deleted=False))))
+
 
 def print_values(tenant):
 
-    if tenant != "Global" :
+    if tenant != "Global":
         images = request(deleted=False, owner=tenant)
     else:
         images = request(deleted=False)
 
-    total_size = sum([ image["size"] for image in images ])
-    print '%s.value %s' % (tenant, total_size)
+    total_size = sum([image["size"] for image in images])
+    print('%s.value %s' % (tenant, total_size))
 
 
 if __name__ == '__main__':
@@ -125,18 +125,17 @@ if __name__ == '__main__':
             load_conf()
             print_suggest()
         elif argv[1] == 'autoconf':
-            if not successful_import:  
-                print 'no (failed import glance and/or sqlachemy module)'
+            if not successful_import:
+                print('no (failed import glance and/or sqlachemy module)')
                 sys.exit(0)
             try:
                 load_conf()
                 get_session()
             except:
-                print 'no (failed to connect glance backend, check user)'
+                print('no (failed to connect glance backend, check user)')
                 sys.exit(0)
-            print 'yes'
+            print('yes')
 
     elif successful_import:
         load_conf()
         print_values(tenant)
-

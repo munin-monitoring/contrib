@@ -1,0 +1,62 @@
+#!/bin/sh
+: << =cut
+=head1 NAME
+
+letsencrypt_weekly - monitor the number of CSRs by week for /etc/letsencrypt/csr/
+
+see https://letsencrypt.org/docs/rate-limits/
+
+= head1 CONFIGURATION
+
+You can configure the warning and critical limits for this plugin:
+
+[letsencrypt_weekly]
+# warn when more than 40 certificates have been requested in the last week
+env.warning :40
+# critical when more than 50 certificates have been requested in the last week
+env.critical :50
+
+=head1 Dependencies
+
+Dependencies: openssl
+
+=head1 AUTHOR
+
+andreas perhab - andreas.perhab@wt-io-it.at
+https://www.wt-io-it.at/
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+warning=${warning:-:40}
+critical=${critical:-:50} #letsencrypt doesn't allow more than 50 certificates per week
+# see https://letsencrypt.org/docs/rate-limits/
+
+if [ "$1" = "autoconf" ] ; then
+	test -d /etc/letsencrypt/csr/ && echo "yes" || echo "no (directory /etc/letsencrypt/csr does not exist)"
+elif [ "$1" = "config" ] ; then
+	echo "graph_title Letsencrypt certificate requests during last week"
+	echo "graph_args --base 1000"
+	echo "graph_vlabel Number of certificates"
+	echo "graph_category security"
+	echo "letsencrypt_weekly.label Letsencrypt certificates last week"
+	print_warning "letsencrypt_weekly"
+	print_critical "letsencrypt_weekly"
+elif [ "$1" = "" ] ; then
+	if existing_certs=$(find /etc/letsencrypt/csr/ -mtime -7 -type f 2>/dev/null); then
+		value=$(echo "$existing_certs" | wc -l)
+	else
+		value="U"
+	fi
+	echo "letsencrypt_weekly.value $value"
+fi

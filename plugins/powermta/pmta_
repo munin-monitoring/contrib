@@ -12,21 +12,21 @@
 #  Copyright (c) 2011, emarsys eMarketing Systems AG
 #  All rights reserved.
 #
-#  Redistribution and use in source and binary forms, with or without modification, are permitted provided that  
+#  Redistribution and use in source and binary forms, with or without modification, are permitted provided that
 #  the following conditions are met:
 #
-#      Redistributions of source code must retain the above copyright notice, this list of conditions and the  
-#      following disclaimer. Redistributions in binary form must reproduce the above copyright notice, this list  
-#      of conditions and the following disclaimer in the documentation and/or other materials provided with the  
-#      distribution. Neither the name of the emarsys eMarketing Systems AG nor the names of its contributors may  
+#      Redistributions of source code must retain the above copyright notice, this list of conditions and the
+#      following disclaimer. Redistributions in binary form must reproduce the above copyright notice, this list
+#      of conditions and the following disclaimer in the documentation and/or other materials provided with the
+#      distribution. Neither the name of the emarsys eMarketing Systems AG nor the names of its contributors may
 #      be used to endorse or promote products derived from this software without specific prior written permission.
 #
-#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, 
-#  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
-#  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR 
-#  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,  
-#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE  
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+#  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+#  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+#  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 #  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 #
@@ -53,7 +53,7 @@
 #		  lrwxrwxrwx 1 root root    5 2011-11-15 16:31 pmta_top_domains -> pmta_
 #
 #		o alternative multi-host configuration:
-#		   you can also link the pmta_ script to various hosts and configure munin to respond 
+#		   you can also link the pmta_ script to various hosts and configure munin to respond
 #		   to multiple REMOTEHOSTs, just link pmta_ in this schema and configure munin
 #		   accordingly - DO NOT USE DOTS IN YOUR IDENTIFIER VARIABLE, USE UNDERSCORE INSTEAD!
 #		   for example:
@@ -63,7 +63,7 @@
 #			lrwxrwxrwx 1 root root    5 2011-11-18 12:18 mailhost4_domain_com_pmta_top_domains -> pmta_
 #		  [...]
 #
-#		  conf.: 
+#		  conf.:
 #		   [mailhost1_domain_com_pmta*]
 #				env.REMOTEHOST somehostORip
 #				env.PORT portnumber
@@ -91,18 +91,18 @@ fi
 fetch_xml() {
 	#  o arg1 specifies xpath or false
 	#  o arg2 specifies sed/regex or false
-	#  o arg3 specifies category ('status', 'domains',..) or false	
+	#  o arg3 specifies category ('status', 'domains',..) or false
 	HTTPQUERY="GET /${3}?format=xml HTTP/1.1\n\n"
 	REMOTE=`echo ${HTTPQUERY} | nc -q 1 -w 5 ${REMOTEHOST} ${PORT} | tail -1`
 	XML_DATA=${REMOTE}
-	SED="s/.*<$2>\([^<]*\)<\/$2>.*/\1/p"	
-	
+	SED="s/.*<$2>\([^<]*\)<\/$2>.*/\1/p"
+
 	if [ "$3" = "status" ]; then
 		RET=`echo $XML_DATA | xpath -q -e $1 | sed -n $SED | cut -f1 -d '.'`
 	elif [ "$3" = "domains" ]; then
 		RET=`echo $XML_DATA | xpath -q -e '//domain/*[self::name or self::rcp]' | sed 's/<[^>]*>//g' | sed 's/\./_/g'`
-	fi	
-	
+	fi
+
 	if [ "$RET" ]; then
 		echo $RET
 		return 0
@@ -122,15 +122,15 @@ case $NAME_SELF in
 		CONF_TITLE="powermta ${WHAT}bound traffic"
 		CONF_LABEL="traffic_${WHAT}"
 		CONF_SELF="traffic_${WHAT}bound"
-		
-		if [ -z $1 ]; then			
-			GET=`fetch_xml //traffic//lastMin/${WHAT} kb status`  
+
+		if [ -z $1 ]; then
+			GET=`fetch_xml //traffic//lastMin/${WHAT} kb status`
 			RETURN=`echo $GET / 1024 | bc`
-			RCPT=`fetch_xml //traffic//lastMin/${WHAT} rcp status`  
-			MSGS=`fetch_xml //traffic//lastMin/${WHAT} msg status`  
+			RCPT=`fetch_xml //traffic//lastMin/${WHAT} rcp status`
+			MSGS=`fetch_xml //traffic//lastMin/${WHAT} msg status`
 			echo "megabytes.value $RETURN"
 			echo "recipients.value $RCPT"
-			echo "messages.value $MSGS"			
+			echo "messages.value $MSGS"
 			exit 0
 		elif [ $1 = config ]; then
 			echo "megabytes.label megabytes"
@@ -154,10 +154,10 @@ case $NAME_SELF in
 		CONF_TITLE=`echo "powermta ${WHAT}bound connections" | tr [:upper:] [:lower:]`
 		CONF_LABEL=`echo "conn_${WHAT}" | tr [:upper:] [:lower:]`
 		CONF_SELF=`echo "connections_${WHAT}bound" | tr [:upper:] [:lower:]`
-		if [ -z $1 ]; then			
-			GET=`fetch_xml //conn//smtp${WHAT} cur status`  
+		if [ -z $1 ]; then
+			GET=`fetch_xml //conn//smtp${WHAT} cur status`
 			echo "${CONF_SELF}.value $GET"
-			exit 0 
+			exit 0
 		elif [ $1 = config ]; then
 			echo "${CONF_SELF}.label ${WHAT}bound connections"
 			echo "${CONF_SELF}.draw LINE1"
@@ -165,7 +165,7 @@ case $NAME_SELF in
 			AUTOLABEL="no"
 		fi
 	;;
-	*pmta_queue_domains | *pmta_queue_recipients | *pmta_queue_megabytes)		
+	*pmta_queue_domains | *pmta_queue_recipients | *pmta_queue_megabytes)
 		if [ `expr match "$NAME_SELF" ".*pmta_queue_domains"` != 0 ]; then
 			WHAT="domains"
 		elif [ `expr match "$NAME_SELF" ".*pmta_queue_recipients"` != 0 ]; then
@@ -175,28 +175,28 @@ case $NAME_SELF in
 			UNIT_KB="true"
 		fi
 		CONF_TITLE="powermta ${WHAT} in queue"
-		CONF_LABEL="queue_${WHAT}"	
-		CONF_SELF="${WHAT}"		
-		
+		CONF_LABEL="queue_${WHAT}"
+		CONF_SELF="${WHAT}"
+
 		if [ -z $1 ]; then
 			if [ !$UNIT_KB ]; then
-				GET=`fetch_xml //queue/smtp dom status`  
+				GET=`fetch_xml //queue/smtp dom status`
 				echo "${CONF_SELF}.value $GET"
-				exit 0 
-			else	
-				GET=`fetch_xml //queue/smtp kb status`  
+				exit 0
+			else
+				GET=`fetch_xml //queue/smtp kb status`
 				RETURN=`echo $GET / 1024 | bc`
 				echo "${CONF_SELF}.value $RETURN"
-				exit 0 
+				exit 0
 			fi
-		fi	
+		fi
 	;;
 	*pmta_top_domains)
 		CONF_TITLE="powermta top 10 domains by recipients"
 		CONF_LABEL="top_domains"
 		CONF_SELF="domains"
 		AUTOLABEL="no"
-		
+
 		GET=`fetch_xml false false domains`
 		if [ -z $1 ]; then
 			for values in $GET; do
@@ -204,7 +204,7 @@ case $NAME_SELF in
 					echo $values
 				else
 					echo -n "$values.value#"
-				fi			
+				fi
 			done | tr ' ' '\n' | tr '#' ' ' # restore newline - replace hashtag with whitespace
 			exit 0
 		elif [ $1 = config ]; then
@@ -239,11 +239,11 @@ case $1 in
 			fi
 		fi
 		exit 0
-	;;	
+	;;
 	autoconf)
 		# tell munin this script supports autoconfiguration:
 		echo "yes"
-	;;	
+	;;
 	*)
 		exit 1
 	;;

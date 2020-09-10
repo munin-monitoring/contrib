@@ -10,10 +10,10 @@
 # Additionally, you need Accountingrules in fwbuilder
 #	fwbuilder creates Chains in INPUT-, OUTPUT- and FORWARD-Chain
 #	with Rules that "RETURN"
-#	You will have to specify rule options with name "ACCOUNTING" for the 
+#	You will have to specify rule options with name "ACCOUNTING" for the
 #	rules to use, otherwise no rules will be found.
-#	try "fwbuilder_ suggest" to see if all is ok. 
-#    
+#	try "fwbuilder_ suggest" to see if all is ok.
+#
 #
 # Furthermore, this plugin needs to be run as root for iptables to work
 #
@@ -61,23 +61,21 @@ IP=${IP/-/\/}
 
 if [ "$1" = "autoconf" ]; then
 	if [ -r /proc/net/dev ]; then
-		iptables -L INPUT -v -n -x >/dev/null 2>/dev/null
+		iptables -L INPUT -v -n -x -w >/dev/null 2>/dev/null
 		if [ $? -gt 0 ]; then
 			echo "no (could not run iptables as user `whoami`)"
-			exit 1
 		else
 			echo yes
-			exit 0
 		fi
 	else
 		echo "no (/proc/net/dev not found)"
-		exit 1
 	fi
+	exit 0
 fi
 
 if [ "$1" = "suggest" ]; then
 	# find Chains for Accounting
-	iptables -L -n |grep ^ACCOUNTING |awk '{printf "%s\n%s\n",$4,$5}'| sort -u |sed 's#\/#-#'
+	iptables -L -n -w | grep ^ACCOUNTING |awk '{printf "%s\n%s\n",$4,$5}'| sort -u |sed 's#\/#-#'
 	exit 0
 fi
 
@@ -95,10 +93,10 @@ if [ "$1" = "config" ]; then
         echo 'in.label received'
         echo 'in.type DERIVE'
         echo 'in.min 0'
-        echo 'in.cdef in,8,*' 
+        echo 'in.cdef in,8,*'
         exit 0
 fi;
 
-echo "in.value $(( $(iptables -L -n -v -x |grep "ACCOUNTING" |awk '{printf "%s %s\n",$2,$9}' |grep $IP |awk '{printf "%s + ",$1}') 0 ))"
-echo "out.value $(( $(iptables -L -n -v -x |grep "ACCOUNTING" |awk '{printf "%s %s\n",$2,$8}' |grep $IP |awk '{printf "%s + ",$1}') 0 ))"
+echo "in.value $(( $(iptables -L -n -v -x -w | grep "ACCOUNTING" | awk '{printf "%s %s\n",$2,$9}' | grep $IP | awk '{printf "%s + ",$1}') 0 ))"
+echo "out.value $(( $(iptables -L -n -v -x -w |grep "ACCOUNTING" | awk '{printf "%s %s\n",$2,$8}' | grep $IP | awk '{printf "%s + ",$1}') 0 ))"
 

@@ -2,19 +2,19 @@
 #
 # Munin plugin for MythTV
 # This plugin can graph:- Encoder Status, Days Remaining in Schedule, Job schedule, Recording Schedule, Recorded Programes, Recorded hours
-# 
+#
 # Create a symbolic link to mythtv_status_{GraphType}
 # Where {GraphType} can be encoder, epg, job,  schedule, recorded
 # for example         mythtv_status_encoder
 #
-# NOTE: This plugin needs to run as root so add the following to your munin-node config file 
+# NOTE: This plugin needs to run as root so add the following to your munin-node config file
 #  [mythtv_status*]
 #  user=root
 #  The http/xml status page must be enabled in the mythtv backend.
 #
 # $Log$
 # Revision 0.1  2008/03/27  idobson
-# Code for all options except recorded implemented 
+# Code for all options except recorded implemented
 #
 # Revision 0.2  2008/03/28  idobson
 # Tidied up the code abit/removed dead functions
@@ -35,7 +35,7 @@
 # Revision 0.7  2008/04/3  idobson
 # Now using SQL to read the number of days in the EPG
 # Changed recordings symlink to schedule, makes more sense
-# 
+#
 # Revision 0.8  2008/04/6  idobson
 # Tidied up the SQL code abit, moved it into a function.
 #
@@ -43,7 +43,7 @@
 # Added a check that we got the XML data before trying to  parse it.
 #
 # Revision 1.0  2008/04/15  idobson
-# Fixed undef returned from SQL query, it now returns 0, 
+# Fixed undef returned from SQL query, it now returns 0,
 # added error handler to SQL sub. It just dies with an error text.
 #
 # Revision 1.1  2008/05/03  idobson
@@ -94,7 +94,7 @@ my $RecHoursLiveTV=0;
 my $result="";
 my $gata="";
 my $VideoInput=1;
- $GraphOption=`basename $0 | sed 's/^mythtv_status_//g' | tr '_' '-'` ;	
+ $GraphOption=`basename $0 | sed 's/^mythtv_status_//g' | tr '_' '-'` ;
  chomp $GraphOption;
 
 PrepSQLRead();
@@ -103,7 +103,7 @@ PrepSQLRead();
  if ($ARGV[0] and $ARGV[0] eq "autoconf" ) {
      print "yes\n";
      exit 0;
- } 
+ }
 
 #Config Options
 ##Configuration for encoder, no config data needs to read from anywhere
@@ -135,7 +135,7 @@ PrepSQLRead();
      print "FreeEncoders.colour 00FF00\n";
      print "HungEncoders.colour 000000\n";
      print "HungEncoders.draw LINE1\n";
-     print "HungEncoders.label Encoders that have hung (no DB update)\n";     
+     print "HungEncoders.label Encoders that have hung (no DB update)\n";
      print "HungEncoders.warning 0:0\n";
    }
 
@@ -147,7 +147,7 @@ PrepSQLRead();
      print "graph_title MythTV EPG days/Programs\n";
      print "graph_category tv\n";
      print "graph_vlabel Days\/Programs\n";
-     
+
      @result=SQLQuery("SELECT DISTINCT `sourceid` FROM `cardinput`");
      $VideoInput = 1;
      foreach $gata (@result) {
@@ -259,7 +259,7 @@ PrepSQLRead();
    @result=SQLQuery("SELECT count(*) FROM `capturecard` ");
    my $FreeRecorders=$result[0];
    my $ActiveTuners=0;
-   @result=SQLQuery("SELECT videosource.name, count( inuseprograms.recusage ) 
+   @result=SQLQuery("SELECT videosource.name, count( inuseprograms.recusage )
                      FROM   inuseprograms, channel, videosource
                      WHERE  inuseprograms.recusage = 'recorder'
                      AND    inuseprograms.chanid   = channel.chanid
@@ -283,8 +283,8 @@ PrepSQLRead();
    }
    print "FreeEncoders.value $FreeRecorders\n";
    @result=SQLQuery("SELECT count(inuseprograms.recusage)
-                     from inuseprograms  
-                     where inuseprograms.recusage = 'recorder'   
+                     from inuseprograms
+                     where inuseprograms.recusage = 'recorder'
                      and (UNIX_TIMESTAMP( NOW( )) - UNIX_TIMESTAMP(inuseprograms.lastupdatetime)) / 60 > 20");
    print "HungEncoders.value $result[0]\n";
  }
@@ -296,7 +296,7 @@ PrepSQLRead();
    foreach $gata (@result) {
       print "EPGDays$VideoInput.value $gata\n";
       $VideoInput++;
-   }  
+   }
 
 #Get number of programs in EPG per video source
    $VideoInput = 1;
@@ -324,7 +324,7 @@ PrepSQLRead();
    @result=SQLQuery("SELECT COUNT(*) FROM `record`");
    print "RecordingSchedules.value $result[0]\n";
 
-#Connect to mythtv using the MythTV object 
+#Connect to mythtv using the MythTV object
    my $Repeats=0;
    my $Recordings=0;
    my $Conflicts=0;
@@ -374,7 +374,7 @@ exit 0;
 sub PrepSQLRead {
     my $hostname = `hostname`;
     chomp($hostname);
-    
+
 # Read the mysql.txt file in use by MythTV. Could be in a couple places, so try the usual suspects
     my $found = 0;
     my @mysql = ('/usr/local/share/mythtv/mysql.txt',
@@ -423,7 +423,7 @@ sub SQLQuery {
    my  ($QUERY) = @_;
    my @data;
    my $ref;
-   my $dbh = DBI->connect_cached("DBI:mysql:$SQLDBName:$SQLServer", $SQLUser, $SQLPassword) 
+   my $dbh = DBI->connect_cached("DBI:mysql:$SQLDBName:$SQLServer", $SQLUser, $SQLPassword)
          or die "Couldn't connect to database: " . DBI->errstr;
    my $table_data = $dbh->prepare($QUERY) or die "Couldn't prepare statement: " . $dbh->errstr;
    $table_data->execute or die "Couldn't execute statement: " . $table_data->errstr;
@@ -435,7 +435,7 @@ sub SQLQuery {
      return @data;
    } else {
      return 0;
-   }   
+   }
 }
 
 # Returns true if the show is scheduled to record

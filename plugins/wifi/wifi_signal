@@ -6,7 +6,7 @@
 # License: GPL v. 2
 #
 #%# family=auto
-#%# capabilitoes=autoconf
+#%# capabilities=autoconf
 
 PNWL=/proc/net/wireless
 
@@ -22,9 +22,9 @@ do_config () {
     echo "graph_title WiFi signal and noise"
     echo "graph_args --base 1000 -u 0"
     echo "graph_vlabel dB"
-    echo "graph_category network"
-    echo "graph_info This graph shows the noise and singal levels of your WiFi devices"
-    
+    echo "graph_category wireless"
+    echo "graph_info This graph shows the noise and signal levels of your WiFi devices"
+
     awk -F'[ :]*' '/:/ {
 	        print $2"_noise.label Noise "$2;
 	        print $2"_signal.label Signal "$2;
@@ -32,23 +32,16 @@ do_config () {
 }
 
 do_autoconf () {
-    if [ ! -f $PNWL ] ; then
-	echo "no (no $PNWL)"
-	exit 1
+    if [ ! -f "$PNWL" ]; then
+        echo "no (missing file '$PNWL')"
+    elif [ ! -r "$PNWL" ]; then
+        echo "no (cannot read file '$PNWL')"
+    elif grep -qs : "$PNWL"; then
+        echo yes
+    else
+        echo "no (no devices in $PNWL)"
     fi
-
-    if [ ! -r $PNWL ] ; then
-	echo "no (could not read $PNWL)"
-	exit 1
-    fi
-
-    if grep -qs : $PNWL ; then
-	echo yes
-	exit 0
-    fi
-
-    echo "no (no devices in $PNWL)"
-    exit 1
+    exit 0
 }
 
 case $1 in

@@ -21,6 +21,8 @@
 # You can test this plugin by calling it with params "test" and your  watchdirs:
 # ./dirsizes test /dir1,/tmp/dir2
 #
+# The directories can contain wildcards that are automatically expanded.
+#
 #
 ##############################################################################
 #
@@ -44,6 +46,17 @@ else {
     # Split the watchdirs string
     @watchdirs = split( ",", $ENV{"watchdirs"} );
 }
+
+# Glob all of the watchdirs.
+my @globbed_watchdirs;
+foreach my $watchdir ( @watchdirs )
+{
+	foreach my $expanded_dir ( glob( $watchdir ) )
+	{
+		push @globbed_watchdirs, $expanded_dir;
+	}
+}
+@watchdirs = @globbed_watchdirs;
 
 # Config or read request?
 if ( exists $ARGV[0] and $ARGV[0] eq "config" ) {
@@ -88,9 +101,8 @@ sub getSize {
     my ($dir) = @_;
 
     # Get the size via `du`
-    my @dirsize = split( ' ', `du -cb $dir | grep "total" |  tail -1 ` );
+    my @dirsize = split( ' ', `du -cb "$dir" | grep "total" |  tail -1 ` );
     return @dirsize[0];
 }
 
 exit 0;
-

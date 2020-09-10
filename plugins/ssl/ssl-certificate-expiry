@@ -1,16 +1,22 @@
-#!/bin/sh
+#!/bin/sh -u
 # -*- sh -*-
+# shellcheck disable=SC2039
 
 : << =cut
 
 =head1 NAME
 
-ssl-certificate-expiry - Plugin to monitor CERTificate expiration on multiple services and ports
+ssl-certificate-expiry - Plugin to monitor Certificate expiration on multiple services and ports
 
 =head1 CONFIGURATION
 
   [ssl-certificate-expiry]
-    env.services www.service.tld blah.example.net_PORT
+    env.services www.service.tld blah.example.net_PORT foo.example.net_PORT_STARTTLS
+
+PORT is the TCP port number
+STARTTLS is passed to openssl as "-starttls" argument. Useful for services like SMTP or IMAP implementing StartTLS.
+  Current known values are ftp, imap, pop3 and smtp
+  PORT is mandatory if STARTTLS is used.
 
 To set warning and critical levels do like this:
 
@@ -28,84 +34,173 @@ For example:
   ssl-certificate-expiry_www.example.org_443
   ssl-certificate-expiry_192.0.2.42_636
   ssl-certificate-expiry_2001:0DB8::badc:0fee_485
+  ssl-certificate-expiry_mail.example.net_25_smtp
 
-=head1 AUTHOR
+=head2 Cron setup
 
-Pactrick Domack (ssl_)
-Olivier Mehani (ssl-certificate-expiry)
+To avoid having to run the SSL checks during the munin-update, it is possible
+to run it from cron, and save a cachefile to be read during the update, This is
+particularly useful when checking a large number of certificates, or when some
+of the hosts are slow.
 
-Copyright (C) 2013 Patrick Domack <patrickdk@patrickdk.com>
-Copyright (C) 2017 Olivier Mehani <shtrom+munin@ssji.net>
+To do so, add a cron job running the plugin with cron as the argument:
+
+  <minute> * * * <user> /usr/sbin/munin-run/ssl-certificate-expiry cron
+
+<user> should be the user that has write permission to the MUNIN_PLUGSTATE.
+<minute> should be a number between 0 and 59 when the check should run every hour.
+
+If, for any reason, the cron script stops running, the script will revert to
+uncached updates after the cache file is older than an hour.
+
+=head1 AUTHORS
+
+ * Pactrick Domack (ssl_)
+ * Olivier Mehani (ssl-certificate-expiry)
+ * Martin Schobert (check for intermediate certs)
+ 
+ * Copyright (C) 2013 Patrick Domack <patrickdk@patrickdk.com>
+ * Copyright (C) 2017, 2019 Olivier Mehani <shtrom+munin@ssji.net>
+ * Copyright (C) 2020 Martin Schobert <martin@schobert.cc> 
 
 =head1 LICENSE
 
 =cut
 
+# shellcheck disable=SC1090
 . "${MUNIN_LIBDIR}/plugins/plugin.sh"
 
-if [ "${MUNIN_DEBUG}" = 1 ]; then
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
     set -x
 fi
 
 HOSTPORT=${0##*ssl-certificate-expiry_}
+CACHEFILE="${MUNIN_PLUGSTATE}/$(basename "${0}").cache"
 
 if [ "${HOSTPORT}" != "${0}" ] \
-	&& [ ! -z "${HOSTPORT}" ]; then
+	&& [ -n "${HOSTPORT}" ]; then
 	services="${HOSTPORT}"
 fi
 
-case $1 in
-    config)
 
+# Read data including a certificate from stdin and output the (fractional) number of days left
+# until the expiry of this certificate. The output is empty if parsing failed.
+parse_valid_days_from_certificate() {
+    local input_data
+    local valid_until_string
+    local valid_until_epoch
+    local now_epoch
+    local input_data
+    input_data=$(cat)
+
+    if echo "$input_data" | grep -q -- "-----BEGIN CERTIFICATE-----"; then
+        valid_until_string=$(echo "$input_data" | openssl x509 -noout -enddate \
+            | grep "^notAfter=" | cut -f 2 -d "=")
+        if [ -n "$valid_until_string" ]; then
+            # FreeBSD requires special arguments for "date"
+            if uname | grep -q ^FreeBSD; then
+                valid_until_epoch=$(date -j -f '%b %e %T %Y %Z' "$valid_until_string" +%s)
+                now_epoch=$(date -j +%s)
+            else
+                valid_until_epoch=$(date --date="$valid_until_string" +%s)
+                now_epoch=$(date +%s)
+            fi
+            if [ -n "$valid_until_epoch" ]; then
+                # calculate the number of days left
+                echo "$valid_until_epoch" "$now_epoch" | awk '{ print(($1 - $2) / (24 * 3600)); }'
+            fi
+        fi
+    fi
+}
+
+
+print_expire_days() {
+    local host="$1"
+    local port="$2"
+    local starttls="$3"
+
+    # Wrap IPv6 addresses in square brackets
+    echo "$host" | grep -q ':' && host="[$host]"
+
+    local s_client_args=
+    [ -n "$starttls" ] && s_client_args="-starttls $starttls"
+
+    # We extract and check the server certificate,
+    # but the end date also depends on intermediate certs. Therefore
+    # we want to check intermediate certs as well.
+    #
+    # The following cryptic lines do:
+    # - invoke openssl and connect to a port
+    # - print certs, not only the server cert
+    # - extract each certificate as a single line
+    # - pipe each cert to the parse_valid_days_from_certificate
+    #   function, which basically is 'openssl x509 -enddate'
+    # - get a list of the parse_valid_days_from_certificate
+    #   results and sort them
+    
+    # shellcheck disable=SC2086
+    echo "" | openssl s_client \
+	-servername "$host" -connect "${host}:${port}" \
+	-showcerts \
+	$s_client_args 2>/dev/null | \
+	awk '{
+  	  if ($0 == "-----BEGIN CERTIFICATE-----") cert=""
+  	  else if ($0 == "-----END CERTIFICATE-----") print cert
+  	  else cert=cert$0
+	  }' | \
+	  while read -r CERT; do
+	      (printf '\n-----BEGIN CERTIFICATE-----\n%s\n-----END CERTIFICATE-----\n' "$CERT") | \
+	  	  parse_valid_days_from_certificate
+          done | sort -n | head -n 1
+	
+}
+
+main() {
+    for service in $services; do
+	if echo "$service" | grep -q "_"; then
+	    host=$(echo "$service" | cut -f 1 -d "_")
+	    port=$(echo "$service" | cut -f 2 -d "_")
+	    starttls=$(echo "$service" | cut -f 3 -d "_")
+	else
+	    host=$service
+	    port=443
+	    starttls=""
+	fi
+	fieldname="$(clean_fieldname "$service")"
+	valid_days=$(print_expire_days "$host" "$port" "$starttls")
+	[ -z "$valid_days" ] && valid_days="U"
+	printf "%s.value %s\\n" "$fieldname" "$valid_days"
+        echo "${fieldname}.extinfo Last checked: $(date)"
+    done
+}
+
+case ${1:-} in
+    config)
 	echo "graph_title SSL Certificates Expiration"
 	echo 'graph_args --base 1000'
 	echo 'graph_vlabel days left'
 	echo 'graph_category security'
-	echo "graph_info This graph shows the days left for the certificate"
+	echo "graph_info This graph shows the numbers of days before certificate expiry"
 	for service in $services; do
 	    fieldname=$(clean_fieldname "$service")
 	    echo "${fieldname}.label $(echo "${service}" | sed 's/_/:/')"
-	    print_thresholds "${fieldname}"
+	    print_thresholds "${fieldname}" warning critical
 	done
+
+	exit 0
+	;;
+    cron)
+	UPDATE="$(main)"
+	echo "${UPDATE}" > "${CACHEFILE}"
+	chmod 0644 "${CACHEFILE}"
 
 	exit 0
 	;;
 esac
 
-get_expire()
-{
-    SITE="$(echo "${1}" | sed 's/_.*//')"
-    PORT="$(echo "${1}" | sed 's/.*_//')"
+if [ -n "$(find "${CACHEFILE}" -mmin -60 2>/dev/null)" ]; then
+	cat "${CACHEFILE}"
+	exit 0
+fi
 
-    VAR="$(clean_fieldname "$1")"
-    if [ "$PORT" = "$SITE" ]; then
-	PORT=443
-    fi
-    if echo "$SITE" | grep -q ':'; then
-	# Wrap IPv6 addresses in square brackets
-        SITE="[${SITE}]"
-    fi
-
-    CERT=$(echo "" | openssl s_client -CApath /etc/ssl/certs -servername "${SITE}" -connect "${SITE}:${PORT}" 2>/dev/null);
-
-    if echo "${CERT}" | grep -q -- "-----BEGIN CERTIFICATE-----"; then
-	echo "${CERT}" \
-		| openssl x509 -noout -enddate \
-		| awk -F= 'BEGIN {
-			split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", month, " ");
-			for (i=1; i<=12; i++)
-				mdigit[month[i]] = i;
-		}
-		/notAfter/ {
-			split($0,a,"="); split(a[2],b," "); split(b[3],time,":");
-			datetime=b[4] " " mdigit[b[1]] " " b[2] " " time[1] " " time[2] " " time[3];
-			days=(mktime(datetime)-systime())/86400;
-			print "VAR.value " days;
-		}' \
-		| sed "s/VAR/${VAR}/g"
-    fi
-}
-
-for service in $services; do
-    get_expire "$service"
-done
+main

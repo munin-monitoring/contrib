@@ -1,49 +1,105 @@
-#!/usr/bin/env python
-# bitcoind_ Munin plugin for Bitcoin Server Variables
-#
-# by Mike Koss
-# Feb 14, 2012, MIT License
-#
-# You need to be able to authenticate to the bitcoind server to issue rpc's.
-# This plugin supporst 2 ways to do that:
-#
-# 1) In /etc/munin/plugin-conf.d/bitcoin.conf place:
-#
-#      [bitcoind_*]
-#      user your-username
-#
-#    Then be sure your $HOME/.bitcoin/bitcoin.conf has the correct authentication info:
-#        rpcconnect, rpcport, rpcuser, rpcpassword
-#
-# 2) Place your bitcoind authentication directly in /etc/munin/plugin-conf.d/bitcoin.conf
-#
-#      [bitcoind_*]
-#      env.rpcport 8332
-#      env.rpcconnect 127.0.0.1
-#      env.rpcuser your-username-here
-#      env.rpcpassword your-password-here
-#
-# To install all available graphs:
-#
-#     sudo munin-node-configure --libdir=. --suggest --shell | sudo bash
-#
-# Leave out the "| bash" to get a list of commands you can select from to install
-# individual graphs.
-#
-# Munin plugin tags:
-#
-#%# family=auto
-#%# capabilities=autoconf suggest
+#!/usr/bin/env python3
 
+"""=cut
+=head1 NAME
+
+  bitcoind_ - Track Bitcoin Server Variables
+
+=head1 CONFIGURATION
+
+You need to be able to authenticate to the bitcoind server to issue rpc's.
+This plugin supports two ways to do that:
+
+1) In /etc/munin/plugin-conf.d/bitcoin.conf place:
+
+     [bitcoind_*]
+     user your-username
+     env.bitcoin_configfile /home/your-username/.bitcoin/bitcoin.conf
+
+   Then be sure that the file referenced above (typically: $HOME/.bitcoin/bitcoin.conf)
+   has the correct authentication info:
+       rpcconnect, rpcport, rpcuser, rpcpassword
+
+2) Place your bitcoind authentication directly in /etc/munin/plugin-conf.d/bitcoin.conf
+
+     [bitcoind_*]
+     env.rpcport 8332
+     env.rpcconnect 127.0.0.1
+     env.rpcuser your-username-here
+     env.rpcpassword your-password-here
+
+To install all available graphs:
+
+    sudo munin-node-configure --libdir=. --suggest --shell | sudo bash
+
+Leave out the "| bash" to get a list of commands you can select from to install
+individual graphs.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf suggest
+
+=head1 LICENSE
+
+MIT License
+
+=head1 AUTHOR
+
+Copyright (C) 2012 Mike Koss
+
+=cut"""
+
+import base64
+import json
 import os
+import re
 import sys
 import time
-import re
-import urllib2
-import json
+import urllib.error
+import urllib.request
 
 
-DEBUG = False
+DEBUG = os.getenv('MUNIN_DEBUG') == '1'
+
+
+def _get_version(info):
+    # v0.15.2 version is represented as 150200
+    return info['version'] // 10000
+
+
+def _rpc_get_initial_info(connection):
+    (info, connect_error) = connection.getnetworkinfo()
+    if connect_error:
+        if isinstance(connect_error, urllib.error.HTTPError) and connect_error.code == 404:
+            # getinfo RPC exists in version <= 0.15
+            (info, connect_error) = connection.getinfo()
+            if connect_error:
+                return (None, None, connect_error)
+        else:
+            return (None, None, connect_error)  # pass all other not-404 errors
+
+    return (info, _get_version(info), None)
+
+
+def _rpc_get_balance(info, minor_version, connection):
+    # see https://github.com/bitcoin/bitcoin/blob/239d199667888e5d60309f15a38eed4d3afe56c4/
+    # doc/release-notes/release-notes-0.19.0.1.md#new-rpcs
+    if minor_version >= 19:
+        # we use getbalance*s* (plural) as old getbalance is being deprecated,
+        # and we have to calculate total balance (owned and watch-only) manually now.
+        (result, error) = connection.getbalances()
+
+        total = sum(result[wallet_mode]['trusted']
+                    for wallet_mode in ('mine', 'watchonly')
+                    if wallet_mode in result)
+
+        info['balance'] = total
+        return info
+    else:
+        (result, error) = connection.getbalance()
+        info['balance'] = result
+        return info
 
 
 def main():
@@ -52,7 +108,6 @@ def main():
     command = sys.argv[1] if len(sys.argv) > 1 else None
     request_labels = {'balance': ('Wallet Balance', 'BTC'),
                       'connections': ('Peer Connections', 'Connections'),
-                      'fees': ("Tip Offered", "BTC"),
                       'transactions': ("Transactions", "Transactions",
                                        ('confirmed', 'waiting')),
                       'block_age': ("Last Block Age", "Seconds"),
@@ -66,60 +121,78 @@ def main():
 
     if command == 'suggest':
         for var_name in request_labels.keys():
-            print var_name
-        return
+            print(var_name)
+        return True
 
     if command == 'config':
-        print 'graph_category other'
-        print 'graph_title Bitcoin %s' % labels[0]
-        print 'graph_vlabel %s' % labels[1]
+        print('graph_category htc')
+        print('graph_title Bitcoin %s' % labels[0])
+        print('graph_vlabel %s' % labels[1])
         for label in line_labels:
-            print '%s.label %s' % (label, label)
-        return
+            print('%s.label %s' % (label, label))
+        return True
 
     # Munin should send connection options via environment vars
     bitcoin_options = get_env_options('rpcconnect', 'rpcport', 'rpcuser', 'rpcpassword')
     bitcoin_options.rpcconnect = bitcoin_options.get('rpcconnect', '127.0.0.1')
     bitcoin_options.rpcport = bitcoin_options.get('rpcport', '8332')
 
+    error = None
     if bitcoin_options.get('rpcuser') is None:
-        conf_file = os.path.join(os.path.expanduser('~/.bitcoin'), 'bitcoin.conf')
-        bitcoin_options = parse_conf(conf_file)
+        conf_file = os.getenv("bitcoin_configfile")
+        if not conf_file:
+            error = "Missing environment settings: rpcuser/rcpassword or bitcoin_configfile"
+        elif not os.path.exists(conf_file):
+            error = "Configuration file does not exist: {}".format(conf_file)
+        else:
+            bitcoin_options = parse_conf(conf_file)
 
-    bitcoin_options.require('rpcuser', 'rpcpassword')
+    if not error:
+        try:
+            bitcoin_options.require('rpcuser', 'rpcpassword')
+        except KeyError as exc:
+            error = str(exc).strip("'")
 
-    bitcoin = ServiceProxy('http://%s:%s' % (bitcoin_options.rpcconnect,
-                                             bitcoin_options.rpcport),
-                           username=bitcoin_options.rpcuser,
-                           password=bitcoin_options.rpcpassword)
+    if not error:
+        bitcoin = ServiceProxy('http://%s:%s' % (bitcoin_options.rpcconnect,
+                                                 bitcoin_options.rpcport),
+                               username=bitcoin_options.rpcuser,
+                               password=bitcoin_options.rpcpassword)
+        (info, minor_version, connect_error) = _rpc_get_initial_info(bitcoin)
+        if connect_error:
+            error = "Could not connect to Bitcoin server: {}".format(connect_error)
 
-    (info, error) = bitcoin.getinfo()
+    if command == 'autoconf':
+        if error:
+            print('no ({})'.format(error))
+        else:
+            print('yes')
+        return True
 
     if error:
-        if command == 'autoconf':
-            print 'no'
-            return
-        else:
-            # TODO: Better way to report errors to Munin-node.
-            raise ValueError("Could not connect to Bitcoin server.")
+        print(error, file=sys.stderr)
+        return False
+
+    if request_var == 'balance':
+        info = _rpc_get_balance(info, minor_version, bitcoin)
 
     if request_var in ('transactions', 'block_age'):
-        (info, error) = bitcoin.getblockhash(info['blocks'])
-        (info, error) = bitcoin.getblock(info)
+        (info, error) = bitcoin.getblockchaininfo()
+        (info, error) = bitcoin.getblock(info['bestblockhash'])
         info['block_age'] = int(time.time()) - info['time']
         info['confirmed'] = len(info['tx'])
 
-    if request_var in ('fees', 'transactions'):
-        (memory_pool, error) = bitcoin.getrawmempool()
-        if memory_pool:
-            info['waiting'] = len(memory_pool)
+    if request_var == 'difficulty':
+        (info, error) = bitcoin.getblockchaininfo()
 
-    if command == 'autoconf':
-        print 'yes'
-        return
+    if request_var == 'transactions':
+        (memory_pool, error) = bitcoin.getmempoolinfo()
+        info['waiting'] = memory_pool['size']
 
     for label in line_labels:
-        print "%s.value %s" % (label, info[label])
+        print("%s.value %s" % (label, info[label]))
+
+    return True
 
 
 def parse_conf(filename):
@@ -138,7 +211,8 @@ def parse_conf(filename):
                     continue
                 (var, value) = (m.group(1), m.group(2).strip())
                 options[var] = value
-    except:
+    except OSError:
+        # the config file may be missing
         pass
 
     return options
@@ -147,7 +221,9 @@ def parse_conf(filename):
 def get_env_options(*vars):
     options = Options()
     for var in vars:
-        options[var] = os.getenv(var)
+        value = os.getenv(var)
+        if value is not None:
+            options[var] = os.getenv(var)
     return options
 
 
@@ -165,12 +241,11 @@ class Options(dict):
             if self.get(name) is None:
                 missing.append(name)
         if len(missing) > 0:
-            raise ValueError("Missing required setting%s: %s." %
-                             ('s' if len(missing) > 1 else '',
-                              ', '.join(missing)))
+            raise KeyError("Missing required setting{}: {}."
+                           .format('s' if len(missing) > 1 else '', ', '.join(missing)))
 
 
-class ServiceProxy(object):
+class ServiceProxy:
     """
     Proxy for a JSON-RPC web service. Calls to a function attribute
     generates a JSON-RPC call to the host service. If a callback
@@ -190,7 +265,7 @@ class ServiceProxy(object):
         return Proxy(self, method, id=self.id)
 
 
-class Proxy(object):
+class Proxy:
     def __init__(self, service, method, id=None):
         self.service = service
         self.method = method
@@ -199,43 +274,43 @@ class Proxy(object):
     def __call__(self, *args):
         if DEBUG:
             arg_strings = [json.dumps(arg) for arg in args]
-            print "Calling %s(%s) @ %s" % (self.method,
+            print("Calling %s(%s) @ %s" % (self.method,
                                            ', '.join(arg_strings),
-                                           self.service.url)
+                                           self.service.url))
 
         data = {
             'method': self.method,
             'params': args,
             'id': self.id,
-            }
-        request = urllib2.Request(self.service.url, json.dumps(data))
+        }
+        request = urllib.request.Request(self.service.url, json.dumps(data).encode())
         if self.service.username:
-            # Strip the newline from the b64 encoding!
-            b64 = ('%s:%s' % (self.service.username, self.service.password)).encode('base64')[:-1]
-            request.add_header('Authorization', 'Basic %s' % b64)
+            auth_string = '%s:%s' % (self.service.username, self.service.password)
+            auth_b64 = base64.urlsafe_b64encode(auth_string.encode()).decode()
+            request.add_header('Authorization', 'Basic %s' % auth_b64)
 
         try:
-            body = urllib2.urlopen(request).read()
-        except Exception, e:
+            body = urllib.request.urlopen(request).read()
+        except urllib.error.URLError as e:
             return (None, e)
 
         if DEBUG:
-            print 'RPC Response (%s): %s' % (self.method, json.dumps(body, indent=4))
+            print('RPC Response (%s): %s' % (self.method, json.dumps(json.loads(body), indent=4)))
 
         try:
             data = json.loads(body)
-        except ValueError, e:
+        except ValueError as e:
             return (None, e.message)
         # TODO: Check that id matches?
         return (data['result'], data['error'])
 
 
 def get_json_url(url):
-    request = urllib2.Request(url)
-    body = urllib2.urlopen(request).read()
+    request = urllib.request.Request(url)
+    body = urllib.request.urlopen(request).read()
     data = json.loads(body)
     return data
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(0 if main() else 1)

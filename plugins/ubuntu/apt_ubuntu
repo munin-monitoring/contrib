@@ -21,12 +21,15 @@
 # Magic markers - optional - used by installation scripts and
 # munin-config:
 #
-#%# capabilities=autoconf
-#%# family=contrib
+#  #%# capabilities=autoconf
+#  #%# family=contrib
+
+import os
+import sys
+import warnings
 
 ###########################################################
-category = 'security' # 'upgrades'
-title = 'Upgradable packages' # 'Upgradeable packages'
+title = 'Upgradable packages'  # 'Upgradeable packages'
 vlabel = 'Total packages'
 other = 'other'
 total = 'total'
@@ -38,11 +41,8 @@ origins = ['Ubuntu']
 critical = 1
 ###########################################################
 
-import os
-import sys
-import warnings
-
 warnings.filterwarnings('ignore', 'apt API not stable yet', FutureWarning)
+
 
 def autoconf():
     if os.path.exists('/etc/lsb-release'):
@@ -51,59 +51,59 @@ def autoconf():
                 try:
                     import apt
                 except ImportError:
-                    print 'no (python-apt not installed)'
-                    sys.exit(1)
+                    print('no (python-apt not installed)')
+                    sys.exit(0)
                 cache = apt.Cache()
-                if not cache.has_key('update-notifier-common'):
-                    print 'no (update-notifier-common not found)'
-                    sys.exit(1)
+                if 'update-notifier-common' not in cache:
+                    print('no (update-notifier-common not found)')
+                    sys.exit(0)
                 if not cache['update-notifier-common'].isInstalled:
-                    print 'no (update-notifier-common not installed)'
-                    sys.exit(1)
+                    print('no (update-notifier-common not installed)')
+                    sys.exit(0)
                 if not os.path.exists('/etc/apt/apt.conf.d/10periodic'):
-                    print 'no (/etc/apt/apt.conf.d/10periodic not found)'
+                    print('no (/etc/apt/apt.conf.d/10periodic not found)')
                     sys.exit(1)
                 for line in open('/etc/apt/apt.conf.d/10periodic'):
                     if line.strip() == 'APT::Periodic::Update-Package-Lists "1";':
-                        print 'yes'
+                        print('yes')
                         sys.exit(0)
-                print 'no (APT::Periodic::Update-Package-Lists not "1")'
-                sys.exit(1)
-    print 'no'
-    sys.exit(1)
-
-def config():
-    print 'graph_category security'
-    print 'graph_title %s' % (title)
-    #print 'graph_total %s' % (total)
-    print 'graph_vlabel %s' % (vlabel)
-    for i, archive in enumerate(archives + [other]):
-        if len(colour) > i:
-            print '%s.colour %s' % (archive, colour[i])
-        if i < critical:
-            print '%s.critical 0:0' % (archive)
-        if i == 0:
-            print '%s.draw AREA' % (archive)
-        else:
-            print '%s.draw STACK' % (archive)
-        print '%s.label %s' % (archive, archive)
-        if i + 1 > critical:
-            print '%s.warning 0:0' % (archive)
-    print 'total.colour 000000'
-    print 'total.draw LINE1'
-    print 'total.label %s' % (total)
+                print('no (APT::Periodic::Update-Package-Lists not "1")')
+                sys.exit(0)
+    print('no (missing /etc/lsb-release file)')
     sys.exit(0)
 
+
+def config():
+    print('graph_category security')
+    print('graph_title %s' % (title))
+    print('graph_vlabel %s' % (vlabel))
+    for i, archive in enumerate(archives + [other]):
+        if len(colour) > i:
+            print('%s.colour %s' % (archive, colour[i]))
+        if i < critical:
+            print('%s.critical 0:0' % (archive))
+        if i == 0:
+            print('%s.draw AREA' % (archive))
+        else:
+            print('%s.draw STACK' % (archive))
+        print('%s.label %s' % (archive, archive))
+        if i + 1 > critical:
+            print('%s.warning 0:0' % (archive))
+    print('total.colour 000000')
+    print('total.draw LINE1')
+    print('total.label %s' % (total))
+    sys.exit(0)
+
+
 def check_origin(pkg):
-    #print 'Checking: %s (%s)' % (pkg.name, map(str, pkg.candidateOrigin))
     if pkg.candidate.origins:
         for archive in archives:
             for origin in pkg.candidate.origins:
-                #a = origin.archive.rpartition('-')[2]
                 a = origin.archive.split('-')[origin.archive.count('-')]
-                if a == archive and origin.origin in origins:
+                if (a == archive) and (origin.origin in origins):
                     return a
     return other
+
 
 if len(sys.argv) > 1:
     if sys.argv[1] == 'autoconf':
@@ -116,19 +116,22 @@ if len(sys.argv) > 1:
 
 try:
     import apt
+    import apt_pkg
 except ImportError:
-    print "The module 'apt' is currently not installed.  You can install it by typing:\nsudo apt-get install python-apt\nImportError: No module named apt"
+    print("The module 'apt' is currently not installed.  You can install it by typing:\n"
+          "sudo apt-get install python-apt\nImportError: No module named apt")
     sys.exit(1)
+
 
 pkgs = {}
 total = 0
 for pkg in apt.Cache():
-    if pkg.is_upgradable:
+    if (pkg.is_upgradable) and (pkg._pkg.selected_state != apt_pkg.SELSTATE_HOLD):
         a = check_origin(pkg)
         pkgs[a] = pkgs.get(a, 0) + 1
         total += 1
 
 for archive in archives + [other]:
-    print '%s.value %s' % (archive, pkgs.pop(archive, 0))
+    print('%s.value %s' % (archive, pkgs.pop(archive, 0)))
 
-print 'total.value %s' % (total)
+print('total.value %s' % (total))

@@ -4,7 +4,7 @@
 
 	This plugin does http requests to specified URLs and takes the response time.
 	Use it to monitor remote sites.
-	
+
 	LWP::UserAgent and Time::HiRes are required
 
 =head1 CONFIGURATION
@@ -16,6 +16,7 @@
   env.url3_name  some_munin_internal_name
   env.url3_label Some random page on our website
   env.url3_proxy http://firewall:3128
+  env.url3_agent Mozilla/5.0
   env.timeout 3
 
 Timeout is the timeout of any HTTP request. Tune to avoid a complete
@@ -70,11 +71,13 @@ for (my $i = 1; $ENV{"url$i"}; $i++)
 	my $proxy = $ENV{"url${i}_proxy"};
 	my $name  = $ENV{"url${i}_name"}  || clean($url);
 	my $label = $ENV{"url${i}_label"} || $url;
-	
+	my $agent = $ENV{"url${i}_agent"};
+
 	$URLS{$name}={
 		url=>$url,
 		proxy=>$proxy,
 		label=>$label,
+		agent=>$agent,
 		time=>'U'
 	};
 }
@@ -90,7 +93,7 @@ if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" )
 	my $ua = LWP::UserAgent->new(timeout => $timeout);
 
 	foreach my $url (keys %URLS) {
-		my $response = $ua->request(HTTP::Request->new('GET',$url));
+		my $response = $ua->request(HTTP::Request->new('GET',$URLS{$url}{'url'}));
                 if ($response->is_success) {
                 	next;
                 }
@@ -141,9 +144,15 @@ if ( defined $ARGV[0] and $ARGV[0] eq "config" )
 }
 
 my $ua = LWP::UserAgent->new(timeout => $timeout);
+my $defaultAgent = $ua->agent;
 foreach my $name (keys %URLS) {
 	my $url = $URLS{$name};
 
+	if ($url->{agent}) {
+		$ua->agent($url->{agent});
+	} else {
+		$ua->agent($defaultAgent);
+	}
 	if ($url->{proxy}) {
 		$ua->proxy(['http', 'ftp'], $url->{proxy});
 	}
@@ -161,7 +170,7 @@ foreach my $name (keys %URLS) {
 
 	if ($response->is_success) {
 		$$url{'time'}=sprintf("%d",tv_interval($t1,$t2)*1000);
-	};		
+	};
 };
 
 print("multigraph http_request_time\n");

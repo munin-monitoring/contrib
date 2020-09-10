@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+import re
+import subprocess
+import sys
+import textwrap
+
+
+'''
+=head1 NAME
+
+timesync_status - monitor ntp status with systemd-timesyncd
+
+=head1 APPLICABLE SYSTEMS
+
+All systems using systemd-timesyncd as its NTP-client. However, this
+plugin itself also needs Python 3.5+ to call subprocess.run.
+
+=head1 CONFIGURATION
+
+This plugin should work out-of-the-box with autoconf. It does expect
+timedatectl to be on $PATH, but that should always be the case in a
+normal system.
+
+=head1 INTERPRETATION
+
+This plugin shows a graph with one line for every NTP metric it measure.
+Metrics are shown with their usual name, and are explained in their
+respective info fields.
+
+This plugin issues no warnings or critical states.
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=head1 VERSION
+
+1.0
+
+=head1 AUTHOR
+
+Bert Peters <bert@bertptrs.nl>
+
+=head1 LICENSE
+
+GPLv2
+'''
+
+
+def parse_time(value):
+    value = value.strip()
+    if ' ' in value:
+        return sum(parse_time(x) for x in value.split(' '))
+
+    match = re.match(r'^([+-]?[0-9.]+)([a-z]+)$', value)
+    if not match:
+        raise ValueError('Invalid time ' + value)
+
+    value = float(match.group(1))
+    suffix = match.group(2)
+
+    if suffix == 'min':
+        value *= 60
+    elif suffix == 'ms':
+        value /= 1000
+    elif suffix == 'us':
+        value /= 1e6
+
+    return value
+
+
+def parse_response(data):
+    values = {}
+    for line in data.splitlines():
+        k, v = line.split(': ', 1)
+        values[k.strip()] = v.strip()
+
+    return values
+
+
+def retrieve():
+    result = subprocess.run(['timedatectl', 'timesync-status'], capture_output=True)
+    if result.returncode != 0:
+        sys.exit('timedatectl failed')
+
+    output = result.stdout.decode('utf-8')
+    values = parse_response(output)
+
+    print('offset.value', parse_time(values['Offset']))
+    print('delay.value', parse_time(values['Delay']))
+    print('delay.extinfo', 'Server', values['Server'])
+    print('jitter.value', parse_time(values['Jitter']))
+    print('poll.value', parse_time(values['Poll interval'].split('(')[0]))
+
+
+def autoconf():
+    result = subprocess.run(['timedatectl', 'status'], capture_output=True)
+    if result.returncode != 0:
+        print('no (failed to run timedatectl)')
+        return
+
+    values = parse_response(result.stdout.decode('utf-8'))
+    if values['NTP service'] == 'active':
+        print('yes')
+    else:
+        print('no (ntp service not running)')
+
+
+def config():
+    print(textwrap.dedent('''\
+            graph_title Timesync status
+            graph_vlabel s
+            graph_category time
+
+            offset.label Offset
+            offset.info Time difference between source and local
+
+            delay.label Delay
+            delay.info Roundtrip time to the NTP-server
+
+            jitter.label Jitter
+            jitter.info Difference in offset between two subsequent samples
+
+            poll.label Polling time
+            poll.info Time between two subsequent NTP-polls
+    '''))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) == 1:
+        retrieve()
+    elif sys.argv[1] == 'config':
+        config()
+    elif sys.argv[1] == 'autoconf':
+        autoconf()

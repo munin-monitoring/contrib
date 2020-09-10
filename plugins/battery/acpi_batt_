@@ -1,48 +1,70 @@
 #!/usr/bin/perl -w
-# -*- perl -*- 
+# -*- perl -*-
 
 =head1 NAME
 
-acpi_batt_ Munin plugin to monitor the (note|net)book battery states through procfs
+acpi_batt_ - monitor the (note|net)book battery states through procfs
 
 =head1 APPLICABLE SYSTEMS
 
-Notebooks and netbooks with avialable /proc/acpi/battery
+Notebooks and netbooks with available /proc/acpi/battery
 
 =head1 CONFIGURATION
 
-Configured change the name of symbolic link
+The name of the plugin (or its symbolic link) determines the retrieved data.
 
-acpi_batt_X_capacity - chart of Design capacity, Last full capacity, Design capacity low,
-                       Design capacity warning, Capacity granularity 1, Capacity granularity 2,
-                       Remaining capacity, Present rate (mA)
-acpi_batt_X_percents - percentage chart of Current voltage, Current capacity, Full capacity (of design)
-acpi_batt_X_voltage  - chart of Design voltage, Present voltage
+=over
+
+=item acpi_batt_X_capacity: chart of Design capacity, Last full capacity, Design capacity low, Design capacity warning, Capacity granularity 1, Capacity granularity 2, Remaining capacity, Present rate (mA)
+
+=item acpi_batt_X_percents: percentage chart of Current voltage, Current capacity, Full capacity (of design)
+
+=item acpi_batt_X_voltage: chart of Design voltage, Present voltage
+
+=back
+
 Where X is the number of battery from /proc/acpi/battery/BATX
 
 =head1 INTERPRETATION
 
 The plugin shows:
- Design capacity
- Last full capacity
- Design capacity low
- Design capacity warning
- Capacity granularity 1
- Capacity granularity 2
- Remaining capacity
- Present rate (mA)
- Percentage Current/design voltage
- Percentage Full/current capacity
- Percentage Design/full capacity
- Design voltage
- Present voltage
+
+=over
+
+=item Design capacity
+
+=item Last full capacity
+
+=item Design capacity low
+
+=item Design capacity warning
+
+=item Capacity granularity 1
+
+=item Capacity granularity 2
+
+=item Remaining capacity
+
+=item Present rate (mA)
+
+=item Percentage Current/design voltage
+
+=item Percentage Full/current capacity
+
+=item Percentage Design/full capacity
+
+=item Design voltage
+
+=item Present voltage
+
+=back
+
 
 =head1 MAGIC MARKERS
 
-#%# family=power
+ #%# family=power
 
-=head1 VERSION 
-=head1 BUGS 
+=head1 BUGS
 
 None known.
 
@@ -98,8 +120,8 @@ sub read_data
 		{
 			$val = "unknown";
 		}
-		elsif ( $var ne "batery type" or $var ne "serial number" or $var ne "OEM info" )
-		{ 
+		elsif ( $var ne "battery type" or $var ne "serial number" or $var ne "OEM info" )
+		{
 			@tmp = split(" " ,$val);
 			$val = trim($tmp[0]);
 		}
@@ -120,8 +142,8 @@ if ($ARGV[0] and $ARGV[0] eq "config")
 {
 	my $batt_name = sprintf("%s %s %s", $batt_data->{'info'}{'OEM info'}, $batt_data->{'info'}{'battery type'}, $batt_data->{'info'}{'model number'});
 	print  ("graph_args --base 1000\n");
-	printf ("graph_title Battery %s (%s) %s\n" , $batt_num, $batt_name, $graph_type);
-	printf ("graph_info This graph shows battery %s (%s) %s\n" , $batt_num, $batt_name, $graph_type);
+	printf ("graph_title Battery %d (%s) %s\n" , $batt_num, $batt_name, $graph_type);
+	printf ("graph_info This graph shows battery %d (%s) %s\n" , $batt_num, $batt_name, $graph_type);
 	print  ("graph_category sensors\n");
 	if ($graph_type eq "capacity")
 	{
@@ -160,31 +182,23 @@ sub percent
 
 if ($graph_type eq "capacity")
 {
-	printf ("dc.value %s\n", $batt_data->{'info'}{'design capacity'});
-	printf ("lfc.value %s\n", $batt_data->{'info'}{'last full capacity'});
-	printf ("dcl.value %s\n", $batt_data->{'info'}{'design capacity low'});
-	printf ("dcw.value %s\n", $batt_data->{'info'}{'design capacity warning'});
-	printf ("cg1.value %s\n", $batt_data->{'info'}{'capacity granularity 1'});
-	printf ("cg2.value %s\n", $batt_data->{'info'}{'capacity granularity 2'});
-	printf ("rc.value %s\n", $batt_data->{'state'}{'remaining capacity'});
-	printf ("pr.value %s\n", $batt_data->{'state'}{'present rate'});
+	printf ("dc.value %d\n", $batt_data->{'info'}{'design capacity'});
+	printf ("lfc.value %d\n", $batt_data->{'info'}{'last full capacity'});
+	printf ("dcl.value %d\n", $batt_data->{'info'}{'design capacity low'});
+	printf ("dcw.value %d\n", $batt_data->{'info'}{'design capacity warning'});
+	printf ("cg1.value %d\n", $batt_data->{'info'}{'capacity granularity 1'});
+	printf ("cg2.value %d\n", $batt_data->{'info'}{'capacity granularity 2'});
+	printf ("rc.value %d\n", $batt_data->{'state'}{'remaining capacity'});
+	printf ("pr.value %d\n", $batt_data->{'state'}{'present rate'});
 }
 elsif ($graph_type eq "voltage")
 {
-	printf ("d.value %s\n", $batt_data->{'info'}{'design voltage'});
-	printf ("p.value %s\n", $batt_data->{'state'}{'present voltage'});
+	printf ("d.value %d\n", $batt_data->{'info'}{'design voltage'});
+	printf ("p.value %d\n", $batt_data->{'state'}{'present voltage'});
 }
 elsif ($graph_type eq "percents")
 {
-	printf ("cv.value %s\n", percent($batt_data->{'info'}{'design voltage'},$batt_data->{'state'}{'present voltage'}));
-	printf ("cc.value %s\n", percent($batt_data->{'info'}{'design capacity'},$batt_data->{'state'}{'remaining capacity'}));
-	printf ("fc.value %s\n", percent($batt_data->{'info'}{'design capacity'},$batt_data->{'info'}{'last full capacity'}));
+	printf ("cv.value %d\n", percent($batt_data->{'info'}{'design voltage'},$batt_data->{'state'}{'present voltage'}));
+	printf ("cc.value %d\n", percent($batt_data->{'info'}{'design capacity'},$batt_data->{'state'}{'remaining capacity'}));
+	printf ("fc.value %d\n", percent($batt_data->{'info'}{'design capacity'},$batt_data->{'info'}{'last full capacity'}));
 }
-
-
-
-
-
-
-
-

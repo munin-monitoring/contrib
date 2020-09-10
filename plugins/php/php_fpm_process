@@ -25,7 +25,7 @@ You have to put this in your plugin.conf.d folder
 
 # If your php process is listening on Unix Socket
 [php_fpm_process]
-   env.sock /var/run/php5-fpm.sock
+   env.sock /var/run/php-fpm.sock
    env.path /status
 
 =head1 MAGIC MARKERS
@@ -35,15 +35,16 @@ You have to put this in your plugin.conf.d folder
 
 =head1 VERSION
 
-  v1.0
+  v2.0.0
 
 =head1 AUTHOR
 
 Minitux
+Olivier Mehani <shtrom+munin@ssji.net>
 
 =head1 LICENSE
 
-GNU General Public License, version 3
+SPDX-License-Identifier: GPL-3.0
 
 =cut
 
@@ -56,6 +57,10 @@ my $body = "";
 my $IDLE = 0;
 my $ACTIVE = 0;
 my $TOTAL = 0;
+my $LISTEN = 0;
+my $MAX = 0;
+my $LEN = 0;
+my $CONNECTIONS = 0;
 my $SLOW_REQUESTS = 0;
 my $PLUGIN_NAME = basename($0);
 
@@ -67,67 +72,104 @@ my $UNIX_SOCK = $ENV{'sock'};
 my $sock;
 
 if ($UNIX_SOCK) {
-  use IO::Socket::UNIX;
-  $sock = IO::Socket::UNIX->new(
-    Peer =>  $UNIX_SOCK,
-  );
-  if (!$sock) {
-    print "Server maybe down, unabled to connect to $UNIX_SOCK";
-    exit 2;
-  }
+	use IO::Socket::UNIX;
+	$sock = IO::Socket::UNIX->new(
+		Peer =>  $UNIX_SOCK,
+	);
+	if (!$sock) {
+		print "Server maybe down, unabled to connect to $UNIX_SOCK";
+		exit 2;
+	}
 } else {
-  use IO::Socket::INET;
-  $sock = IO::Socket::INET->new(
-    PeerAddr =>  $SERVERADDR,
-    PeerPort =>  $PORT,
-  );
-  if (!$sock) {
-    print "Server maybe down, unabled to connect to $SERVERADDR:$PORT";
-    exit 2;
-  }
+	use IO::Socket::INET;
+	$sock = IO::Socket::INET->new(
+		PeerAddr =>  $SERVERADDR,
+		PeerPort =>  $PORT,
+	);
+	if (!$sock) {
+		print "Server maybe down, unabled to connect to $SERVERADDR:$PORT";
+		exit 2;
+	}
 }
 
 my $client = FCGI::Client::Connection->new( sock => $sock );
 
 my ( $stdout, $stderr, $appstatus )  = $client->request(
-    +{
-        REQUEST_METHOD => 'GET',
-        SCRIPT_FILENAME => '',
-        QUERY_STRING => '',
-        SCRIPT_NAME    => $PATH,
-    },
-    ''
-  );
+	+{
+		REQUEST_METHOD => 'GET',
+		SCRIPT_FILENAME => '',
+		QUERY_STRING => '',
+		SCRIPT_NAME    => $PATH,
+	},
+	''
+);
+
+#
+# Example output:
+#
+# pool:                 www
+# process manager:      dynamic
+# start time:           23/Jun/2019:12:13:50 +0200
+# start since:          577793
+# accepted conn:        37211
+# listen queue:         0
+# max listen queue:     0
+# listen queue len:     0
+# idle processes:       6
+# active processes:     1
+# total processes:      7
+# max active processes: 13
+# max children reached: 0
+# slow requests:        0
+
+#
+# ...with ?full added to the query string, each child is also described:
+#
+# ************************
+# pid:                  56027
+# state:                Running
+# start time:           18/Jul/2019:01:02:15 +0200
+# start since:          45279
+# requests:             776
+# request duration:     1043
+# request method:       GET
+# request URI:          /fpm-status?full
+# content length:       0
+# user:                 -
+# script:               -
+# last request cpu:     0.00
+# last request memory:  0
+#
 
 $stdout =~ s/\r//g;
 
 while($stdout =~ /([^\n]*)\n?/g) {
-  if(!$1) {
-    $ish = 0;
-    next;
-  }
-  if($ish == 1) {
-    $header .= $1."\n";
-  } else {
-    $body .= $1."\n";
-  }
+	if(!$1) {
+		$ish = 0;
+		next;
+	}
+	if($ish == 1) {
+		$header .= $1."\n";
+	} else {
+		$body .= $1."\n";
+	}
 }
 
 if ( defined $ARGV[0] and $ARGV[0] eq "config" )
 {
 
-  if($body =~ m/pool:\s+(.*?)\n/) {
-    $pool = $1;
-  }
+	if($body =~ m/pool:\s+(.*?)\n/) {
+		$pool = $1;
+	}
 
-  print <<"EOF";
+	print <<"EOF";
 multigraph ${PLUGIN_NAME}_process
-graph_title php5-fpm processes for $pool
+graph_title php-fpm processes for $pool
 graph_args --base 1000 -l 0
 graph_vlabel Processes
 graph_scale yes
-graph_category processes
-graph_info This graph shows the php5-fpm process manager status from pool: $pool
+graph_category appserver
+graph_info This graph shows the php-fpm process manager status from pool $pool
 active.label Active processes
 active.type GAUGE
 active.draw AREA
@@ -140,23 +182,52 @@ total.label Total processes
 total.type GAUGE
 total.draw LINE2
 total.info The number of idle + active processes
+max.label Max processes
+max.type GAUGE
+max.draw LINE
+max.info The maximum number of active processes since FPM has started
 
-multigraph ${PLUGIN_NAME}_slowrequests
-graph_title php5-fpm slow requests $pool
+multigraph ${PLUGIN_NAME}_queues
+graph_title php-fpm queues for $pool
 graph_args --base 1000 -l 0
-graph_vlabel Slow requests
+graph_vlabel Queue
 graph_scale yes
-graph_category processes
-graph_info This graph shows the php5-fpm slow request from pool: $pool
-slow_requests.label Slow requests
-slow_requests.type DERIVE
-slow_requests.draw LINE2
-slow_requests.min 0
-slow_requests.info evolution of slow requests
+graph_category appserver
+graph_info This graph shows the php-fpm queue from pool $pool
+listen.label Listen queue
+listen.type GAUGE
+listen.draw LINE
+listen.info The number of pending requests in the queue
+max.label Max listen queue
+max.type GAUGE
+max.draw LINE
+max.info The maximum number of pending requests in the queue
+len.label Queue len
+len.type GAUGE
+len.draw LINE
+len.info The number of pending connections in the queue
+
+multigraph ${PLUGIN_NAME}_requests
+graph_title php-fpm requests for $pool
+graph_args --base 1000 -l 0
+graph_vlabel Requests
+graph_scale yes
+graph_category appserver
+graph_info This graph shows the php-fpm request rate from pool $pool
+connections.label Connections
+connections.type DERIVE
+connections.draw LINE
+connections.min 0
+connections.info evolution of connections
+slow.label Slow requests
+slow.type DERIVE
+slow.draw LINE
+slow.min 0
+slow.info evolution of slow requests (longer than request_slowlog_timeout)
 
 EOF
 
-  exit 0
+	exit 0
 }
 
 # print $body;
@@ -164,21 +235,42 @@ EOF
 print "multigraph ${PLUGIN_NAME}_process\n";
 
 if($body =~ m/idle processes: (.*?)\n/) {
-        $IDLE = $1;
-  print "idle.value ".$IDLE."\n";
+	$IDLE = $1;
+	print "idle.value ".$IDLE."\n";
 }
 if($body =~ m/active processes: (.*?)\n/) {
-        $ACTIVE = $1;
-  print "active.value ".$ACTIVE."\n";
+	$ACTIVE = $1;
+	print "active.value ".$ACTIVE."\n";
 }
 if($body =~ m/total processes: (.*?)\n/) {
-        $TOTAL = $1;
-  print "total.value ".$TOTAL."\n";
+	$TOTAL = $1;
+	print "total.value ".$TOTAL."\n";
+}
+if($body =~ m/max active processes: (.*?)\n/) {
+	$MAX = $1;
+	print "max.value ".$MAX."\n";
 }
 
+if($body =~ m/listen queue: (.*?)\n/) {
+	$LISTEN= $1;
+	print "multigraph ${PLUGIN_NAME}_queues\n";
+	print "listen.value ".$LISTEN."\n";
+	if($body =~ m/max listen queue: (.*?)\n/) {
+		$MAX = $1;
+		print "max.value ".$MAX."\n";
+	}
+	if($body =~ m/listen queue len: (.*?)\n/) {
+		$LEN = $1;
+		print "len.value ".$LEN."\n";
+	}
+}
+
+print "multigraph ${PLUGIN_NAME}_requests\n";
+if($body =~ m/accepted conn: (.*?)\n/) {
+	$CONNECTIONS = $1;
+	print "connections.value ".$CONNECTIONS."\n";
+}
 if($body =~ m/slow requests: (.*?)\n/) {
-  $SLOW_REQUESTS = $1;
-  print "\n";
-  print "multigraph ${PLUGIN_NAME}_slowrequests\n";
-  print "slow_requests.value ".$SLOW_REQUESTS."\n";
+	$SLOW_REQUESTS = $1;
+	print "slow.value ".$SLOW_REQUESTS."\n";
 }

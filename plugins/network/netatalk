@@ -124,7 +124,7 @@ fi
 echo "proc.value" $(ps ax --no-headers -o command | grep "^$afpdPath" | wc -l)
 
 # Connected users (user):
-# We will ignore root (having UID=0 it's line will be first) (assomption done: there will have only one line corresponding to root in `ps` output)
+# We will ignore root (having UID=0 it's line will be first) (assumption done: there will have only one line corresponding to root in `ps` output)
 connectedUsers=$(ps anx --no-headers -o uid,command | sed 's/^ *//g' | grep "^[0-9]* $afpdPath" | sort -n | tail -n +2 | awk '{print $1}')
 echo "user.value" `echo $connectedUsers | wc -w`
 
@@ -144,7 +144,7 @@ for shareName in `cat $defaultServer_volumesFile | grep "^[^#:]" | grep -oP "^([
 		for currentUid in $connectedUsers; do # For each connected users
 			currentUserHomeDir=`getent passwd $currentUid | cut -d ':' -f6` # Fetch it's the home directory
 			currentUserHomeDir=`readlink -f "$currentUserHomeDir"` # We want the realpath (resolves symbolic links and normalize the path)
-			
+
 			#FIX: We use pipe `lsof` outputs to `echo -e` with `xargs` because lsof "displays only printable ASCII characters" (cf. http://ftp.cerias.purdue.edu/pub/tools/unix/sysutils/lsof/00FAQ #14.5)
 			#     Then if a share with non-ASCII characters in it's path were to be opened, lsof would return them on \xNN form and grep wouldn't match: `echo -e /the/path` fixes this
 			[ `$baseLsofCommand -F n | xargs -0 echo -e | grep "^n$currentUserHomeDir" | wc -l` -gt 0 ] && let openShares++ # If found in lsof output: increment the openShares counter

@@ -24,20 +24,20 @@ This plugin has checked on Debian - Wheezy and squeeze. If you want to use it
 on older installations, tell me whether it works or which errors you had. It
 should run past python-apt 0.7 and python 2.5.
 
-check out this git repository from 
-   
+check out this git repository from
+
     aptitude install python-apt
     git clone git://github.com/munin-monitoring/contrib.git
     cd contrib/plugins/apt/deb_packages
     sudo cp deb_packages.py /etc/munin/plugins/deb_packages
-    sudo cp deb_packages.munin-conf /etc/munin/plugin-conf.d/deb_packages
+    sudo cp deb_packages.munin.conf /etc/munin/plugin-conf.d/deb_packages
 
 Verify the installation by
 
     sudo munin-run deb_packages
 
 ### Configuration
-If you copied deb_packages.munin-conf to plugin-conf.d you have a starting point.
+If you copied deb_packages.munin.conf to plugin-conf.d you have a starting point.
 A typical configuration looks like this
 
     [deb_packages]
@@ -51,7 +51,7 @@ A typical configuration looks like this
     # Age in seconds an $CACHE_FILE can be. If it is older, the script updates
     # default if not set is 3540 (one hour)
     # at the moment this is not used, the plugin always runs (if munin calls it)
-    #  
+    #
     env.CACHE_FILE_MAX_AGE 3540
 
     # All these numbers are only for sorting, so you can use env.graph01_sort_by_0

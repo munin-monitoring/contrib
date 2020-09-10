@@ -18,12 +18,11 @@
 # [openweather_*]
 # env.apikey XYZ
 
-query_string=$(printf '%s' "${0#*_}" | tr '_' '=')
+location=$(printf '%s' "${0#*_}" | tr '_' '=')
+query_string="${location}&appid=${apikey}"
 plugin_name=$( basename $0 )
 
 OWAPI=$( curl -s "http://api.openweathermap.org/data/2.5/weather?mode=xml&${query_string}")
-# API returns temp in K, we have to convert it in C
-# &units=metric would change that ;-)
 KELVIN_BIAS=273
 
 CITY=$( expr "$OWAPI" : '.*\<city.*name=\"\(.*\)\"><coord.*' )
@@ -37,7 +36,7 @@ then
 		graph_category sensors
 		graph_info This graph show the temperature in ${CITY}
 		temp_avg.label avg
-		temp_avg.cdef $KELVIN_BIAS,-
+		temp_avg.cdef temp_avg,$KELVIN_BIAS,-
 
 		multigraph $plugin_name.temp
 		graph_title Temperature in ${CITY}
@@ -45,25 +44,26 @@ then
 		graph_category sensors
 		graph_info This graph show the temperature in ${CITY}
 		temp_avg.label avg
-		temp_avg.cdef $KELVIN_BIAS,-
+		temp_avg.cdef temp_avg,$KELVIN_BIAS,-
 		temp_min.label min
-		temp_min.cdef $KELVIN_BIAS,-
+		temp_min.cdef temp_min,$KELVIN_BIAS,-
 		temp_max.label max
-		temp_max.cdef $KELVIN_BIAS,-
+		temp_max.cdef temp_max,$KELVIN_BIAS,-
 
 		multigraph $plugin_name.humidity
 		graph_title Humidity in ${CITY}
 		graph_vlabel %
 		graph_category sensors
+		graph_args --upper-limit 100 --lower-limit 0
 		graph_info This graph show the humidity in ${CITY}
-		humidity.label humidity
+		field_humidity.label humidity
 
 		multigraph $plugin_name.pressure
 		graph_title Pressure in ${CITY}
 		graph_vlabel hPa
-		graph_category sensors 
+		graph_category sensors
 		graph_info This graph show the pressure in ${CITY}
-		pressure.label pressure
+		field_pressure.label pressure
 
 		multigraph $plugin_name.wind_speed
 		graph_title Wind Speed in ${CITY}
@@ -74,14 +74,16 @@ then
 
 		multigraph $plugin_name.wind_direction
 		graph_title Wind direction in ${CITY}
-		graph_vlabel m/s
+		graph_vlabel direction
 		graph_category sensors
+		graph_args --upper-limit 360 --lower-limit 0
 		graph_info This graph show the wind direction in ${CITY}
 		direction.label wind direction
+
 	EOF
 
 	# Continue if dirty config is enabled
-	[ "$MUNIN_CAP_DIRTYCONFIG" = 1 ] || exit 0
+	[ "${MUNIN_CAP_DIRTYCONFIG:-0}" = 1 ] || exit 0
 fi
 
 TEMP_AVG=$( expr "$OWAPI" : '.*\<temperature value=\"\(.*\)\" min.*/temperature.*' )
@@ -96,7 +98,7 @@ WD_DIREC=$( expr "$OWAPI" : '.*\<direction .*value=\"\(.*\)\" code.*/direction.*
 
 cat <<- EOF
 	multigraph $plugin_name
-	temp_avg.value	$TEMP_AVG
+	temp_avg.value $TEMP_AVG
 
 	multigraph $plugin_name.temp
 	temp_avg.value $TEMP_AVG
@@ -104,10 +106,10 @@ cat <<- EOF
 	temp_max.value $TEMP_MAX
 
 	multigraph $plugin_name.humidity
-	humidity.value $HUMIDITY
+	field_humidity.value $HUMIDITY
 
 	multigraph $plugin_name.pressure
-	pressure.value $PRESSURE
+	field_pressure.value $PRESSURE
 
 	multigraph $plugin_name.wind_speed
 	speed.value $WD_SPEED

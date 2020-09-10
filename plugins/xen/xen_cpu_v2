@@ -7,8 +7,8 @@
 # Based loosely on Adam Crews' xen_cpu script
 #
 # This script tries to measure the CPU usage of the Xen guests
-# accurately. 
-# The problem with the current monitoring script is that these 
+# accurately.
+# The problem with the current monitoring script is that these
 # scripts use the CPU output of xentop or xm list, which might be
 # inaccurate due to the resources used up at the time of the query by
 # the xm or xentop command.
@@ -50,19 +50,18 @@ if ( defined($ARGV[0]) )
 	{
 		$arg = 'autoconf';
 	}
-	
+
 	if ( $arg eq 'autoconf')
 	{
 		if ( -e $XM && -e $XMTOP )
 		{
 			print "yes\n";
-			exit 0;
 		}
 		else
 		{
 			print "no ($XM and/or $XMTOP not found\n";
-			exit 1;
 		}
+		exit 0;
 	}
 
 	if ( $arg eq 'config' )
@@ -72,13 +71,13 @@ if ( defined($ARGV[0]) )
 			'graph_title' => 'Xen Domain CPU Usage v2',
 			'graph_args' => '--base 1000 -l 0 --upper-limit 100 --rigid',
 			'graph_vlabel' => 'Percent (%)',
-			'graph_category' => 'Virtualization',
+			'graph_category' => 'virtualization',
 			'graph_info' => 'Display the % of CPU Usage for each domain',
 		);
 
 		my @domains = `$XM list`;
 		my $cnt = 0;
-		shift(@domains); # we dont need the header line
+		shift(@domains); # we don't need the header line
 		foreach my $domain ( @domains )
 		{
 			my ($dom,undef) = split(/\s/, $domain, 2);
@@ -102,7 +101,7 @@ if ( defined($ARGV[0]) )
 		exit 0;
 	}
 }
-	
+
 my @xmlist = `$XM list`;
 shift (@xmlist);
 
@@ -124,7 +123,7 @@ if ( -e $TEMPFILE )
 		$_ =~ /(\S+)\s+\S+\s+\S+\s+\d+\s+\S+\s+(\S+)/;
 		$dom{$1}->{'oldtime'} = $2;
 	}
-	
+
 	close FH;
 }
 
@@ -137,14 +136,14 @@ foreach my $domain ( @xmlist )
 
 	$diff = $dom{$1}->{'newtime'} - $dom{$1}->{'oldtime'};
 	$diff = sprintf("%.2f", $diff);
-	
+
 	# Calc the diff between old and new cputime, or reset the counter
 	if ( $diff < 0 )
 	{
 		$diff = $dom{$1}->{'newtime'};
 	}
 	$dom{$1}->{'diff'} = $diff;
-	
+
 	# Calc a sum CPU usage
 	$cpusum = $cpusum + $diff;
 }
@@ -168,12 +167,16 @@ while (($key, $value) = each %dom)
 	my $tmp = 0;
 	$tmp = ( $dom{$key}->{'diff'} / $cpusum ) * 100;
 	$dom{$key}->{'pc_time'} = sprintf("%.2f", $tmp);
-	
+
 	# Calc a percentage based on the _total_ available CPU time
 	$tmp = 0;
-	$tmp = ( $dom{$key}->{'diff'} / $tcpuavail ) * 100;
-	$dom{$key}->{'pc_tcpu'} = sprintf("%.2f", $tmp);
-	
+	if ($tcpuavail != 0) {
+		$tmp = ( $dom{$key}->{'diff'} / $tcpuavail ) * 100;
+		$dom{$key}->{'pc_tcpu'} = sprintf("%.2f", $tmp);
+	} else {
+		$dom{$key}->{'pc_tcpu'} = "U";
+	}
+
 	if ( $debug )
 	{
 		print "$key newtime: ".$dom{$key}->{'newtime'}.", oldtime: ".$dom{$key}->{'oldtime'}.", diff: ".$dom{$key}->{'diff'}.", pc_bytime ".$dom{$key}->{'pc_time'}.", pc_bytcpu ".$dom{$key}->{'pc_tcpu'}."\n";
@@ -186,4 +189,4 @@ open(FH, ">", $TEMPFILE) or die $!;
 print FH $curtime."\n";
 print FH @xmlist;
 close FH;
-	
+

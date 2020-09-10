@@ -23,6 +23,7 @@
 
 dbserver='localhost'
 dbuser='postgres'
+dbpass=''
 
 if [ "$1" = "config" ]; then
    echo 'graph_args --base 1024 --lower-limit 0'
@@ -31,7 +32,7 @@ if [ "$1" = "config" ]; then
    echo 'graph_title PostgreSQL Tablespace Sizes'
    echo 'graph_vlabel Size (bytes)'
 
-   psql -h ${dbserver} -U ${dbuser} -tc "SELECT spcname FROM pg_tablespace ORDER BY 1;" | while read name
+   PGPASSWORD="${dbpass}" psql -h ${dbserver} -U ${dbuser} -tc "SELECT spcname FROM pg_tablespace ORDER BY 1;" | while read name
    do
       test -z "${name}" && continue
       echo ${name}'.label '${name}
@@ -47,7 +48,7 @@ if [ "$1" = "config" ]; then
    exit 0
 fi
 
-psql -h ${dbserver} -U ${dbuser} -tc "SELECT spcname, PG_TABLESPACE_SIZE(oid) FROM pg_tablespace ORDER BY 1;" | while read name sep num
+PGPASSWORD="${dbpass}" psql -h ${dbserver} -U ${dbuser} -tc "SELECT spcname, PG_TABLESPACE_SIZE(oid) FROM pg_tablespace ORDER BY 1;" | while read name sep num
 do
    test -z "${name}" && continue
    echo ${name}'.value '${num}

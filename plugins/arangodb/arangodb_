@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 """
-Plugin to monitor ArangoDB  servers. It works with the new server statistics 
+Plugin to monitor ArangoDB  servers. It works with the new server statistics
 interface of ArangoDB 1.3. Not every value seems senseful, but there are
 nice graphs generated...
 
@@ -30,19 +30,19 @@ Usage:
 Links possible:
         arangodb_conn                   HTTP client connections
         arangodb_time_total		Total request/queue/connection time
-        arangodb_bytes_total		Total sent/received bytes 
+        arangodb_bytes_total		Total sent/received bytes
 
 
 Configuration:
         - No configuration required. Just enable the admin interface of ArangoDB.
 
-Thanks to the authors of other Python munin plugins. I've used some of 
-them as inspiring example. 
+Thanks to the authors of other Python munin plugins. I've used some of
+them as inspiring example.
 
 Possible todos:
         - support of munin-like configuration parameters
         - add more statistics
-        
+
 """
 
 from os.path import basename
@@ -57,7 +57,7 @@ except ImportError:
 
 def getServerStatus(group):
     raw = urllib2.urlopen( "http://127.0.0.1:8529/_admin/statistics" ).read()
-    
+
     return json.loads( raw )[group]
 
 def doData(plugin_name):
@@ -66,26 +66,26 @@ def doData(plugin_name):
 
     elif plugin_name== 'arangodb_time_total':
         data = getServerStatus('client')
-        timeTotal = data['totalTime']['sum'] 
-        timeConnection = data['connectionTime']['sum'] 
-        timeRequest = data['requestTime']['sum'] 
-        timeQueue = data['queueTime']['sum'] 
-         
+        timeTotal = data['totalTime']['sum']
+        timeConnection = data['connectionTime']['sum']
+        timeRequest = data['requestTime']['sum']
+        timeQueue = data['queueTime']['sum']
+
         print "total.value " + str(int(round(timeTotal)))
         print "connection.value " + str(int(round(timeConnection)))
         print "request.value " + str(int(round(timeRequest)))
         print "queue.value " + str(int(round(timeQueue)))
-        
+
     elif plugin_name== 'arangodb_bytes_total':
         data = getServerStatus('client')
         bytesReceived = data['bytesReceived']['sum']
         bytesSent = data['bytesSent']['sum']
         print "received.value " + str(int(round(bytesReceived)))
         print "sent.value " + str(int(round(bytesSent)))
-        
+
     else:
         pass
-    
+
 def doConfig(plugin_name):
     if plugin_name == 'arangodb_conn':
         print "graph_title ArangoDB current connections"
@@ -103,7 +103,7 @@ def doConfig(plugin_name):
         print "connection.label connection"
         print "request.label request"
         print "queue.label queue"
-        
+
     elif plugin_name == 'arangodb_bytes_total':
         print "graph_title ArangoDB total bytes"
         print "graph_args --base 1024"
@@ -125,7 +125,7 @@ def doConfig(plugin_name):
 
     else:
         pass
-     
+
 
 
 plugin_name = basename(sys.argv[0])

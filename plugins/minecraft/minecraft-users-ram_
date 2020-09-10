@@ -1,30 +1,63 @@
 #!/bin/bash
-# I'm not the author, just wanted to add this plugin to github
-#  Author & instructions: http://wiki.natenom.name/minecraft/munin-plugin
 
-LC_LANG=C
+: <<=cut
+
+=head1 NAME
+
+minecraft-users-ram_ - monitor resource usage of a local minecraft server
+
+=head1 APPLICABLE SYSTEMS
+
+Every system with a running minecraft server.
+
+
+=head1 USAGE
+
+Symlink this plugin to /etc/munin/plugins/ by adding the TCP port number used
+by the local mincecraft server. Afterwards restart the munin-node.
+
+Some more instructions: http://wiki.natenom.name/minecraft/munin-plugin
+
+
+=head1 AUTHOR
+
+  2011 Natenom
+  2017 Leandro Späth
+
+
+=head1 MAGIC MARKERS
+
+  #%# family=manual
+  #%# capabilities=
+
+=cut
+
+
 MC_PORT=${0##*_}
- 
+
 if [ "$1" = "config" ]
 then
-    printf 'graph_title Minecraft-Server (Port %s)\n' ${MC_PORT}
-    printf 'graph_category games'
-    printf 'graph_vlabel Anzahl\n'
-    printf 'users.label Benutzer\n'
-    printf 'ramusage.label Verwendeter RAM in GiB\n'
+    echo "graph_title Minecraft-Server (Port $MC_PORT)"
+    echo 'graph_category games'
+    echo 'graph_scale no'
+    echo 'graph_vlabel Players / RAM / CPU'
+    echo 'users.label Players'
+    echo 'ramusage.label RAM usage in GiB'
+    echo 'cpuusage.label CPU usage'
     exit 0
 fi
 
-PLAYERCOUNT=$(netstat -tn | grep -i ${MC_PORT} | grep ESTABLISHED | wc -l)
-MC_PID=$(netstat -tlpn | grep ${MC_PORT}  | sed -n -e '1p' | awk '{ print $7 }' | cut -d'/' -f1)
-if [ ! -z "${MC_PID}" ]
+PLAYERCOUNT=$(LC_LANG=C netstat -tn | grep ":$MC_PORT " | grep ESTABLISHED | wc -l)
+MC_PID=$(netstat -tlpn | grep ":$MC_PORT " | sed -n -e '1p' | awk '{ print $7 }' | cut -d '/' -f1)
+if [ -n "${MC_PID}" ]
 then #is running
-    MEMORYRSS=$(ps -p ${MC_PID} -o rss | cut -d'
-' -f2)
-    MEMGiB=$(echo "scale=2;${MEMORYRSS}/1024/1024" | bc -l)
+    MEMGiB=$(ps -p "$MC_PID" -o rss | sed -n '2p' | awk '{ print $1 / 1024 / 1024 }')
+    CPU=$(top -bp "$MC_PID" -n 1 | sed -n '$p' | awk '{ print $10 / 100; }')
 else
-    MEMGiB=0
+    MEMGiB="U"
+    CPU="U"
 fi
 
-printf "users.value %i\n" "${PLAYERCOUNT}"
-printf "ramusage.value %3.2f\n" "${MEMGiB}"
+echo "users.value $PLAYERCOUNT"
+echo "ramusage.value $MEMGiB"
+echo "cpuusage.value $CPU"

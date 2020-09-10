@@ -6,6 +6,10 @@
 
 ceph_osd - Shows ceph OSD states (total configured, up and in)
 
+=head1 APPLICABLE SYSTEMS
+
+Any host with ceph configured and "jq" being installed .
+
 =head1 AUTHOR
 
 Mate Gabri <mate@gabri.hu>
@@ -28,7 +32,7 @@ fi
 
 
 if [ "$1" = "config" ]; then
-	
+
 	echo 'graph_title CEPH OSDs'
 	echo 'graph_category fs'
 	echo 'graph_vlabel nr'
@@ -44,6 +48,8 @@ if [ "$1" = "config" ]; then
 	exit 0
 fi
 
-echo "osds.value $(ceph -s | grep osdmap | awk '{ print $3 }')"
-echo "up.value $(ceph -s | grep osdmap | awk '{ print $5 }')"
-echo "in.value $(ceph -s | grep osdmap | awk '{ print $7 }')"
+CEPH_STATUS=$(ceph -s --format=json)
+
+echo "osds.value $(echo "$CEPH_STATUS" | jq '.osdmap.osdmap.num_osds')"
+echo "up.value $(echo "$CEPH_STATUS" | jq '.osdmap.osdmap.num_up_osds')"
+echo "in.value $(echo "$CEPH_STATUS" | jq '.osdmap.osdmap.num_in_osds')"

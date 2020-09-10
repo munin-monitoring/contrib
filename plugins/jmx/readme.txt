@@ -5,7 +5,7 @@ As soon as JMX embedded in Java 5, any Java process may expose parameters to be 
 look http://java.sun.com/j2se/1.5.0/docs/guide/management/agent.html and http://java.sun.com/jmx for details
 In Java version < 5 it is still possible to expose JMX interface using third party libraries
 
-To see what can be monitored by JMX, run <JDK>/bin/jconsole.exe and connect to 
+To see what can be monitored by JMX, run <JDK>/bin/jconsole.exe and connect to
 the host/port you setup in your Java process.
 
 Some examples are:
@@ -41,7 +41,7 @@ env.jmxurl service:jmx:rmi:///jndi/rmi://localhost:1616/jmxrmi
 To check that all installed properly, try invoke plugins from command line, using links like:
 
 root@re:/etc/munin/plugins# ./jmx_java_process_memory config
-graph_category Java
+graph_category appserver
 ...
 root@re:/etc/munin/plugins# ./jmx_java_process_memory
 java_memory_nonheap_committed.value 35291136

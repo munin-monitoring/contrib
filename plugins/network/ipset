@@ -1,0 +1,80 @@
+#!/bin/sh
+# -*- sh -*-
+
+: <<=cut
+
+=head1 NAME
+
+ipset - Graph number of members of netfilter ipsets
+
+=head1 APPLICABLE SYSTEMS
+
+Any system with a compatible ipset command.
+
+=head1 CONFIGURATION
+
+Ipset has to be run as root:
+
+  [ipset]
+  user root
+
+=head1 INTERPRETATION
+
+This plugin draws number of members for each ipset present in the kernel
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 VERSION
+  0.1 first release
+  0.2 added docs, munin best practices
+
+=head1 BUGS
+
+None known
+
+=head1 AUTHOR
+
+Originally: Tomas Mudrunka 2016-2018 ( github.com/harvie )
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+set -eu
+
+
+get_ipset_list() {
+	ipset list -n
+}
+
+
+if [ "${1:-}" = "autoconf" ]; then
+	if [ -e /sbin/ipset ] || [ -n "$(which ipset)" ]; then
+		echo 'yes'
+	else
+		echo 'no (ipset binary not present)'
+	fi
+	exit 0
+fi
+
+if [ "${1:-}" = "config" ]; then
+	echo graph_title Netfilter IPSets
+	echo graph_category network
+	echo graph_vlabel Members
+	echo graph_args --base 1000 --logarithmic --units=si
+	get_ipset_list | while read -r list; do
+		echo "$list.label $list"
+		echo "$list.min 0"
+	done
+	[ "${MUNIN_CAP_DIRTYCONFIG:-0}" = 1 ] || exit 0
+fi
+
+get_ipset_list | while read -r list; do
+	echo "$list.value $(( $(ipset list "$list" | wc -l) - 7 ))"
+done
+exit 0

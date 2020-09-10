@@ -21,144 +21,147 @@ require 'yaml'
 #
 
 LOG_FILE = ENV['log'] || '/var/log/ejabberd/ejabberd.log'
-CACHE_FILE = '/tmp/ejabberd_scanlog_cache' # cache file position
+CACHE_FILE = '/tmp/ejabberd_scanlog_cache'.freeze # cache file position
 
-DEFAULT_CACHE = { :start => 0 }
+DEFAULT_CACHE = { start: 0 }.freeze
 
 $debug_mode = ARGV.first == 'debug'
 
 if $debug_mode
-	log_info = DEFAULT_CACHE
+  log_info = DEFAULT_CACHE
 else
-	begin
-		log_info = YAML.load IO.read(CACHE_FILE)
-	rescue
-		log_info = DEFAULT_CACHE
-	end
+  begin
+    log_info = YAML.load IO.read(CACHE_FILE)
+  rescue StandardError
+    log_info = DEFAULT_CACHE
+  end
 
-	if File.size(LOG_FILE) < log_info[:start]
-		# logrotate?
-		log_info = DEFAULT_CACHE
-	end
+  if File.size(LOG_FILE) < log_info[:start]
+    # logrotate?
+    log_info = DEFAULT_CACHE
+  end
 end
 
 if ARGV.first == 'reset'
-	log_info = { :start => File.size(LOG_FILE)-1 }
-	puts 'Log reset'
+  log_info = { start: File.size(LOG_FILE) - 1 }
+  puts 'Log reset'
 end
 
 new_data = ''
 File.open(LOG_FILE, 'rb') do |flog|
-	flog.seek(log_info[:start])
-	new_data = flog.read
+  flog.seek(log_info[:start])
+  new_data = flog.read
 end
 
 KNOWN_LOG_TYPES = [
-	# each element is an instance of Array. 1st item: error description, others: text to search log for
-	['EJAB-1482 Crash when waiting for item',
-		['wait_for_']],
-	['EJAB-1483 ODBC sup failure (wrong PID?)',
- 		['ejabberd_odbc_sup']],
-	['EJAB-1483 ODBC sup wrong PID failure echo',
-		["mod_pubsub_odbc,'-unsubscribe"]],
-	['DNS failure',
-		['You should check your DNS configuration']],
-	['Database unavailable/too slow',
-		['Database was not available or too slow']],
-	['State machine terminated: timeout',
-		['State machine',
-		'terminating',
-		'Reason for',
-		'timeout']],
-	['The auth module returned an error',
-		['The authentication module',
-		'returned an error']],
-	['MySQL disconnected',
-		['mysql',
-		'Received unknown signal, exiting']],
-	['Connecting to MySQL: failed',
-		['mysql',
-		'Failed connecting to']],
-	['Timeout while running a hook',
-		['ejabberd_hooks',
-		'timeout']],
-	['SQL transaction restarts exceeded',
-		['SQL transaction restarts exceeded']],
-	['Unexpected info',
-		['nexpected info']],
-	['Other sql_cmd timeout',
-		['sql_cmd']],
-	['System limit hit: ports', # check with length(erlang:ports())., set in ejabberdctl config file
-		['system_limit',
-		'open_port']],
-	['Other system limit hit', # processes? check with erlang:system_info(process_count)., erlang:system_info(process_limit)., set in ejabberdctl cfg
-		['system_limit']],
-	['Generic server terminating',
-		['Generic server',
-		'terminating']],
-	['Mnesia table shrinked',
-		['shrinking table']],
-	['Admin access failed',
-		['Access of',
-		'failed with error']],
-	['MySQL sock timedout',
-		['mysql_',
-		': Socket',
-		'timedout']],
-	['Configuration error',
-		['{badrecord,config}']],
-	['Strange vCard error (vhost)',
-		['error found when trying to get the vCard']],
-	['Mnesia is overloaded',
-		['Mnesia is overloaded']],
-	['MySQL: init failed recv data',
-		['mysql_conn: init failed receiving data']],
-	['TCP Error',
-		['Failed TCP']]
-]
+  # each element is an instance of Array. 1st item: error description, others: text to search log for
+  ['EJAB-1482 Crash when waiting for item',
+   ['wait_for_']],
+  ['EJAB-1483 ODBC sup failure (wrong PID?)',
+   ['ejabberd_odbc_sup']],
+  ['EJAB-1483 ODBC sup wrong PID failure echo',
+   ["mod_pubsub_odbc,'-unsubscribe"]],
+  ['DNS failure',
+   ['You should check your DNS configuration']],
+  ['Database unavailable/too slow',
+   ['Database was not available or too slow']],
+  ['State machine terminated: timeout',
+   ['State machine',
+    'terminating',
+    'Reason for',
+    'timeout']],
+  ['The auth module returned an error',
+   ['The authentication module',
+    'returned an error']],
+  ['MySQL disconnected',
+   ['mysql',
+    'Received unknown signal, exiting']],
+  ['Connecting to MySQL: failed',
+   ['mysql',
+    'Failed connecting to']],
+  ['Timeout while running a hook',
+   %w[ejabberd_hooks
+      timeout]],
+  ['SQL transaction restarts exceeded',
+   ['SQL transaction restarts exceeded']],
+  ['Unexpected info',
+   ['nexpected info']],
+  ['Other sql_cmd timeout',
+   ['sql_cmd']],
+  ['System limit hit: ports', # check with length(erlang:ports())., set in ejabberdctl config file
+   %w[system_limit
+      open_port]],
+  ['Other system limit hit', # processes? check with erlang:system_info(process_count)., erlang:system_info(process_limit)., set in ejabberdctl cfg
+   ['system_limit']],
+  ['Generic server terminating',
+   ['Generic server',
+    'terminating']],
+  ['Mnesia table shrinked',
+   ['shrinking table']],
+  ['Admin access failed',
+   ['Access of',
+    'failed with error']],
+  ['MySQL sock timedout',
+   ['mysql_',
+    ': Socket',
+    'timedout']],
+  ['Configuration error',
+   ['{badrecord,config}']],
+  ['Strange vCard error (vhost)',
+   ['error found when trying to get the vCard']],
+  ['Mnesia is overloaded',
+   ['Mnesia is overloaded']],
+  ['MySQL: init failed recv data',
+   ['mysql_conn: init failed receiving data']],
+  ['TCP Error',
+   ['Failed TCP']]
+].freeze
 
 def log_type(text)
-	KNOWN_LOG_TYPES.find_index { |entry|
-		entry[1].all? { |substr| text.include? substr }
-	}
+  KNOWN_LOG_TYPES.find_index do |entry|
+    entry[1].all? { |substr| text.include? substr }
+  end
 end
 
-new_data.split("\n=").each { |report|
-	next if report.empty?
-	report =~ /\A(\w+) REPORT==== (.*) ===\n(.*)\z/m
-	type, time, text = $1, $2, $3
-	next unless type and time and text
+new_data.split("\n=").each do |report|
+  next if report.empty?
 
-	log_info[type] = (log_info[type] || 0) + 1
-	if sub_type = log_type(text)
-		log_info[sub_type] = (log_info[sub_type] || 0) + 1
-	elsif $debug_mode
-		warn "Unparsed log entry #{type}: #{text} at #{time}"
-	end
-}
+  report =~ /\A(\w+) REPORT==== (.*) ===\n(.*)\z/m
+  type = Regexp.last_match(1)
+  time = Regexp.last_match(2)
+  text = Regexp.last_match(3)
+  next unless type && time && text
+
+  log_info[type] = (log_info[type] || 0) + 1
+  if sub_type = log_type(text)
+    log_info[sub_type] = (log_info[sub_type] || 0) + 1
+  elsif $debug_mode
+    warn "Unparsed log entry #{type}: #{text} at #{time}"
+  end
+end
 
 log_info[:start] += new_data.size
 File.open(CACHE_FILE, 'w') { |f| f.write log_info.to_yaml } unless $debug_mode
 
 if ARGV.first == 'config'
-	puts <<CONFIG
-graph_title Ejabberd Log
-graph_vlabel total
-graph_category chat
-graph_args -l 0
-CONFIG
+  puts <<~CONFIG
+    graph_title Ejabberd Log
+    graph_vlabel total
+    graph_category chat
+    graph_args -l 0
+  CONFIG
 end
 
-(KNOWN_LOG_TYPES + %w(ERROR WARNING INFO DEBUG)).each.with_index { |log_type, index|
-	label, index = if log_type.is_a? Array
-					   [log_type.first, index]
-				   else
-					   [log_type, log_type]
-				   end
-	if ARGV.first == 'config'
-		puts "T#{index}.label #{label}"
-		puts "T#{index}.draw LINE"
-	else
-		puts "T#{index}.value #{log_info[index] or 0}"
-	end
-}
+(KNOWN_LOG_TYPES + %w[ERROR WARNING INFO DEBUG]).each.with_index do |log_type, index|
+  label, index = if log_type.is_a? Array
+                   [log_type.first, index]
+                 else
+                   [log_type, log_type]
+           end
+  if ARGV.first == 'config'
+    puts "T#{index}.label #{label}"
+    puts "T#{index}.draw LINE"
+  else
+    puts "T#{index}.value #{log_info[index] or 0}"
+  end
+end

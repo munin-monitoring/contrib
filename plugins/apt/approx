@@ -1,0 +1,64 @@
+#!/usr/bin/env python
+#
+# vim:syntax=python
+#
+# Plugin to monitor the amount of packages in an approx cache.
+#
+# Usage: place in /etc/munin/plugins/ (or link it there using ln -s)
+#
+# Parameters understood:
+#
+#     config   (required)
+#     autoconf (optional - used by munin-config)
+#
+# Magic markers - optional - used by installation scripts and
+# munin-config:
+#
+#  #%# family=manual
+#  #%# capabilities=autoconf
+#
+# Now for the real work...
+
+from os.path import walk, exists, isfile, join
+from sys import argv, exit
+
+
+def get_file_types():
+    """Returns an array of filetype => count."""
+    out = {}
+
+    def visitor(arg, dirname, names):
+        for filename in names:
+            if not isfile(join(dirname, filename)):
+                continue
+            ext = filename.split(".")[-1].lower()
+            out[ext] = out.get(ext, 0) + 1
+
+    walk('/var/cache/approx/', visitor, None)
+    return out
+
+
+if len(argv) > 1:
+
+    # Autoconfiguration
+    if argv[1] == "autoconf":
+        # Test if we can find a approx cache
+        if exists('/var/cache/approx'):
+            print("yes")
+        else:
+            print("no ('/var/cache/approx' not found)")
+        exit()
+
+    elif argv[1] == "config":
+        print("graph_title Approx cache")
+        print("graph yes")
+        print("graph_category loadbalancer")
+        print("graph_info Statistics from the Approx cache.")
+        for filetype in get_file_types().keys():
+            print("%s.label %s" % (filetype.lower(), filetype))
+        exit()
+
+for filetype, count in get_file_types().iteritems():
+    print("%s.value %d" % (filetype.lower(), count))
+
+exit()

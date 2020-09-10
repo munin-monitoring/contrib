@@ -31,7 +31,7 @@ This plugin produces four different graphs: CPU usage, memory usage, disk IOs
 and network traffic.
 
 In each graph, all Xen domains (including dom0) have their data stacked, giving
-an overall amount of ressources used.
+an overall amount of resources used.
 
 NOTE: xentop always reports 0 for dom0's disk IOs and network traffic, but
 both graphs show its entry all the same, so each domain can keep its own color
@@ -129,7 +129,12 @@ sub trim_label {
 # Global variables
 my (%domains,$domain,@domainlist,$munindomain,$cpusecs,$cpupercent,$memk,$nettxk,$netrxk,$vbdrd,$vbdwr);
 
-open (XENTOP,"xentop -b -f -i2 |") or die "Could not execute xentop, $!";
+# There is a bug in xentop, its output is too high in rare cases.
+# https://lists.xenproject.org/archives/html/xen-users/2019-04/msg00020.html
+# Workaround to process 3 iterations after the first one (4 iterations) and
+# choose the lowest cpusecs value line.
+
+open (XENTOP,"xentop -b -f -i4 |") or die "Could not execute xentop, $!";
 
 # Now we build a hash of hashes to store information
 while (<XENTOP>) {
@@ -146,13 +151,21 @@ while (<XENTOP>) {
 
   # We need the remaining data only for a normal run
   if ($ARGV[0] eq "") {
-    $domains{$domain}{'cpusecs'} = $cpusecs;
-    $domains{$domain}{'cpupercent'} = $cpupercent;
-    $domains{$domain}{'mem'} = $memk;
-    $domains{$domain}{'nettx'} = $nettxk;
-    $domains{$domain}{'netrx'} = $netrxk;
-    $domains{$domain}{'vbdrd'} = $vbdrd;
-    $domains{$domain}{'vbdwr'} = $vbdwr;
+    # the cnt key counts the iterations
+    # - skip the first one because xentop gives 0% cpu for the first iteration ( cnt > 1 )
+    # - process if not processed yet ( !defined ) or if current cpusecs less than any earlier
+    # normally the cpusecs is monotonous per domain as it grows so a smaller value means that the previous one was wrong
+
+    $domains{$domain}{'cnt'}++;
+    if ( $domains{$domain}{'cnt'} > 1 && ( !defined $domains{$domain}{'cpusecs'} || $cpusecs < $domains{$domain}{'cpusecs'} ) ) {
+      $domains{$domain}{'cpusecs'} = $cpusecs;
+      $domains{$domain}{'cpupercent'} = $cpupercent;
+      $domains{$domain}{'mem'} = $memk;
+      $domains{$domain}{'nettx'} = $nettxk;
+      $domains{$domain}{'netrx'} = $netrxk;
+      $domains{$domain}{'vbdrd'} = $vbdrd;
+      $domains{$domain}{'vbdwr'} = $vbdwr;
+    }
   }
 }
 
@@ -169,7 +182,7 @@ if ($ARGV[0] eq "config") {
 		print "graph_args --base 1000 -l 0\n";
 		print "graph_vlabel cpu seconds\n";
 		print "graph_scale no\n";
-		print "graph_category Virtualization\n";
+		print "graph_category virtualization\n";
 		print "graph_info This graph shows CPU time for each Xen domain.\n";
 		for $domain (@domainlist) {
 			print "$domains{$domain}{'munindomain'}_cpu_time.label ".trim_label('pos',$domain)."\n";
@@ -186,7 +199,7 @@ if ($ARGV[0] eq "config") {
 		print "graph_args --base 1000 -l 0 --upper-limit 100\n";
 		print "graph_vlabel %\n";
 		print "graph_scale no\n";
-		print "graph_category Virtualization\n";
+		print "graph_category virtualization\n";
 		print "graph_info This graph shows CPU utilization for each Xen domain.\n";
 		for $domain (@domainlist) {
 			print "$domains{$domain}{'munindomain'}_cpu.label ".trim_label('pos',$domain)."\n";
@@ -199,7 +212,7 @@ if ($ARGV[0] eq "config") {
 		print "graph_title Xen domains memory usage\n";
 		print "graph_args --base 1024 -l 0\n";
 		print "graph_vlabel bytes\n";
-		print "graph_category Virtualization\n";
+		print "graph_category virtualization\n";
 		print "graph_info This graph shows memory usage for each Xen domain.\n";
 		for $domain (@domainlist) {
 			print "$domains{$domain}{'munindomain'}_mem.label ".trim_label('pos',$domain)."\n";
@@ -213,7 +226,7 @@ if ($ARGV[0] eq "config") {
 		print "graph_title Xen domains network traffic\n";
 		print "graph_args --base 1000\n";
 		print "graph_vlabel bits per \${graph_period} in (-) / out (+)\n";
-		print "graph_category Virtualization\n";
+		print "graph_category virtualization\n";
 		print "graph_info This graph shows network traffic for each Xen domain.\n";
 		for $domain (@domainlist) {
 			print "$domains{$domain}{'munindomain'}_netrx.label none\n";
@@ -233,7 +246,7 @@ if ($ARGV[0] eq "config") {
 		print "graph_title Xen domains disk IOs\n";
 		print "graph_args --base 1000\n";
 		print "graph_vlabel IOs per \${graph_period} read (-) / write (+)\n";
-		print "graph_category Virtualization\n";
+		print "graph_category virtualization\n";
 		print "graph_info This graph shows disk IOs for each Xen domain.\n";
 		for $domain (@domainlist) {
 			print "$domains{$domain}{'munindomain'}_vbdrd.label none\n";

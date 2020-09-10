@@ -1,6 +1,6 @@
-#!/usr/bin/ruby
+#!/usr/bin/env ruby
 
-# Monitor your EAccelerator usage. 
+# Monitor your EAccelerator usage.
 # Requires: ruby
 
 # Mandatory Parameters
@@ -31,15 +31,15 @@ user  = ENV['user'] || 'user'
 pwd   = ENV['password'] || 'password'
 url   = ENV['url'] || 'http://127.0.0.1/control.php'
 
-if ARGV[0]=="config"
+if ARGV[0] == 'config'
   print "EAccelerator Monitoring\n"
   print "graph_title PHP Eaccelerator\n"
   print "graph_category webserver\n"
-  print "Memoryusagepercentage.label Memory Usage %\n"  
-  print "Memoryusagepercentage.warning 95\n"  
-  print "Memoryusagepercentage.critical 95\n"  
-  print "Memoryusage.label Memory Usage MB\n"  
-  print "Memorymax.label Cache Size MB\n"  
+  print "Memoryusagepercentage.label Memory Usage %\n"
+  print "Memoryusagepercentage.warning 95\n"
+  print "Memoryusagepercentage.critical 95\n"
+  print "Memoryusage.label Memory Usage MB\n"
+  print "Memorymax.label Cache Size MB\n"
   print "Freememory.label Free Memory MB\n"
   print "Cachedscripts.label Cached Scripts\n"
   print "Removedscripts.label Removed Scripts\n"
@@ -47,58 +47,50 @@ if ARGV[0]=="config"
   exit
 end
 
-one_liners=0
-three_liners=0
-key=""
+one_liners = 0
+three_liners = 0
+key = ''
 
-open(url, :http_basic_authentication=>[user, pwd]) do |f|
+open(url, http_basic_authentication: [user, pwd]) do |f|
   f.each do |line|
-    if three_liners>0
-      three_liners=three_liners+1
+    if three_liners > 0
+      three_liners += 1
 
-      if three_liners==2
-        print "Memoryusagepercentage.value "
-      end
+      print 'Memoryusagepercentage.value ' if three_liners == 2
 
-      if three_liners==3
-        print "Memoryusage.value "
-      end
+      print 'Memoryusage.value ' if three_liners == 3
 
-      if three_liners==4
-        print "Memorymax.value "
-      end
+      print 'Memorymax.value ' if three_liners == 4
 
-      print line.gsub!(/[^0-9.]/s,"")
+      print line.gsub!(/[^0-9.]/s, '')
       print "\n"
     end
 
-    if one_liners>0
-      one_liners=one_liners+1
+    if one_liners > 0
+      one_liners += 1
       print "#{key}.value "
-      print line.gsub!(/[^0-9.]/s,"")
+      print line.gsub!(/[^0-9.]/s, '')
       print "\n"
     end
 
-    if one_liners>1
-      line=""
-      one_liners=0
+    if one_liners > 1
+      line = ''
+      one_liners = 0
     end
 
-    if three_liners>3
-      line=""
-      three_liners=0
+    if three_liners > 3
+      line = ''
+      three_liners = 0
     end
 
     if line =~ /Memory usage/
-      key=line.gsub!(/(<[^>]*>)|\n|\t| /s,"")
-      three_liners=three_liners+1
+      key = line.gsub!(/(<[^>]*>)|\n|\t| /s, '')
+      three_liners += 1
     end
 
-    if line =~ /<td class="e">Free memory/ || line =~ /<td class="e">Cached scripts/  || line =~ /<td class="e">Removed scripts/ || line =~ /<td class="e">Cached keys/
-      key=line.gsub!(/(<[^>]*>)|\n|\t| /s,"")
-      one_liners=one_liners+1
+    if line =~ /<td class="e">Free memory/ || line =~ /<td class="e">Cached scripts/ || line =~ /<td class="e">Removed scripts/ || line =~ /<td class="e">Cached keys/
+      key = line.gsub!(/(<[^>]*>)|\n|\t| /s, '')
+      one_liners += 1
     end
-
   end
 end
-

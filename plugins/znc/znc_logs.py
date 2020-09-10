@@ -159,7 +159,7 @@ def emit_config():
     print('graph_period minute')
     graph_order = []
 
-    if 'MUNIN_CAP_DIRTYCONFIG' in os.environ and os.environ['MUNIN_CAP_DIRTYCONFIG'] == 1:
+    if os.getenv('MUNIN_CAP_DIRTYCONFIG') == "1":
         read_data(1)
     else:
         read_data(0)

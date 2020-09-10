@@ -23,7 +23,7 @@ def config(vm_names):
     '''
     base_config = """graph_title KVM Virtual Machine Memory usage
 graph_vlabel Bytes
-graph_category Virtualization
+graph_category virtualization
 graph_info This graph shows the current amount of memory used by virtual machines
 graph_args --base 1024
     """
@@ -49,11 +49,19 @@ def clean_vm_name(vm_name):
     if suffix:
         vm_name = re.sub(suffix,'',vm_name)
 
+    # proxmox uses kvm with -name parameter
+    parts = vm_name.split('\x00')
+    if (parts[0].endswith('kvm')):
+        try:
+            return parts[parts.index('-name')+1]
+        except ValueError:
+            pass
+
     return re.sub(r"[^a-zA-Z0-9_]", "_", vm_name)
-    
+
 def fetch(vms):
     ''' Fetch values for a list of pids
-    @param dictionnary {kvm_pid: cleaned vm name}
+    @param dictionary {kvm_pid: cleaned vm name}
     '''
     res = {}
     for pid in vms:
@@ -61,12 +69,12 @@ def fetch(vms):
             cmdline = open("/proc/%s/cmdline" % pid, "r")
             amount = re.sub(r"^.*-m\x00(.*)\x00-smp.*$",r"\1", cmdline.readline())
             amount = int(amount) * 1024 * 1024
-            print "%s_mem.value %s" % (vms[pid], amount) 
+            print "%s_mem.value %s" % (vms[pid], amount)
         except:
             cmdline = open("/proc/%s/cmdline" % pid, "r")
             amount = re.sub(r"^.*-m\x00(\d+).*$",r"\1", cmdline.readline())
             amount = int(amount) * 1024 * 1024
-            print "%s_mem.value %s" % (vms[pid], amount) 
+            print "%s_mem.value %s" % (vms[pid], amount)
 
 def detect_kvm():
     ''' Check if kvm is installed
@@ -77,21 +85,21 @@ def detect_kvm():
 
 def find_vm_names(pids):
     '''Find and clean vm names from pids
-    @return a dictionnary of {pids : cleaned vm name}
+    @return a dictionary of {pids : cleaned vm name}
     '''
     result = {}
     for pid in pids:
         cmdline = open("/proc/%s/cmdline" % pid, "r")
-        result[pid] = clean_vm_name(re.sub(r"^.*-name\x00([a-zA-Z0-9.-_-]*)\x00\-.*$",r"\1", cmdline.readline()))
+        result[pid] = clean_vm_name(re.sub(r"^.*guest=([a-zA-Z0-9.-_-]*).*$",r"\1", cmdline.readline()))
     return result
-    
+
 def list_pids():
     ''' Find the pid of kvm processes
     @return a list of pids from running kvm
     '''
-    pid = Popen("pidof qemu-system-x86_64", shell=True, stdout=PIPE)
+    pid = Popen("pidof qemu-kvm qemu-system-x86_64 kvm", shell=True, stdout=PIPE)
     return pid.communicate()[0].split()
-    
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         if sys.argv[1] in ['autoconf', 'detect']:

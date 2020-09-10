@@ -95,7 +95,11 @@ int acquire() {
 	/* fork ourselves if not asked otherwise */
 	char* no_fork = getenv("no_fork");
 	if (! no_fork || strcmp("1", no_fork)) {
-		if (fork()) return;
+		pid_t child_pid = fork();
+		if (child_pid) {
+			printf("# acquire() launched as PID %d\n", child_pid);
+			return 0;
+		}
 		// we are the child, complete the daemonization
 
 		/* Close standard IO */
@@ -116,7 +120,12 @@ int acquire() {
 	int f = open(PROC_STAT, O_RDONLY);
 
 	/* open the spoolfile */
-	int cache_file = open(cache_filename, O_CREAT | O_APPEND | O_WRONLY);
+	FILE* cache_file = fopen(cache_filename, "a");
+	if (!cache_file) {
+		return fail("cannot create cache_file");
+	}
+
+	int cache_file_fd = fileno(cache_file);
 
 	/* loop each second */
 	while (1) {
@@ -142,7 +151,7 @@ int acquire() {
 		line = strtok(buffer, newl);
 
 		/* lock */
-		flock(cache_file, LOCK_EX);
+		flock(cache_file_fd, LOCK_EX);
 
 		for (line = strtok(NULL, newl); line; line = strtok(NULL, newl)) {
 			// Not on CPU lines anymore
@@ -154,17 +163,15 @@ int acquire() {
 
 			long used = usr + nice + sys + iowait + irq + softirq;
 
-			char out_buffer[1024];
-			sprintf(out_buffer, "%s.value %ld:%ld\n", cpu_id, epoch, used);
-
-			write(cache_file, out_buffer, strlen(out_buffer));
+			fprintf(cache_file, "%s.value %ld:%ld\n", cpu_id, epoch, used);
+			fflush(cache_file);
 		}
 
 		/* unlock */
-		flock(cache_file, LOCK_UN);
+		flock(cache_file_fd, LOCK_UN);
 	}
 
-	close(cache_file);
+	fclose(cache_file);
 	close(f);
 
 	return 0;
@@ -172,9 +179,13 @@ int acquire() {
 
 int fetch() {
 	FILE* cache_file = fopen(cache_filename, "r+");
+	if (!cache_file) {
+		return acquire();
+	}
 
 	/* lock */
-	flock(fileno(cache_file), LOCK_EX);
+	int cache_file_fd = fileno(cache_file);
+	flock(cache_file_fd, LOCK_EX);
 
 	/* cat the cache_file to stdout */
 	char buffer[1024];
@@ -182,7 +193,7 @@ int fetch() {
 		printf("%s", buffer);
 	}
 
-	ftruncate(fileno(cache_file), 0);
+	ftruncate(cache_file_fd, 0);
 	fclose(cache_file);
 
 	return 0;

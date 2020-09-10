@@ -9,12 +9,18 @@
 #%# family=auto
 #%# capabilities=autoconf
 
-command="/etc/init.d/pdns show"
+pdns_control="/usr/bin/pdns_control"
+command="$pdns_control show"
 state_file=$MUNIN_PLUGSTATE/pdns_rel.state
 
 if [ "$1" = "autoconf" ]; then
-        echo yes
-        exit 0
+        if [ -e "$pdns_control" ]; then
+                echo yes
+                exit 0
+        else
+                echo "no (missing $pdns_control)"
+                exit 0
+        fi
 fi
 
 if [ "$1" = "config" ]; then
@@ -31,18 +37,20 @@ if [ "$1" = "config" ]; then
         exit 0
 fi
 
-hits=$($command packetcache-hit | awk -F= '{print $2}')
-queries=$($command udp-queries | awk -F= '{print $2}')
-old_hits=$(cat $state_file | head -n1)
-old_queries=$(cat $state_file | tail -n1)
-
-if [ -f $state_file ] && [ $(ls -l --time-style=+%s $state_file | awk '{print $6}') -gt $(date --date="7 minutes ago" +%s) ] ; then
-	d_hits=$(($hits - $old_hits))
-	d_queries=$(($queries - $old_queries))
-	if [ $d_queries -gt 0 ] ; then
-	   echo packetcache_hitrate.value $(( $d_hits * 100 / $d_queries ))
-	fi
+hits=$($command packetcache-hit)
+queries=$($command udp-queries)
+if [ -f "$state_file" ]; then
+        old_hits=$(head -n1 "$state_file")
+        old_queries=$(tail -n1 "$state_file")
 fi
 
-echo $hits > $state_file
-echo $queries >> $state_file
+if [ -f "$state_file" ] && [ "$(stat --format=%Y "$state_file")" -gt "$(date --date="7 minutes ago" +%s)" ] ; then
+        d_hits=$((hits - old_hits))
+        d_queries=$((queries - old_queries))
+        if [ $d_queries -gt 0 ] ; then
+           echo packetcache_hitrate.value $(( d_hits * 100 / d_queries ))
+        fi
+fi
+
+echo "$hits" > "$state_file"
+echo "$queries" >> "$state_file"

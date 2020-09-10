@@ -18,13 +18,14 @@ sub wanted {
 
     ( ( $dev, $ino, $mode, $nlink, $uid, $gid ) = lstat($_) )
         && -f _
+        && -s _
         && ( ( $interpreter, $arguments ) = hashbang("$_") )
         && ($interpreter)
         && ++$num_plugins
         && process_file( $_, $name, $interpreter, $arguments );
 }
 
-File::Find::find( { wanted => \&wanted }, 'plugins' );
+File::Find::find( { wanted => \&wanted, no_chdir => 1 }, 'plugins' );
 
 sub hashbang {
     my ($filename) = @_;
@@ -48,44 +49,84 @@ sub process_file {
     my ( $file, $filename, $interpreter, $arguments ) = @_;
     use v5.10.1;
 
-    if ( $interpreter =~ m{/bin/sh} ) {
+    if ( -r "$file.nocheck") {
+    SKIP: {
+            skip( sprintf("\nFile '%s' has a .nocheck flag. Ignoring\n", $file), 1);
+            pass("Not pretending everything is ok");
+        }
+    }
+    elsif ( ! -x $file ) {
+        # missing executable flag
+        diag(
+            sprintf("\nFile '%s' lacks executable permission bits. Maybe try 'chmod +x $file'?\n",
+                    $file)
+        );
+    }
+    elsif ( $interpreter =~ m{/bin/sh} ) {
         subtest $filename => sub {
-            plan tests => 2;
+            plan tests => 3;
             run_check(
                 {   command     => [ 'sh', '-n', $file ],
                     description => 'sh syntax check'
                 }
             );
+            my $checkbashisms_location = `command -v checkbashisms 2>/dev/null`;
+            chomp($checkbashisms_location);
+            my $command;
+            if ($checkbashisms_location ne "") {
+                # monkey-patch "checkbashisms" in order to allow "command -v"
+                # see https://unix.stackexchange.com/a/85250: "command -v" vs. which/hash/...
+                # see https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=733511
+                my $run_modified_checkbashisms = q/sed 's#command\\\s+-\[\^p\]#command\s+-[^pvV]#'/
+                    . " '$checkbashisms_location' | perl - '$file'";
+                $command = [ 'sh', '-c', $run_modified_checkbashisms ];
+            } else {
+                # make sure that the non-confusing "checkbashisms not found" message is displayed
+                $command = [ 'checkbashisms', $file ];
+            }
             run_check(
-                {   command     => [ 'checkbashisms', $file ],
+                {   command     => $command,
                     description => 'checkbashisms'
+                }
+            );
+            run_check(
+                {   command     => [ 't/test-exception-wrapper', $file, 'shellcheck', '--exclude=SC1090,SC2009,SC2126,SC2230', '--shell=dash' ],
+                    description => 'shellcheck'
                 }
             );
         };
     }
     elsif ( $interpreter =~ m{/bin/ksh} ) {
-        run_check(
-            {   command     => [ 'ksh', '-n', $file ],
-                description => 'ksh syntax check',
-                filename    => $filename
-            }
-        );
-    }
-    elsif ( $interpreter =~ m{/bin/zsh} ) {
-        run_check(
-            {   command     => [ 'zsh', '-n', $file ],
-                description => 'zsh syntax check',
-                filename    => $filename
-            }
-        );
+        subtest $filename => sub {
+            plan tests => 2;
+            run_check(
+                {   command     => [ 'ksh', '-n', $file ],
+                    description => 'ksh syntax check',
+                    filename    => $filename
+                }
+            );
+            run_check(
+                {   command     => [ 't/test-exception-wrapper', $file, 'shellcheck', '--shell=ksh' ],
+                    description => 'shellcheck'
+                }
+            );
+        }
     }
     elsif ( $interpreter =~ m{bash} ) {
-        run_check(
-            {   command     => [ 'bash', '-n', $file ],
-                description => 'bash syntax check',
-                filename    => $filename
-            }
-        );
+        subtest $filename => sub {
+            plan tests => 2;
+            run_check(
+                {   command     => [ 'bash', '-n', $file ],
+                    description => 'bash syntax check',
+                    filename    => $filename
+                }
+            );
+            run_check(
+                {   command     => [ 't/test-exception-wrapper', $file, 'shellcheck', '--exclude=SC1090,SC2009,SC2126,SC2230', '--shell=bash' ],
+                    description => 'shellcheck'
+                }
+            );
+        }
     }
     elsif ( $interpreter =~ m{/bin/zsh} ) {
         run_check(
@@ -111,20 +152,36 @@ sub process_file {
         );
     }
     elsif ( $interpreter =~ m{python3} ) {
-        run_check(
-            {   command     => [ 'python3', '-m', 'py_compile', $file ],
-                description => 'python3 compile',
-                filename    => $filename
-            }
-        );
+        subtest $filename => sub {
+            plan tests => 2;
+            run_check(
+                {   command     => [ 'python3', '-m', 'py_compile', $file ],
+                    description => 'python3 compile',
+                    filename    => $filename
+                }
+            );
+            run_check(
+                {   command     => [ 't/test-exception-wrapper', $file, 'python3', '-m', 'flake8' ],
+                    description => 'python3-flake8'
+                }
+            );
+        }
     }
     elsif ( $interpreter =~ m{python} ) {
-        run_check(
-            {   command     => [ 'python', '-m', 'py_compile', $file ],
-                description => 'python compile',
-                filename    => $filename
-            }
-        );
+        subtest $filename => sub {
+            plan tests => 2;
+            run_check(
+                {   command     => [ 'python', '-m', 'py_compile', $file ],
+                    description => 'python compile',
+                    filename    => $filename
+                }
+            );
+            run_check(
+                {   command     => [ 't/test-exception-wrapper', $file, 'python', '-m', 'flake8' ],
+                    description => 'python-flake8'
+                }
+            );
+        }
     }
     elsif ( $interpreter =~ m{php} ) {
         run_check(
@@ -135,12 +192,21 @@ sub process_file {
         );
     }
     elsif ( $interpreter =~ m{j?ruby} ) {
-        run_check(
-            {   command     => [ 'ruby', '-cw', $file ],
-                description => 'ruby syntax check',
-                filename    => $filename
-            }
-        );
+        subtest $filename => sub {
+            plan tests => 2;
+            run_check(
+                {   command     => [ 'ruby', '-cw', $file ],
+                    description => 'ruby syntax check',
+                    filename    => $filename
+                }
+            );
+            run_check(
+                {   command     => [ 't/test-exception-wrapper', $file, 'rubocop' ],
+                    description => 'ruby style and syntax check',
+                    filename    => $filename
+                }
+            );
+        }
     }
     elsif ( $interpreter =~ m{gawk} ) {
         run_check(
