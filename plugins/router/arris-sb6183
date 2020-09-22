@@ -1,0 +1,267 @@
+#!/usr/bin/python
+
+# modem:
+#
+# * upstream and downstream power levels
+# * downstream signal to noise ratio
+# * downstream error counts
+#
+# The values are retrieved from the cable modem's status web pages at
+# 192.168.100.1. So, this plugin must be installed on a munin node
+# which can access those pages.
+#
+# To install, place this plugin in the node's plugins directory,
+# /etc/munin/plugins and restart munin-node.
+#
+# Developed and tested with:
+# firmware:         D30CM-OSPREY-2.4.0.1-GA-02-NOSH
+# hardware version: 1
+#
+# Copyright 2020 Nathaniel Clark <nathaniel.clark@misrule.us>
+
+"""
+=head1 NAME
+
+arris-sb6183 - Health monitoring plugin for Arris SB6183 Cable Modem
+
+=head1 CONFIGURATION
+
+Make sure 192.168.100.1 is accessable through your firewall.
+
+To have this register with munin as it's own host set the "env.hostname" in config.
+Also ensure that the hostname set is listed in munin.conf.
+
+[arris*]
+env.hostname modem
+
+=head1 VERSION
+
+0.0.1
+
+=head1 AUTHOR
+
+Nathaniel Clark <nathaniel.clark@misrule.us>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import re
+import os
+import sys
+import requests
+from lxml import html
+
+
+URL = os.getenv("url", "http://192.168.100.1/RgConnect.asp")
+HOSTNAME = os.getenv("hostname", None)
+UPCOUNT = int(os.getenv("up", 4))
+DOWNCOUNT = int(os.getenv("down", 16))
+
+if len(sys.argv) == 2:
+    if sys.argv[1] == "config":
+        if HOSTNAME:
+            print("host_name {0}\n".format(HOSTNAME))
+
+        # POWER
+        print("multigraph arris_power")
+        print("graph_title Arris Power (dBmV)")
+        print("graph_vlabel Power (dBmV)")
+        print("graph_category network")
+        for i in range(1, DOWNCOUNT + 1):
+            print("down_{0}.label Down Ch {1}".format(i, i))
+            print("down_{0}.type GAUGE".format(i))
+            print("down_{0}.draw LINE1".format(i))
+        for i in range(1, UPCOUNT + 1):
+            print("up_{0}.label Up Ch {1}".format(i, i))
+            print("up_{0}.type GAUGE".format(i))
+            # print("up_{0}.draw LINE1".format(i))
+
+        for i in range(1, DOWNCOUNT + 1):
+            name = "down_{0}".format(i)
+            print("\nmultigraph arris_power.{0}".format(name))
+            print("graph_title Downstream Power for Channel {0} (dBmV)".format(i))
+            print("graph_category network")
+            print("power.label dBmV")
+            print("power.type GAUGE")
+            print("power.draw LINE1")
+        for i in range(1, UPCOUNT + 1):
+            name = "up_{0}".format(i)
+            print("\nmultigraph arris_power.{0}".format(name))
+            print("graph_title Upstream Power for Channel {0} (dBmV)".format(i))
+            print("graph_category network")
+            print("power.label dBmV")
+            print("power.type GAUGE")
+            print("power.draw LINE1")
+
+        # SNR
+        print("\nmultigraph arris_snr")
+        print("graph_title Arris Signal-to-Noise Ratio (dB)")
+        print("graph_vlabel SNR (dB)")
+        print("graph_category network")
+        for i in range(1, DOWNCOUNT + 1):
+            print("down_{0}.label Ch {1}".format(i, i))
+            print("down_{0}.type GAUGE".format(i))
+            print("down_{0}.draw LINE1".format(i))
+
+        for i in range(1, DOWNCOUNT + 1):
+            name = "down_{0}".format(i)
+            print("\nmultigraph arris_snr.{0}".format(name))
+            print("graph_title SNR on Channel {0} (dB)".format(i))
+            print("graph_vlabel SNR (dB)")
+            print("graph_category network")
+            print("snr.label dB")
+            print("snr.type GAUGE")
+            print("snr.draw LINE1")
+
+        # ERRORS
+        print("\nmultigraph arris_error")
+        print("graph_title Arris Channel Errors")
+        print("graph_category network")
+        print("graph_args --base 1000")
+        print("graph_vlabel errors/sec")
+        print("graph_category network")
+        print("corr.label Corrected")
+        print("corr.type DERIVE")
+        print("corr.min 0")
+        print("uncr.label Uncorrectable")
+        print("uncr.type DERIVE")
+        print("uncr.min 0")
+        print("uncr.warning 1")
+
+        for i in range(1, DOWNCOUNT + 1):
+            name = "down_{0}".format(i)
+            print("\nmultigraph arris_error.{0}".format(name))
+            print("graph_title Channel {0} Errors".format(i))
+            print("graph_args --base 1000")
+            print("graph_vlabel errors/sec")
+            print("graph_category network")
+            print("corr.label Correctable")
+            print("corr.type DERIVE")
+            print("corr.min 0")
+            print("uncr.label Uncorrectable")
+            print("uncr.type DERIVE")
+            print("uncr.min 0")
+            print("uncr.warning 1")
+
+        sys.exit(0)
+
+    if sys.argv[1] == "autoconfig":
+        try:
+            page = requests.get(URL)
+        except:
+            print("no (no router)")
+        else:
+            if page.status_code == 200:
+                print("yes")
+            else:
+                print("no (Bad status code: %d)" % page.status_code)
+        sys.exit(0)
+
+rxblank = re.compile(r"[\x00\n\r\t ]+", re.MULTILINE)
+rxcomment = re.compile(r"<!--.*?-->")
+rxscript = re.compile(r"<script.*?</script>", re.MULTILINE)
+
+page = requests.get(URL)
+data = rxscript.sub("", rxcomment.sub("", rxblank.sub(" ", page.text)))
+dom = html.fromstring(data)
+
+arr = dom.xpath('//table[contains(@class, "simpleTable")]')
+downstream = arr[1]
+upstream = arr[2]
+
+trs = downstream.findall("tr")
+# drop title
+trs.pop(0)
+
+headings = ["".join(x.itertext()).strip() for x in trs.pop(0).findall("td")]
+# ['Channel', 'Lock Status', 'Modulation', 'Channel ID', 'Frequency', 'Power', 'SNR', 'Corrected', 'Uncorrectables']
+
+mapper = lambda x, y: (x, y)
+
+# Summation Graphs
+correct = 0
+uncorr = 0
+power = {"up": ["U"] * UPCOUNT, "down": ["U"] * DOWNCOUNT}
+snr = ["U"] * DOWNCOUNT
+for row in trs:
+    data = dict(
+        map(
+            mapper, headings, ["".join(x.itertext()).strip() for x in row.findall("td")]
+        )
+    )
+    uncorr += int(data["Uncorrectables"])
+    correct += int(data["Corrected"])
+
+    channel = int(data["Channel"])
+
+    print("multigraph arris_power.down_{0}".format(channel))
+    value = data["Power"].split(" ")[0]
+    print("power.value {0}".format(value))
+    power["down"][channel - 1] = value
+
+    print("multigraph arris_snr.down_{0}".format(channel))
+    value = data["SNR"].split(" ")[0]
+    print("snr.value {0}".format(value))
+    snr[channel - 1] = value
+
+    print("multigraph arris_error.down_{0}".format(channel))
+    print("corr.value {0}".format(data["Corrected"]))
+    print("uncr.value {0}".format(data["Uncorrectables"]))
+
+# Fill missing
+for i in range(len(trs), DOWNCOUNT):
+    print("multigraph arris_power.down_{0}".format(i + 1))
+    print("power.value U")
+
+    print("multigraph arris_snr.down_{0}".format(i + 1))
+    print("snr.value U")
+
+    print("multigraph arris_error.down_{0}".format(i + 1))
+    print("corr.value U")
+    print("uncr.value U")
+
+print("multigraph arris_error")
+print("corr.value {0}".format(correct))
+print("uncr.value {0}".format(uncorr))
+
+print("multigraph arris_snr")
+for i in range(0, DOWNCOUNT):
+    print("down_{0}.value {1}".format(i + 1, snr[i]))
+
+trs = upstream.findall("tr")
+# drop title
+trs.pop(0)
+
+headings = ["".join(x.itertext()).strip() for x in trs.pop(0).findall("td")]
+# ['Channel', 'Lock Status', 'US Channel Type', 'Channel ID', 'Symbol Rate', 'Frequency', 'Power']
+for row in trs:
+    data = dict(
+        map(
+            mapper, headings, ["".join(x.itertext()).strip() for x in row.findall("td")]
+        )
+    )
+    channel = int(data["Channel"])
+    print("multigraph arris_power.up_{0}".format(channel))
+    value = data["Power"].split(" ")[0]
+    print("power.value {0}".format(value))
+    power["up"][channel - 1] = value
+
+# Fill missing
+for i in range(len(trs), UPCOUNT):
+    print("multigraph arris_power.up_{0}".format(i + 1))
+    print("power.value U")
+
+print("multigraph arris_power")
+for i in range(0, DOWNCOUNT):
+    print("down_{0}.value {1}".format(i + 1, power["down"][i]))
+for i in range(0, UPCOUNT):
+    print("up_{0}.value {1}".format(i + 1, power["up"][i]))
