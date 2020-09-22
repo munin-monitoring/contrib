@@ -1,0 +1,117 @@
+#!/usr/bin/python
+
+# modem:
+#
+# * uptime
+#
+# The values are retrieved from the cable modem's status web pages at
+# 192.168.100.1. So, this plugin must be installed on a munin node
+# which can access those pages.
+#
+# To install, place this plugin in the node's plugins directory,
+# /etc/munin/plugins and restart munin-node.
+#
+# Developed and tested with:
+# firmware:         D30CM-OSPREY-2.4.0.1-GA-02-NOSH
+# hardware version: 1
+#
+# Copyright 2020 Nathaniel Clark <nathaniel.clark@misrule.us>
+
+"""
+=head1 NAME
+
+arris-sb6183_uptime - Uptime monitoring for Arris SB6183 Cable Modem
+
+=head1 CONFIGURATION
+
+Make sure 192.168.100.1 is accessable through your firewall.
+
+To have this register with munin as it's own host set the "env.hostname" in config.
+Also ensure that the hostname set is listed in munin.conf.
+
+[arris*]
+env.hostname modem
+
+=head1 VERSION
+
+0.0.1
+
+=head1 AUTHOR
+
+Nathaniel Clark <nathaniel.clark@misrule.us>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=autoconf
+
+=cut
+"""
+import re
+import os
+import sys
+import requests
+from lxml import html
+
+
+URL = os.getenv("url", "http://192.168.100.1/RgSwInfo.asp")
+HOSTNAME = os.getenv("hostname", None)
+
+if len(sys.argv) == 2:
+    if sys.argv[1] == "config":
+        print("host_name {0}".format(HOSTNAME))
+
+        # POWER
+        print(
+            """graph_title Modem Uptime
+graph_category system
+graph_args --base 1000 -l 0
+graph_vlabel uptime in days
+graph_scale no
+graph_category system
+graph_info This graph shows the number of days that the the host is up and running so far.
+uptime.label uptime
+uptime.info The system uptime itself in days.
+uptime.draw AREA
+"""
+        )
+        sys.exit(0)
+
+    if sys.argv[1] == "autoconfig":
+        try:
+            page = requests.get(URL)
+        except:
+            print("no (no router)")
+        else:
+            if page.status_code == 200:
+                print("yes")
+            else:
+                print("no (Bad status code: %d)" % page.status_code)
+        sys.exit(0)
+
+rxblank = re.compile(r"[\x00\n\r\t ]+", re.MULTILINE)
+rxcomment = re.compile(r"<!--.*?-->")
+rxscript = re.compile(r"<script.*?</script>", re.MULTILINE)
+
+page = requests.get(URL)
+data = rxscript.sub("", rxcomment.sub("", rxblank.sub(" ", page.text)))
+dom = html.fromstring(data)
+
+arr = dom.xpath('//table[contains(@class, "simpleTable")]')
+trs = arr[1].findall("tr")
+# drop title
+trs.pop(0)
+
+date = "".join(trs[0].findall("td")[1].itertext()).strip()
+
+arr = date.split(" ")
+rx = re.compile(r"[hms]")
+days = int(arr[0])
+hms = rx.sub("", arr[2]).split(":")
+
+seconds = ((days * 24 + int(hms[0])) * 60 + int(hms[1])) * 60 + int(hms[2])
+print("uptime.value {0}".format(seconds / 86400.0))
