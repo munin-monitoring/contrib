@@ -102,10 +102,12 @@ uptime.draw AREA
         )
 
         # POWER
-        print("multigraph arris_power")
-        print("graph_title Arris Power (dBmV)")
-        print("graph_vlabel Power (dBmV)")
-        print("graph_category network")
+        print(
+            """multigraph arris_power
+graph_title Arris Power (dBmV)
+graph_vlabel Power (dBmV)
+graph_category network"""
+        )
         for i in range(1, DOWNCOUNT + 1):
             print("down_{0}.label Down Ch {1}".format(i, i))
             print("down_{0}.type GAUGE".format(i))
@@ -153,19 +155,22 @@ uptime.draw AREA
             print("snr.draw LINE1")
 
         # ERRORS
-        print("\nmultigraph arris_error")
-        print("graph_title Arris Channel Errors")
-        print("graph_category network")
-        print("graph_args --base 1000")
-        print("graph_vlabel errors/sec")
-        print("graph_category network")
-        print("corr.label Corrected")
-        print("corr.type DERIVE")
-        print("corr.min 0")
-        print("uncr.label Uncorrectable")
-        print("uncr.type DERIVE")
-        print("uncr.min 0")
-        print("uncr.warning 1")
+        print(
+            """
+multigraph arris_error
+graph_title Arris Channel Errors
+graph_category network
+graph_args --base 1000
+graph_vlabel errors/sec
+graph_category network
+corr.label Corrected
+corr.type DERIVE
+corr.min 0
+uncr.label Uncorrectable
+uncr.type DERIVE
+uncr.min 0
+uncr.warning 1"""
+        )
 
         for i in range(1, DOWNCOUNT + 1):
             name = "down_{0}".format(i)
@@ -185,10 +190,16 @@ uptime.draw AREA
         sys.exit(0)
 
     if sys.argv[1] == "autoconfig":
-        try:
+
+        def check(url):
             from lxml import html
 
-            resp = request.urlopen(STATUS_URL)
+            resp = request.urlopen(url)
+            html.fromstring("<html>")
+            return resp
+
+        try:
+            resp = check(STATUS_URL)
         except ImportError:
             print("no (missing lxml module)")
         except OSError:
@@ -197,10 +208,8 @@ uptime.draw AREA
             if resp.status == 200:
                 print("yes")
             else:
-                print("no (Bad status code: %d)" % page.status_code)
+                print("no (Bad status code: %d)" % resp.status_code)
         sys.exit(0)
-
-from lxml import html
 
 rxblank = re.compile(r"[\x00\n\r\t ]+", re.MULTILINE)
 rxcomment = re.compile(r"<!--.*?-->")
@@ -211,6 +220,8 @@ def process_url(url):
     """
     Extract simpleTables from page at URL
     """
+    from lxml import html
+
     try:
         resp = request.urlopen(url)
     except OSError:
@@ -266,7 +277,8 @@ if arr:
     trs.pop(0)
 
     headings = ["".join(x.itertext()).strip() for x in trs.pop(0).findall("td")]
-    # ['Channel', 'Lock Status', 'Modulation', 'Channel ID', 'Frequency', 'Power', 'SNR', 'Corrected', 'Uncorrectables']
+    # ['Channel', 'Lock Status', 'Modulation', 'Channel ID', 'Frequency', 'Power', 'SNR',
+    # 'Corrected', 'Uncorrectables']
 else:
     trs = []
     headings = []
@@ -329,7 +341,8 @@ if arr:
     trs.pop(0)
 
     headings = ["".join(x.itertext()).strip() for x in trs.pop(0).findall("td")]
-    # ['Channel', 'Lock Status', 'US Channel Type', 'Channel ID', 'Symbol Rate', 'Frequency', 'Power']
+    # ['Channel', 'Lock Status', 'US Channel Type', 'Channel ID', 'Symbol Rate',
+    # 'Frequency', 'Power']
 
 for row in trs:
     data = dict(
