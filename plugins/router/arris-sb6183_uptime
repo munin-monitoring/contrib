@@ -1,21 +1,20 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
-# modem:
-#
-# * uptime
-#
-# The values are retrieved from the cable modem's status web pages at
-# 192.168.100.1. So, this plugin must be installed on a munin node
-# which can access those pages.
-#
-# To install, place this plugin in the node's plugins directory,
-# /etc/munin/plugins and restart munin-node.
-#
-# Developed and tested with:
-# firmware:         D30CM-OSPREY-2.4.0.1-GA-02-NOSH
-# hardware version: 1
-#
 # Copyright 2020 Nathaniel Clark <nathaniel.clark@misrule.us>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Library General Public License as published by
+# the Free Software Foundation; version 2 only
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Library General Public License for more details.
+#
+# You should have received a copy of the GNU Library General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
 
 """
 =head1 NAME
@@ -31,6 +30,12 @@ Also ensure that the hostname set is listed in munin.conf.
 
 [arris*]
 env.hostname modem
+
+=head1 TESTING
+
+Developed and tested with:
+firmware:         D30CM-OSPREY-2.4.0.1-GA-02-NOSH
+hardware version: 1
 
 =head1 VERSION
 
@@ -54,16 +59,16 @@ GPLv2
 import re
 import os
 import sys
-import requests
-from lxml import html
+from urllib import request
 
 
-URL = os.getenv("url", "http://192.168.100.1/RgSwInfo.asp")
 HOSTNAME = os.getenv("hostname", None)
+URL = "http://192.168.100.1/RgSwInfo.asp"
 
 if len(sys.argv) == 2:
     if sys.argv[1] == "config":
-        print("host_name {0}".format(HOSTNAME))
+        if HOSTNAME:
+            print("host_name {0}".format(HOSTNAME))
 
         # POWER
         print(
@@ -83,8 +88,12 @@ uptime.draw AREA
 
     if sys.argv[1] == "autoconfig":
         try:
-            page = requests.get(URL)
-        except:
+            from lxml import html
+
+            resp = request.urlopen(URL)
+        except ImportError:
+            print("no (missing lxml module)")
+        except OSError:
             print("no (no router)")
         else:
             if page.status_code == 200:
@@ -93,12 +102,27 @@ uptime.draw AREA
                 print("no (Bad status code: %d)" % page.status_code)
         sys.exit(0)
 
+from lxml import html
+
 rxblank = re.compile(r"[\x00\n\r\t ]+", re.MULTILINE)
 rxcomment = re.compile(r"<!--.*?-->")
 rxscript = re.compile(r"<script.*?</script>", re.MULTILINE)
 
-page = requests.get(URL)
-data = rxscript.sub("", rxcomment.sub("", rxblank.sub(" ", page.text)))
+resp = request.urlopen(URL)
+if resp.status != 200:
+    print(
+        "failed to get status page %d: %s" % (resp.status, resp.reason), file=sys.stderr
+    )
+    print("uptime.value U")
+    sys.exit(0)
+
+data = rxscript.sub(
+    "",
+    rxcomment.sub(
+        "",
+        rxblank.sub(" ", "".join(map(lambda x: x.decode("utf-8"), resp.readlines()))),
+    ),
+)
 dom = html.fromstring(data)
 
 arr = dom.xpath('//table[contains(@class, "simpleTable")]')

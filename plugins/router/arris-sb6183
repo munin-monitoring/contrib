@@ -1,28 +1,36 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
-# modem:
-#
-# * upstream and downstream power levels
-# * downstream signal to noise ratio
-# * downstream error counts
-#
-# The values are retrieved from the cable modem's status web pages at
-# 192.168.100.1. So, this plugin must be installed on a munin node
-# which can access those pages.
-#
-# To install, place this plugin in the node's plugins directory,
-# /etc/munin/plugins and restart munin-node.
-#
-# Developed and tested with:
-# firmware:         D30CM-OSPREY-2.4.0.1-GA-02-NOSH
-# hardware version: 1
-#
 # Copyright 2020 Nathaniel Clark <nathaniel.clark@misrule.us>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Library General Public License as published by
+# the Free Software Foundation; version 2 only
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Library General Public License for more details.
+#
+# You should have received a copy of the GNU Library General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
 
 """
 =head1 NAME
 
 arris-sb6183 - Health monitoring plugin for Arris SB6183 Cable Modem
+
+=head1 DESCRIPTION
+
+This provides the following multigraphs:
+* upstream and downstream power levels
+* downstream signal to noise ratio
+* downstream error counts
+
+The values are retrieved from the cable modem's status web pages at
+192.168.100.1. So, this plugin must be installed on a munin node
+which can access those pages.
 
 =head1 CONFIGURATION
 
@@ -33,6 +41,12 @@ Also ensure that the hostname set is listed in munin.conf.
 
 [arris*]
 env.hostname modem
+
+=head1 TESTING
+
+Developed and tested with:
+firmware:         D30CM-OSPREY-2.4.0.1-GA-02-NOSH
+hardware version: 1
 
 =head1 VERSION
 
@@ -57,14 +71,12 @@ GPLv2
 import re
 import os
 import sys
-import requests
-from lxml import html
+from urllib import request
 
-
-URL = os.getenv("url", "http://192.168.100.1/RgConnect.asp")
 HOSTNAME = os.getenv("hostname", None)
-UPCOUNT = int(os.getenv("up", 4))
-DOWNCOUNT = int(os.getenv("down", 16))
+URL = "http://192.168.100.1/RgConnect.asp"
+UPCOUNT = 4
+DOWNCOUNT = 16
 
 if len(sys.argv) == 2:
     if sys.argv[1] == "config":
@@ -83,7 +95,7 @@ if len(sys.argv) == 2:
         for i in range(1, UPCOUNT + 1):
             print("up_{0}.label Up Ch {1}".format(i, i))
             print("up_{0}.type GAUGE".format(i))
-            # print("up_{0}.draw LINE1".format(i))
+            print("up_{0}.draw LINE1".format(i))
 
         for i in range(1, DOWNCOUNT + 1):
             name = "down_{0}".format(i)
@@ -156,22 +168,34 @@ if len(sys.argv) == 2:
 
     if sys.argv[1] == "autoconfig":
         try:
-            page = requests.get(URL)
-        except:
+            from lxml import html
+
+            resp = request.urlopen(URL)
+        except ImportError:
+            print("no (missing lxml module)")
+        except OSError:
             print("no (no router)")
         else:
-            if page.status_code == 200:
+            if resp.status == 200:
                 print("yes")
             else:
                 print("no (Bad status code: %d)" % page.status_code)
         sys.exit(0)
 
+from lxml import html
+
 rxblank = re.compile(r"[\x00\n\r\t ]+", re.MULTILINE)
 rxcomment = re.compile(r"<!--.*?-->")
 rxscript = re.compile(r"<script.*?</script>", re.MULTILINE)
 
-page = requests.get(URL)
-data = rxscript.sub("", rxcomment.sub("", rxblank.sub(" ", page.text)))
+resp = request.urlopen(URL)
+data = rxscript.sub(
+    "",
+    rxcomment.sub(
+        "",
+        rxblank.sub(" ", "".join(map(lambda x: x.decode("utf-8"), resp.readlines()))),
+    ),
+)
 dom = html.fromstring(data)
 
 arr = dom.xpath('//table[contains(@class, "simpleTable")]')
@@ -185,8 +209,6 @@ trs.pop(0)
 headings = ["".join(x.itertext()).strip() for x in trs.pop(0).findall("td")]
 # ['Channel', 'Lock Status', 'Modulation', 'Channel ID', 'Frequency', 'Power', 'SNR', 'Corrected', 'Uncorrectables']
 
-mapper = lambda x, y: (x, y)
-
 # Summation Graphs
 correct = 0
 uncorr = 0
@@ -194,9 +216,7 @@ power = {"up": ["U"] * UPCOUNT, "down": ["U"] * DOWNCOUNT}
 snr = ["U"] * DOWNCOUNT
 for row in trs:
     data = dict(
-        map(
-            mapper, headings, ["".join(x.itertext()).strip() for x in row.findall("td")]
-        )
+        zip(headings, ["".join(x.itertext()).strip() for x in row.findall("td")])
     )
     uncorr += int(data["Uncorrectables"])
     correct += int(data["Corrected"])
@@ -245,9 +265,7 @@ headings = ["".join(x.itertext()).strip() for x in trs.pop(0).findall("td")]
 # ['Channel', 'Lock Status', 'US Channel Type', 'Channel ID', 'Symbol Rate', 'Frequency', 'Power']
 for row in trs:
     data = dict(
-        map(
-            mapper, headings, ["".join(x.itertext()).strip() for x in row.findall("td")]
-        )
+        zip(headings, ["".join(x.itertext()).strip() for x in row.findall("td")])
     )
     channel = int(data["Channel"])
     print("multigraph arris_power.up_{0}".format(channel))
