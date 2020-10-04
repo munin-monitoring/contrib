@@ -1,39 +1,61 @@
 #!/usr/bin/env python3
 
-# Overview
-# --------
-#
-# this is a munin plugin that lists the number of pages (including ACL-protected pages) in all wikis of a MoinMoin wikifarm
-#
-# Installation
-# ------------
-#
-# Put this in your munin plugins directory. You probably want to set the following block in plugin-conf.d/munin-node so that it runs under the riht user for your wiki:
-#
-# [moinmoin_*]
-# user www
-#
-# Implementation notes
-# --------------------
-#
-# it is quite koumbit-specific:
-#  1. the wikifarm config is hardcoded
-#  2. it relies on the "wikilist.py" file to contain the list of wiki -> url patterns
-#  3. it assumes the url patterns are simple enough that they are decodable into an url
-#
-# also note that it reuses code from MoinMoin/wikimacro.py's SystemInfo macro
-#
-# finally, i tried using XMLRPC instead of native functions to fetch the data, but it ended up being slower. For the record, here is what the getPageList() call would have looked like:
-# xmlrpclib.ServerProxy("http://wiki.koumbit.net/?action=xmlrpc2").getAllPages()
-#
-# the quick benchmark i did yieled those results for the getAllPages() vs getPageList() calls:
-# xmlrpc:         2.35 real         0.12 user         0.04 sys
-# native:         1.44 real         1.07 user         0.35 sys
-#
-# so the plugin is spending more time in the CPU (all time, actually), but it's doing in faster. it is highly possible that the CPU time spared in XMLRPC is in fact used by the server
-#
-# (C) Copyleft 2007, The Anarcat <anarcat@koumbit.org>
-# Licensed under the GPLv2 or any later version
+"""
+
+=head1 NAME
+
+moinmoin_pages - lists the number of pages (including ACL-protected pages) in all wikis of a MoinMoin wikifarm
+
+
+=head1 CONFIGURATION
+
+ [moinmoin_*]
+ user www
+
+
+=head1 IMPLEMENTATION NOTES
+
+The plugin is quite koumbit-specific:
+
+=over 4
+
+=item 1. the wikifarm config is hardcoded
+
+=item 2. "wikilist.py" is assumed to contain the list of wiki -> url patterns
+
+=item 3. url patterns are assumed to be simple enough, that they are decodable into an url
+
+=back
+
+Also note that this plugin reuses code from MoinMoin/wikimacro.py's SystemInfo macro.
+
+Finally, i tried using XMLRPC instead of native functions to fetch the data, but it ended up being
+slower.  For the record, here is what the getPageList() call would have looked like:
+
+ xmlrpclib.ServerProxy("http://wiki.koumbit.net/?action=xmlrpc2").getAllPages()
+
+The quick benchmark I did yielded those results for the getAllPages() vs getPageList() calls:
+
+ xmlrpc:         2.35 real         0.12 user         0.04 sys
+ native:         1.44 real         1.07 user         0.35 sys
+
+So the plugin is spending more time in the CPU (all time, actually), but it's doing in faster.
+It is highly possible that the CPU time spared in XMLRPC is in fact used by the server.
+
+
+=head1 AUTHORS
+
+Copyleft 2007, The Anarcat <anarcat@koumbit.org>
+
+
+=head1 LICENSE
+
+Licensed under the GPLv2 or any later version.
+
+SPDX-License-Identifier: GPL-2.0-or-later
+
+=cut
+"""
 
 import operator
 import os
