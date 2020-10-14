@@ -4,7 +4,10 @@
 
 =head1 NAME
 
-moinmoin_pages - lists the number of pages (including ACL-protected pages) in all wikis of a MoinMoin wikifarm
+moinmoin_pages - lists the number of pages in all wikis of a MoinMoin wikifarm
+
+
+ACL-protected pages are included.
 
 
 =head1 CONFIGURATION
@@ -57,19 +60,17 @@ SPDX-License-Identifier: GPL-2.0-or-later
 =cut
 """
 
-import operator
 import os
 from re import sub
 import sys
 
+from MoinMoin import wikiutil
+from MoinMoin.request import RequestCLI
+
 os.chdir('/export/wiki/config')
 sys.path.insert(0, '/export/wiki/config')
 
-from MoinMoin import wikiutil
-from MoinMoin.Page import Page
-from farmconfig import wikis
-import farmconfig
-from MoinMoin.request import RequestCLI
+from farmconfig import wikis  # noqa: E402
 
 
 def _formatInReadableUnits(size):
@@ -108,16 +109,11 @@ def main():
         # remove common regexp patterns and slap a protocol to make this a real url
         url = sub(r'[\^\$]|(\.\*)', '', url)
 
-        mod = getattr(__import__(name), 'Config')
-        #print "Upgradeing wiki %s (%s)" % (getattr(mod, 'sitename'), url)
-
         request = RequestCLI(url)
         pagelist = request.rootpage.getPageList(user='')
 
         systemPages = [page for page in pagelist if wikiutil.isSystemPage(request, page)]
         print(name + '.value ' + str(len(pagelist) - len(systemPages)))
-        #totalsize = reduce(operator.add, [Page(request, name).size() for name in pagelist])
-        #print('Accumulated page sizes' + _formatInReadableUnits(totalsize))
 
 
 def config():
