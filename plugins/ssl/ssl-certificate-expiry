@@ -23,6 +23,8 @@ To set warning and critical levels do like this:
   [ssl-certificate-expiry]
     env.services ...
     env.warning 30:
+    env.proxy PROXYHOST:PORT          # optional, enables openssl operation over proxy
+    env.checkname yes                 # optional, checks if used servername is covered by certificate
 
 Alternatively, if you want to monitor hosts separately, you can create multiple symlinks named as follows.
 
@@ -58,6 +60,7 @@ uncached updates after the cache file is older than an hour.
  * Pactrick Domack (ssl_)
  * Olivier Mehani (ssl-certificate-expiry)
  * Martin Schobert (check for intermediate certs)
+ * Arndt Kritzner (hostname verification and proxy usage)
  
  * Copyright (C) 2013 Patrick Domack <patrickdk@patrickdk.com>
  * Copyright (C) 2017, 2019 Olivier Mehani <shtrom+munin@ssji.net>
@@ -122,8 +125,10 @@ print_expire_days() {
     # Wrap IPv6 addresses in square brackets
     echo "$host" | grep -q ':' && host="[$host]"
 
-    local s_client_args=
-    [ -n "$starttls" ] && s_client_args="-starttls $starttls"
+    local s_client_args=''
+    [ -n "$starttls" ] && s_client_args="$s_client_args -starttls $starttls"
+    [ -n "${proxy:-}" ] && s_client_args="$s_client_args -proxy $proxy"
+    [ -n "${checkname:-}" ] && [ "$checkname" = "yes" ] && s_client_args="$s_client_args -verify_hostname $host"
 
     # We extract and check the server certificate,
     # but the end date also depends on intermediate certs. Therefore
@@ -139,10 +144,14 @@ print_expire_days() {
     #   results and sort them
     
     # shellcheck disable=SC2086
-    echo "" | openssl s_client \
-	-servername "$host" -connect "${host}:${port}" \
-	-showcerts \
-	$s_client_args 2>/dev/null | \
+    local openssl_call
+    local openssl_response
+    openssl_call="s_client -servername $host -connect ${host}:${port} -showcerts $s_client_args"
+    openssl_response=$(echo "" | openssl $openssl_call 2>/dev/null)
+    if [ "$(echo "$openssl_response" | grep -i -c "Hostname mismatch")" -gt "0" ]; then
+        echo "<>"
+    else
+        echo "$openssl_response" | \
 	awk '{
   	  if ($0 == "-----BEGIN CERTIFICATE-----") cert=""
   	  else if ($0 == "-----END CERTIFICATE-----") print cert
@@ -152,7 +161,7 @@ print_expire_days() {
 	      (printf '\n-----BEGIN CERTIFICATE-----\n%s\n-----END CERTIFICATE-----\n' "$CERT") | \
 	  	  parse_valid_days_from_certificate
           done | sort -n | head -n 1
-	
+    fi
 }
 
 main() {
@@ -168,9 +177,12 @@ main() {
 	fi
 	fieldname="$(clean_fieldname "$service")"
 	valid_days=$(print_expire_days "$host" "$port" "$starttls")
+	extinfo=""
 	[ -z "$valid_days" ] && valid_days="U"
+	[ "$valid_days" = "<>" ] && extinfo="Error: hostname mismatch, "
+	[ "$valid_days" = "<>" ] && valid_days="-1"
 	printf "%s.value %s\\n" "$fieldname" "$valid_days"
-        echo "${fieldname}.extinfo Last checked: $(date)"
+        echo "${fieldname}.extinfo ${extinfo}Last checked: $(date)"
     done
 }
 
