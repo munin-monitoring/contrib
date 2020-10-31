@@ -176,27 +176,36 @@ def get_sensor_data(host):
 
 
 def print_graph_section(graph_description, hosts, include_config, include_values):
-    print("multigraph {}".format(graph_description["name"]))
-    if include_config:
-        # graph configuration
-        print("graph_category sensors")
-        for key in ("graph_title", "graph_vlabel", "graph_args", "graph_info"):
-            if key in graph_description:
-                print("{} {}".format(key, graph_description[key]))
-        for host_info in hosts:
-            print("{}.label {}".format(host_info.fieldname, host_info.label))
-            print("{}.type {}".format(host_info.fieldname, graph_description["value_type"]))
-    if include_values:
-        for host_info in hosts:
-            # We cannot distinguish between fields that are not supported by the sensor (most are
-            # optional) and missing data. Thus we cannot handle online/offline sensor data fields,
-            # too.
-            data = get_sensor_data(host_info.host)
-            if data is not None:
-                value = data.get(graph_description["api_value_name"])
-                if value is not None:
-                    print("{}.value {}".format(host_info.fieldname, value))
-    print()
+    # retrieve the data and omit ony output, if the relevant key is missing
+    results = []
+    for host_info in hosts:
+        data = get_sensor_data(host_info.host)
+        if data:
+            for dataset in data["sensordatavalues"]:
+                if dataset["value_type"] == graph_description["api_value_name"]:
+                    results.append((host_info, dataset["value"]))
+                    break
+            else:
+                # We cannot distinguish between fields that are not supported by the sensor (most
+                # are optional) and missing data. Thus we cannot handle online/offline sensor data
+                # fields, too.
+                pass
+    # skip this multigraph, if no host contained this data field
+    if results:
+        print("multigraph {}".format(graph_description["name"]))
+        if include_config:
+            # graph configuration
+            print("graph_category sensors")
+            for key in ("graph_title", "graph_vlabel", "graph_args", "graph_info"):
+                if key in graph_description:
+                    print("{} {}".format(key, graph_description[key]))
+            for host_info, value in results:
+                print("{}.label {}".format(host_info.fieldname, host_info.label))
+                print("{}.type {}".format(host_info.fieldname, graph_description["value_type"]))
+        if include_values:
+            for host_info, value in results:
+                print("{}.value {}".format(host_info.fieldname, value))
+        print()
 
 
 action = sys.argv[1] if (len(sys.argv) > 1) else ""
