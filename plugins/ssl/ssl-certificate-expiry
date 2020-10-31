@@ -143,16 +143,16 @@ print_expire_days() {
     # - get a list of the parse_valid_days_from_certificate
     #   results and sort them
     
-    # shellcheck disable=SC2086
     local openssl_call
     local openssl_response
+    # shellcheck disable=SC2086
     openssl_call="s_client -servername $host -connect ${host}:${port} -showcerts $s_client_args"
     # shellcheck disable=SC2086
-    openssl_response=$(echo "" | openssl $openssl_call 2>/dev/null)
-    if [ "$(echo "$openssl_response" | grep -i -c "Hostname mismatch")" -gt "0" ]; then
-        echo "<>"
+    openssl_response=$(echo "" | openssl ${openssl_call} 2>/dev/null)
+    if echo "$openssl_response" | grep -qi "Hostname mismatch"; then
+	echo "<>"
     else
-        echo "$openssl_response" | \
+	echo "$openssl_response" | \
 	awk '{
   	  if ($0 == "-----BEGIN CERTIFICATE-----") cert=""
   	  else if ($0 == "-----END CERTIFICATE-----") print cert
@@ -180,10 +180,12 @@ main() {
 	valid_days=$(print_expire_days "$host" "$port" "$starttls")
 	extinfo=""
 	[ -z "$valid_days" ] && valid_days="U"
-	[ "$valid_days" = "<>" ] && extinfo="Error: hostname mismatch, "
-	[ "$valid_days" = "<>" ] && valid_days="-1"
+	if [ "$valid_days" = "<>" ]; then
+	    extinfo="Error: hostname mismatch, "
+	    valid_days="-1"
+	fi
 	printf "%s.value %s\\n" "$fieldname" "$valid_days"
-        echo "${fieldname}.extinfo ${extinfo}Last checked: $(date)"
+	echo "${fieldname}.extinfo ${extinfo}Last checked: $(date)"
     done
 }
 
