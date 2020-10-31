@@ -81,42 +81,54 @@ graphs = [
         "graph_vlabel": "%",
         "graph_args": "-l 0",
         "graph_info": "Wifi signal strength",
-        "api_value_name": "signal",
+        "fields": [
+            {"api_key": "signal"},
+        ],
         "value_type": "GAUGE",
     }, {
         "name": "feinstaub_samples",
         "graph_title": "Feinstaub Sample Count",
         "graph_vlabel": "#",
         "graph_info": "Number of samples since bootup",
-        "api_value_name": "samples",
+        "fields": [
+            {"api_key": "samples"},
+        ],
         "value_type": "DERIVE",
     }, {
         "name": "feinstaub_humidity",
         "graph_title": "Feinstaub Humidity",
         "graph_vlabel": "% humidity",
         "graph_info": "Weather information: air humidity",
-        "api_value_name": "humidity",
+        "fields": [
+            {"api_key": "humidity"},
+        ],
         "value_type": "GAUGE",
     }, {
         "name": "feinstaub_temperature",
         "graph_title": "Feinstaub Temperature",
         "graph_vlabel": "°C",
         "graph_info": "Weather information: temperature",
-        "api_value_name": "temperature",
+        "fields": [
+            {"api_key": "temperature"},
+        ],
         "value_type": "GAUGE",
     }, {
         "name": "feinstaub_particles_pm10",
         "graph_title": "Feinstaub Particle Measurement P10",
         "graph_vlabel": "µg / m³",
         "graph_info": "Concentration of particles with a size between 2.5µm and 10µm",
-        "api_value_name": "SDS_P1",
+        "fields": [
+            {"api_key": "SDS_P1"},
+        ],
         "value_type": "GAUGE",
     }, {
         "name": "feinstaub_particles_pm2_5",
         "graph_title": "Feinstaub Particle Measurement P2.5",
         "graph_vlabel": "µg / m³",
         "graph_info": "Concentration of particles with a size up to 2.5µm",
-        "api_value_name": "SDS_P2",
+        "fields": [
+            {"api_key": "SDS_P2"},
+        ],
         "value_type": "GAUGE",
     }]
 
@@ -181,15 +193,16 @@ def print_graph_section(graph_description, hosts, include_config, include_values
     for host_info in hosts:
         data = get_sensor_data(host_info.host)
         if data:
-            for dataset in data["sensordatavalues"]:
-                if dataset["value_type"] == graph_description["api_value_name"]:
-                    results.append((host_info, dataset["value"]))
-                    break
-            else:
-                # We cannot distinguish between fields that are not supported by the sensor (most
-                # are optional) and missing data. Thus we cannot handle online/offline sensor data
-                # fields, too.
-                pass
+            for data_field in graph_description["fields"]:
+                for dataset in data["sensordatavalues"]:
+                    if dataset["value_type"] == data_field["api_key"]:
+                        results.append((host_info, data_field, dataset["value"]))
+                        break
+                else:
+                    # We cannot distinguish between fields that are not supported by the sensor
+                    # (most are optional) and missing data. Thus we cannot handle online/offline
+                    # sensor data fields, too.
+                    pass
     # skip this multigraph, if no host contained this data field
     if results:
         print("multigraph {}".format(graph_description["name"]))
@@ -199,11 +212,15 @@ def print_graph_section(graph_description, hosts, include_config, include_values
             for key in ("graph_title", "graph_vlabel", "graph_args", "graph_info"):
                 if key in graph_description:
                     print("{} {}".format(key, graph_description[key]))
-            for host_info, value in results:
-                print("{}.label {}".format(host_info.fieldname, host_info.label))
+            for host_info, data_field, value in results:
+                try:
+                    label = "{} ({})".format(host_info.label, data_field["info"])
+                except KeyError:
+                    label = host_info.label
+                print("{}.label {}".format(host_info.fieldname, label))
                 print("{}.type {}".format(host_info.fieldname, graph_description["value_type"]))
         if include_values:
-            for host_info, value in results:
+            for host_info, data_field, value in results:
                 print("{}.value {}".format(host_info.fieldname, value))
         print()
 
