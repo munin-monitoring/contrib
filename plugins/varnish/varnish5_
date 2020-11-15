@@ -1,10 +1,11 @@
 #!/usr/bin/perl
 # -*- perl -*-
 #
-# varnish4_ - Munin plugin to for Varnish 4.x
-# Copyright (C) 2009  Redpill Linpro AS
+# varnish5_ - Munin plugin to for Varnish 5.x and 6.x
+# Copyright (C) 2009,2018  Redpill Linpro AS
 #
 # Author: Kristian Lyngstøl <kristian@bohemians.org>
+#         Pål-Eivind Johnsen <pej@redpill-linpro.com>
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,18 +23,18 @@
 
 =head1 NAME
 
-varnish4_ - Munin plugin to monitor various aspects of varnish
+varnish5_ - Munin plugin to monitor various aspects of varnish
 
 =head1 APPLICABLE SYSTEMS
 
-Varnish 4.x with varnishstat
+Varnish 5.x with varnishstat
 
 =head1 CONFIGURATION
 
 The plugin needs to be able to execute varnishstat.
 
 The configuration section shows the defaults
-  [varnish4_*]
+  [varnish5_*]
      group varnish
      env.varnishstat varnishstat
      env.name
@@ -54,8 +55,8 @@ session, session_herd, gzip
 
 You can link them yourself with something like this:
 
-  ln -s @@LIBDIR@@/plugins/varnish4_ \
-    @@CONFDIR@@/plugins/varnish4_data_structures
+  ln -s @@LIBDIR@@/plugins/varnish5_ \
+    @@CONFDIR@@/plugins/varnish5_data_structures
 
 =head1 INTERPRETATION
 
@@ -78,8 +79,8 @@ correctly.
 =head1 PATCHES-TO
 
 Please send patches to Kristian Lyngstøl <kristian@bohemians.org>
-and/or varnish-misc@varnish-cache.org for significant changes. Munin SVN
-is the authoritative repository for this plugin.
+and/or varnish-misc@varnish-cache.org for significant changes. The
+munin-contrib Git repo is the authoritative repository for this plugin.
 
 =head1 AUTHOR
 
@@ -88,6 +89,7 @@ Kristian Lyngstøl <kristian@bohemians.org>
 =head1 MODIFICATIONS
 
 Ingo Oppermann <ingo.oppermann@gmail.com>
+Pål-Eivind Johnsen <pej@redpill-linpro.com>
 
 =head1 LICENSE
 
@@ -168,7 +170,7 @@ my %data;
 my %ASPECTS = (
 	'request_rate' => {
 		'title' => 'Request rates',
-		'order' => 'cache_hit cache_hitpass cache_miss '
+		'order' => 'cache_hit cache_hitpass cache_miss cache_hitmiss'
 			 . 'backend_conn backend_unhealthy '
 			 . 'client_req client_conn' ,
 		'values' => {
@@ -206,6 +208,17 @@ my %ASPECTS = (
 				'draw' => 'STACK',
 				'min' => '0'
 			},
+			'cache_hitmiss' => {
+				'info' => 'Hitmiss are cached missing: An '
+					. 'entry in the cache instructing '
+					. 'Varnish to pass. Typically '
+					. 'achieved after a pass in '
+					. 'vcl_fetch.',
+				'type' => 'DERIVE',
+				'draw' => 'STACK',
+				'colour' => 'FFFF00',
+				'min' => '0'
+			},
 			'backend_conn' => {
 				'type' => 'DERIVE',
 				'colour' => '995599',
@@ -231,7 +244,7 @@ my %ASPECTS = (
 	'hit_rate' => {
 		'title' => 'Hit rates',
 		'order' => 'client_req cache_hit cache_miss '
-			 . 'cache_hitpass' ,
+			 . 'cache_hitpass cache_hitmiss' ,
 		'vlabel' => '%',
 		'args' => '-l 0 -u 100 --rigid',
 		'scale' => 'no',
@@ -240,7 +253,7 @@ my %ASPECTS = (
 				'type' => 'DERIVE',
 				'min' => '0',
 				'graph' => 'off',
-				'rpn' => [ 'cache_hit' , 'cache_miss' , 'cache_hitpass' , '+' , '+' ]
+				'rpn' => [ 'cache_hit' , 'cache_miss' , 'cache_hitpass' ,'cache_hitmiss', '+' , '+' ,'+' ]
 			},
 			'cache_hit' => {
 				'type' => 'DERIVE',
@@ -260,6 +273,12 @@ my %ASPECTS = (
 				'min' => '0',
 				'cdef' => 'cache_hitpass,client_req,/,100,*'
 			},
+			'cache_hitmiss' => {
+				'type' => 'DERIVE',
+				'draw' => 'STACK',
+				'min' => '0',
+				'cdef' => 'cache_hitmiss,client_req,/,100,*'
+			}
 		}
 	},
 	'backend_traffic' => {
@@ -289,10 +308,6 @@ my %ASPECTS = (
 			'backend_recycle' => {
 				'type' => 'DERIVE',
 				'min' => 0
-			},
-			'backend_toolate' => {
-				'type' => 'DERIVE',
-				'min' => '0'
 			},
 			'backend_retry' => {
 				'type' => 'DERIVE',
@@ -386,12 +401,6 @@ my %ASPECTS = (
 		'args' => '--base 1024',
 		'vlabel' => 'bytes',
 		'values' => {
-			'sms_balloc' => {
-				'type' => 'GAUGE',
-			},
-			'sms_nbytes' => {
-				'type' => 'GAUGE',
-			},
 			'SMA_1' => {
 				'counter' => 'g_bytes',
 				'family' => 'SMA',
@@ -411,25 +420,42 @@ my %ASPECTS = (
 			'SMF_2' => {
 				'counter' => 'g_space',
 				'family' => 'SMF',
+			},
+			'SMF_3' => {
+				'counter' => 'c_bytes',
+				'family' => 'SMF',
 			}
 		}
 	},
-	'uptime' => {
-		'title' => 'Varnish uptime',
+	'main_uptime' => {
+		'type' => 'MAIN',
+		'title' => 'Varnish Child uptime',
 		'vlabel' => 'days',
 		'scale' => 'no',
 		'values' => {
 			'uptime' => {
 				'type' => 'GAUGE',
 				'cdef' => 'uptime,86400,/'
-			}
+			},
+		}
+	},
+	'mgt_uptime' => {
+		'type' => 'MGT',
+		'title' => 'Varnish Management uptime',
+		'vlabel' => 'days',
+		'scale' => 'no',
+		'values' => {
+			'uptime' => {
+				'type' => 'GAUGE',
+				'cdef' => 'uptime,86400,/'
+			},
 		}
 	},
 	'objects_per_objhead' => {
 		'title' => 'Objects per objecthead',
 		'DEBUG' => 'yes',
 		'values' => {
-			'obj_per_objhead' => {
+			'n_objecthead' => {
 				'type' => 'GAUGE',
 				'label' => 'Objects per object heads',
 				'rpn' => [ 'n_object','n_objecthead','/' ]
@@ -468,10 +494,6 @@ my %ASPECTS = (
 		'title' => 'ESI',
 		'DEBUG' => 'yes',
 		'values' => {
-			'esi_parse' => {
-				'type' => 'DERIVE',
-				'min' => '0'
-			},
 			'esi_errors' => {
 				'type' => 'DERIVE',
 				'min' => '0'
@@ -631,15 +653,15 @@ my %ASPECTS = (
 			},
 			'bans_tested' => {
 				'type' => 'DERIVE',
-				'min' => '0'
+                'min' => '0'
 			},
 			'bans_obj_killed' => {
 				'type' => 'DERIVE',
-				'min' => '0'
+                'min' => '0'
 			},
 			'bans_tests_tested' => {
 				'type' => 'DERIVE',
-				'min' => '0'
+                'min' => '0'
 			},
 			'bans_dups' => {
 				'type' => 'GAUGE'
@@ -768,7 +790,19 @@ my %ASPECTS = (
 				'min' => '0'
 			}
 		}
+	},
+	'backend' => {
+		'title' => 'Backend Status',
+		'DEBUG' => 'yes',
+		'values' => {
+                        'VBE.boot_1' => {
+                                'counter' => 'happy',
+                                'family' => 'VBE',
+                        },
+
+		}
 	}
+		
 );
 
 ################################
@@ -798,7 +832,9 @@ sub print_if_exist
 	my %values = %{$_[0]};
 	my $value = $_[1];
 	my $field = $_[2];
-	my $title = "$value.$field";
+	my $pvalue = normalize_name($value);
+
+	my $title = "$pvalue.$field";
 	if (defined($_[3])) {
 		$title = $_[3];
 	}
@@ -919,19 +955,32 @@ sub xml_characters {
 # Note that 'flag' is translated to RRD-equivalents here.
 sub xml_commit_state
 {
+	my $configtype = $ASPECTS{$self}{'type'};
 	my $name = $state{'values'}{'name'};
-	my $type = $state{'values'}{'type'};
-	my $ident = $state{'values'}{'ident'};
-
-	foreach my $key (keys %{$state{'values'}}) {
-		my $data = $state{'values'}{$key};
-		if ($key eq 'flag') {
-			$data = translate_type($data);
-		}
-		if (defined($type) and $type ne '' and defined($ident) and $ident ne '') {
-			$data{$type}{$ident}{$name}{$key} = $data;
+	my @namelist = split(/\./,$name);
+	my $type = shift @namelist;
+	if ($configtype eq '' || $configtype eq $type) {
+		my $name = "";
+		my $ident = "";
+		if (scalar(@namelist) == 1) {
+			$name = shift @namelist;
+		} elsif (scalar(@namelist) == 2) {
+			$ident = shift @namelist;
+			$name = shift @namelist;
 		} else {
-			$data{$name}{$key} = $data
+			$name = pop @namelist;
+			$ident = join('_', @namelist);
+		}
+		foreach my $key (keys %{$state{'values'}}) {
+			my $data = $state{'values'}{$key};
+			if ($key eq 'flag') {
+				$data = translate_type($data);
+			}
+			if (defined($type) and $type ne '' and defined($ident) and $ident ne '') {
+				$data{$type}{$ident}{$name}{$key} = $data;
+			} else {
+				$data{$name}{$key} = $data;
+			}
 		}
 	}
 }
@@ -1096,13 +1145,14 @@ sub get_config
 		if (!defined($data{$value}{'value'}) &&
 		    !defined($values{$value}{'rpn'})) {
 			if ($DEBUG) {
-				print "ERROR: $value not part of varnishstat.\n"
+				print STDERR "ERROR: $value not part of varnishstat.\n"
 			}
 			next;
 		}
 
 		if (!print_if_exist(\%values,$value,'label')) {
-			print "$value.label $data{$value}{'description'}\n";
+			my $pvalue =  normalize_name($value);
+			print "$pvalue.label $data{$value}{'description'}\n";
 		}
 		foreach my $field (@field_parameters) {
 			print_if_exist(\%values,$value,$field);
@@ -1149,8 +1199,9 @@ populate_stats;
 # NOTE: Due to differences in varnish-versions, this checks if the value
 # actually exist before using it.
 foreach my $value (keys %{$ASPECTS{$self}{'values'}}) {
+        my $pvalue =  normalize_name($value);
 	if (defined($ASPECTS{$self}{'values'}{$value}{'rpn'})) {
-		print "$value.value ";
+		print "$pvalue.value ";
 		rpn($ASPECTS{$self}{'values'}{$value}{'rpn'});
 	} else {
 		if (print_dynamic($value,'.value',('value'))) {
@@ -1164,7 +1215,7 @@ foreach my $value (keys %{$ASPECTS{$self}{'values'}}) {
 			}
 			next;
 		}
-		print "$value.value ";
+		print "$pvalue.value ";
 		print "$data{$value}{'value'}\n";
 	}
 }
