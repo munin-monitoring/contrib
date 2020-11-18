@@ -38,13 +38,6 @@ This plugin has been tested with lxc 3 and
 lx2 (on Debian buster and Debian jessie,
 respectively).
 
-For the network graphs to work, you need
-to have in every container's config file
-a line defining the virtual network interface
-path (else lxc will use a random name at
-each container's start); see the lxc_netdev()
-function below.
-
 If using lxc 2, make sure you do not have cruft
 in your container config files, you can test
 it with:
@@ -113,18 +106,6 @@ get_lxc_cgroup_info() {
    local field="$2"
    # lxc3 (lxc < 3: may output some warnings if there is cruft in your config dir)
    lxc-cgroup -o /dev/stdout -l INFO -n "$guest_name" "$field" | sed 's/^.*lxc_cgroup.c:main:[0-9][0-9]* - //' | grep -v set_config_idmaps
-}
-
-
-lxc_netdev() {
-   local guest_name="$1"
-
-   if [ -f "$lxcpath/$guest_name/config" ]; then
-      # lxc 3 vs < 3
-      (grep -E '^lxc.net.0.veth.pair' "$lxcpath/$guest_name/config" 2>/dev/null \
-         || grep -E '^lxc.network.veth.pair' "$lxcpath/$guest_name/config"
-      ) | awk '{print $NF;}'
-   fi
 }
 
 
@@ -259,7 +240,7 @@ EOF
 
    for guest_name in $active_guests
    do
-      device=$(lxc_netdev "$guest_name")
+      device=$(lxc-info -n "$guest_name" | grep Link | sed 's/Link:\ \+//g')
       if [ -z "$device" ]; then
          continue
       fi
@@ -362,7 +343,7 @@ do_fetch() {
    echo "multigraph lxc_net"
    for guest_name in $active_guests
    do
-      device=$(lxc_netdev "$guest_name")
+      device=$(lxc-info -n "$guest_name" | grep Link | sed 's/Link:\ \+//g')
       if [ -z "$device" ]; then
          value_up="U"
          value_down="U"
