@@ -17,6 +17,8 @@ This script requires root permissions to run, in your munin-node configuration:
 
   [certbot_expiry]
   user root
+  env.openssl_bin Path to openssl, default: /usr/bin/openssl
+  env.certs_path Path to certificate renewal files, default: /etc/letsencrypt/renewal
 
 =head1 CAPABILITIES
 
@@ -52,17 +54,40 @@ use Munin::Plugin;
 use Date::Parse;
 use POSIX;
 
+my $openSSL  = $ENV{'OPENSSL_BIN'} || "/usr/bin/openssl";
+my $certPATH = $ENV{'CERTS_PATH'}  || "/etc/letsencrypt/renewal";
+my $DEBUG    = $ENV{'MUNIN_DEBUG'} || 0;
+
 if ( defined($ARGV[0]) && $ARGV[0] eq "autoconf" ) {
-	if ( -e "/usr/bin/openssl" ) {
-		print "no (Root User Required)\n";
+	my $keyPATH = $certPATH;
+	$keyPATH =~ s/renewal/live/; 
+	if ( ! ( -e $openSSL) ) {
+		print "no (OpenSSL not found)\n";
 	} else {
-		print "no (OpenSSL Not Found)\n";
+		if ( ! (-e -r -d $certPATH) )  {
+			print "no (Certificates folder not found or not readable)\n";
+		} else {
+			if ( !( -e -r -d $keyPATH ) ) {
+				print "no (Key folder not found or not readable - requires elevated permissions [root])\n";
+			} else {
+				print "yes\n";
+			}
+		}
 	}
 	exit;
 }
 
+# Sanity Check enviroment.
+if ( ! -e $openSSL ) {
+	die "FATAL: OpenSSL not found.";
+}
+if ( ! (-e -r -d $certPATH) ) {
+	die "FATAL: Certificate folder not found or not readable";
+}
 
 my %thecerts = get_data();
+
+
 
 
 if ( defined($ARGV[0]) && $ARGV[0] eq "config" ) {
@@ -107,13 +132,13 @@ sub get_data {
 	my $runtime = time();
 	my %cert_files;
 	# Get Renewal Files
-	opendir(DIR, "/etc/letsencrypt/renewal");
+	opendir(DIR, $certPATH);
 	my @renew_files = grep(/\.conf$/,readdir(DIR));
 	closedir(DIR);
 
 	# Each renewal file
 	foreach my $file (@renew_files) {
-		my @this_renew = `cat /etc/letsencrypt/renewal/$file`;
+		my @this_renew = `cat $certPATH/$file`;
 
 		my $cert_name = $file;
 		$cert_name =~ s/\.conf//;
@@ -121,32 +146,44 @@ sub get_data {
 		my $safe_name = $cert_name;
 		$safe_name =~ s/\./_/g;
 
+		# define some sane defaults should something go wrong.
+		$cert_files{$cert_name} = {
+			"name"		=> $cert_name,
+			"safename"	=> $safe_name,
+			"cert"		=> "",
+			"expdays"	=> 0,
+			"info"		=> ""
+		};
 
-		$cert_files{$cert_name}{"name"} = $cert_name;
-		$cert_files{$cert_name}{"safename"} = $safe_name;
-
-		# cert is listed
-		foreach my $line ( @this_renew ) {
-			if ( $line =~ /cert = (.+?)$/ ) {
+		# key file is listed in renewal file, get it.
+		foreach ( @this_renew ) {
+			if ( $_ =~ /cert = (.+?)$/ ) {
 				$cert_files{$cert_name}{"cert"} = $1;
 			}
 		}
 
-		# use openssl for the info
-		my @ssl_info = `openssl x509 -noout -in $cert_files{$cert_name}{"cert"} -text -certopt no_subject,no_header,no_version,no_serial,no_signame,no_validity,no_issuer,no_pubkey,no_sigdump,no_aux -enddate`;
+		if ( $cert_files{$cert_name}{"cert"} ne "" ) {
+			if ( ! -f -r $cert_files{$cert_name}{"cert"}) {
+				# warn, only on debuging, that a file couldn't be opened.  sane defaults will show zero days remaining for this certificate
+				if ( $DEBUG ) { print "# WARNING: {$cert_name} certificate not found or not readable" }
+			} else {
+				# use openssl for the info
+				my @ssl_info = `$openSSL x509 -noout -in $cert_files{$cert_name}{"cert"} -text -certopt no_subject,no_header,no_version,no_serial,no_signame,no_validity,no_issuer,no_pubkey,no_sigdump,no_aux -enddate`;
 
-		# parse for SAN and expiry
-		foreach my $line ( @ssl_info ) {
-			if ( $line =~ /notAfter=(.+?)$/ ) {
-				$cert_files{$cert_name}{"expdate"} = $1;
-				$cert_files{$cert_name}{"expdays"} = floor((str2time($1) - $runtime)/(60*60*24));
+				foreach my $line ( @ssl_info ) {
+					if ( $line =~ /notAfter=(.+?)$/ ) {
+						# Grab the expiration date, convert it to days, rounding down.
+						$cert_files{$cert_name}{"expdays"} = floor((str2time($1) - $runtime)/(60*60*24));
+					}
+					if ( $line =~ /(DNS:.+?)$/ ) {
+						# Grab the list of SubjectAlternativeNames, set the info line to that.
+						my $san_line = $1;
+						$san_line =~ s/DNS://g;
+						$cert_files{$cert_name}{"info"} = $san_line;
+					}
+				}	
 			}
-			if ( $line =~ /(DNS:.+?)$/ ) {
-				my $san_line = $1;
-				$san_line =~ s/DNS://g;
-				$cert_files{$cert_name}{"info"} = $san_line;
-			}
-		}		
+		}	
 	}
 
 	return %cert_files;
