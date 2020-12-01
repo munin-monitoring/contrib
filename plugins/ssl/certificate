@@ -1,0 +1,126 @@
+#!/usr/bin/python3 -tt
+# -*- coding: utf-8 -*-
+# pylint: disable=invalid-name
+# pylint: enable=invalid-name
+
+"""Munin plugin to monitor certificate expiry.
+Copyright 2015, Kim B. Heino, b@bbbs.net, Foobar Oy
+License GPLv2+
+
+Requires: pyOpenSSL
+
+
+Config file:
+
+[certificate]
+env.hosts domain.invalid some.domain:888
+"""
+
+import datetime
+import os
+import socket
+import sys
+import time
+from OpenSSL import SSL
+
+
+RESULT = 0
+
+
+def cert_check(dummy_connection, x509, dummy_errnum, dummy_errdepth, dummy_ok):
+    """Callback function to get certificate expire time."""
+    after = datetime.datetime.strptime(x509.get_notAfter().decode('utf-8'),
+                                       '%Y%m%d%H%M%SZ')
+    global RESULT  # pylint: disable=global-statement
+    RESULT = time.mktime(after.timetuple()) - time.time()
+    return True
+
+
+def check_site(host, port):
+    """Get value for single host."""
+    try:
+        sock = socket.create_connection((host, port), 5)
+    except socket.error:
+        return None
+    sock.settimeout(None)  # pylint: disable=no-member
+
+    global RESULT  # pylint: disable=global-statement
+    RESULT = 0
+    try:
+        ctx = SSL.Context(SSL.SSLv23_METHOD)
+        ctx.set_verify(
+            SSL.VERIFY_PEER | SSL.VERIFY_FAIL_IF_NO_PEER_CERT, cert_check)
+        ssl_sock = SSL.Connection(ctx, sock)
+        ssl_sock.set_connect_state()
+        ssl_sock.set_tlsext_host_name(bytes(host, 'utf-8'))
+        ssl_sock.do_handshake()
+        ssl_sock.shutdown()
+        sock.close()
+    except SSL.Error:
+        return None
+    return RESULT / 86400
+
+
+def cleanup(value):
+    """Convert host name to Munin key."""
+    ret = []
+    for char in value:
+        if 'a' <= char <= 'z' or '0' <= char <= '9':
+            ret.append(char)
+        elif 'A' <= char <= 'Z':
+            ret.append(char.lower())
+        else:
+            ret.append('_')
+    return ''.join(ret)
+
+
+def get_values(show_config):
+    """Iterate all hosts and print config or values."""
+    show_values = (not show_config or
+                   os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1')
+    if show_config:
+        print('graph_title Certificate Expire')
+        print('graph_vlabel days left')
+        print('graph_category security')
+        print('graph_args --base 1000 --lower-limit 0')
+        print('graph_scale no')
+        print('graph_info This graph shows the days left for the certificate.')
+
+    args = os.getenv('hosts')
+    if args:
+        args = args.split()
+    else:
+        args = sys.argv[0].split('_')[1:]
+
+    for arg in args:
+        key = cleanup(arg)
+        host = arg
+        port = 443
+        hostp = portp = None
+        if ':' in host:
+            hostp, portp = host.rsplit(':', 1)
+        elif '.' in host:
+            hostp, portp = host.rsplit('.', 1)
+        if portp and portp.isdigit():
+            host = hostp
+            port = int(portp)
+        if show_config:
+            if port == 443:
+                print('{}.label Host {}'.format(key, host))
+            else:
+                print('{}.label Host {}:{}'.format(key, host, port))
+            print('{}.warning 7:'.format(key))
+            print('{}.critical 1:'.format(key))
+        if show_values:
+            value = check_site(host, port)
+            if value is not None:
+                print('{}.value {}'.format(key, value))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('no')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        get_values(True)
+    else:
+        get_values(False)
