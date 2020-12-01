@@ -1,0 +1,77 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+amavismessages - Plugin to monitor amavisd mail filter message counts
+
+=head1 CONFIGURATION
+
+No configuration
+
+=head1 AUTHOR
+
+Kim Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+if [ "$1" = "autoconf" ]; then
+    if [ -x /usr/bin/amavisd-agent ]; then
+	echo "yes"
+	exit 0
+    else
+	echo "no (no /usr/bin/amavisd-agent)"
+	exit 0
+    fi
+fi
+
+if [ "$1" = "config" ]; then
+    echo 'graph_title Amavisd mail filter messages'
+    echo 'graph_period minute'
+    echo 'graph_vlabel mails per ${graph_period}'
+    echo 'graph_args -l 0 --base 1000'
+    echo 'graph_category spamfilter'
+    echo 'msgs_in.label total mails'
+    echo 'msgs_in.type DERIVE'
+    echo 'msgs_in.min 0'
+    echo 'spammy.label spammy mails'
+    echo 'spammy.type DERIVE'
+    echo 'spammy.min 0'
+    echo 'quar_spam.label quarantined spam'
+    echo 'quar_spam.type DERIVE'
+    echo 'quar_spam.min 0'
+    echo 'quar_virus.label quarantined virus'
+    echo 'quar_virus.type DERIVE'
+    echo 'quar_virus.min 0'
+    exit 0
+fi
+
+/usr/bin/amavisd-agent -c 1 | (
+    msgsin=0
+    spammy=0
+    qspam=0
+    qvirus=0
+    while read -r key value rest; do
+	[ "${key}" = "InMsgs" ] && msgsin=${value}
+	[ "${key}" = "ContentSpammyMsgs" ] && spammy=${value}
+	[ "${key}" = "ContentSpamMsgs" ] && qspam=${value}
+	[ "${key}" = "ContentVirusMsgs" ] && qvirus=${value}
+    done
+    echo "msgs_in.value ${msgsin}"
+    echo "spammy.value ${spammy}"
+    echo "quar_spam.value ${qspam}"
+    echo "quar_virus.value ${qvirus}"
+)

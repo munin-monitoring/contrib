@@ -1,0 +1,76 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+amavistimes - Plugin to monitor amavisd mail filter elapsed time
+
+=head1 CONFIGURATION
+
+No configuration
+
+=head1 AUTHOR
+
+Kim Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. $MUNIN_LIBDIR/plugins/plugin.sh
+
+if [ "$1" = "autoconf" ]; then
+    if [ -x /usr/bin/amavisd-agent ]; then
+	echo "yes"
+	exit 0
+    else
+	echo "no (no /usr/bin/amavisd-agent)"
+	exit 0
+    fi
+fi
+
+if [ "$1" = "config" ]; then
+    echo 'graph_title Amavisd mail filter elapsed time'
+    echo 'graph_vlabel seconds per mail'
+    echo 'graph_args -l 0 --base 1000'
+    echo 'graph_category spamfilter'
+    echo 'decoding.label decoding'
+    echo 'receiving.label receiving'
+    echo 'sending.label sending'
+    echo 'spamcheck.label spam check'
+    echo 'viruscheck.label virus check'
+    echo 'total.label total'
+    exit 0
+fi
+
+/usr/bin/amavisd-agent -c 1 | (
+    decoding=0
+    receiving=0
+    sending=0
+    spamcheck=0
+    viruscheck=0
+    total=0
+    while read -r key sum s value rest; do
+	[ "${key}" = "TimeElapsedDecoding" ] && decoding=${value}
+	[ "${key}" = "TimeElapsedReceiving" ] && receiving=${value}
+	[ "${key}" = "TimeElapsedSending" ] && sending=${value}
+	[ "${key}" = "TimeElapsedSpamCheck" ] && spamcheck=${value}
+	[ "${key}" = "TimeElapsedVirusCheck" ] && viruscheck=${value}
+	[ "${key}" = "TimeElapsedTotal" ] && total=${value}
+    done
+    echo "decoding.value ${decoding}"
+    echo "receiving.value ${receiving}"
+    echo "sending.value ${sending}"
+    echo "spamcheck.value ${spamcheck}"
+    echo "viruscheck.value ${viruscheck}"
+    echo "total.value ${total}"
+)

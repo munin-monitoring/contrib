@@ -1,0 +1,66 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+amavischilds - Plugin to monitor amavisd mail filter child busy percent
+
+=head1 CONFIGURATION
+
+No configuration
+
+=head1 AUTHOR
+
+Kim Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. ${MUNIN_LIBDIR}/plugins/plugin.sh
+STATE="${MUNIN_PLUGSTATE}/munin-plugin-amavischilds.state"
+
+if [ "$1" = "autoconf" ]; then
+    if [ -x /usr/bin/amavisd-nanny ]; then
+	echo "yes"
+	exit 0
+    else
+	echo "no (no /usr/bin/amavisd-nanny)"
+	exit 0
+    fi
+fi
+
+if [ "$1" = "config" ]; then
+    echo 'graph_title Amavisd mail filter child busy percent'
+    echo 'graph_vlabel % busy'
+    echo 'graph_period minute'
+    echo 'graph_args -l 0 --base 1000'
+    echo 'graph_category spamfilter'
+    echo 'busy.label percent of busy childs'
+    warning=80 critical=95 print_thresholds busy
+    exit 0
+fi
+
+OLD=(0 0)
+[ -f ${STATE} ] && OLD=($(cat ${STATE}))
+
+IFS=""
+/usr/bin/amavisd-nanny -c 1 2>&1 | grep '^PID [0-9]*: .*:' | sed 's/^PID [0-9]*//' | (
+    total=0
+    busy=0
+    while read line; do
+	total=$[ ${total} + 1 ]
+	[ "${line:0:4}" != ":   " ] && busy=$[ ${busy} + 1 ]
+    done
+    echo "busy.value $[ 100 * ( ${OLD[0]} + ${OLD[1]} + ${busy} ) / ( 3 * ${total} ) ]"
+    echo "${OLD[1]} ${busy}" > ${STATE}
+)
