@@ -1,0 +1,98 @@
+#!/usr/bin/python3 -tt
+# -*- coding: utf-8 -*-
+
+"""Munin plugin to monitor Network UPS Tools (NUT)
+
+Copyright 2019, Kim B. Heino, b@bbbs.net, Foobar Oy
+License GPLv2+
+
+Munin configuration:
+
+[nut]
+env.ups upsname
+
+#%# capabilities=autoconf
+#%# family=auto
+"""
+
+import os
+import subprocess
+import sys
+
+
+def get_stats():
+    """Get statistics."""
+    # Get status output
+    try:
+        pipe = subprocess.Popen(
+            ['/usr/bin/upsc', os.getenv('ups') or 'no-such-ups'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT)
+        output = pipe.communicate()[0].decode('utf-8', 'ignore')
+    except OSError:
+        return {}
+
+    # Parse output
+    values = {}
+    for line in output.splitlines():
+        if ': ' not in line:
+            continue
+        key, value = line.split(': ', 1)
+        values[key] = value
+    return values
+
+
+def print_values(values, config):
+    """Print values or config."""
+    if not values:
+        return
+    both = os.getenv('MUNIN_CAP_DIRTYCONFIG') == '1'
+
+    print('multigraph nut_battery')
+    if both or config:
+        print('graph_title NUT battery charge')
+        print('graph_vlabel Percent')
+        print('graph_category sensors')
+        print('graph_args --base 1000 --lower-limit 0 --upper-limit 100')
+        print('graph_scale no')
+        print('charge.label Battery charge')
+    if both or not config:
+        print('charge.value {}'.format(values['battery.charge']))
+
+    print('multigraph nut_runtime')
+    if both or config:
+        print('graph_title NUT battery runtime')
+        print('graph_vlabel Minutes')
+        print('graph_category sensors')
+        print('graph_args --base 1000 --lower-limit 0')
+        print('graph_scale no')
+        print('runtime.label Battery runtime')
+    if both or not config:
+        print('runtime.value {}'.format(int(values['battery.runtime']) / 60))
+
+    if 'ups.load' in values:
+        print('multigraph nut_load')
+        if both or config:
+            print('graph_title NUT load')
+            print('graph_vlabel Percent')
+            print('graph_category sensors')
+            print('graph_args --base 1000 --lower-limit 0')
+            print('graph_scale no')
+            print('load.label {} load'.format(values['ups.model']))
+        if both or not config:
+            print('load.value {}'.format(values['ups.load']))
+
+
+def main(args):
+    """Do it all main program."""
+    values = get_stats()
+    if len(args) > 1 and args[1] == 'autoconf':
+        print('yes' if len(values) > 5 else 'no')
+    elif len(args) > 1 and args[1] == 'config':
+        print_values(values, True)
+    else:
+        print_values(values, False)
+
+
+if __name__ == '__main__':
+    main(sys.argv)
