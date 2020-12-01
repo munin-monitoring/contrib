@@ -1,0 +1,102 @@
+#!/usr/bin/python3 -tt
+# -*- coding: utf-8 -*-
+# pylint: disable=invalid-name
+# pylint: enable=invalid-name
+
+"""Munin plugin to monitor MongoDB status.
+
+Copyright 2016, Kim B. Heino, b@bbbs.net, Foobar Oy
+License GPLv2+
+
+Based heavily on non-multigraph MongoDB plugin found from github.
+"""
+
+import os
+import sys
+import pymongo
+
+
+URI = os.environ.get('uri', 'mongodb://localhost')
+
+
+def server_status():
+    """Get Mongo status."""
+    conn = pymongo.MongoClient(URI)
+    return conn.admin.command('serverStatus', workingSet=True)
+
+
+def print_data(status):
+    """Plugin values."""
+    # conn
+    print('multigraph mongo_conn')
+    print('connections.value {}'.format(status['connections']['current']))
+
+    # docs
+    print('multigraph mongo_docs')
+    for key, value in status['metrics']['document'].items():
+        print('{}.value {}'.format(key, value))
+
+    # mem
+    print('multigraph mongo_mem')
+    for key, value in status['mem'].items():
+        if key in ('resident', 'virtual', 'mapped'):
+            print('{}.value {}'.format(key, value * 1024 * 1024))
+
+    # ops
+    print('multigraph mongo_ops')
+    for key, value in status['opcounters'].items():
+        print('{}.value {}'.format(key, value))
+
+
+def print_config(status):
+    """Plugin config."""
+    # conn
+    print('multigraph mongo_conn')
+    print('graph_title MongoDB connections')
+    print('graph_args --base 1000 -l 0')
+    print('graph_vlabel Connections')
+    print('graph_category db')
+    print('connections.label connections')
+
+    # docs
+    print('multigraph mongo_docs')
+    print('graph_title MongoDB documents')
+    print('graph_args --base 1000 -l 0')
+    print('graph_vlabel Documents / ${graph_period}')
+    print('graph_category db')
+    for key in status['metrics']['document']:
+        print('{0}.label {0}'.format(key))
+        print('{}.type DERIVE'.format(key))
+        print('{}.min 0'.format(key))
+
+    # mem
+    print('multigraph mongo_mem')
+    print('graph_title MongoDB memory usage')
+    print('graph_args --base 1024 -l 0')
+    print('graph_vlabel Bytes')
+    print('graph_category db')
+    for key in status['mem']:
+        if key in ('resident', 'virtual', 'mapped'):
+            print('{0}.label {0}'.format(key))
+
+    # ops
+    print('multigraph mongo_ops')
+    print('graph_title MongoDB operations')
+    print('graph_args --base 1000 -l 0')
+    print('graph_vlabel ops / ${graph_period}')
+    print('graph_category db')
+    print('graph_total total')
+    for key in status['opcounters']:
+        print('{0}.label {0}'.format(key))
+        print('{}.type DERIVE'.format(key))
+        print('{}.min 0'.format(key))
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        print_data(status)
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'config':
+        print_config(server_status())
+    else:
+        print_data(server_status())
