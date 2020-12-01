@@ -1,0 +1,84 @@
+#!/usr/bin/python3 -tt
+# -*- coding: utf-8 -*-
+# pylint: disable=invalid-name
+# pylint: enable=invalid-name
+
+"""Munin plugin to monitor systemd service status.
+Copyright 2018, Kim B. Heino, b@bbbs.net, Foobar Oy
+License GPLv2+
+
+#%# capabilities=autoconf
+#%# family=auto
+"""
+
+import os
+import re
+import subprocess
+import sys
+
+
+STATES = (
+    'failed',
+    'dead',
+    'running',
+    'exited',
+    'active',
+    'listening',
+    'waiting',
+    'plugged',
+    'mounted',
+)
+
+
+def config():
+    """Autoconfig values."""
+    print('graph_title systemd services')
+    print('graph_vlabel Services')
+    print('graph_category processes')
+    print('graph_args --base 1000 --lower-limit 0')
+    print('graph_scale no')
+    print('graph_info Number of services in given activation state.')
+    for state in STATES:
+        print('{state}.label Services in {state} state'.format(state=state))
+    print('failed.warning 0:0')
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch()
+
+
+def fetch():
+    """Print runtime values."""
+    # Get data
+    try:
+        output = subprocess.check_output([
+            '/bin/systemctl',
+            'list-units'])  # deb9/py3.5 doesn't have encoding parameter
+    except (OSError, subprocess.CalledProcessError):
+        return
+
+    # Parse data
+    states = {state: 0 for state in STATES}
+    for line in output.splitlines():
+        line = line.decode('utf-8').split()
+        if len(line) < 4:
+            continue
+        if len(line[0]) < 3:  # Skip failed-bullet
+            line = line[1:]
+        if line[0].endswith('.scope'):  # Ignore scopes
+            continue
+        if re.match(r'user.*@\d+\.service', line[0]):
+            continue
+        if line[3] in states:
+            states[line[3]] = states[line[3]] + 1
+
+    # Output
+    for state in STATES:
+        print('{}.value {}'.format(state, states[state]))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config()
+    else:
+        fetch()
