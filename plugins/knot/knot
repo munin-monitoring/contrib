@@ -1,0 +1,186 @@
+#!/usr/bin/python3 -tt
+# -*- coding: utf-8 -*-
+# pylint: disable=invalid-name
+# pylint: enable=invalid-name
+
+"""Munin plugin to monitor Knot DNS server.
+
+Copyright 2017, Kim B. Heino, b@bbbs.net, Foobar Oy
+License GPLv2+
+
+This plugin requires Munin config /etc/munin/plugin-conf.d/knot:
+
+[knot]
+user root
+
+
+#%# capabilities=autoconf
+#%# family=auto
+"""
+
+import os
+import subprocess
+import sys
+from collections import defaultdict
+
+
+CONFIG = {
+    # 'edns-presence': {},
+    # 'flag-presence': {},
+    'query-size': {
+        'title': 'query counts grouped by size',
+        'vlabel': 'queries / second',
+        'info': '',
+    },
+    'query-type': {
+        'title': 'query types',
+        'vlabel': 'queries / second',
+        'info': '',
+    },
+    'reply-nodata': {
+        'title': 'no-data replies',
+        'vlabel': 'replies / second',
+        'info': '',
+    },
+    'reply-size': {
+        'title': 'reply counts grouped by size',
+        'vlabel': 'replies / second',
+        'info': '',
+    },
+    'request-bytes': {
+        'title': 'request bytes',
+        'vlabel': 'bytes / second',
+        'info': '',
+    },
+    'request-protocol': {
+        'title': 'request protocols',
+        'vlabel': 'requests / second',
+        'info': '',
+    },
+    'response-bytes': {
+        'title': 'response bytes',
+        'vlabel': 'bytes / second',
+        'info': '',
+    },
+    'response-code': {
+        'title': 'response codes',
+        'vlabel': 'responses / second',
+        'info': '',
+    },
+    'server-operation': {
+        'title': 'operations',
+        'vlabel': 'operations / second',
+        'info': '',
+    },
+}
+
+
+def _merge_replysize(values):
+    """Merge reply-size 512..65535 stats."""
+    if 'reply-size' not in values:
+        return
+
+    total = 0
+    todel = []
+    for key in values['reply-size']:
+        if int(key.split('-')[0]) >= 512:
+            total += values['reply-size'][key]
+            todel.append(key)
+    for key in todel:
+        del values['reply-size'][key]
+    values['reply-size']['512-65535'] = total
+
+
+def get_stats():
+    """Get statistics."""
+    # Get status output
+    try:
+        pipe = subprocess.Popen(
+            ['/usr/sbin/knotc', '--force', 'stats'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT)
+        output = pipe.communicate()[0].decode('utf-8', 'ignore')
+    except OSError:
+        return {}
+
+    # Parse output. Keep graph labels in knotc-order.
+    values = defaultdict(dict)
+    for line in output.splitlines():
+        if not line.startswith('mod-stats.') or ' = ' not in line:
+            continue
+
+        # Parse key
+        key, value = line.split(' = ', 1)
+        key = key[10:-1]
+        key1, key2 = key.split('[', 1)
+
+        # Parse value
+        try:
+            values[key1][key2] = int(value)
+        except ValueError:
+            continue
+
+    _merge_replysize(values)
+    return values
+
+
+def _clean_key(key):
+    """Convert knotc key to Munin label."""
+    key = key.lower().replace('-', '_')
+    if key[0].isdigit():
+        key = '_' + key
+    return key
+
+
+def print_config(values):
+    """Print plugin config."""
+    for key_graph in sorted(CONFIG):
+        if key_graph not in values:
+            continue
+
+        # Basic data
+        print('multigraph knot_{}'.format(key_graph.replace('-', '')))
+        print('graph_title Knot {}'.format(CONFIG[key_graph]['title']))
+        print('graph_vlabel {}'.format(CONFIG[key_graph]['vlabel']))
+        info = CONFIG[key_graph]['info']
+        if info:
+            print('graph_info {}'.format(info))
+        print('graph_category dns')
+        print('graph_args --base 1000 --lower-limit 0')
+
+        # Keys
+        for key_raw in values[key_graph]:
+            key_clean = _clean_key(key_raw)
+            print('{}.label {}'.format(key_clean, key_raw))
+            print('{}.type DERIVE'.format(key_clean))
+            print('{}.min 0'.format(key_clean))
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        print_values(values)
+
+
+def print_values(values):
+    """Print plugin values."""
+    for key_graph in sorted(CONFIG):
+        if key_graph not in values:
+            continue
+
+        print('multigraph knot_{}'.format(key_graph.replace('-', '')))
+        for key_raw in values[key_graph]:
+            key_clean = _clean_key(key_raw)
+            print('{}.value {}'.format(key_clean, values[key_graph][key_raw]))
+
+
+def main(args):
+    """Do it all main program."""
+    values = get_stats()
+    if len(args) > 1 and args[1] == 'autoconf':
+        print('yes' if values else 'no')
+    elif len(args) > 1 and args[1] == 'config':
+        print_config(values)
+    else:
+        print_values(values)
+
+
+if __name__ == '__main__':
+    main(sys.argv)
