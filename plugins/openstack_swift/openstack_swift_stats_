@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ME="${0##*/}"
-CONTAINER=$(printf "$ME" | cut -d'_' -f4 -)
+CONTAINER=$(printf "%s" "$ME" | cut -d'_' -f4 -)
 # printf "$CONTAINER\n"
 
 case $1 in
@@ -39,31 +39,29 @@ EOM
 esac
 
 IFS=" "
-STAT_OUTPUT=( $(swift stat $CONTAINER | awk 'NR>=3&&NR<=4 {print $2}' FS=": " ORS=" ") )
+STAT_OUTPUT=( $(swift stat "$CONTAINER" | awk 'NR>=3&&NR<=4 {print $2}' FS=": " ORS=" ") )
 
 # Size graph
 printf "multigraph openstack_swift_stats_size\n"
 
 # Check value is an integer.
-[ -n "${STAT_OUTPUT[1]}" ] && [ "${STAT_OUTPUT[1]}" -eq "${STAT_OUTPUT[1]}" ] 2>/dev/null
-if [ $? -ne 0 ]; then
+if [ -z "${STAT_OUTPUT[1]}" ] || [ "${STAT_OUTPUT[1]}" != "${STAT_OUTPUT[1]}" ] 2>/dev/null; then
     printf "size.value 0\n"
     printf "Error: no usable size value from swift command.\n" 1>&2
     exit 1
 fi
 
-printf "size.value ${STAT_OUTPUT[1]}\ngrowth.value ${STAT_OUTPUT[1]}\n"
+printf "size.value %s\ngrowth.value %s\n" "${STAT_OUTPUT[1]}" "${STAT_OUTPUT[1]}"
 
 # Objects graph
 printf "multigraph openstack_swift_stats_objects\n"
 
-[ -n "${STAT_OUTPUT[0]}" ] && [ "${STAT_OUTPUT[0]}" -eq "${STAT_OUTPUT[0]}" ] 2>/dev/null
-if [ $? -ne 0 ]; then
+if [ -z "${STAT_OUTPUT[0]}" ] || [ "${STAT_OUTPUT[0]}" != "${STAT_OUTPUT[0]}" ] 2>/dev/null; then
     printf "objects.value 0\n"
     printf "Error: no usable objects value from swift command.\n" 1>&2
     exit 1
 fi
 
-printf "objects.value ${STAT_OUTPUT[0]}\nobjgrowth.value ${STAT_OUTPUT[0]}\n"
+printf "objects.value %s\nobjgrowth.value %s\n" "${STAT_OUTPUT[0]}" "${STAT_OUTPUT[0]}"
 
 
