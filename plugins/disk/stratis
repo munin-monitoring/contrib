@@ -1,39 +1,58 @@
-#!/usr/bin/python3 -tt
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 
 """Munin plugin to monitor stratis pools and filesystems.
 
-Copyright 2020 Kim B. Heino, Foobar Oy
-License GPLv2+
+=head1 NAME
 
-#%# capabilities=autoconf
-#%# family=auto
+stratis - monitor stratis pools and filesystems
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems with stratis filesystems.
+
+=head1 CONFIGURATION
+
+No configuration is required for this plugin.
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
 """
 
 import os
 import subprocess
 import sys
+import unicodedata
 
 
-def safename(variable):
+def safename(name):
     """Return safe variable name."""
-    ret = []
-    for letter in variable:
-        if letter.isalnum():
-            ret.append(letter)
-        else:
-            ret.append('_')
-    return ''.join(ret)
+    # Convert ä->a as isalpha('ä') is true
+    value = unicodedata.normalize('NFKD', name)
+    value = value.encode('ASCII', 'ignore').decode('utf-8')
+
+    # Remove non-alphanumeric chars
+    return ''.join(char.lower() if char.isalnum() else '_' for char in value)
 
 
 def run_binary(arg):
     """Run binary and return output."""
     try:
-        cmd = subprocess.Popen(
-            arg, shell=False, close_fds=True, bufsize=-1,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        return cmd.communicate()[0].decode('utf-8', 'ignore')
-    except OSError:
+        return subprocess.run(arg, stdout=subprocess.PIPE, check=False,
+                              encoding='utf-8', errors='ignore').stdout
+    except FileNotFoundError:
         return ''
 
 
@@ -54,7 +73,7 @@ def parse_unit(number, unit):
 def find_pools():
     """Return list of found pools and filesystems."""
     pool = []
-    for line in run_binary(['/usr/bin/stratis', 'pool']).splitlines():
+    for line in run_binary(['stratis', 'pool']).splitlines():
         if line.startswith('Name  '):
             continue
         line = line.split()
@@ -64,17 +83,17 @@ def find_pools():
         pool.append((line[0], total, used, free))
 
     files = []
-    dflist = run_binary(['/usr/bin/df']).splitlines()
-    for line in run_binary(['/usr/bin/stratis', 'filesystem']).splitlines():
+    dflist = run_binary(['df']).splitlines()
+    for line in run_binary(['stratis', 'filesystem']).splitlines():
         if line.startswith('Pool Name ') or '-snap-' in line:
             continue
-        line = line.split()
-        df_used = used = parse_unit(line[2], line[3])
+        tokens = line.split()
+        df_used = used = parse_unit(tokens[2], tokens[3])
         for dfline in dflist:
-            if line[9] not in dfline:  # match by uuid
+            if tokens[9] not in dfline:  # match by uuid
                 continue
             df_used = int(dfline.split()[2]) * 1024
-        files.append((line[0], line[1], used, df_used))
+        files.append((tokens[0], tokens[1], used, df_used))
     return sorted(pool), sorted(files)
 
 
@@ -145,7 +164,7 @@ def fetch(pools, files):
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
-        print('yes' if find_pools()[0] else 'no')
+        print('yes' if find_pools()[0] else 'no (no stratis pools found)')
     elif len(sys.argv) > 1 and sys.argv[1] == 'config':
         config(*find_pools())
     else:
