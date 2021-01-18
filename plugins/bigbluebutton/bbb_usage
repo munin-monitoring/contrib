@@ -46,10 +46,12 @@ import subprocess
 import re
 import hashlib
 import urllib.request
+from urllib.error import URLError, HTTPError
 import os
 from xml.etree import ElementTree
 
 bbbconf_path = "/usr/bin/bbb-conf"
+
 
 def config():
     """ autoconfig values """
@@ -68,13 +70,14 @@ def bbb_stats():
     URL = None
     secret = None
 
-    ## find out url and secret from local bbb instance
+    # find out url and secret from local bbb instance
     if os.path.exists(bbbconf_path):
-        ## Ubuntu 16.04 with Python 3.5 is recommended for bbb 2.2.x
+        # Ubuntu 16.04 with Python 3.5 is recommended for bbb 2.2.x
         if sys.version_info.major == 3 and sys.version_info.minor < 7:
-            tmp = subprocess.run([bbbconf_path, '--secret'], stdout=subprocess.PIPE, universal_newlines=True)
+            tmp = subprocess.run([bbbconf_path, '--secret'],
+                                 stdout=subprocess.PIPE, universal_newlines=True)
         else:
-            tmp = subprocess.run([bbbconf_path, '--secret'], capture_output=True, text=True) 
+            tmp = subprocess.run([bbbconf_path, '--secret'], capture_output=True, text=True)
         output = tmp.stdout
 
         for line in output.splitlines():
@@ -90,13 +93,12 @@ def bbb_stats():
         print('error getting URL and/or secret. Is "bbb-conf --secret" returning it?')
         sys.exit(1)
 
-
-    ## prepare api request
+    # prepare api request
     APIURL = URL + 'api/'
     apimethod = 'getMeetings'
     querystring = ''
 
-    h = hashlib.sha1((apimethod+querystring+secret).encode('utf-8'))
+    h = hashlib.sha1((apimethod + querystring + secret).encode('utf-8'))
     checksum = h.hexdigest()
 
     if len(querystring) > 0:
@@ -104,21 +106,27 @@ def bbb_stats():
 
     requesturl = APIURL + apimethod + '?' + querystring + 'checksum=' + checksum
 
-    ## make api request
+    # make api request
     response = urllib.request.urlopen(requesturl)
     responsedata = response.read()
     try:
         tree = ElementTree.fromstring(responsedata)
-        if tree.find('returncode').text != 'SUCCESS':
-            print('error getting API data')
-            sys.exit(1)
-    except:
+    except HTTPError as e:
         print('There was an error with the recieved data from bbb api.')
+        print('Error code: ', e.code)
         sys.exit(1)
+    except URLError as e:
+        print('There was an error with the recieved data from bbb api.')
+        print('Reason: ', e.reason)
+        sys.exit(1)
+    else:
+        if tree.find('returncode').text != 'SUCCESS':
+            print('There was an error within the API data')
+            sys.exit(1)
 
     meetings = tree.find('meetings')
 
-    ## get numbers from api response
+    # get numbers from api response
     num_meetings = 0
     num_users = 0
     num_video = 0
@@ -128,7 +136,6 @@ def bbb_stats():
 
     for m in meetings.iter('meeting'):
         meetname = m.find('meetingName').text
-        meetid = m.find('meetingID').text
         participants = m.find('participantCount').text
         video = m.find('videoCount').text
         listeners = m.find('listenerCount').text
@@ -136,7 +143,6 @@ def bbb_stats():
         moderators = m.find('moderatorCount').text
 
         meta = m.find('metadata')
-        origin = meta.find('bbb-origin').text
         if meta.find('bbb-context') is not None:
             meetname = meta.find('bbb-context').text + ' / ' + meetname
 
@@ -147,7 +153,7 @@ def bbb_stats():
         num_speakers += int(speakers)
         num_moderators += int(moderators)
 
-    ## finally print everything
+    # finally print everything
     print('meetings.value %2i' % (num_meetings))
     print('users.value %2i' % (num_users))
     print('videostreams.value %2i' % (num_video))
