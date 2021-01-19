@@ -189,6 +189,7 @@ def container_attributes(container, *args):
 
 def print_containers_status(client):
     running = []
+    unhealthy = []
     paused = []
     created = []
     restarting = []
@@ -197,7 +198,11 @@ def print_containers_status(client):
     dead = []
     for container in client.all_containers:
         if container.status == 'running':
-            running.append(container)
+            state = client.api.inspect_container(container.name)['State']
+            if state.get('Health', {}).get('Status') == 'unhealthy':
+                unhealthy.append(container)
+            else:
+                running.append(container)
         elif container.status == 'paused':
             paused.append(container)
         elif container.status == 'created':
@@ -212,6 +217,8 @@ def print_containers_status(client):
             dead.append(container)
     print('running.value', len(running))
     print('running.extinfo', ', '.join(container_summary(c) for c in running))
+    print('unhealthy.value', len(unhealthy))
+    print('unhealthy.extinfo', ', '.join(container_summary(c) for c in unhealthy))
     print('paused.value', len(paused))
     print('paused.extinfo', ', '.join(container_summary(c) for c in paused))
     print('created.value', len(created))
@@ -353,6 +360,11 @@ def main():
                   "commands run in them with `docker container exec "
                   "[--detach|--interactive,--privileged,--tty] <NAME> <COMMAND>`"
                   )
+            print("unhealthy.label UNHEALTHY")
+            print("unhealthy.draw AREASTACK")
+            print("unhealthy.warning 1")
+            print("unhealthy.info Unhealthy containers can be restarted with "
+                  "`docker container restart <NAME>`")
             print("paused.label PAUSED")
             print("paused.draw AREASTACK")
             print("paused.info Paused containers can be resumed with "
