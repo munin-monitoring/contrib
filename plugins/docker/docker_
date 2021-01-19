@@ -275,8 +275,14 @@ def print_containers_cpu(client):
 
 def print_containers_memory(client):
     for container, stats in parallel_container_stats(client):
-        print(container.name + '.value', stats['memory_stats']['stats']['total_rss'])
-        print(container.name + '.extinfo', container_attributes(container))
+        if 'total_rss' in stats['memory_stats']['stats']:  # cgroupv1 only?
+            memory_usage = stats['memory_stats']['stats']['total_rss']
+            extinfo = 'Resident Set Size'
+        else:
+            memory_usage = stats['memory_stats']['usage']
+            extinfo = 'Total memory usage'
+        print(container.name + '.value', memory_usage)
+        print(container.name + '.extinfo', container_attributes(container, extinfo))
 
 
 def print_containers_network(client):
