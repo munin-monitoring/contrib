@@ -158,29 +158,24 @@ class TorPlugin(object):
                 print('{}.{} {}'.format(label, key, val))
 
     @staticmethod
-    def autoconf():
+    def get_autoconf_status():
         try:
             import stem
-
         except ImportError as e:
-            print('no (failed to import the required python module "stem": {})'.format(e))
-
+            return 'no (failed to import the required python module "stem": {})'.format(e)
         try:
             import GeoIP  # noqa: F401
-
         except ImportError as e:
-            print('no (failed to import the required python module "GeoIP": {})'.format(e))
-
+            return 'no (failed to import the required python module "GeoIP": {})'.format(e)
         try:
             with gen_controller() as controller:
                 try:
                     authenticate(controller)
-                    print('yes')
+                    return 'yes'
                 except stem.connection.AuthenticationFailure as e:
-                    print('no (Authentication failed: {})'.format(e))
-
-        except stem.connection:
-            print('no (Connection failed)')
+                    return 'no (Authentication failed: {})'.format(e)
+        except stem.SocketError:
+            return 'no (Connection failed)'
 
     @staticmethod
     def suggest():
@@ -516,7 +511,7 @@ def main():
         param = 'fetch'
 
     if param == 'autoconf':
-        TorPlugin.autoconf()
+        print(TorPlugin.get_autoconf_status())
         sys.exit()
     elif param == 'suggest':
         TorPlugin.suggest()
