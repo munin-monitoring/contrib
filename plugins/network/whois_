@@ -26,6 +26,7 @@ However, a few parameters, all optional, can be set if needed
 	env.extract_re s/PATTERN/REPL/
 	env.warning_days <default: 7 days>
 	env.critical_days <default: 3 days>
+	env.cache_expiry_mins <default: 60 minutes>
 
 The C<extract_re> will be used in C<sed> to extract the relevant expiry date. It
 default to C<s/^.*[Ee]xpir.*: //>. Only lines for which a replacement has
@@ -62,7 +63,7 @@ fi
 EXTRACT_RE=${extract_re:-'s/^.*[Ee]xpir.*: //'}
 WARNING=${warning_days:-7}
 CRITICAL=${critical_days:-3}
-CACHE_EXPIRY=60 # minutes
+CACHE_EXPIRY=${cache_expiry_mins:-60}
 
 # Args: domain name (optional, for title)
 graph_config() {
@@ -100,7 +101,7 @@ fetch() {
 
 	CACHEFILE="${MUNIN_PLUGSTATE}/$(basename "${0}").${FIELDNAME}.cache"
 
-	if [ -z "$(find "${CACHEFILE}" -mmin -${CACHE_EXPIRY} 2>/dev/null)" ]; then
+	if [ -z "$(find "${CACHEFILE}" -mmin -"${CACHE_EXPIRY}" 2>/dev/null)" ]; then
 		EXPIRY="$(whois "${NAME}" 2>/dev/null | sed -n "${EXTRACT_RE}p;T;q")" # T;q exits after printing the first match
 		DELTA_TS=U
 		if [ -n "${EXPIRY}" ]; then
