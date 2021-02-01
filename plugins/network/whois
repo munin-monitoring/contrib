@@ -6,34 +6,36 @@
 
 =head1 NAME
 
-whois_ - Plugin to monitor expiry dates of domain in the WHOIS database
+whois - Plugin to monitor expiry dates of domain in the WHOIS database
 
 Though the plugin will be called every 5 minutes, it will keep a cache, and
-only query the WHOIS database every hour.
+only query the WHOIS database C<cache_expiry_mins> minutes.
 
 =head1 CONFIGURATION
 
-None is needed, just
+First, create a section in your munin-node configuration files. The domain envvar
+is mandatory, others are optional.
 
-	ln -s /path/to/whois_ whois_domain.tld
-
-in Munin's installed plugins directory will suffice to start monitoring
-C<domain.tld>.
-
-However, a few parameters, all optional, can be set if needed
-
-	[whois_domain.tld]
+	[whois]
+	env.domains example.com example.org
 	env.extract_re s/PATTERN/REPL/
 	env.warning_days <default: 7 days>
 	env.critical_days <default: 3 days>
 	env.cache_expiry_mins <default: 60 minutes>
 
+
+C<domains> is a space-separated list of domains to be checked.
 The C<extract_re> will be used in C<sed> to extract the relevant expiry date. It
 default to C<s/^.*[Ee]xpir.*: //>. Only lines for which a replacement has
 happened will be considered, and the pattern should take care to only output
 one line. While the default RegExp just finds a leader pattern and removes it,
 it is possible to write more complex logic to format the date. The extracted
 date needs to be in a format supported by C<date(1)>'s C<--date> parameter.
+
+Then create a symlink to enable this plugin:
+
+	ln -s /path/to/whois /etc/munin/plugins/
+
 
 =head1 AUTHOR
 
@@ -53,13 +55,14 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 set -eu
 
-# shellcheck disable=SC1090
+# shellcheck disable=SC1091
 . "${MUNIN_LIBDIR}/plugins/plugin.sh"
 
 if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
 	set -x
 fi
 
+DOMAINS=${domains:-""}
 EXTRACT_RE=${extract_re:-'s/^.*[Ee]xpir.*: //'}
 WARNING=${warning_days:-7}
 CRITICAL=${critical_days:-3}
@@ -67,9 +70,8 @@ CACHE_EXPIRY=${cache_expiry_mins:-60}
 
 # Args: domain name (optional, for title)
 graph_config() {
-	NAMETITLE=${1:+ for ${1}}
 	cat << EOF
-graph_title Domain registration expiry${NAMETITLE}
+graph_title Domain registration expiry
 graph_category network
 graph_vlabel days
 EOF
@@ -78,43 +80,48 @@ EOF
 # Args: domain name
 # Separated from graph_config so we can easily extend the plugin to support multiple domains.
 config() {
-	local NAME=${1}
+	local NAME
 	local FIELDNAME
+	for NAME in $DOMAINS
+	do
+		FIELDNAME="$(clean_fieldname "${NAME}")"
 
-	FIELDNAME="$(clean_fieldname "${NAME}")"
-
-	cat << EOF
-${FIELDNAME}.label expiry
+		cat << EOF
+${FIELDNAME}.label ${NAME}
 ${FIELDNAME}.cdef ${FIELDNAME},86400,/
 ${FIELDNAME}.warning ${WARNING}:
 ${FIELDNAME}.critical ${CRITICAL}:
 EOF
+	done
 }
 
 # Args: domain name
 fetch() {
-	local NAME=${1}
+	local NAME
 	local FIELDNAME
 	local CACHEFILE
 
-	FIELDNAME="$(clean_fieldname "${NAME}")"
+	for NAME in $DOMAINS
+	do
+		FIELDNAME="$(clean_fieldname "${NAME}")"
 
-	CACHEFILE="${MUNIN_PLUGSTATE}/$(basename "${0}").${FIELDNAME}.cache"
+		CACHEFILE="${MUNIN_PLUGSTATE}/$(basename "${0}").${FIELDNAME}.cache"
 
-	if [ -z "$(find "${CACHEFILE}" -mmin -"${CACHE_EXPIRY}" 2>/dev/null)" ]; then
-		EXPIRY="$(whois "${NAME}" 2>/dev/null | sed -n "${EXTRACT_RE}p;T;q")" # T;q exits after printing the first match
-		DELTA_TS=U
-		if [ -n "${EXPIRY}" ]; then
-			EXPIRY_TS="$(date +%s -d "${EXPIRY}")"
+		if [ -z "$(find "${CACHEFILE}" -mmin -"${CACHE_EXPIRY}" 2>/dev/null)" ]; then
+			EXPIRY="$(whois "${NAME}" 2>/dev/null | sed -n "${EXTRACT_RE}p;T;q")" # T;q exits after printing the first match
+			DELTA_TS=U
+			if [ -n "${EXPIRY}" ]; then
+				EXPIRY_TS="$(date +%s -d "${EXPIRY}")"
 
-			NOW_TS="$(date +%s)"
-			DELTA_TS=$((EXPIRY_TS-NOW_TS))
+				NOW_TS="$(date +%s)"
+				DELTA_TS=$((EXPIRY_TS-NOW_TS))
+			fi
+
+			echo "${FIELDNAME}.value ${DELTA_TS}" > "${CACHEFILE}"
 		fi
 
-		echo "${FIELDNAME}.value ${DELTA_TS}" > "${CACHEFILE}"
-	fi
-
-	cat "${CACHEFILE}"
+		cat "${CACHEFILE}"
+	done
 }
 
 main() {
