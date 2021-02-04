@@ -81,10 +81,11 @@ try:
     import stem
     import stem.control
     import stem.connection
-except ImportError:
+    missing_dependency_error = None
+except ImportError as exc:
     # missing dependencies are reported via "autoconf"
     # thus failure is acceptable here
-    pass
+    missing_dependency_error = str(exc)
 
 default_torcachefile = 'munin_tor_country_stats.json'
 default_torconnectmethod = 'port'
@@ -517,6 +518,10 @@ def main():
         TorPlugin.suggest()
         sys.exit()
     else:
+        if missing_dependency_error is not None:
+            print("Failed to run tor_ due to missing dependency: {}"
+                  .format(missing_dependency_error), file=sys.stderr)
+            sys.exit(1)
         # detect data provider
         if __file__.endswith('_bandwidth'):
             provider = TorBandwidth()
