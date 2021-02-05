@@ -1,0 +1,74 @@
+#!/bin/sh
+# -*- sh -*-
+
+# shellcheck disable=SC2046
+
+: << =cut
+
+=head1 NAME
+
+memory - Plugin to measure memory on osx.
+
+=head1 NOTES
+
+This plugin runs the top command once per interval, to discover memory usage on OSX.
+Contributions are welcome to collect additional memory regions, if possible, such as buffers and caches.
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+TOTALMEM=$(sysctl hw.memsize | cut -d" " -f2)
+graphlimit=$(echo "$TOTALMEM"/1048576 | bc)
+
+dehumanise() {
+    echo "$1" | sed -e "s/K/*1024/g;s/M/*1024*1024/;s/G/*1024*1024*1024/;s/T/*1024*1024*1024*1024/" | bc
+}
+dehumanise_to_M() {
+    echo "$1" | sed -e "s/K/\/1024/g;s/M//;s/G/*1024/;s/T/*1024*1024/" | bc
+}
+
+if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title Memory'
+        echo "graph_order used wired unused"
+        echo "graph_args --base 1024 -r --lower-limit 0 --upper-limit $graphlimit"
+        echo 'graph_scale no'
+        echo 'graph_vlabel MB'
+        echo 'graph_category system'
+        echo 'used.label used (not incl. wired)'
+        echo 'used.draw AREA'
+        echo 'used.min 0'
+        echo "used.info Used memory, not including wired, in MB"
+        echo 'wired.label wired'
+        echo 'wired.draw STACK'
+        echo 'wired.min 0'
+        echo 'wired.info Wired memory, in MB'
+        # echo 'unused.label unused'
+        # echo 'unused.draw STACK'
+        # echo 'unused.min 0'
+        # echo 'unused.info Unused memory, in MB'
+
+        exit 0
+fi
+
+# Note: while it's possible to show all three values "used", "wired", "unused", the sum total often differs by around 1% from an exact 100% value.
+# This makes the top of the chart uneven, and can be solved by omitting "unused" which will be implied.
+TOPINFO=$(top -l 1 | grep "PhysMem: ")
+MEM_USED=$(echo "$TOPINFO" | awk '/PhysMem: / { print substr($2, 1, length($2)) }')
+MEM_WIRED=$(echo "$TOPINFO" | awk '/PhysMem: / { print substr($4, 2, length($4)-1) }') 
+# MEM_UNUSED=$(echo "$TOPINFO" | awk '/PhysMem: / { print substr($6, 1, length($6)) }') 
+echo "used.value" $(echo $(dehumanise_to_M "$MEM_USED") - $(dehumanise_to_M "$MEM_WIRED") | bc)
+echo "wired.value" $(dehumanise_to_M "$MEM_WIRED" | bc)
+# echo "unused.value" $(dehumanise_to_M "$MEM_UNUSED" | bc)
