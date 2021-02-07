@@ -68,7 +68,7 @@ static char getitem(char *input, unsigned char item, char *output)
 	return 0;
 }
 
-int smart(int argc, char **argv)
+int main(int argc, char **argv)
 {
 	char command[50];
 	char output[255];
