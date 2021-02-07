@@ -107,7 +107,10 @@ int main(int argc, char **argv)
 	}
 
 	/* Close command (this is where we get the exit code! */
-	i = WEXITSTATUS(pclose(f));
+	{
+		int status = pclose(f); /* using an explicit temp var, to be compatible with macos & openbsd */
+		i = WEXITSTATUS(status);
+	}
 	if (i == 1 ||		/* smartctl command did not parse */
 	    /*i == 2 || *//* smartctl device open failed */
 	    i == 127) {		/* command not found */
