@@ -12,7 +12,8 @@ cpu - Plugin to measure cpu on osx.
 =head1 NOTES
 
 This plugin runs the top command once per interval, to discover the current value of CPU usage on OSX.
-The result is scaled to # of CPU's, so a 4 core machine will reach 400% utilization.
+The result is scaled to # of CPU's, so a 4 core machine will reach 400% utilization (unless $scaleto100 is set to "yes").
+
 Contributions are welcome to convert the plugin to use a long running counter such as /proc/stat in Linux.
 
 =head1 LICENSE
@@ -26,22 +27,26 @@ GPLv2
 
 =cut
 
-NCPU=$(sysctl hw.ncpu | cut -d" " -f2)
-
 if [ "$1" = "autoconf" ]; then
+    if [ "$(uname)" = "Darwin" ]; then
         echo yes
         exit 0
+    else
+        echo no
+        exit 0
+    fi
 fi
 
-scaleto100=""
+scaleto100=${scaleto100:-}
+
+if [ "$scaleto100" = "yes" ]; then
+    NCPU="1"
+else
+    NCPU=$(sysctl hw.ncpu | cut -d" " -f2)
+fi
 
 if [ "$1" = "config" ]; then
-        # Linux had NCPU=$(egrep '^cpu[0-9]+ ' /proc/stat | wc -l)
-        if [ "$scaleto100" = "yes" ]; then
-                graphlimit=100
-        else
-                graphlimit=$(echo "$NCPU"*100 | bc)
-        fi
+        graphlimit=$(( NCPU*100 ))
         echo 'graph_title CPU usage'
         echo "graph_order system user idle"
         echo "graph_args --base 1000 -r --lower-limit 0 --upper-limit $graphlimit"
@@ -70,6 +75,6 @@ TOPINFO=$(top -l 2 | grep "CPU usage: " | tail -n 1)
 CPU_USER=$(echo "$TOPINFO" | awk '/CPU usage: / { print substr($3, 1, length($3)-1) }')
 CPU_SYS=$(echo "$TOPINFO" | awk '/CPU usage: / { print substr($5, 1, length($5)-1) }') 
 CPU_IDLE=$(echo "$TOPINFO" | awk '/CPU usage: / { print substr($7, 1, length($7)-1) }') 
-echo "system.value" $( echo "$NCPU"*"$CPU_SYS"/1 | bc)
-echo "user.value" $( echo "$NCPU"*"$CPU_USER"/1 | bc)
-echo "idle.value" $( echo "$NCPU"*"$CPU_IDLE"/1 | bc)
+echo "system.value" $(echo "$NCPU" "$CPU_SYS" | awk '{print($1 * $2)}')
+echo "user.value" $(echo "$NCPU" "$CPU_USER" | awk '{print($1 * $2)}')
+echo "idle.value" $(echo "$NCPU" "$CPU_IDLE" | awk '{print($1 * $2)}')
