@@ -309,15 +309,16 @@ class TorCountries(TorPlugin):
 
     def fetch(self):
         """Generate metrics"""
-
+        # Fallback if cache_dir_name is not set, unreadable or any other error
+        countries_num = self.top_countries()
         # If possible, read cached data instead of doing the processing twice
-        try:
-            with open(self.cache_dir_name) as f:
-                countries_num = json.load(f)
-        except (IOError, ValueError):
-            # Fallback if cache_dir_name is not set, unreadable or any other
-            # error
-            countries_num = self.top_countries()
+        if self.cache_dir_name:
+            try:
+                with open(self.cache_dir_name) as f:
+                    countries_num = json.load(f)
+            except (IOError, ValueError):
+                # use the fallback value above
+                pass
 
         for c, v in countries_num:
             print("%s.value %d" % (c, v))
