@@ -112,6 +112,14 @@ def sorted_by_creation_date(func):
     return sorted_func
 
 
+def clean_fieldname(text):
+    if text == "root":
+        # "root" is a magic (forbidden) word
+        return "_root"
+    else:
+        return re.sub(r"(^[^A-Za-z_]|[^A-Za-z0-9_])", "_", text)
+
+
 class ClientWrapper:
     """
     A small wrapper for the docker client, to centralise some parsing logic,
@@ -434,9 +442,10 @@ def cpu(client, mode):
         print("graph_info This graph shows docker container CPU usage.")
         print("graph_total Total CPU usage")
         for container in client.all_containers:
-            print("{}.label {}".format(container.name, container.name))
-            print("{}.draw AREASTACK".format(container.name))
-            print("{}.info {}".format(container.name, container_attributes(container)))
+            fieldname = clean_fieldname(container.name)
+            print("{}.label {}".format(fieldname, container.name))
+            print("{}.draw AREASTACK".format(fieldname))
+            print("{}.info {}".format(fieldname, container_attributes(container)))
     else:
         print_containers_cpu(client)
 
@@ -450,18 +459,19 @@ def network(client, mode):
             print("graph_info This graph shows docker container network usage.")
             print("graph_total Total network usage")
             for container in client.all_containers:
-                print("{}_down.label {}_received".format(container.name, container.name))
-                print("{}_down.type DERIVE".format(container.name))
-                print("{}_down.min 0".format(container.name))
-                print("{}_down.graph no".format(container.name))
-                print("{}_down.cdef {}_down,8,*".format(container.name, container.name))
-                print("{}_up.label {}".format(container.name, container.name))
-                print("{}_up.draw LINESTACK1".format(container.name))
-                print("{}_up.type DERIVE".format(container.name))
-                print("{}_up.min 0".format(container.name))
-                print("{}_up.negative {}_down".format(container.name, container.name))
-                print("{}_up.cdef {}_up,8,*".format(container.name, container.name))
-                print("{}_up.info {}".format(container.name, container_attributes(container)))
+                fieldname = clean_fieldname(container.name)
+                print("{}_down.label {}_received".format(fieldname, container.name))
+                print("{}_down.type DERIVE".format(fieldname))
+                print("{}_down.min 0".format(fieldname))
+                print("{}_down.graph no".format(fieldname))
+                print("{}_down.cdef {}_down,8,*".format(fieldname, fieldname))
+                print("{}_up.label {}".format(fieldname, container.name))
+                print("{}_up.draw LINESTACK1".format(fieldname))
+                print("{}_up.type DERIVE".format(fieldname))
+                print("{}_up.min 0".format(fieldname))
+                print("{}_up.negative {}_down".format(fieldname, fieldname))
+                print("{}_up.cdef {}_up,8,*".format(fieldname, fieldname))
+                print("{}_up.info {}".format(fieldname, container_attributes(container)))
         else:
             print_containers_network(client)
 
@@ -475,9 +485,10 @@ def memory(client, mode):
         print("graph_info This graph shows docker container memory usage.")
         print("graph_total Total memory usage")
         for container in client.all_containers:
-            print("{}.label {}".format(container.name, container.name))
-            print("{}.draw AREASTACK".format(container.name))
-            print("{}.info {}".format(container.name, container_attributes(container)))
+            fieldname = clean_fieldname(container.name)
+            print("{}.label {}".format(fieldname, container.name))
+            print("{}.draw AREASTACK".format(fieldname))
+            print("{}.info {}".format(fieldname, container_attributes(container)))
     else:
         print_containers_memory(client)
 
