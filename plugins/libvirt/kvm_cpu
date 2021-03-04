@@ -47,7 +47,7 @@ def config(vm_names):
     @param vm_names : a list of "cleaned" vms' name
     '''
     percent = 100 * len(
-        filter(lambda x: x[0:3] == 'cpu' and x[3] != ' ', open('/proc/stat', 'r').readlines()))
+        list(filter(lambda x: x[0:3] == 'cpu' and x[3] != ' ', open('/proc/stat', 'r').readlines())))
 
     base_config = """graph_title KVM Virtual Machine CPU usage
 graph_vlabel %%
@@ -97,7 +97,7 @@ def find_vm_names(pids):
     '''
     result = {}
     for pid in pids:
-        cmdline = open("/proc/%s/cmdline" % pid, "r")
+        cmdline = open("/proc/%s/cmdline" % pid.decode(), "r")
         result[pid] = clean_vm_name(
             re.sub(r"^.*guest=([a-zA-Z0-9.-_-]*).*$", r"\1", cmdline.readline()))
     return result
@@ -116,7 +116,7 @@ def fetch(vms):
     @param dictionary {kvm_pid: cleaned vm name}
     '''
     for pid, name in vms.items():
-        user, system = open("/proc/%s/stat" % pid, 'r').readline().split(' ')[13:15]
+        user, system = open("/proc/%s/stat" % pid.decode(), 'r').readline().split(' ')[13:15]
         print('%s_cpu.value %d' % (name, int(user) + int(system)))
 
 
