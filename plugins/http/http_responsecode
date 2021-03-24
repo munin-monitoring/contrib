@@ -57,7 +57,8 @@ if [ "$1" = "config" ]; then
 	siteid=`echo $site | sed 's/[^a-z]*//g'`
 	echo "$siteid.label $site"
 	echo "$siteid.info HTTP response code statistics for $site."
-	echo "$siteid.critical 99:399";
+	echo "$siteid.warning 99:299";
+	echo "$siteid.critical 399";
     done
     exit 0
 fi
@@ -65,6 +66,6 @@ fi
 for site in $sites; do
     export siteid=`echo $site | sed 's/[^a-z]*//g'`
     echo -n "$siteid.value "
-    curl --write-out %{http_code} --max-time "${max_time:-5}" --silent --output /dev/null "${site}"
+    curl --head --write-out %{http_code} --max-time "${max_time:-5}" --silent --output /dev/null --location "${site}" | sed 's/000/U/'
     echo
 done
