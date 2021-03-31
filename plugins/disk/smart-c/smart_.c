@@ -56,7 +56,7 @@ static char getitem(char *input, unsigned char item, char *output)
 	}
 
 	if (stop) {
-		/* Found stop, means we have a start aswell */
+		/* Found stop, means we have a start as well */
 		strncpy(output, &input[start], stop - start);
 		return 1;
 	} else if (start) {
