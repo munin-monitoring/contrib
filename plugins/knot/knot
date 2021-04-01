@@ -38,6 +38,7 @@ GPLv2
 import os
 import subprocess
 import sys
+import time
 from collections import defaultdict
 
 
@@ -112,13 +113,25 @@ def get_stats():
     """Get statistics."""
     # Get status output
     try:
-        pipe = subprocess.Popen(
-            ['/usr/sbin/knotc', '--force', 'stats'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT)
-        output = pipe.communicate()[0].decode('utf-8', 'ignore')
-    except OSError:
+        output = subprocess.run(['knotc', '--force', 'stats'],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, check=False,
+                                encoding='utf-8', errors='ignore').stdout
+    except FileNotFoundError:
         return {}
+
+    # After server reboot output can be almost empty. Use cached results
+    # instead, needed for plugin config when using munin-async.
+    cachename = os.getenv('MUNIN_PLUGSTATE') + '/knot.state'
+    if len(output) > 2048:
+        with open(cachename, 'wt') as cache:
+            cache.write(output)
+    elif (
+            os.path.exists(cachename) and
+            os.stat(cachename).st_mtime > time.time() - 900
+    ):
+        with open(cachename, 'rt') as cache:
+            output = cache.read()
 
     # Parse output. Keep graph labels in knotc-order.
     values = defaultdict(dict)
