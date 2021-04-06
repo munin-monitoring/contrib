@@ -1,35 +1,48 @@
-#!/usr/bin/python3 -tt
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 
-"""Munin plugin to read various data from Philips Hue.
+"""Munin plugin to read various data from Philips Hue devices.
 
-Copyright 2019, Kim B. Heino, b@bbbs.net, Foobar Oy
-License GPLv2+
+=head1 NAME
 
-Munin configuration:
+hue - monitor various data from Philips Hue devices
 
-[hue]
-env.host hue-bridge-ip-or-hostname
-env.auth auth-key
+=head1 APPLICABLE SYSTEMS
+
+Homes with Philips Hue light bulbs and motion sensors.
+
+=head1 CONFIGURATION
+
+Following config is needed:
+
+    [hue]
+    env.host hue-bridge-ip-or-hostname
+    env.auth auth-key
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+=cut
 """
 
+import json
 import os
 import sys
 import unicodedata
-import requests
+import urllib.request
 
 
-def cleanup(value):
-    """Convert value to Munin key."""
-    ret = []
-    for char in value:
-        if 'a' <= char <= 'z' or '0' <= char <= '9':
-            ret.append(char)
-        elif 'A' <= char <= 'Z':
-            ret.append(char.lower())
-        else:
-            ret.append('_')
-    return ''.join(ret)
+def safename(name):
+    """Return safe variable name."""
+    # Convert ä->a as isalpha('ä') is true
+    value = unicodedata.normalize('NFKD', name)
+    value = value.encode('ASCII', 'ignore').decode('utf-8')
+
+    # Remove non-alphanumeric chars
+    return ''.join(char.lower() if char.isalnum() else '_' for char in value)
 
 
 def sensor_name(data, sensor):
@@ -40,14 +53,11 @@ def sensor_name(data, sensor):
         if item.get('uniqueid', '').startswith(uniqueid):
             name = item['name']
             break
-
-    # Convert ä to a and return it as utf8 string, py2/3 compatible way
-    name = unicodedata.normalize('NFKD', name)
-    return name.encode('ASCII', 'ignore').decode('utf-8')
+    return name
 
 
 def print_temperatures(data, config, both):
-    """Temperature sensors."""
+    """Motion sensor has temperature sensor - Read it's value."""
     if not any([sensor['type'] == 'ZLLTemperature'
                 for sensor in data['sensors'].values()]):
         return
@@ -62,7 +72,7 @@ def print_temperatures(data, config, both):
     for sensor in data['sensors'].values():
         if sensor['type'] != 'ZLLTemperature':
             continue
-        label = cleanup(sensor['name'])
+        label = safename(sensor['name'])
         if config:
             print('{}.label {}'.format(label, sensor_name(data, sensor)))
         if not config or both:
@@ -71,7 +81,7 @@ def print_temperatures(data, config, both):
 
 
 def print_light_levels(data, config, both):
-    """Light level sensors."""
+    """Motion sensor has light level sensor - Read it's value."""
     if not any([sensor['type'] == 'ZLLLightLevel'
                 for sensor in data['sensors'].values()]):
         return
@@ -87,7 +97,7 @@ def print_light_levels(data, config, both):
     for sensor in data['sensors'].values():
         if sensor['type'] != 'ZLLLightLevel':
             continue
-        label = cleanup(sensor['name'])
+        label = safename(sensor['name'])
         if config:
             print('{}.label {}'.format(label, sensor_name(data, sensor)))
         if not config or both:
@@ -96,7 +106,7 @@ def print_light_levels(data, config, both):
 
 
 def print_lights(data, config, both):
-    """Lights on/off."""
+    """Light bulbs on/off."""
     if not data['lights']:
         return
 
@@ -120,8 +130,11 @@ def print_lights(data, config, both):
 def print_data(config):
     """Print config or values."""
     # Get values
-    data = requests.get('http://{}/api/{}/'.format(
-        os.getenv('host'), os.getenv('auth')), timeout=50).json()
+    url = 'http://{}/api/{}/'.format(os.getenv('host'), os.getenv('auth'))
+    try:
+        data = json.loads(urllib.request.urlopen(url, timeout=50).read())
+    except (OSError, ValueError, TypeError):
+        return
     both = os.getenv('MUNIN_CAP_DIRTYCONFIG') == '1'
 
     # Print config/values
@@ -132,7 +145,7 @@ def print_data(config):
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
-        print('no')
+        print('no (this is not autoconf plugin)')
     elif len(sys.argv) > 1 and sys.argv[1] == 'config':
         print_data(True)
     else:
