@@ -1,13 +1,40 @@
-#!/usr/bin/python3 -tt
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 
 """Munin plugin to monitor chrony NTP daemon status.
 
-Copyright 2014, Kim B. Heino, b@bbbs.net, Foobar Oy
-License GPLv2+
+=head1 NAME
 
-#%# capabilities=autoconf
-#%# family=auto
+chrony_status - monitor chrony NTP daemon status
+
+=head1 APPLICABLE SYSTEMS
+
+Systems with chrony installed.
+
+=head1 CONFIGURATION
+
+No configuration is required for this plugin.
+
+=head1 INTERPRETATION
+
+Monitor Chrony's stratum value (with warning), time offset, network delay
+and clock frequency. It would be very easy to monitor all Chrony's values, but
+IMHO they aren't needed. The most important information in stratum, giving
+"synced" / "not synced" value.
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
 """
 
 import os
@@ -29,7 +56,7 @@ def get_values():
     Return: list of (label, value, description)
     """
     try:
-        output = subprocess.run(['/usr/bin/chronyc', 'tracking'],
+        output = subprocess.run(['chronyc', 'tracking'],
                                 stdout=subprocess.PIPE, check=False,
                                 encoding='utf-8', errors='ignore')
     except FileNotFoundError:
@@ -55,6 +82,9 @@ def config():
     print('graph_args --base 1000 --lower-limit 0')
     print('stratum.label Stratum')
     print('stratum.warning 1:9')
+    # Use long unknown_limit to allow server reboot without Munin warning.
+    # Clock doesn't drift fast so there's no hurry with warning.
+    print('stratum.unknown_limit 15')
 
     print('multigraph chrony_systime')
     print('graph_title Chrony system time offset')
@@ -94,7 +124,7 @@ def fetch():
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
-        print('yes' if get_values() else 'no')
+        print('yes' if get_values() else 'no (chrony is not running)')
     elif len(sys.argv) > 1 and sys.argv[1] == 'config':
         config()
     else:
