@@ -17,7 +17,7 @@
 static char getitem(char *input, unsigned char item, char *output)
 {
 	unsigned char i = 0;
-	unsigned char seperators = 0;
+	unsigned char separators = 0;
 	char know_this_seperator = 0;
 	unsigned char start = 0;
 	unsigned char stop = 0;
@@ -28,23 +28,23 @@ static char getitem(char *input, unsigned char item, char *output)
 	}
 
 	/* If we're requested to return the very first item... */
-	if (seperators == item) {
+	if (separators == item) {
 		start = i;
 	}
 
-	while (input[i] && seperators < item + 1) {
+	while (input[i] && separators < item + 1) {
 		if (input[i] == ' ') {
 			if (know_this_seperator == 0) {
 				know_this_seperator = 1;
-				seperators++;
-				if (seperators == item + 1) {
+				separators++;
+				if (separators == item + 1) {
 					stop = i;
 					break;
 				}
 			}
 		} else if (know_this_seperator) {
 			know_this_seperator = 0;
-			if (seperators == item) {
+			if (separators == item) {
 				start = i;
 			}
 		} else if (input[i] == '\n') {
