@@ -13,8 +13,8 @@ btrfs_device_usage - Script to monitor usage of btrfs devices
 Simply create a symlink in your plugins directory like with any other plugin.
 Must be run as root.
 
- [btrfs_device_usage]
- user root
+[btrfs_device_usage]
+user root
 
 =head2 DEFAULT CONFIGURATION
 
@@ -54,11 +54,22 @@ LGPLv3
 
 
 import btrfs
+import os
 import sys
 
 
 def munin_config(fs):
     fsid = str(fs.fsid).replace('-', '_')
+
+    byte_warning = os.getenv('byte_warning', default = False)
+    byte_critical = os.getenv('byte_critical', default = False)
+    byte_warning = os.getenv('byte_' + fsid + '_warning', default = byte_warning)
+    byte_critical = os.getenv('byte_' + fsid + '_critical', default = byte_critical)
+
+    percent_warning = os.getenv('percent_warning', default = 95)
+    percent_critical = os.getenv('percent_critical', default = 98)
+    percent_warning = os.getenv('percent_' + fsid + '_warning', default = percent_warning)
+    percent_critical = os.getenv('percent_' + fsid + '_critical', default = percent_critical)
 
     print("multigraph btrfs_device_usage_byte_" + fsid)
     print("graph_title btrfs usage by device in bytes on " + fs.path)
@@ -74,6 +85,12 @@ def munin_config(fs):
         this_dev_name = this_dev_info.path.replace('/dev/', '')
         print("btrfs_bytes_" + fsid + "_" + str(this_device.devid) +
               ".label " + this_dev_name)
+        if byte_warning != False:
+            print("btrfs_bytes_" + fsid + "_" + str(this_device.devid) +
+                  ".warning " + str(byte_warning))
+        if byte_critical != False:
+            print("btrfs_bytes_" + fsid + "_" + str(this_device.devid) +
+                  ".critical " + str(byte_critical))
 
     print("")
 
@@ -92,8 +109,10 @@ def munin_config(fs):
         this_dev_name = this_dev_info.path.replace('/dev/', '')
         print("btrfs_percent_" + fsid + "_" + str(this_device.devid) +
               ".label " + this_dev_name)
-        print("btrfs_percent_" + fsid + "_" + str(this_device.devid) + ".warning 95")
-        print("btrfs_percent_" + fsid + "_" + str(this_device.devid) + ".critical 98")
+        print("btrfs_percent_" + fsid + "_" + str(this_device.devid) +
+              ".warning " + str(percent_warning))
+        print("btrfs_percent_" + fsid + "_" + str(this_device.devid) +
+              ".critical " + str(percent_critical))
 
     print("")
 
