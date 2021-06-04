@@ -13,6 +13,24 @@ as "munin-node-configure --snmp switch.langfeldt.net --snmpversion 2c
 interfaces.  On a typical switch you will get one plugin pr. ethernet
 port.  On a router you might get one plugin per VLAN interface.
 
+=head2 NOTABLE DIFFERENCE WITH SNMP__IF_MULTI
+
+The smnp__if_multi plugin records data in _bytes_ per second, and shows
+them as bps by using CDEFs when graphing. This plugin performs the
+multiplication upon reporting the value, and therefore doesn't have a
+CDEF in the graphing path.
+
+This is important when migration from snmp__if_multi, for at least two aspects:
+
+- Reusing RRDs: it is not possible to just rename the old RRD files from
+  smnp__if_multi, as historical data will be graphed as 8 times smaller than in
+  reality. The stored values would need to be adjusted.
+- Data loaning: borrowing graphs no longer need to include a CDEF to convert
+  bytes to bits. Conversely, they do now need a CDEF to convert bits to bytes.
+
+To reflect this aspect explicitely, the root graph's totals are named
+recv_bits and send_bits.
+
 =head1 CONFIGURATION
 
 As a rule SNMP plugins need site specific configuration.  The default
@@ -22,6 +40,7 @@ configuration (shown here) will only work on insecure sites/devices:
 	env.version 2
         env.community public
         env.ifTypeOnly ethernetCsmacd
+        env.stackedRoot 1
 
 In general SNMP is not very secure at all unless you use SNMP version
 3 which supports authentication and privacy (encryption).  But in any
@@ -51,11 +70,20 @@ would normally be for VPNs.  A minor horde of different interface types
 are supposted, please see IANAifType-MIB (on your system or find with
 Google) for a full list.
 
+The stackedRoot option determines whether the root summary graph shows the traffic
+on each interface separately, or stacks them on top of one another to show the
+total traffic through the device.
+
 =head1 INTERPRETATION
 
 A single graph is generated with all the interfaces overlaid one over
 the other: incoming traffic is received on the interface from the
 connected device, outgoing is sent to it instead.
+
+With the `stackedRoot` option, traffic is plotted as stacked areas instead, and
+two additional series are calculated to show the total usage of the device.
+Those series are useful for loaning into higher-level summary graphs (but see
+BUGS below).
 
 Sub-graphs are created, one per interface, akin to snmp__if_multi
 plugin.
@@ -82,6 +110,8 @@ counters (see FEATURES below).
 
 =head1 BUGS
 
+=head2 Missing indexing options
+
 Should support indexing by
 
   - ifIndex
@@ -92,12 +122,41 @@ Should support indexing by
 
 (and anything else MRTG can index by) in addition to OID-index as now.
 
-Pulling in a user definable set of ifName/ifDescr/ifAlias for textual
-description and even graph_title would also be nice.
+=head2 Total traffic oddities in stackedRoot mode.
 
-If we get a patch to support the .oldname attribute then we may use
-that to let the operator change the indexing dynamically without data
-loss.
+When using the `stackedRoot` option, the total lines (`send_bits` and
+`recv_bits`) may sometimes jump to nonsensical values. This is a bug shared with
+the original snmp__if_multi.
+
+This seems to be due to the way those series are calculated, by summing the
+current values of the other counters. The first issue is that of summing 64-bit
+values into a single variable that is likely to also be 64 bits. The second
+issue (compounded by the first) is that of wraparound. When one of the counters
+wraps around, the sum jumps backwards. With a `min` set to 0, and other counters
+having kept increasing, this looks like a huge increase the total counter.
+Depending on the `max` (which should match the backplane bandwidth), this may
+not be correctly recognised as a spurious value, just reconded as valid.
+
+There is no clear solution to this bug at the moment, save for trying to salvage
+the data after the fact. This can be done my either clipping all values beyond a
+maximum (e.g., the known use of the switch, rather that its full backplane
+bandwith).
+
+    RANGE='[0-9.]\+e+\(0[789]\|[1-9][0-9]\)'  # Anything >=1e07
+    rrdtool dump ${RRD_FILE} \
+      | sed "s/<v>${RANGE}/<v>NaN/" \
+      | rrdtool restore - ${RRD_FILE}.new
+    mv ${RRD_FILE}.new ${RRD_FILE}  # Make sure you have a backup!
+
+Alternatively, if you can determine the time at whiche the spurious value was
+recorded, you can just make that value a NaN.
+
+    TIMESTAMP="1623492000"
+    rrdtool dump "${RRD_FILE}" \
+      | sed "/${TIMESTAMP}/s/<v>.*<\/v>/<v>NaN<\/v>/" \
+      | rrdtool restore - "${RRD_FILE}.new"
+    mv ${RRD_FILE}.new ${RRD_FILE}  # Make sure you have a backup!
+
 
 =head1 FEATURES
 
@@ -117,7 +176,7 @@ usage of it, it is nothing the plugin can fix.  In the future Munin
 may be able to run the plugin more often than the counter wraps
 around.
 
-=head1 AUTHOR
+=head1 AUTHORS
 
 Copyright (C) 2012 Diego Elio Pettenò.
 
@@ -135,6 +194,8 @@ further grooming by Nicolai Langfeldt.
 Reworked to snmp__if_multi by Nicolai Langfeldt.
 
 Reworked to snmp__if_combined by Diego Elio Pettenò.
+
+Stacked option by Olivier Mehani <shtrom+munin@ssji.net>
 
 =head1 LICENSE
 
@@ -175,6 +236,11 @@ my $iface;
 if (defined $ARGV[0] and $ARGV[0] eq "snmpconf") {
 	print "require 1.3.6.1.2.1.2.2.1.1.\n";
 	exit 0;
+}
+
+my $stackedRoot = 0;
+if (exists $ENV{'stackedRoot'}) {
+    $stackedRoot = $ENV{'stackedRoot'};
 }
 
 my $sysDescr           = '1.3.6.1.2.1.1.1.0';
@@ -550,17 +616,24 @@ graph_info This graph shows the total traffic for $host.
 END
 
     print "graph_order";
+    my @ifs;
     foreach my $if (sort {$a <=> $b} keys %{$snmpinfo}) {
       print " recv$if=snmp_if_combined.$if.recv send$if=snmp_if_combined.$if.send";
+      push @ifs, "snmp_if_combined.$if";
+    }
+    if ($stackedRoot) {
+        print " recv_bits send_bits";
     }
     print "\n";
 
+    # XXX: For some reason, Munin doesn't resolve AREASTACK properly in this case...
+    my $area_or_stack = "AREA";
     foreach my $if (sort {$a <=> $b} keys %{$snmpinfo}) {
       my $alias = $snmpinfoX->{$if}->{ifAlias} || $snmpinfo->{$if}->{ifDescr} || "Interface $if";
 
       if (! ($alias =~ /\d+/) ) {
-	# If there are no numbers in the $alias add the if index
-	$alias .=" (if $if)";
+          # If there are no numbers in the $alias add the if index
+          $alias .=" (if $if)";
       }
 
       print <<END;
@@ -569,10 +642,39 @@ recv$if.graph no
 send$if.label $alias
 send$if.negative recv$if
 END
+      if ($stackedRoot) {
+          print "send$if.draw $area_or_stack\n";
+          $area_or_stack = "STACK";
+      }
+    }
+    if ($stackedRoot) {
+
+        # If a stacked graph is requested, plot the total. Rather than
+        # aggregating them with CDEFs of SUMs, we sum them in the script, which
+        # allows us to create real series than can be easily borrowed by other
+        # loaning graphs.
+        #
+        # Using CDEFs and SUMs proved difficult anyway. Due to bugs in Munin
+        # 2.0's GraphOld core  (negatives and multigraph), the graph_total
+        # behaves weirdly: - only the positive total is plotted (but both
+        # positive and negatives are calculated); - the graph_total is also
+        # included in the single graphs, where it is clearly unecessary.
+
+        print <<END;
+recv_bits.label Total traffic
+recv_bits.type DERIVE
+recv_bits.min 0
+recv_bits.graph no
+send_bits.label Total traffic
+send_bits.type DERIVE
+send_bits.min 0
+send_bits.draw LINE1
+send_bits.colour 000000
+send_bits.negative recv_bits
+END
     }
 
     print <<END;
-
 multigraph snmp_if_combined_err
 graph_title All interfaces errors
 graph_args --base 1000
@@ -723,34 +825,18 @@ sub do_fetch_if {
 
     my $status = $snmpinfo->{$if}->{ifOperStatus} || 1;
 
-    my $response;
-
     # 1 means up
     # 2 means set to down
     # Everything else we ignore.
 
-    print "multigraph snmp_if_combined.$if\n";
-
-    if ($status == 2) {
-	# Interface is down
-	print "recv.value U\n";
-	print "send.value U\n";
-	print "send.extinfo This interface is currently down.\n";
-	goto if_errors;
-    }
-
-    $response = $snmpinfoX->{$if}->{ifHCInOctets} || $snmpinfo->{$if}->{ifInOctets};
-    printf("recv.value %s\n", defined($response) ? ($response * 8) : "U");
-
-    $response = $snmpinfoX->{$if}->{ifHCOutOctets} || $snmpinfo->{$if}->{ifOutOctets};
-    printf("send.value %s\n", defined($response) ? ($response * 8) : "U");
-
-  if_errors:
-
-    print "multigraph snmp_if_combined_err.$if\n";
-
-    if ($status == 2) {
-	print <<END;
+    if ($status != 1) {
+        # Interface is down
+        print <<END;
+multigraph snmp_if_combined.$if
+recv.value U
+send.value U
+send.extinfo This interface is currently down.
+multigraph snmp_if_combined_err.$if
 errors_in.value U
 errors_out.value U
 discards_in.value U
@@ -759,8 +845,24 @@ total_in.value U
 total_out.value U
 errors_out.extinfo This interface is currently down
 END
-	return;
+        return (undef, undef);
     }
+
+    my $response;
+    my $recv;
+    my $send;
+
+    print "multigraph snmp_if_combined.$if\n";
+
+    $response = $snmpinfoX->{$if}->{ifHCInOctets} || $snmpinfo->{$if}->{ifInOctets};
+    $recv = defined($response) ? ($response * 8) : undef;
+    printf("recv.value %s\n", $recv || "U");
+
+    $response = $snmpinfoX->{$if}->{ifHCOutOctets} || $snmpinfo->{$if}->{ifOutOctets};
+    $send = defined($response) ? ($response * 8) : undef;
+    printf("send.value %s\n", $send || "U");
+
+    print "multigraph snmp_if_combined_err.$if\n";
 
     my $errors = $snmpinfo->{$if}->{ifInErrors};
     my $discards = $snmpinfo->{$if}->{ifInDiscards};
@@ -781,6 +883,8 @@ END
 	   $discards || "U",
 	   ($errors || 0) + ($discards || 0)
 	  );
+
+    return ($recv, $send);
 }
 
 sub do_config {
@@ -806,6 +910,18 @@ if ($ARGV[0] and $ARGV[0] eq "config") {
     exit 0;
 }
 
+my $recv = 0;
+my $send = 0,
+my $recv_if;
+my $send_if;
+
 foreach my $if (sort {$a <=> $b} keys %{$snmpinfo}) {
-    do_fetch_if($if);
+    ($recv_if, $send_if) = do_fetch_if($if);
+    $recv += ($recv_if || 0);
+    $send += ($send_if || 0);
+}
+if ($stackedRoot) {
+    print "multigraph snmp_if_combined\n";
+    print "recv_bits.value $recv\n";
+    print "send_bits.value $send\n";
 }
