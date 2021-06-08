@@ -44,7 +44,7 @@ support a new host.
 
 Olivier Mehani
 
-Copyright (C) 2016,2019 Olivier Mehani <shtrom+munin@ssji.net>
+Copyright (C) 2016--2021 Olivier Mehani <shtrom+munin@ssji.net>
 
 =head1 LICENSE
 
@@ -129,6 +129,36 @@ up.negative down
 ${HOST_NAME}
 EOF
 			;;
+		"root")
+			cat << EOF
+graph_title Uplink traffic${HOST_TITLE}
+graph_args --base 1000 -l 0
+graph_category network
+graph_vlabel bits per second in (-) / out (+)
+EOF
+			graph_order="down=traffic.down up=traffic.up"
+			if [ "${traffic_remove_max:-false}" != 'true' ]; then
+				graph_order="${graph_order} maxdown=traffic.maxdown maxup=traffic.maxup"
+			fi
+			echo "graph_order ${graph_order}"
+			if [ "${traffic_remove_max:-false}" != 'true' ]; then
+				cat << EOF
+maxdown.label bps (max)
+maxup.label bps (max)
+maxdown.graph no
+maxup.negative maxdown
+EOF
+			fi
+			cat << EOF
+down.label bps
+down.cdef down,8,*
+down.graph no
+up.label bps
+up.cdef up,8,*
+up.negative down
+${HOST_NAME}
+EOF
+			;;
 		"traffic")
 			cat << EOF
 graph_title Uplink traffic${HOST_TITLE}
@@ -184,12 +214,12 @@ EOF
 			echo "${HOST_NAME}"
 			# Don't repeat HOST_NAME in sub-configs
 			HOST_NAME=""
-			echo "multigraph ${PLUGIN_NAME}"
-			config "traffic"
 			for mode in ${SUPPORTED_MODES}; do
 				echo "multigraph ${PLUGIN_NAME}.${mode}"
 				config "${mode}"
 			done
+			echo "multigraph ${PLUGIN_NAME}"
+			config "root"
 			;;
 		*)
 			echo "unknown mode '${1}'" >&2
@@ -206,6 +236,9 @@ fetch () {
 		"bitrate")
 		echo "${DATA}" | sed -n "s/^MaxBitRateDown : \([0-9]\+\) bps.*MaxBitRateUp \([0-9]\+\) bps.*/down.value \1\nup.value \2/p"
 			;;
+		"root")
+			# Nothing to do: all values loaned from the traffic graph
+			;;
 		"traffic")
 		echo "${DATA}" | sed -n "
 		s/^Bytes:\s*Sent:\s*\([0-9]\+\).*Recv:\s*\([0-9]\+\).*/up.value \1\ndown.value \2/p"
@@ -218,12 +251,12 @@ fetch () {
 		echo "${DATA}" | sed -n "s/^Packets:\s*Sent:\s*\([0-9]\+\).*Recv:\s*\([0-9]\+\).*/up.value \1\ndown.value \2/p"
 			;;
 		"multi"|"upnpc")
-			echo "multigraph ${PLUGIN_NAME}"
-			fetch "traffic"
 			for mode in ${SUPPORTED_MODES}; do
 				echo "multigraph ${PLUGIN_NAME}.${mode}"
 				fetch "${mode}"
 			done
+			echo "multigraph ${PLUGIN_NAME}"
+			fetch "root"
 			;;
 		*)
 			echo "unknown mode '${1}'" >&2
