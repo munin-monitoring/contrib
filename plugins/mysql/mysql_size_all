@@ -39,11 +39,8 @@
 
 use strict;
 
-# unless ($0 =~ /mysql_size(?:_([^_]+)|)_(.+)\s*$/)
-# {
-#     die "Could not parse name $0.\n";
-# }
-# my $db = $2;
+use Munin::Plugin;
+
 
 my $COMMAND;
 my $MYSQLADMIN = $ENV{mysqladmin} || "mysql";
@@ -103,7 +100,8 @@ foreach my $db (getDBList()) {
     close(SERVICE);
 
   }
-  print("$db.value $total_size\n");
+  my $fieldname = clean_fieldname($db);
+  print("$fieldname.value $total_size\n");
 }
 
 
@@ -121,11 +119,11 @@ graph_info Plugin available at <a href="http://rodolphe.quiedeville.org/hack/mun
 ');
 
     for my $db (@dbs) {
-        my $title = "$db";
-        print("$title.label ${title}\n",
-              "$title.min 0\n",
-              "$title.type GAUGE\n",
-              "$title.draw ", ($num) ? "STACK" : "AREA" ,  "\n",
+        my $fieldname = clean_fieldname($db);
+        print("$fieldname.label $db\n",
+              "$fieldname.min 0\n",
+              "$fieldname.type GAUGE\n",
+              "$fieldname.draw AREASTACK\n",
              );
         $num++;
     }
@@ -162,6 +160,7 @@ sub getDBList {
   foreach my $f (glob("/var/lib/mysql/*")) {
     if (-d $f) {
       $f =~ s/\@002d/-/g;
+      $f =~ s/\@002e/./g;
       $f =~ s!.*/!!;
       @dbs[$#dbs+1]=$f };
   }
