@@ -145,14 +145,14 @@ EOF_
 fi
 
 ALL=$(debsecan --suite "${SUITE}" 2> /dev/null)
-REMOTE=$(printf "$ALL" | grep -w 'remotely')
-NONREMOTE=$(printf "$ALL" | grep -wv 'remotely')
+REMOTE=$(printf '%s' "$ALL" | grep -w 'remotely')
+NONREMOTE=$(printf '%s' "$ALL" | grep -wv 'remotely')
 
-HIGH=$(printf "${NONREMOTE}" | grep -w 'high urgency')
-MEDIUM=$(printf "${NONREMOTE}" | grep -w 'medium urgency')
-LOW=$(printf "${NONREMOTE}" | grep -w 'low urgency')
-OTHER=$(printf "${NONREMOTE}" | grep -wv 'urgency')
-FIXED=$(printf "${ALL}" | grep -w '(fixed')
+HIGH=$(printf '%s' "${NONREMOTE}" | grep -w 'high urgency')
+MEDIUM=$(printf '%s' "${NONREMOTE}" | grep -w 'medium urgency')
+LOW=$(printf '%s' "${NONREMOTE}" | grep -w 'low urgency')
+OTHER=$(printf '%s' "${NONREMOTE}" | grep -wv 'urgency')
+FIXED=$(printf '%s' "${ALL}" | grep -w '(fixed')
 
 # Arguments: Field offset to aggregate by
 count_entries() {
@@ -162,39 +162,37 @@ count_entries() {
 
 case "${MODE}" in
 	'cve')
-		remote_count=$(printf "${REMOTE}" | count_entries "${FIELD}" | wc -l)
-		high_count=$(printf "${HIGH}" | count_entries "${FIELD}" | wc -l)
-		medium_count=$(printf "${MEDIUM}" | count_entries "${FIELD}" | wc -l)
-		low_count=$(printf "${LOW}" | count_entries "${FIELD}" | wc -l)
-		other_count=$(printf "${OTHER}" | count_entries "${FIELD}" | wc -l)
-		fixed_count=$(printf "${FIXED}" | count_entries "${FIELD}" | wc -l)
+		remote_count=$(printf '%s' "${REMOTE}" | count_entries "${FIELD}" | wc -l)
+		high_count=$(printf '%s' "${HIGH}" | count_entries "${FIELD}" | wc -l)
+		medium_count=$(printf '%s' "${MEDIUM}" | count_entries "${FIELD}" | wc -l)
+		low_count=$(printf '%s' "${LOW}" | count_entries "${FIELD}" | wc -l)
+		other_count=$(printf '%s' "${OTHER}" | count_entries "${FIELD}" | wc -l)
+		fixed_count=$(printf '%s' "${FIXED}" | count_entries "${FIELD}" | wc -l)
 		;;
 	'pkg' | *)
-		remote_count=$(printf "${REMOTE}" | wc -l)
-		high_count=$(printf "${HIGH}" | wc -l)
-		medium_count=$(printf "${MEDIUM}" | wc -l)
-		low_count=$(printf "${LOW}" | wc -l)
-		other_count=$(printf "${OTHER}" | wc -l)
-		fixed_count=$(printf "${FIXED}" | wc -l)
+		remote_count=$(printf '%s' "${REMOTE}" | wc -l)
+		high_count=$(printf '%s' "${HIGH}" | wc -l)
+		medium_count=$(printf '%s' "${MEDIUM}" | wc -l)
+		low_count=$(printf '%s' "${LOW}" | wc -l)
+		other_count=$(printf '%s' "${OTHER}" | wc -l)
+		fixed_count=$(printf '%s' "${FIXED}" | wc -l)
 		;;
 esac
 
 # Reformat the output of the cut|sort|uniq... to a more human-friendly "item (count)" format
 CVECOUNTRE='s/^ *\([0-9]\+\) \+\([^ ]\+\)/\2 (\1)/'
 
-# shellcheck disable=SC2005 disable=SC2046
-# The nested $(echo ...)s are needed to yeet the newlines
 cat <<EOF
 remote.value $remote_count
-remote.extinfo $(echo $(printf "${REMOTE}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}"))
+remote.extinfo $(printf '%s' "${REMOTE}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}" | xargs)
 high.value $high_count
-high.extinfo $(echo $(printf "${HIGH}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}"))
+high.extinfo $(printf '%s' "${HIGH}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}" | xargs)
 medium.value $medium_count
-medium.extinfo $(echo $(printf "${MEDIUM}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}"))
+medium.extinfo $(printf '%s' "${MEDIUM}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}" | xargs)
 low.value $low_count
-low.extinfo $(echo $(printf "${LOW}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}"))
+low.extinfo $(printf '%s' "${LOW}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}" | xargs)
 other.value $other_count
-other.extinfo $(echo $(printf "${OTHER}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}"))
+other.extinfo $(printf '%s' "${OTHER}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}" | xargs)
 fixed.value $fixed_count
-fixed.extinfo $(echo $(printf "${FIXED}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}"))
+fixed.extinfo $(printf '%s' "${FIXED}" | count_entries "${FIELD}" | sort -nr | sed "${CVECOUNTRE}" | xargs)
 EOF
