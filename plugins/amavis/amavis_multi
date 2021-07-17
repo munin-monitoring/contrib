@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to monitor amavis mail filter status.
+
+=head1 NAME
+
+amavis_multi - monitor amavis mail filter status
+
+=head1 CONFIGURATION
+
+Following config is needed:
+
+    [amavis_multi]
+    user amavis
+
+=head1 AUTHOR
+
+Kim Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import os
+import subprocess
+import sys
+
+
+def run_binary(arg):
+    """Run binary and return output."""
+    try:
+        return subprocess.run(arg, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, check=False,
+                              encoding='utf-8', errors='ignore').stdout
+    except FileNotFoundError:
+        return ''
+
+
+def get_values():
+    """Get status from nanny and agent. They are part of amavis."""
+    ret = {
+        'nanny': {
+            'total': 0,
+            'busy': 0,
+        },
+        'agent': {},
+    }
+    agent = run_binary(['amavisd-agent', '-c', '1'])
+    nanny = run_binary(['amavisd-nanny', '-c', '1'])
+    if not agent or not nanny:
+        return ret
+
+    # Busy count from nanny
+    for line in nanny.splitlines():
+        if not line.startswith('PID ') or ':' not in line:
+            continue
+        ret['nanny']['total'] += 1
+        if ':   ' not in line:
+            ret['nanny']['busy'] += 1
+
+    # Mail counts and processing times from agent
+    for line in agent.splitlines():
+        items = line.split()
+        if len(items) > 1 and items[1].isnumeric():
+            ret['agent'][items[0]] = items[1:]
+    return ret
+
+
+def print_status(config):
+    """Print config or values."""
+    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-statements
+    both = os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1'
+    values = get_values()
+
+    # Busy processes. Use average of last three runs so that single "bad
+    # timing" doesn't trigger warning.
+    print('multigraph amavis_processes')
+    if config or both:
+        print('graph_title Amavis mail filter busy processes')
+        print('graph_vlabel % busy')
+        print('graph_args --base 1000 --lower-limit 0 --upper-limit 100')
+        print('graph_category spamfilter')
+        print('busy.label Percent of busy processes')
+        print('busy.warning 80')
+        print('busy.critical 95')
+    if not config or both:
+        if not values['nanny']['total']:
+            print('busy.value U')
+        else:
+            statename = os.path.join(os.getenv('MUNIN_PLUGSTATE'),
+                                     'amavis_multi.state')
+            try:
+                with open(statename, 'rt') as statef:
+                    count1 = int(statef.readline())
+                    count2 = int(statef.readline())
+            except (FileNotFoundError, TypeError, ValueError):
+                count1 = count2 = 0
+            with open(statename, 'wt') as statef:
+                print(values['nanny']['busy'], file=statef)
+                print(count1, file=statef)
+            print('busy.value {}'.format(
+                (values['nanny']['busy'] + count1 + count2) * 100 / 3 /
+                values['nanny']['total']))
+
+    # Mail counts
+    print('multigraph amavis_mails')
+    if config or both:
+        print('graph_title Amavis mail filter mail counts')
+        print('graph_period minute')
+        print('graph_vlabel mails per ${graph_period}')
+        print('graph_args --base 1000 --lower-limit 0')
+        print('graph_category spamfilter')
+        print('contentcleanmsgs.label Clean mails')
+        print('contentcleanmsgs.type DERIVE')
+        print('contentcleanmsgs.min 0')
+        print('contentbadhdrmsgs.label Bad header mails')
+        print('contentbadhdrmsgs.type DERIVE')
+        print('contentbadhdrmsgs.min 0')
+        print('contentspammymsgs.label Spammy mails')
+        print('contentspammymsgs.type DERIVE')
+        print('contentspammymsgs.min 0')
+        print('contentspammsgs.label Spam mails')
+        print('contentspammsgs.type DERIVE')
+        print('contentspammsgs.min 0')
+        print('contentvirusmsgs.label Virus mails')
+        print('contentvirusmsgs.type DERIVE')
+        print('contentvirusmsgs.min 0')
+        print('inmsgs.label Total mails')
+        print('inmsgs.type DERIVE')
+        print('inmsgs.min 0')
+    if not config or both:
+        for key in ('ContentCleanMsgs',
+                    'ContentBadHdrMsgs',
+                    'ContentSpammyMsgs',
+                    'ContentSpamMsgs',
+                    'ContentVirusMsgs',
+                    'InMsgs'):
+            if key in values['agent']:
+                print('{}.value {}'.format(key.lower(),
+                                           values['agent'][key][0]))
+            else:
+                # Key is missing if no such mail yet, so 0, not U.
+                print('{}.value 0'.format(key.lower()))
+
+    # Elapsed times
+    print('multigraph amavis_times')
+    if config or both:
+        print('graph_title Amavis mail filter elapsed times')
+        print('graph_vlabel seconds per mail')
+        print('graph_args --base 1000 --lower-limit 0')
+        print('graph_category spamfilter')
+        print('timeelapsedreceiving.label Receiving')
+        print('timeelapseddecoding.label Decoding')
+        print('timeelapsedspamcheck.label Spam check')
+        print('timeelapsedviruscheck.label Virus check')
+        print('timeelapsedsending.label Sending')
+        print('timeelapsedtotal.label Total')
+    if not config or both:
+        for key in ('TimeElapsedReceiving',
+                    'TimeElapsedDecoding',
+                    'TimeElapsedSpamCheck',
+                    'TimeElapsedVirusCheck',
+                    'TimeElapsedSending',
+                    'TimeElapsedTotal'):
+            if key in values['agent']:
+                print('{}.value {}'.format(key.lower(),
+                                           values['agent'][key][2]))
+            else:
+                # Key is missing if feature is not used, so 0, not U.
+                print('{}.value 0'.format(key.lower()))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if get_values()['agent'] else
+              'no (amavis is not running)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        print_status(True)
+    else:
+        print_status(False)
