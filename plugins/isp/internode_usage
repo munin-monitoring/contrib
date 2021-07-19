@@ -46,15 +46,16 @@ to have a better chance of getting the data out nonetheless.
 
 * The hourly rate are a bit spikey in the -day view, as the API seems to update
   every 20 to 30 minutes; it is fine in the -month and more aggregated views
-* The daily rate is the _previous_ day, and does always lag by 24h
+* The daily rate is the _previous_ day, and does always lag by 24h.
 * Due to the way the API seems to update the data, values for the daily rate
-  are missing for a short period every day
+  are missing for a short period every day. This may not play very well with
+	spoolfetch.
 
 =head1 AUTHOR
 
 Olivier Mehani
 
-Copyright (C) 2019 Olivier Mehani <shtrom+munin@ssji.net>
+Copyright (C) 2019--2021 Olivier Mehani <shtrom+munin@ssji.net>
 
 =head1 LICENSE
 
@@ -170,7 +171,7 @@ get_service_data() {
 		FIRST_DAY="$(date +%s --date "${SERVICE_ROLLOVER} -1 ${SERVICE_INTERVAL}")"
 		LAST_DAY="$(date +%s --date "${SERVICE_ROLLOVER}")"
 		BILLING_PERIOD="(${LAST_DAY}-${FIRST_DAY})"
-		IDEAL_USAGE="$(echo "${SERVICE_QUOTA}-(${SERVICE_QUOTA}*(${LAST_DAY}-${CURRENT_TIMESTAMP})/${BILLING_PERIOD})" | bc -ql)"
+		IDEAL_USAGE="$(echo "${SERVICE_QUOTA}-(${SERVICE_QUOTA}*(${LAST_DAY}-${CURRENT_TIMESTAMP})/${BILLING_PERIOD})" | bc -q)"
 
 		USAGE_CRITICAL="${SERVICE_QUOTA}"
 	fi
@@ -238,8 +239,22 @@ graph_config() {
 			echo "daily_rate.type GAUGE"
 
 			;;
+		'')
+			echo "graph_title Uplink usage"
+			echo "graph_info Username: ${SERVICE_USERNAME}; Service ID: ${SERVICE_ID}; Plan: ${SERVICE_PLAN}"
+			echo 'graph_category network'
+			echo 'graph_vlabel bytes'
+			echo 'graph_period hour'
+			echo 'graph_order root_usage=usage.usage root_ideal=usage.ideal'
+
+			echo "root_usage.label Total usage"
+			echo "root_usage.draw AREA"
+			echo "root_ideal.extinfo Quota rollover: ${SERVICE_ROLLOVER}"
+			echo "root_ideal.label Ideal usage"
+			echo "root_ideal.draw LINE2"
+			echo "root_ideal.colour FFA500"
+			;;
 		*)
-		#.usage)
 			echo "graph_title Uplink usage"
 			echo "graph_info Username: ${SERVICE_USERNAME}; Service ID: ${SERVICE_ID}; Plan: ${SERVICE_PLAN}"
 			echo 'graph_category network'
@@ -250,13 +265,11 @@ graph_config() {
 			echo "usage.draw AREA"
 			echo "ideal.extinfo Quota rollover: ${SERVICE_ROLLOVER}"
 			echo "ideal.label Ideal usage"
-			echo "ideal.draw LINE"
+			echo "ideal.draw LINE2"
 			echo "ideal.colour FFA500"
 
 			echo "usage.critical ${USAGE_CRITICAL}"
 			echo "usage.warning ${IDEAL_USAGE}"
-			echo "ideal.critical 0:"
-			echo "ideal.warning 0:"
 			;;
 	esac
 	echo
@@ -276,6 +289,9 @@ graph_data() {
 		.daily)
 			echo "daily_rate.value ${DAILY_TIMESTAMP}:${DAILY_USAGE:-U}"
 			;;
+		'')
+			# Nothing to do: all values loaned from the traffic graph
+			;;
 		*)
 			echo "usage.value ${CURRENT_TIMESTAMP}:${SERVICE_USAGE:-U}"
 			echo "ideal.value ${CURRENT_TIMESTAMP}:${IDEAL_USAGE:-U}"
@@ -290,14 +306,14 @@ main() {
 			if [ -n "${host_name:-}" ]; then
 				echo "host_name ${host_name}"
 			fi
-			graph_config
+			graph_config ''
 			graph_config usage
 			graph_config daily
 			graph_config current
 			;;
 		*)
 			get_data
-			graph_data
+			graph_data ''
 			graph_data usage
 			graph_data daily
 			graph_data current
