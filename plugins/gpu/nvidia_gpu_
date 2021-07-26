@@ -268,12 +268,28 @@ case $name in
 		valueGpus=$(echo "$smiOutput" | grep "Gpu" | cut -d ':' -f 2 | cut -d ' ' -f 2)
 		;;
 	rx)
-		valueGpus=$(echo "$smiOutput" | grep "Rx Throughput" | cut -d ':' -f 2 | cut -d ' ' -f 2)
-		valueGpus=$((valueGpus*1024))
+		rxGpus=$(echo "$smiOutput" | grep "Rx Throughput" | cut -d ':' -f 2 | cut -d ' ' -f 2)
+		valueGpus=''
+		nGpusCounter=0
+		while [ $nGpusCounter -lt "$nGpus" ]
+		do
+			kiloBitsPerSecond=$(echo "$rxGpus" | sed -n $((nGpusCounter+1))p)
+			bitsPerSecond=$((kiloBitsPerSecond*1024))
+			valueGpus="${valueGpus}${bitsPerSecond}"$'\n'
+			: $((nGpusCounter=nGpusCounter+1))
+		done
 		;;
 	tx)
-		valueGpus=$(echo "$smiOutput" | grep "Tx Throughput" | cut -d ':' -f 2 | cut -d ' ' -f 2)
-		valueGpus=$((valueGpus*1024))
+		txGpus=$(echo "$smiOutput" | grep "Tx Throughput" | cut -d ':' -f 2 | cut -d ' ' -f 2)
+		valueGpus=''
+		nGpusCounter=0
+		while [ $nGpusCounter -lt "$nGpus" ]
+		do
+			kiloBitsPerSecond=$(echo "$txGpus" | sed -n $((nGpusCounter+1))p)
+			bitsPerSecond=$((kiloBitsPerSecond*1024))
+			valueGpus="${valueGpus}${bitsPerSecond}"$'\n'
+			: $((nGpusCounter=nGpusCounter+1))
+		done
 		;;
 	*)
 		echo "Can't run without a proper symlink. Exiting."
