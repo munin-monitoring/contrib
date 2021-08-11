@@ -73,8 +73,8 @@ Each of them has "payload" and "overhead" value.
 
 =head2 states
 
-In the "states" mode, this plugin shows the number of torrents in each state :
-Downloading, Seeding, Paused, Error, Queued, Checking, Other
+In the "states" mode, this plugin shows the number of torrents in the states:
+Seeding, Uploading, Downloading, Checking, Stopped, Queued seeding, Queued downloads, Errors
 
 =head1 MAGIC MARKERS
 
@@ -128,29 +128,6 @@ conf = {
     'password': os.getenv('password', '')
 }
 
-names_for_munin = {
-    'numConnections': 'numConnections',
-    'payloadUploadRate': 'payloadUploadRate',
-    'overheadUploadRate': 'overheadUploadRate',
-    'payloadDownloadRate': 'payloadDownloadRate',
-    'overheadDownloadRate': 'overheadDownloadRate',
-    'state.Seeding': 'seeding',
-    'state.Downloading': 'downloading',
-    'state.Paused': 'paused',
-    'state.Error': 'error',
-    'state.Queued': 'queued',
-    'state.Checking': 'checking',
-    'state.Other': 'other',
-}
-
-torrent_states = ["Downloading",
-                  "Seeding",
-                  "Paused",
-                  "Error",
-                  "Queued",
-                  "Checking",
-                  "Other"]
-
 modes = ["bandwidth", "peers", "states"]
 
 connection_keys = [
@@ -158,6 +135,17 @@ connection_keys = [
     { 'id': 'peer.num_peers_half_open', 'label': 'Half open' },
     { 'id': 'peer.num_peers_up_interested', 'label': 'Interested (upload)' },
     { 'id': 'peer.num_peers_down_interested', 'label': 'Interested (download)' }
+]
+
+torrent_keys = [
+    { 'id': 'ses.num_seeding_torrents', 'label': 'Seeding' },
+    { 'id': 'ses.num_upload_only_torrents', 'label': 'Uploading' },
+    { 'id': 'ses.num_downloading_torrents', 'label': 'Downloading' },
+    { 'id': 'ses.num_checking_torrents', 'label': 'Checking' },
+    { 'id': 'ses.num_stopped_torrents', 'label': 'Stopped' },
+    { 'id': 'ses.num_queued_seeding_torrents', 'label': 'Queued seeding' },
+    { 'id': 'ses.num_queued_download_torrents', 'label': 'Queued downloads' },
+    { 'id': 'ses.num_error_torrents', 'label': 'Error' },
 ]
 
 def for_munin(value):
@@ -217,8 +205,11 @@ class StatClient:
                 errbackArgs=("get_session_status failed"))
         elif self.mode == "states":
             log.debug("Calling get_session_state")
-            client.core.get_session_state().addCallbacks(
-                self.on_session_state,
+            keys = []
+            for torrent_key in torrent_keys:
+                keys.append(torrent_key['id'])
+            client.core.get_session_status(keys=keys).addCallbacks(
+                self.on_torrent_session_state,
                 self.end_session,
                 errbackArgs=("get_session_state failed"))
         else:
@@ -244,55 +235,20 @@ class StatClient:
         payload_upload_rate = values['payload_upload_rate']
         overhead_upload_rate = upload_rate - payload_upload_rate
 
-        print("{0}.value {1}".format(
-            names_for_munin["payloadDownloadRate"], payload_download_rate))
-        print("{0}.value {1}".format(
-            names_for_munin["overheadDownloadRate"], overhead_download_rate))
-        print("{0}.value {1}".format(
-            names_for_munin["payloadUploadRate"], payload_upload_rate))
-        print("{0}.value {1}".format(
-            names_for_munin["overheadUploadRate"], overhead_upload_rate))
+        print(f"payloadDownloadRate.value {payload_download_rate}")
+        print(f"overheadDownloadRate.value {overhead_download_rate}")
+        print(f"payloadUploadRate.value {payload_upload_rate}")
+        print(f"overheadUploadRate.value {overhead_upload_rate}")
         self.end_session("Done")
 
-    def on_session_state(self, torrent_ids):
-        log.debug("Got session state from the daemon")
+    def on_torrent_session_state(self, result):
+        log.debug("Got torrent session state from the daemon", result)
 
-        self.states = {}
-        for state_name in torrent_states:
-            self.states[state_name] = 0
-
-        deferred_list = []
-        for torrent_id in torrent_ids:
-            log.debug(" - TorrentId : %s", torrent_id)
-            d = client.core.get_torrent_status(torrent_id, ['state'])
-            d.addCallback(self.on_one_torrent_info, torrent_id)
-            d.addErrback(self.on_one_torrent_info_failed, torrent_id)
-            deferred_list.append(d)
-
-        defer.DeferredList(deferred_list).addCallback(
-            self.on_all_torrent_info_fetched)
-
-    def on_one_torrent_info_failed(self, torrent_id):
-        log.debug("Failed fetching torrent info %s", torrent_id)
-        self.state["Error"] = self.state["Error"] + 1
-
-    def on_one_torrent_info(self, value, torrent_id):
-        log.debug("Got torrent info : %s -> %s", torrent_id, value)
-        state = value.get("state", "Error")
-
-        if state not in self.states:
-            log.warn("State '%s' is unknown !", state)
-            state = "Other"
-
-        self.states[state] += 1
-
-    def on_all_torrent_info_fetched(self, res):
-        log.debug("on_all_torrent_info_fetched : %s", self.states)
-
-        for state in self.states:
-            print("{0}.value {1}".format(
-                names_for_munin["state." + state], self.states[state]))
-
+        for torrent_key in torrent_keys:
+            print(
+                f"{for_munin(torrent_key['id'])}.value "
+                f"{result[torrent_key['id']]}"
+            )
         self.end_session("Done")
 
 
@@ -359,12 +315,7 @@ def print_config(mode):
         print("overheadUploadRate.info Bandwidth 'lost' due to overhead while downloading and "
               "uploading torrents")
     elif mode == "states":
-        print("graph_title Torrents states")
-
-        graph_order = " ".join(
-            [names_for_munin["state.{}".format(name)] for name in torrent_states])
-
-        print("graph_order " + graph_order)
+        print("graph_title Torrent states")
         print("graph_args --base 1000 -r --lower-limit 0")
         print("graph_vlabel number of torrents")
         print("graph_scale yes")
@@ -372,13 +323,11 @@ def print_config(mode):
         print("graph_category filetransfer")
         print("graph_period second")
 
-        for state_name in torrent_states:
-            print(names_for_munin["state." + state_name] + ".label " + state_name)
-            print(names_for_munin["state." + state_name] + ".draw AREASTACK")
-            print(names_for_munin["state." + state_name] + ".type GAUGE")
-            print(names_for_munin["state." + state_name] + ".min 0")
-            print(names_for_munin["state." + state_name]
-                  + ".info Number of torrents in the '" + state_name + "' state")
+        for torrent_key in torrent_keys:
+            print(f"{for_munin(torrent_key['id'])}.label {torrent_key['label']}")
+            print(f"{for_munin(torrent_key['id'])}.min 0")
+            print(f"{for_munin(torrent_key['id'])}.draw AREASTACK")
+            print(f"{for_munin(torrent_key['id'])}.type GAUGE")
 
 
 def fetch_info(mode):
@@ -407,8 +356,7 @@ if len(sys.argv) > 1:
             print(mode)
         sys.exit(0)
     elif action == "version":
-        print('Deluge Torrent Munin plugin, version {0}'.format(
-            plugin_version))
+        print(f"Deluge Torrent Munin plugin, version {plugin_version}")
         sys.exit(0)
     elif action:
         log.warn("Unknown argument '%s'", action)
