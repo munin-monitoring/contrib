@@ -101,14 +101,14 @@ from __future__ import print_function
 
 import logging
 import os
-import string
 import sys
 
 
 try:
     from deluge.log import setup_logger
     from deluge.ui.client import client
-    from twisted.internet import reactor, defer
+    from twisted.internet import reactor
+
     setup_logger()
 except (ImportError, NameError):
     successful_import = False
@@ -122,38 +122,38 @@ log = logging.getLogger("delugeStats")
 log.setLevel(logging.WARNING)
 
 conf = {
-    'host': os.getenv('host', '127.0.0.1'),
-    'port': int(os.getenv('port', '58846')),
-    'username': os.getenv('username', ''),
-    'password': os.getenv('password', '')
+    "host": os.getenv("host", "127.0.0.1"),
+    "port": int(os.getenv("port", "58846")),
+    "username": os.getenv("username", ""),
+    "password": os.getenv("password", ""),
 }
 
 modes = ["bandwidth", "peers", "states"]
 
 connection_keys = [
-    { 'id': 'peer.num_peers_connected', 'label': 'Total' },
-    { 'id': 'peer.num_peers_half_open', 'label': 'Half open' },
-    { 'id': 'peer.num_peers_up_interested', 'label': 'Interested (upload)' },
-    { 'id': 'peer.num_peers_down_interested', 'label': 'Interested (download)' }
+    {"id": "peer.num_peers_connected", "label": "Total"},
+    {"id": "peer.num_peers_half_open", "label": "Half open"},
+    {"id": "peer.num_peers_up_interested", "label": "Interested (upload)"},
+    {"id": "peer.num_peers_down_interested", "label": "Interested (download)"},
 ]
 
 torrent_keys = [
-    { 'id': 'ses.num_seeding_torrents', 'label': 'Seeding' },
-    { 'id': 'ses.num_upload_only_torrents', 'label': 'Uploading' },
-    { 'id': 'ses.num_downloading_torrents', 'label': 'Downloading' },
-    { 'id': 'ses.num_checking_torrents', 'label': 'Checking' },
-    { 'id': 'ses.num_stopped_torrents', 'label': 'Stopped' },
-    { 'id': 'ses.num_queued_seeding_torrents', 'label': 'Queued seeding' },
-    { 'id': 'ses.num_queued_download_torrents', 'label': 'Queued downloads' },
-    { 'id': 'ses.num_error_torrents', 'label': 'Error' },
+    {"id": "ses.num_seeding_torrents", "label": "Seeding"},
+    {"id": "ses.num_upload_only_torrents", "label": "Uploading"},
+    {"id": "ses.num_downloading_torrents", "label": "Downloading"},
+    {"id": "ses.num_checking_torrents", "label": "Checking"},
+    {"id": "ses.num_stopped_torrents", "label": "Stopped"},
+    {"id": "ses.num_queued_seeding_torrents", "label": "Queued seeding"},
+    {"id": "ses.num_queued_download_torrents", "label": "Queued downloads"},
+    {"id": "ses.num_error_torrents", "label": "Error"},
 ]
 
+
 def for_munin(value):
-    return value.replace('.', '').replace('_', '')
+    return value.replace(".", "").replace("_", "")
 
 
 class StatClient:
-
     def __init__(self, conf, mode):
         self.conf = conf
         self.mode = mode
@@ -169,18 +169,18 @@ class StatClient:
         reactor.stop()
 
     def fetch_info(self):
-        log.debug("Connecting to %s:%d ...",
-                  self.conf['host'], self.conf['port'])
+        log.debug("Connecting to %s:%d ...", self.conf["host"], self.conf["port"])
         client.connect(
-            self.conf['host'],
-            self.conf['port'],
-            self.conf['username'],
-            self.conf['password']).addCallbacks(
+            self.conf["host"],
+            self.conf["port"],
+            self.conf["username"],
+            self.conf["password"],
+        ).addCallbacks(
             self.on_connect_success,
             self.end_session,
-            errbackArgs=("Connection failed: check settings and try again."))
+            errbackArgs=("Connection failed: check settings and try again."),
+        )
         reactor.run()
-
 
     def on_connect_success(self, result):
         log.debug("Connection was successful")
@@ -190,28 +190,35 @@ class StatClient:
             log.debug("Calling get_session_status")
             keys = []
             for connection_key in connection_keys:
-                keys.append(connection_key['id'])
+                keys.append(connection_key["id"])
             client.core.get_session_status(keys=keys).addCallbacks(
                 self.on_peer_session_status,
-                self.end_session, errbackArgs=("get_session_status failed"))
+                self.end_session,
+                errbackArgs=("get_session_status failed"),
+            )
         elif self.mode == "bandwidth":
             log.debug("Calling get_session_status")
             interesting_status = [
-                'upload_rate', 'payload_upload_rate',
-                'download_rate', 'payload_download_rate']
+                "upload_rate",
+                "payload_upload_rate",
+                "download_rate",
+                "payload_download_rate",
+            ]
             client.core.get_session_status(interesting_status).addCallbacks(
                 self.on_bandwidth,
                 self.end_session,
-                errbackArgs=("get_session_status failed"))
+                errbackArgs=("get_session_status failed"),
+            )
         elif self.mode == "states":
             log.debug("Calling get_session_state")
             keys = []
             for torrent_key in torrent_keys:
-                keys.append(torrent_key['id'])
+                keys.append(torrent_key["id"])
             client.core.get_session_status(keys=keys).addCallbacks(
                 self.on_torrent_session_state,
                 self.end_session,
-                errbackArgs=("get_session_state failed"))
+                errbackArgs=("get_session_state failed"),
+            )
         else:
             log.error("Unknown mode '%s'", mode)
             sys.exit(1)
@@ -228,11 +235,11 @@ class StatClient:
     def on_bandwidth(self, values):
         log.debug("Got bandwidth info from the daemon : %s", values)
 
-        download_rate = values['download_rate']
-        payload_download_rate = values['payload_download_rate']
+        download_rate = values["download_rate"]
+        payload_download_rate = values["payload_download_rate"]
         overhead_download_rate = download_rate - payload_download_rate
-        upload_rate = values['upload_rate']
-        payload_upload_rate = values['payload_upload_rate']
+        upload_rate = values["upload_rate"]
+        payload_upload_rate = values["payload_upload_rate"]
         overhead_upload_rate = upload_rate - payload_upload_rate
 
         print(f"payloadDownloadRate.value {payload_download_rate}")
@@ -246,15 +253,14 @@ class StatClient:
 
         for torrent_key in torrent_keys:
             print(
-                f"{for_munin(torrent_key['id'])}.value "
-                f"{result[torrent_key['id']]}"
+                f"{for_munin(torrent_key['id'])}.value " f"{result[torrent_key['id']]}"
             )
         self.end_session("Done")
 
 
 def get_mode():
     script_name = os.path.basename(sys.argv[0])
-    mode = script_name[script_name.rindex('_') + 1:]
+    mode = script_name[script_name.rindex("_") + 1 :]
 
     log.debug("Mode : %s", mode)
 
@@ -274,14 +280,17 @@ def print_config(mode):
         print("graph_scale yes")
         print("graph_category filetransfer")
         print(
-            "graph_info This graph shows the number of peers for the Deluge Torrent client")
+            "graph_info This graph shows the number of peers for the Deluge Torrent client"
+        )
         for connection_key in connection_keys:
             print(f"{for_munin(connection_key['id'])}.label {connection_key['label']}")
             print(f"{for_munin(connection_key['id'])}.min 0")
     elif mode == "bandwidth":
         print("graph_title Bandwidth usage")
-        print("graph_order payloadDownloadRate overheadDownloadRate payloadUploadRate "
-              "overheadUploadRate")
+        print(
+            "graph_order payloadDownloadRate overheadDownloadRate payloadUploadRate "
+            "overheadUploadRate"
+        )
         print("graph_args --base 1024 -r")
         print("graph_vlabel bytes/s : down(-) and up(+)")
         print("graph_scale yes")
@@ -299,8 +308,10 @@ def print_config(mode):
         print("overheadDownloadRate.draw STACK")
         print("overheadDownloadRate.min 0")
         print("overheadDownloadRate.graph no")
-        print("overheadDownloadRate.info Bandwidth 'lost' due to overhead while downloading and "
-              "uploading torrents")
+        print(
+            "overheadDownloadRate.info Bandwidth 'lost' due to overhead while downloading and "
+            "uploading torrents"
+        )
 
         print("payloadUploadRate.label payload")
         print("payloadUploadRate.draw AREA")
@@ -312,14 +323,18 @@ def print_config(mode):
         print("overheadUploadRate.draw STACK")
         print("overheadUploadRate.min 0")
         print("overheadUploadRate.negative overheadDownloadRate")
-        print("overheadUploadRate.info Bandwidth 'lost' due to overhead while downloading and "
-              "uploading torrents")
+        print(
+            "overheadUploadRate.info Bandwidth 'lost' due to overhead while downloading and "
+            "uploading torrents"
+        )
     elif mode == "states":
         print("graph_title Torrent states")
         print("graph_args --base 1000 -r --lower-limit 0")
         print("graph_vlabel number of torrents")
         print("graph_scale yes")
-        print("graph_info This graph shows the states of the torrents in Deluge Torrent")
+        print(
+            "graph_info This graph shows the states of the torrents in Deluge Torrent"
+        )
         print("graph_category filetransfer")
         print("graph_period second")
 
@@ -332,7 +347,7 @@ def print_config(mode):
 
 def fetch_info(mode):
     if not successful_import:
-        print('Missing imports, cannot run !', file=sys.stderr)
+        print("Missing imports, cannot run !", file=sys.stderr)
         sys.exit(1)
 
     log.debug("Launching tests")
@@ -348,9 +363,9 @@ if len(sys.argv) > 1:
         sys.exit(0)
     elif action == "autoconf":
         if not successful_import:
-            print('no (required modules not found)')
+            print("no (required modules not found)")
             sys.exit(0)
-        print('yes')
+        print("yes")
     elif action == "suggest":
         for mode in modes:
             print(mode)
