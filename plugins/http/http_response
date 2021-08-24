@@ -11,14 +11,16 @@ http_response - Monitor HTTP response statistics
 
 The following environment variables are used
 
- sites       - Sites to check
-                 - separated by spaces
-                 - can contain basic auth credentials
-                 - defaults to "http://localhost/"
- max_time    - Timeout for each site check in seconds
-                 - defaults to 5 seconds
- short_label - Switch for shortening the label below the graph
-                 - defaults to false
+ sites           - Sites to check
+                     - separated by spaces
+                     - can contain basic auth credentials
+                     - defaults to "http://localhost/"
+ max_time        - Timeout for each site check in seconds
+                     - defaults to 5 seconds
+ short_label     - Switch for shortening the label below the graph
+                     - defaults to false
+ follow_redirect - Follow http redirects
+                     - defaults to false
 
 =head2 CONFIGURATION EXAMPLE
 
@@ -26,6 +28,7 @@ The following environment variables are used
   env.sites http://example.com/ https://user:secret@example2.de
   env.max_time 20
   env.short_label true
+  env.follow_redirect true
 
 =head1 PREREQUISITES
 
@@ -116,12 +119,13 @@ fi
 sites=${sites:-"http://localhost/"}
 max_time=${max_time:-5}
 short_label=${short_label:-"false"}
+follow_redirect=${follow_redirect:-"false"}
 
 if [[ "$1" == "config" ]]; then
     echo 'multigraph http_response_code'
     echo 'graph_args --base 1000 -l 0 -u 511'
     echo 'graph_title HTTP Response Codes'
-    echo 'graph_vlabel Repsonse Code'
+    echo 'graph_vlabel Response Code'
     echo 'graph_category network'
     echo 'graph_info This graph shows HTTP response code statistics'
     echo 'graph_printf %3.0lf'
@@ -168,15 +172,21 @@ for site in $sites; do
         curl_auth_opt=(--config "$curl_config_file")
     fi
 
+    curl_arg=""
+    if $follow_redirect; then
+        curl_arg="--location"
+    fi
+
     siteid="$( clean_fieldname "$site_without_credentials" )"
     statuscode=
     loadtime=
     start=$(date +%s.%N)
-    statuscode=$( curl "${curl_auth_opt[@]}" --write-out '%{http_code}' --max-time "$max_time" --silent --output /dev/null "$site_without_credentials" )
+    statuscode=$( curl "${curl_auth_opt[@]}" --write-out '%{http_code}' --max-time "$max_time" $curl_arg --silent --output /dev/null "$site_without_credentials" )
     returncode=$?
     loadtime=$( echo "$start" "$(date +%s.%N)" | awk '{ print($2 - $1); }' )
     if [[ $returncode -ne 0 ]]; then
-        loadtime=0
+        loadtime="U"
+        statuscode="U"
     fi
     response_codes+=(["$siteid"]="$statuscode")
     response_times+=(["$siteid"]="$loadtime")

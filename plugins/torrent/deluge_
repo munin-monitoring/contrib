@@ -1,14 +1,14 @@
-#! /usr/bin/env python2
+#! /usr/bin/env python3
 
 """=cut
 =head1 NAME
 
-deluge_ - Munin wildcard plugin to monitor Deluge torrent client
+deluge_ - Munin wildcard plugin to monitor the Deluge torrent client
 
 =head1 REQUIREMENTS
 
- - Python2.5+ (Deluge itself won't work with python3)
- - Deluge
+ - Python3+
+ - Deluge2+
 
 This plugin also uses
  - deluge.ui.client
@@ -19,13 +19,13 @@ These modules are required by Deluge itself.
 =head1 INSTALLATION
 
 This plugin has 3 modes :
- - connections : monitors the number of connections
+ - peers : monitors the number of peers
  - bandwidth : monitors the bandwidth (up, up overhead, down, down overhead)
  - states : monitors the torrents' states
 
 To use one of these modes, link the this plugin as 'deluge_<mode>'
 For example :
-ln -s /path/to/deluge_ /etc/munin/plugins/deluge_connections
+ln -s /path/to/deluge_ /etc/munin/plugins/deluge_peers
 
 =head1 CONFIGURATION
 
@@ -58,10 +58,10 @@ set the env.XDG_CONFIG_HOME if needed.
 
 =head1 INTERPRETATION
 
-=head2 connections
+=head2 peers
 
-In the "connections" mode, this plugin shows a graph with the number of
-connections
+In the "peers" mode, this plugin shows a graph with the number of
+total peers, half open peers, and peers interested in upload and download slots
 
 =head2 bandwidth
 
@@ -73,8 +73,8 @@ Each of them has "payload" and "overhead" value.
 
 =head2 states
 
-In the "states" mode, this plugin shows the number of torrents in each state :
-Downloading, Seeding, Paused, Error, Queued, Checking, Other
+In the "states" mode, this plugin shows the number of torrents in the states:
+Seeding, Uploading, Downloading, Checking, Stopped, Queued seeding, Queued downloads, Errors
 
 =head1 MAGIC MARKERS
 
@@ -83,11 +83,12 @@ Downloading, Seeding, Paused, Error, Queued, Checking, Other
 
 =head1 VERSION
 
-1.0.0
+2.0.0
 
 =head1 AUTHOR
 
 Neraud (https://github.com/Neraud)
+kmkr (https://github.com/kmkr)
 
 =head1 LICENSE
 
@@ -100,61 +101,59 @@ from __future__ import print_function
 
 import logging
 import os
-import string
 import sys
 
 
 try:
-    from deluge.log import setupLogger
+    from deluge.log import setup_logger
     from deluge.ui.client import client
-    from twisted.internet import reactor, defer
-    setupLogger()
+    from twisted.internet import reactor
+
+    setup_logger()
 except (ImportError, NameError):
     successful_import = False
 else:
     successful_import = True
 
 
-plugin_version = "1.0.0"
+plugin_version = "2.0.0"
 
 log = logging.getLogger("delugeStats")
 log.setLevel(logging.WARNING)
 
 conf = {
-    'host': os.getenv('host', '127.0.0.1'),
-    'port': int(os.getenv('port', '58846')),
-    'username': os.getenv('username', ''),
-    'password': os.getenv('password', '')
+    "host": os.getenv("host", "127.0.0.1"),
+    "port": int(os.getenv("port", "58846")),
+    "username": os.getenv("username", ""),
+    "password": os.getenv("password", ""),
 }
 
-names_for_munin = {
-    'numConnections': 'numConnections',
-    'payloadUploadRate': 'payloadUploadRate',
-    'overheadUploadRate': 'overheadUploadRate',
-    'payloadDownloadRate': 'payloadDownloadRate',
-    'overheadDownloadRate': 'overheadDownloadRate',
-    'state.Seeding': 'seeding',
-    'state.Downloading': 'downloading',
-    'state.Paused': 'paused',
-    'state.Error': 'error',
-    'state.Queued': 'queued',
-    'state.Checking': 'checking',
-    'state.Other': 'other'
-}
+modes = ["bandwidth", "peers", "states"]
 
-torrent_states = ["Downloading",
-                  "Seeding",
-                  "Paused",
-                  "Error",
-                  "Queued",
-                  "Checking",
-                  "Other"]
+connection_keys = [
+    {"id": "peer.num_peers_connected", "label": "Total"},
+    {"id": "peer.num_peers_half_open", "label": "Half open"},
+    {"id": "peer.num_peers_up_interested", "label": "Interested (upload)"},
+    {"id": "peer.num_peers_down_interested", "label": "Interested (download)"},
+]
 
-modes = ["bandwidth", "connections", "states"]
+torrent_keys = [
+    {"id": "ses.num_seeding_torrents", "label": "Seeding"},
+    {"id": "ses.num_upload_only_torrents", "label": "Uploading"},
+    {"id": "ses.num_downloading_torrents", "label": "Downloading"},
+    {"id": "ses.num_checking_torrents", "label": "Checking"},
+    {"id": "ses.num_stopped_torrents", "label": "Stopped"},
+    {"id": "ses.num_queued_seeding_torrents", "label": "Queued seeding"},
+    {"id": "ses.num_queued_download_torrents", "label": "Queued downloads"},
+    {"id": "ses.num_error_torrents", "label": "Error"},
+]
+
+
+def for_munin(value):
+    return value.replace(".", "").replace("_", "")
 
 
 class StatClient:
-
     def __init__(self, conf, mode):
         self.conf = conf
         self.mode = mode
@@ -170,114 +169,98 @@ class StatClient:
         reactor.stop()
 
     def fetch_info(self):
-        log.debug("Connecting to %s:%d ...",
-                  self.conf['host'], self.conf['port'])
+        log.debug("Connecting to %s:%d ...", self.conf["host"], self.conf["port"])
         client.connect(
-            self.conf['host'],
-            self.conf['port'],
-            self.conf['username'],
-            self.conf['password']).addCallbacks(
+            self.conf["host"],
+            self.conf["port"],
+            self.conf["username"],
+            self.conf["password"],
+        ).addCallbacks(
             self.on_connect_success,
             self.end_session,
-            errbackArgs=("Connection failed: check settings and try again."))
+            errbackArgs=("Connection failed: check settings and try again."),
+        )
         reactor.run()
 
     def on_connect_success(self, result):
         log.debug("Connection was successful")
         self.connected = True
 
-        if self.mode == "connections":
-            log.debug("Calling get_num_connections")
-            client.core.get_num_connections().addCallbacks(
-                self.on_num_connections,
-                self.end_session, errbackArgs=("get_num_connections failed"))
+        if self.mode == "peers":
+            log.debug("Calling get_session_status")
+            keys = []
+            for connection_key in connection_keys:
+                keys.append(connection_key["id"])
+            client.core.get_session_status(keys=keys).addCallbacks(
+                self.on_peer_session_status,
+                self.end_session,
+                errbackArgs=("get_session_status failed"),
+            )
         elif self.mode == "bandwidth":
             log.debug("Calling get_session_status")
             interesting_status = [
-                'upload_rate', 'payload_upload_rate',
-                'download_rate', 'payload_download_rate']
+                "upload_rate",
+                "payload_upload_rate",
+                "download_rate",
+                "payload_download_rate",
+            ]
             client.core.get_session_status(interesting_status).addCallbacks(
                 self.on_bandwidth,
                 self.end_session,
-                errbackArgs=("get_session_status failed"))
+                errbackArgs=("get_session_status failed"),
+            )
         elif self.mode == "states":
             log.debug("Calling get_session_state")
-            client.core.get_session_state().addCallbacks(
-                self.on_session_state,
+            keys = []
+            for torrent_key in torrent_keys:
+                keys.append(torrent_key["id"])
+            client.core.get_session_status(keys=keys).addCallbacks(
+                self.on_torrent_session_state,
                 self.end_session,
-                errbackArgs=("get_session_state failed"))
+                errbackArgs=("get_session_state failed"),
+            )
+        else:
+            log.error("Unknown mode '%s'", mode)
+            sys.exit(1)
 
-    def on_num_connections(self, num_connections):
-        log.debug("Got num_connections from the daemon : %s", num_connections)
-        print("{0}.value {1}".format(
-            names_for_munin["numConnections"], num_connections))
+    def on_peer_session_status(self, result):
+        log.debug("Got result from the daemon : %s", result)
+        for connection_key in connection_keys:
+            print(
+                f"{for_munin(connection_key['id'])}.value "
+                f"{result[connection_key['id']]}"
+            )
         self.end_session("Done")
 
     def on_bandwidth(self, values):
         log.debug("Got bandwidth info from the daemon : %s", values)
 
-        download_rate = values['download_rate']
-        payload_download_rate = values['payload_download_rate']
+        download_rate = values["download_rate"]
+        payload_download_rate = values["payload_download_rate"]
         overhead_download_rate = download_rate - payload_download_rate
-        upload_rate = values['upload_rate']
-        payload_upload_rate = values['payload_upload_rate']
+        upload_rate = values["upload_rate"]
+        payload_upload_rate = values["payload_upload_rate"]
         overhead_upload_rate = upload_rate - payload_upload_rate
 
-        print("{0}.value {1}".format(
-            names_for_munin["payloadDownloadRate"], payload_download_rate))
-        print("{0}.value {1}".format(
-            names_for_munin["overheadDownloadRate"], overhead_download_rate))
-        print("{0}.value {1}".format(
-            names_for_munin["payloadUploadRate"], payload_upload_rate))
-        print("{0}.value {1}".format(
-            names_for_munin["overheadUploadRate"], overhead_upload_rate))
+        print(f"payloadDownloadRate.value {payload_download_rate}")
+        print(f"overheadDownloadRate.value {overhead_download_rate}")
+        print(f"payloadUploadRate.value {payload_upload_rate}")
+        print(f"overheadUploadRate.value {overhead_upload_rate}")
         self.end_session("Done")
 
-    def on_session_state(self, torrent_ids):
-        log.debug("Got session state from the daemon")
+    def on_torrent_session_state(self, result):
+        log.debug("Got torrent session state from the daemon", result)
 
-        self.states = {}
-        for state_name in torrent_states:
-            self.states[state_name] = 0
-
-        deferred_list = []
-        for torrent_id in torrent_ids:
-            log.debug(" - TorrentId : %s", torrent_id)
-            d = client.core.get_torrent_status(torrent_id, ['state'])
-            d.addCallback(self.on_one_torrent_info, torrent_id)
-            d.addErrback(self.on_one_torrent_info_failed, torrent_id)
-            deferred_list.append(d)
-
-        defer.DeferredList(deferred_list).addCallback(
-            self.on_all_torrent_info_fetched)
-
-    def on_one_torrent_info_failed(self, torrent_id):
-        log.debug("Failed fetching torrent info %s", torrent_id)
-        self.state["Error"] = self.state["Error"] + 1
-
-    def on_one_torrent_info(self, value, torrent_id):
-        log.debug("Got torrent info : %s -> %s", torrent_id, value)
-        state = value.get("state", "Error")
-
-        if state not in self.states:
-            log.warn("State '%s' is unknown !", state)
-            state = "Other"
-
-        self.states[state] += 1
-
-    def on_all_torrent_info_fetched(self, res):
-        log.debug("on_all_torrent_info_fetched : %s", self.states)
-
-        for state in self.states:
-            print("{0}.value {1}".format(
-                names_for_munin["state." + state], self.states[state]))
-
+        for torrent_key in torrent_keys:
+            print(
+                f"{for_munin(torrent_key['id'])}.value " f"{result[torrent_key['id']]}"
+            )
         self.end_session("Done")
 
 
 def get_mode():
     script_name = os.path.basename(sys.argv[0])
-    mode = script_name[string.rindex(script_name, '_') + 1:]
+    mode = script_name[script_name.rindex("_") + 1 :]
 
     log.debug("Mode : %s", mode)
 
@@ -290,22 +273,24 @@ def get_mode():
 
 
 def print_config(mode):
-    if mode == "connections":
-        print("graph_title Number of connections")
+    if mode == "peers":
+        print("graph_title Number of peers")
         print("graph_args --base 1000 -l 0")
-        print("graph_vlabel connections")
+        print("graph_vlabel peers")
         print("graph_scale yes")
         print("graph_category filetransfer")
         print(
-            "graph_info This graph shows the number of connections used by Deluge Torrent")
-        print(names_for_munin["numConnections"] + ".label connections")
-        print(names_for_munin["numConnections"] + ".min 0")
-        print(names_for_munin["numConnections"]
-              + ".info The number of connections used by Deluge Torrent")
+            "graph_info This graph shows the number of peers for the Deluge Torrent client"
+        )
+        for connection_key in connection_keys:
+            print(f"{for_munin(connection_key['id'])}.label {connection_key['label']}")
+            print(f"{for_munin(connection_key['id'])}.min 0")
     elif mode == "bandwidth":
         print("graph_title Bandwidth usage")
-        print("graph_order payloadDownloadRate overheadDownloadRate payloadUploadRate "
-              "overheadUploadRate")
+        print(
+            "graph_order payloadDownloadRate overheadDownloadRate payloadUploadRate "
+            "overheadUploadRate"
+        )
         print("graph_args --base 1024 -r")
         print("graph_vlabel bytes/s : down(-) and up(+)")
         print("graph_scale yes")
@@ -323,8 +308,10 @@ def print_config(mode):
         print("overheadDownloadRate.draw STACK")
         print("overheadDownloadRate.min 0")
         print("overheadDownloadRate.graph no")
-        print("overheadDownloadRate.info Bandwidth 'lost' due to overhead while downloading and "
-              "uploading torrents")
+        print(
+            "overheadDownloadRate.info Bandwidth 'lost' due to overhead while downloading and "
+            "uploading torrents"
+        )
 
         print("payloadUploadRate.label payload")
         print("payloadUploadRate.draw AREA")
@@ -336,34 +323,31 @@ def print_config(mode):
         print("overheadUploadRate.draw STACK")
         print("overheadUploadRate.min 0")
         print("overheadUploadRate.negative overheadDownloadRate")
-        print("overheadUploadRate.info Bandwidth 'lost' due to overhead while downloading and "
-              "uploading torrents")
+        print(
+            "overheadUploadRate.info Bandwidth 'lost' due to overhead while downloading and "
+            "uploading torrents"
+        )
     elif mode == "states":
-        print("graph_title Torrents states")
-
-        graph_order = " ".join(
-            [names_for_munin["state.{}".format(name)] for name in torrent_states])
-
-        print("graph_order " + graph_order)
+        print("graph_title Torrent states")
         print("graph_args --base 1000 -r --lower-limit 0")
         print("graph_vlabel number of torrents")
         print("graph_scale yes")
-        print("graph_info This graph shows the states of the torrents in Deluge Torrent")
+        print(
+            "graph_info This graph shows the states of the torrents in Deluge Torrent"
+        )
         print("graph_category filetransfer")
         print("graph_period second")
 
-        for state_name in torrent_states:
-            print(names_for_munin["state." + state_name] + ".label " + state_name)
-            print(names_for_munin["state." + state_name] + ".draw AREASTACK")
-            print(names_for_munin["state." + state_name] + ".type GAUGE")
-            print(names_for_munin["state." + state_name] + ".min 0")
-            print(names_for_munin["state." + state_name]
-                  + ".info Number of torrents in the '" + state_name + "' state")
+        for torrent_key in torrent_keys:
+            print(f"{for_munin(torrent_key['id'])}.label {torrent_key['label']}")
+            print(f"{for_munin(torrent_key['id'])}.min 0")
+            print(f"{for_munin(torrent_key['id'])}.draw AREASTACK")
+            print(f"{for_munin(torrent_key['id'])}.type GAUGE")
 
 
 def fetch_info(mode):
     if not successful_import:
-        print('Missing imports, cannot run !', file=sys.stderr)
+        print("Missing imports, cannot run !", file=sys.stderr)
         sys.exit(1)
 
     log.debug("Launching tests")
@@ -379,16 +363,15 @@ if len(sys.argv) > 1:
         sys.exit(0)
     elif action == "autoconf":
         if not successful_import:
-            print('no (required modules not found)')
+            print("no (required modules not found)")
             sys.exit(0)
-        print('yes')
+        print("yes")
     elif action == "suggest":
         for mode in modes:
             print(mode)
         sys.exit(0)
     elif action == "version":
-        print('Deluge Torrent Munin plugin, version {0}'.format(
-            plugin_version))
+        print(f"Deluge Torrent Munin plugin, version {plugin_version}")
         sys.exit(0)
     elif action:
         log.warn("Unknown argument '%s'", action)

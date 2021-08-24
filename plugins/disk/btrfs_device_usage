@@ -13,8 +13,22 @@ btrfs_device_usage - Script to monitor usage of btrfs devices
 Simply create a symlink in your plugins directory like with any other plugin.
 Must be run as root.
 
- [btrfs_device_usage]
- user root
+[btrfs_device_usage]
+user root
+
+You can optionaly configure the warning and critical limits for byte and
+percentage graphs. By default percent_warning is set to 95 and percent_critical
+is 98. For the byte-graphs there are no default limits set. You can set the
+limits either for the entire graph (byte_ percent_) or per individual filesystem
+using it's UUID (replace minus with underscore). The individual values take
+precedence over the general ones. See the following example:
+
+btrfs_device_usage]
+user root
+env.byte_warning 400300200100
+env.percent_critical 97
+env.percent_10164f3f_6670_4982_a941_bffb50d27f29_warning 23
+env.byte_10164f3f_6670_4982_a941_bffb50d27f29_critical 5000000000
 
 =head2 DEFAULT CONFIGURATION
 
@@ -22,7 +36,7 @@ Must be run as root.
 
 =head1 AUTHOR
 
-2019, HaseHarald
+2019-2021, HaseHarald
 
 =head1 MAGIC MARKERS
 
@@ -54,11 +68,26 @@ LGPLv3
 
 
 import btrfs
+import os
 import sys
 
 
 def munin_config(fs):
     fsid = str(fs.fsid).replace('-', '_')
+
+    byte_warning = os.getenv('byte_warning', default=False)
+    byte_critical = os.getenv('byte_critical', default=False)
+    byte_warning = os.getenv('byte_' + fsid + '_warning',
+                             default=byte_warning)
+    byte_critical = os.getenv('byte_' + fsid + '_critical',
+                              default=byte_critical)
+
+    percent_warning = os.getenv('percent_warning', default=95)
+    percent_critical = os.getenv('percent_critical', default=98)
+    percent_warning = os.getenv('percent_' + fsid + '_warning',
+                                default=percent_warning)
+    percent_critical = os.getenv('percent_' + fsid + '_critical',
+                                 default=percent_critical)
 
     print("multigraph btrfs_device_usage_byte_" + fsid)
     print("graph_title btrfs usage by device in bytes on " + fs.path)
@@ -74,6 +103,12 @@ def munin_config(fs):
         this_dev_name = this_dev_info.path.replace('/dev/', '')
         print("btrfs_bytes_" + fsid + "_" + str(this_device.devid) +
               ".label " + this_dev_name)
+        if byte_warning:
+            print("btrfs_bytes_" + fsid + "_" + str(this_device.devid) +
+                  ".warning " + str(byte_warning))
+        if byte_critical:
+            print("btrfs_bytes_" + fsid + "_" + str(this_device.devid) +
+                  ".critical " + str(byte_critical))
 
     print("")
 
@@ -92,8 +127,10 @@ def munin_config(fs):
         this_dev_name = this_dev_info.path.replace('/dev/', '')
         print("btrfs_percent_" + fsid + "_" + str(this_device.devid) +
               ".label " + this_dev_name)
-        print("btrfs_percent_" + fsid + "_" + str(this_device.devid) + ".warning 95")
-        print("btrfs_percent_" + fsid + "_" + str(this_device.devid) + ".critical 98")
+        print("btrfs_percent_" + fsid + "_" + str(this_device.devid) +
+              ".warning " + str(percent_warning))
+        print("btrfs_percent_" + fsid + "_" + str(this_device.devid) +
+              ".critical " + str(percent_critical))
 
     print("")
 

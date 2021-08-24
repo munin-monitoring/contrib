@@ -16,9 +16,13 @@ The plugin uses nvme(1) from the nvme-cli project to read status from
 the NVMe devices.  This requires root access.
 
   [nvme]
-     user root
+    user root
 
-The plugin does not support alerting.
+When setting alert levels per device, use graph and basename of device
+name, e.g., 'nvme0n1', to make environment variable:
+
+    env.nvme_usage_nvme0n1_warning 5:
+    env.nvme_usage_warning 8:
 
 =head1 INTERPRETATION
 
@@ -30,6 +34,8 @@ This reports how much of capacity is allocated in each NVMe
 "namespace".  The report is in percent.  This number may not have much
 relation to actual use, e.g., if deleted data areas have not been
 trimmed/discarded.
+
+Default warning and critical: '95', '98'
 
 =head2 nvme_bytes
 
@@ -43,6 +49,8 @@ It is a good idea to compare these numbers to I/O counters from
 diskstats.  If they are much higher, look into whether the write
 amplification can be due to suboptimal I/O request sizes.
 
+This graph does not support alerting.
+
 =head2 nvme_writecycles
 
 This graphs is intended to give an indication of how much life there
@@ -53,6 +61,16 @@ experienced.
 
 A prosumer NVMe will handle a few thousand writes to each cell before
 the error rate gets out of hand.
+
+No default values for warning and critical.
+
+=head2 nvme_spare
+
+All NVMe has set a side reserve space to remap media errors.  This
+graphs how much is left in percent, taken directly from smart-log
+output.
+
+Default warning and critical: '10:', '3:'
 
 =head1 MAGIC MARKERS
 
@@ -65,7 +83,7 @@ None known.
 
 =head1 VERSION
 
-  1.0
+  1.1
 
 =head1 AUTHOR
 
@@ -80,6 +98,7 @@ GPLv2
 use strict;
 use Munin::Plugin;
 use IPC::Cmd qw(can_run);
+use File::Basename;
 
 # Check that multigraph is supported
 need_multigraph();
@@ -133,7 +152,7 @@ sub nvme_list {
         if (m:^Node\s+SN\s+Model\s+Namespace Usage:) {
             ++$recognised_output;
         } elsif (m:^(/\S+)\s+(\S+)\s+(\S.*\S)\s{3,}(\d+)\s+(\S+\s+.B)\s+/\s+(\S+\s+.B):) {
-            $devices{$2} = {
+            $devices{'SN_'.$2} = {
                 device    => $1,
                 sn        => $2,
                 model     => $3,
@@ -169,6 +188,15 @@ sub smart_log {
     return \%info;
 }
 
+sub my_print_thresholds {
+    my ($label, $graph, $device, $warn_default, $crit_default) = @_;
+    my $dev = basename($device);
+    my ($warn, $crit) = get_thresholds($graph, "${graph}_${dev}_warning", "${graph}_${dev}_critical",
+                                       $warn_default, $crit_default);
+    print "${label}.warning $warn\n" if defined $warn;
+    print "${label}.critical $crit\n" if defined $crit;
+}
+
 use Data::Dumper;
 
 my $mode = ($ARGV[0] or "print");
@@ -200,12 +228,14 @@ graph_category disk
 graph_info How much space is used
 EOF
     for (@sn) {
+        my $device = $list->{$_}->{device};
         print <<"EOF";
-$_.label $list->{$_}->{device} used
+$_.label $device used
 $_.type GAUGE
 $_.max 100
 $_.min 0
 EOF
+        my_print_thresholds($_, 'nvme_usage', $device, '95', '98');
     }
     print <<'EOF';
 multigraph nvme_bytes
@@ -238,11 +268,31 @@ graph_category disk
 graph_info How much data has been written in lifetime divided by capacity
 EOF
     for (@sn) {
+        my $device = $list->{$_}->{device};
         print <<"EOF";
-$_.label $list->{$_}->{device} write cycles
+$_.label $device write cycles
 $_.type GAUGE
 $_.min 0
 EOF
+        my_print_thresholds($_, 'nvme_writecycles', $device);
+    }
+    print <<'EOF';
+multigraph nvme_spare
+graph_title Available spare blocks
+graph_order $sn_list
+graph_vlabel Percent
+graph_category disk
+graph_info Spare capacity for replacing bad blocks
+EOF
+    for (@sn) {
+        my $device = $list->{$_}->{device};
+        print <<"EOF";
+$_.label $device spare capacity
+$_.type GAUGE
+$_.min 0
+$_.max 100
+EOF
+        my_print_thresholds($_, 'nvme_spare', $device, '10:', '3:');
     }
 } else {
     for (@sn) {
@@ -269,5 +319,14 @@ EOF
         # The unit size reported is 1000 blocks.
         my $cycles = $info->{smart}->{data_units_written} * 512_000 / $info->{capacity};
         print "$_.value $cycles\n";
+    }
+    print "multigraph nvme_spare\n";
+    for (@sn) {
+        my $info = $list->{$_};
+
+        # The unit size reported is 1000 blocks.
+        my $spare = $info->{smart}->{available_spare};
+        $spare =~ s/%//;
+        print "$_.value $spare\n";
     }
 }

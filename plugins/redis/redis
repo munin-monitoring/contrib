@@ -95,23 +95,27 @@ for (my $i = 1; $ENV{"host$i"}; $i++)
 my $config = ( defined $ARGV[0] and $ARGV[0] eq "config" );
 my $autoconf = ( defined $ARGV[0] and $ARGV[0] eq "autoconf" );
 if ( $autoconf ) {
+    if (!%INSTANCES) {
+        print "no (no redis instances configured)\n";
+        exit 0;
+    }
     my $err = '';
     for my $INSTANCE (keys %INSTANCES) {
         if (! defined( $INSTANCES{$INSTANCE}{'SOCK'} ) ) {
-            $err .= "no (unable to connect to ".$INSTANCES{$INSTANCE}{'HOST'}."\[:". $INSTANCES{$INSTANCE}{'PORT'}."\])\n";
+            $err = "no (unable to connect to ".$INSTANCES{$INSTANCE}{'HOST'}."\[:". $INSTANCES{$INSTANCE}{'PORT'}."\])\n";
         }
     }
     if ($err) {
         print $err;
     } else {
-        print 'yes';
+        print "yes\n";
     }
     exit 0;
 }
 
 my $total = 0;
 
-my $multi_graph_output = "multigraph redis\n";
+my $multi_graph_output = '';
 my $instance_graph_output = '';
 
 my $connected_clients = 0;
@@ -230,7 +234,7 @@ foreach my $INSTANCE (keys %INSTANCES) {
 
     $instance_graph_output .=  "multigraph redis_connected_clients.$INSTANCE\n";
     $instance_graph_output .=  "connected_clients.value " . $hash->{'connected_clients'} . "\n";
-    $connected_clients += $hash->{'connected_clients'}; 
+    $connected_clients += $hash->{'connected_clients'};
     $instance_graph_output .=  "multigraph keys_per_sec.$INSTANCE\n";
     $instance_graph_output .=  "hits.value " . $hash->{'keyspace_hits'} . "\n";
     $keyspace_hits += $hash->{'keyspace_hits'};
@@ -260,7 +264,7 @@ foreach my $INSTANCE (keys %INSTANCES) {
     $repl_backlog_size += $hash->{'repl_backlog_size'};
 
     $instance_graph_output .=  "multigraph redis_repl_lag.$INSTANCE\n";
-    if (exists $hash->{slave0} && $hash->{slave0} =~ /lag=(\d+)/) { 
+    if (exists $hash->{slave0} && $hash->{slave0} =~ /lag=(\d+)/) {
         $repl_backlog_size += $1;
         $instance_graph_output .=  "repl_backlog_size.value " . $1 . "\n";
     } else {

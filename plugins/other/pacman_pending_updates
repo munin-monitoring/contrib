@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 : <<=cut
 
@@ -58,14 +58,21 @@ EOM
 		;;
 
 	*)
-		if updates="$(checkupdates)"; then
+		updates="$(checkupdates)"
+		exitcode=$?
+		if [ "$exitcode" = 0 ]; then
 			if [ -n "$updates" ]; then
 				echo "updates.value $(echo "$updates" | wc -l)"
 				echo "updates.extinfo $(echo "$updates" | paste -s -d,)"
 			else
-				echo updates.value 0
+				echo "updates.value 0"
 			fi
-			echo "updates.value U" && exit
+		elif [ "$exitcode" = 2 ]; then
+			# Surprisingly "checkupdates" returns the exitcode 2, if all packages are
+			# up to date.
+			echo "updates.value 0"
+		else
+			echo "updates.value U"
 		fi
 		;;
 esac

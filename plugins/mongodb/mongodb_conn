@@ -18,6 +18,11 @@ Default for host is 127.0.0.1 and port 27017 and will work without being defined
     env.username user
     env.password P@55w0rd
 
+or
+
+    [mongodb_conn]
+    env.MONGO_DB_URI mongodb://user:passwd@127.0.0.1:27017
+
 =head1 AUTHOR
 
 Alban Espie-Guillon <alban.espie@alterway.fr>
@@ -42,14 +47,17 @@ import pymongo
 
 
 def _get_connections():
-    host = os.environ.get('host', '127.0.0.1')
-    port = os.environ.get('port', 27017)
-    username = os.environ.get('username', '')
-    password = os.environ.get('password', '')
-    conn = pymongo.MongoClient(host, int(port))
-    if username:
-        connAuth = conn['admin']
-        connAuth.authenticate(username, password)
+    if 'MONGO_DB_URI' in os.environ:
+        conn = pymongo.MongoClient(os.environ['MONGO_DB_URI'])
+    else:
+        host = os.environ.get('host', '127.0.0.1')
+        port = os.environ.get('port', 27017)
+        username = os.environ.get('username', '')
+        password = os.environ.get('password', '')
+        conn = pymongo.MongoClient(host, int(port))
+        if username:
+            connAuth = conn['admin']
+            connAuth.authenticate(username, password)
 
     """ cli : db.serverStatus().connections """
     conn_status = conn.admin.command("serverStatus")['connections']
@@ -66,7 +74,7 @@ def config():
     print("""
 graph_title MongoDB Connections Count
 graph_vlabel Connections count
-graph_category db
+graph_category %s
 graph_args --base 1000 -l 0
 current.label current
 current.draw AREASTACK
@@ -74,7 +82,7 @@ available.label available
 available.draw AREASTACK
 active.label active
 active.draw AREASTACK
-""")
+""" % os.getenv('graph_category', 'db'))
 
 
 if __name__ == "__main__":

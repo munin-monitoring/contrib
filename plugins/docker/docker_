@@ -59,21 +59,24 @@ Would exclude all containers with the word "runner" in the name.
 =over 2
 
     [docker_*]
-    user root
-    env.DOCKER_HOST unix://var/run/docker.sock
+    group docker
+    env.DOCKER_HOST unix://run/docker.sock
     env.EXCLUDE_CONTAINER_NAME regexp
 
 =back
+
+You may need to pick a different group depending on the name schema of your
+distribution.  Or maybe use "user root", if nothing else works.
 
 =head1 AUTHORS
 
 This section has been reverse-engineered from git logs
 
-* Codimp <contact@lithio.fr>: original rewrite
+Codimp <contact@lithio.fr>: original rewrite
 
-* Rowan Wookey <admin@rwky.net>: performance improvement
+Rowan Wookey <admin@rwky.net>: performance improvement
 
-* Olivier Mehani <shtrom@ssji.net>: Network support, ClientWrapper, general cleanup, multigraph
+Olivier Mehani <shtrom@ssji.net>: Network support, ClientWrapper, general cleanup, multigraph
 
 =head1 MAGIC MARKERS
 
@@ -109,6 +112,14 @@ def sorted_by_creation_date(func):
     return sorted_func
 
 
+def clean_fieldname(text):
+    if text == "root":
+        # "root" is a magic (forbidden) word
+        return "_root"
+    else:
+        return re.sub(r"(^[^A-Za-z_]|[^A-Za-z0-9_])", "_", text)
+
+
 class ClientWrapper:
     """
     A small wrapper for the docker client, to centralise some parsing logic,
@@ -131,15 +142,11 @@ class ClientWrapper:
 
     @cached_property
     @sorted_by_creation_date
-    def containers(self):
-        return self.client.containers.list()
-
-    @cached_property
-    @sorted_by_creation_date
     def all_containers(self):
-        return [c for c in self.client.containers.list(all=True)
-                if not self.exclude
-                or not self.exclude.search(c.name)]
+        return [
+            c for c in self.client.containers.list(all=True)
+            if (c.status == 'running') and (not self.exclude or not self.exclude.search(c.name))
+        ]
 
     @cached_property
     @sorted_by_creation_date
@@ -267,7 +274,7 @@ def get_container_stats(container, q):
 def parallel_container_stats(client):
     proc_list = []
     stats = {}
-    for container in client.containers:
+    for container in client.all_containers:
         q = Queue()
         p = Process(target=get_container_stats, args=(container, q))
         proc_list.append({'proc': p, 'queue': q, 'container': container})
@@ -287,8 +294,9 @@ def print_containers_cpu(client):
                         - float(stats["precpu_stats"]["system_cpu_usage"]))
         if system_delta > 0.0:
             cpu_percent = cpu_delta / system_delta * 100.0 * os.cpu_count()
-        print(container.name + '.value', cpu_percent)
-        print(container.name + '.extinfo', container_attributes(container))
+        clean_container_name = clean_fieldname(container.name)
+        print(clean_container_name + '.value', cpu_percent)
+        print(clean_container_name + '.extinfo', container_attributes(container))
 
 
 def print_containers_memory(client):
@@ -299,20 +307,23 @@ def print_containers_memory(client):
         else:
             memory_usage = stats['memory_stats']['usage']
             extinfo = 'Total memory usage'
-        print(container.name + '.value', memory_usage)
-        print(container.name + '.extinfo', container_attributes(container, extinfo))
+        clean_container_name = clean_fieldname(container.name)
+        print(clean_container_name + '.value', memory_usage)
+        print(clean_container_name + '.extinfo', container_attributes(container, extinfo))
 
 
 def print_containers_network(client):
     for container, stats in parallel_container_stats(client):
         tx_bytes = 0
         rx_bytes = 0
-        for data in stats['networks'].values():
-            tx_bytes += data['tx_bytes']
-            rx_bytes += data['rx_bytes']
-        print(container.name + '_up.value', tx_bytes)
-        print(container.name + '_down.value', rx_bytes)
-        print(container.name + '_up.extinfo', container_attributes(container))
+        if "networks" in stats:
+            for data in stats['networks'].values():
+                tx_bytes += data['tx_bytes']
+                rx_bytes += data['rx_bytes']
+        clean_container_name = clean_fieldname(container.name)
+        print(clean_container_name + '_up.value', tx_bytes)
+        print(clean_container_name + '_down.value', rx_bytes)
+        print(clean_container_name + '_up.extinfo', container_attributes(container))
 
 
 def volume_summary(volume):
@@ -377,7 +388,7 @@ def containers(client, mode):
         print("graph_category virtualization")
         print("containers_quantity.label Containers")
     else:
-        print('containers_quantity.value', len(client.containers))
+        print('containers_quantity.value', len(client.all_containers))
 
 
 def images(client, mode):
@@ -431,36 +442,38 @@ def cpu(client, mode):
         print("graph_info This graph shows docker container CPU usage.")
         print("graph_total Total CPU usage")
         for container in client.all_containers:
-            print("{}.label {}".format(container.name, container.name))
-            print("{}.draw AREASTACK".format(container.name))
-            print("{}.info {}".format(container.name, container_attributes(container)))
+            fieldname = clean_fieldname(container.name)
+            print("{}.label {}".format(fieldname, container.name))
+            print("{}.draw AREASTACK".format(fieldname))
+            print("{}.info {}".format(fieldname, container_attributes(container)))
     else:
         print_containers_cpu(client)
 
 
 def network(client, mode):
-        if mode == "config":
-            print("graph_title Docker containers network usage")
-            print("graph_args --base 1024 -l 0")
-            print("graph_vlabel bits in (-) / out (+) per ${graph_period}")
-            print("graph_category virtualization")
-            print("graph_info This graph shows docker container network usage.")
-            print("graph_total Total network usage")
-            for container in client.all_containers:
-                print("{}_down.label {}_received".format(container.name, container.name))
-                print("{}_down.type DERIVE".format(container.name))
-                print("{}_down.min 0".format(container.name))
-                print("{}_down.graph no".format(container.name))
-                print("{}_down.cdef {}_down,8,*".format(container.name, container.name))
-                print("{}_up.label {}".format(container.name, container.name))
-                print("{}_up.draw LINESTACK1".format(container.name))
-                print("{}_up.type DERIVE".format(container.name))
-                print("{}_up.min 0".format(container.name))
-                print("{}_up.negative {}_down".format(container.name, container.name))
-                print("{}_up.cdef {}_up,8,*".format(container.name, container.name))
-                print("{}_up.info {}".format(container.name, container_attributes(container)))
-        else:
-            print_containers_network(client)
+    if mode == "config":
+        print("graph_title Docker containers network usage")
+        print("graph_args --base 1024 -l 0")
+        print("graph_vlabel bits in (-) / out (+) per ${graph_period}")
+        print("graph_category virtualization")
+        print("graph_info This graph shows docker container network usage.")
+        print("graph_total Total network usage")
+        for container in client.all_containers:
+            fieldname = clean_fieldname(container.name)
+            print("{}_down.label {}_received".format(fieldname, container.name))
+            print("{}_down.type DERIVE".format(fieldname))
+            print("{}_down.min 0".format(fieldname))
+            print("{}_down.graph no".format(fieldname))
+            print("{}_down.cdef {}_down,8,*".format(fieldname, fieldname))
+            print("{}_up.label {}".format(fieldname, container.name))
+            print("{}_up.draw LINESTACK1".format(fieldname))
+            print("{}_up.type DERIVE".format(fieldname))
+            print("{}_up.min 0".format(fieldname))
+            print("{}_up.negative {}_down".format(fieldname, fieldname))
+            print("{}_up.cdef {}_up,8,*".format(fieldname, fieldname))
+            print("{}_up.info {}".format(fieldname, container_attributes(container)))
+    else:
+        print_containers_network(client)
 
 
 def memory(client, mode):
@@ -472,15 +485,17 @@ def memory(client, mode):
         print("graph_info This graph shows docker container memory usage.")
         print("graph_total Total memory usage")
         for container in client.all_containers:
-            print("{}.label {}".format(container.name, container.name))
-            print("{}.draw AREASTACK".format(container.name))
-            print("{}.info {}".format(container.name, container_attributes(container)))
+            fieldname = clean_fieldname(container.name)
+            print("{}.label {}".format(fieldname, container.name))
+            print("{}.draw AREASTACK".format(fieldname))
+            print("{}.info {}".format(fieldname, container_attributes(container)))
     else:
         print_containers_memory(client)
 
 
 def main():
     series = [
+        'containers',
         'cpu',
         'images',
         'memory',

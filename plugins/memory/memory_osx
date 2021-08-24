@@ -1,0 +1,67 @@
+#!/bin/sh
+# -*- sh -*-
+
+# shellcheck disable=SC2046
+
+: << =cut
+
+=head1 NAME
+
+memory - Plugin to measure memory on osx.
+
+=head1 NOTES
+
+This plugin runs the top command once per interval, to discover memory usage on OSX.
+Contributions are welcome to collect additional memory regions, if possible, such as buffers and caches.
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+if [ "$1" = "autoconf" ]; then
+    if [ "$(uname)" = "Darwin" ]; then
+        echo yes
+        exit 0
+    else
+        echo "no (uname does not report 'Darwin')"
+        exit 0
+    fi
+fi
+
+TOTALMEM=$(sysctl hw.memsize | cut -d" " -f2)
+graphlimit=$TOTALMEM
+
+dehumanise() {
+    echo "$1" | sed -e "s/K/*1024/g;s/M/*1024*1024/;s/G/*1024*1024*1024/;s/T/*1024*1024*1024*1024/"
+}
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title Memory'
+        echo "graph_order used wired unused"
+        echo "graph_args --base 1024 -r --lower-limit 0 --upper-limit $graphlimit"
+        echo 'graph_vlabel Bytes'
+        echo 'graph_category system'
+        echo 'used.label used (not incl. wired)'
+        echo 'used.draw AREA'
+        echo 'used.min 0'
+        echo "used.info Used memory, not including wired"
+        echo 'wired.label wired'
+        echo 'wired.draw STACK'
+        echo 'wired.min 0'
+        echo 'wired.info Wired memory'
+
+        exit 0
+fi
+
+TOPINFO=$(top -l 1 | grep "PhysMem: ")
+MEM_USED=$(echo "$TOPINFO" | awk '/PhysMem: / { print substr($2, 1, length($2)) }')
+MEM_WIRED=$(echo "$TOPINFO" | awk '/PhysMem: / { print substr($4, 2, length($4)-1) }') 
+echo "used.value" $(( $(dehumanise "$MEM_USED") - $(dehumanise "$MEM_WIRED") ))
+echo "wired.value" $(( $(dehumanise "$MEM_WIRED") ))

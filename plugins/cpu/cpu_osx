@@ -1,0 +1,80 @@
+#!/bin/sh
+# -*- sh -*-
+
+# shellcheck disable=SC2046
+
+: << =cut
+
+=head1 NAME
+
+cpu - Plugin to measure cpu on osx.
+
+=head1 NOTES
+
+This plugin runs the top command once per interval, to discover the current value of CPU usage on OSX.
+The result is scaled to # of CPU's, so a 4 core machine will reach 400% utilization (unless $scaleto100 is set to "yes", in which case the maximum will be 100%).
+
+Contributions are welcome to convert the plugin to use a long running counter such as /proc/stat in Linux.
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+if [ "$1" = "autoconf" ]; then
+    if [ "$(uname)" = "Darwin" ]; then
+        echo yes
+        exit 0
+    else
+        echo "no (uname does not report 'Darwin')"
+        exit 0
+    fi
+fi
+
+scaleto100=${scaleto100:-}
+
+if [ "$scaleto100" = "yes" ]; then
+    NCPU="1"
+else
+    NCPU=$(sysctl hw.ncpu | cut -d" " -f2)
+fi
+
+if [ "$1" = "config" ]; then
+        graphlimit=$(( NCPU*100 ))
+        echo 'graph_title CPU usage'
+        echo "graph_order system user idle"
+        echo "graph_args --base 1000 -r --lower-limit 0 --upper-limit $graphlimit"
+        echo 'graph_scale no'
+        echo 'graph_vlabel %'
+        echo 'graph_category system'
+        echo 'system.label system'
+        echo 'system.draw AREA'
+        echo 'system.min 0'
+        echo "system.info CPU time spent by the kernel in system activities"
+        echo 'user.label user'
+        echo 'user.draw STACK'
+        echo 'user.min 0'
+        echo 'user.info CPU time spent by normal programs and daemons'
+        echo 'idle.label idle'
+        echo 'idle.draw STACK'
+        echo 'idle.min 0'
+        echo 'idle.info Idle CPU time'
+
+        exit 0
+fi
+
+# The second cpu reading is more accurate than the first, so "-l 2":
+TOPINFO=$(top -l 2 | grep "CPU usage: " | tail -n 1)
+
+CPU_USER=$(echo "$TOPINFO" | awk '/CPU usage: / { print substr($3, 1, length($3)-1) }')
+CPU_SYS=$(echo "$TOPINFO" | awk '/CPU usage: / { print substr($5, 1, length($5)-1) }') 
+CPU_IDLE=$(echo "$TOPINFO" | awk '/CPU usage: / { print substr($7, 1, length($7)-1) }') 
+echo "system.value" $(echo "$NCPU" "$CPU_SYS" | awk '{print($1 * $2)}')
+echo "user.value" $(echo "$NCPU" "$CPU_USER" | awk '{print($1 * $2)}')
+echo "idle.value" $(echo "$NCPU" "$CPU_IDLE" | awk '{print($1 * $2)}')
