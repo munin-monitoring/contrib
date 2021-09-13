@@ -48,6 +48,7 @@
 
 import sys
 import os
+import subprocess
 from bluepy.btle import Scanner, DefaultDelegate
 
 
@@ -162,8 +163,12 @@ class SwitchbotMeterPlugin():
             scanner.scan(self.params['scantimeout'])
             for macaddr in self.params['macaddrs']:
                 check = scanner.delegate.sensorValues[macaddr]
-        except Exception as e:
+        except KeyError as e:
             munin_error('retry scan for exception: ' + str(type(e)))
+            scanner.scan(self.params['scantimeout'])
+        except Exception as e:
+            munin_error('reset hci and retry scan for exception: ' + str(type(e)))
+            subprocess.call("hciconfig hci0 down && hciconfig hci0 up", shell=True)
             scanner.scan(self.params['scantimeout'])
 
         # print value
