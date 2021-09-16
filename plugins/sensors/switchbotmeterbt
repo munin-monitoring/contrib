@@ -17,6 +17,7 @@
 
   user            : root privilege is necessary for BLE scan
   env.macaddr     : Mac Address(es) of SwitchBot Meter(s) separated by white-space (Required)
+  env.hcidev      : HCI device index. (Optional, default is 0)
   env.tempunit    : Temperature unit. (Optional, default is C)
   env.scantimeout : Timeout for BLE scan. (Optional, default is 5.0 seconds)
 
@@ -98,6 +99,7 @@ class SwitchbotMeterPlugin():
         self.params['pluginname'] = os.path.basename(__file__)
         self.params['macaddrs'] = [str.lower(macaddr)
                                    for macaddr in os.getenv('macaddr').split()]
+        self.params['hcidev'] = int(os.getenv('hcidev', 0))
         self.params['tempunit'] = os.getenv('tempunit', 'C')
         self.params['scantimeout'] = float(os.getenv('scantimeout', 5.0))
 
@@ -156,7 +158,7 @@ class SwitchbotMeterPlugin():
 
     def fetch(self):
         # scan to fetch data
-        scanner = Scanner().withDelegate(SwitchbotScanDelegate(self.params['macaddrs']))
+        scanner = Scanner(self.params['hcidev']).withDelegate(SwitchbotScanDelegate(self.params['macaddrs']))
 
         try:
             # sometimes it might fail
@@ -168,7 +170,7 @@ class SwitchbotMeterPlugin():
             scanner.scan(self.params['scantimeout'])
         except Exception as e:
             munin_error('reset hci and retry scan for exception: ' + str(type(e)))
-            subprocess.call("hciconfig hci0 down && hciconfig hci0 up", shell=True)
+            subprocess.call(f'hciconfig hci{self.params["hcidev"]} down && hciconfig hci{self.params["hcidev"]} up', shell=True)
             scanner.scan(self.params['scantimeout'])
 
         # print value
