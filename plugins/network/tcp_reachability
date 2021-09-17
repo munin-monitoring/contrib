@@ -108,9 +108,10 @@ timeout
 
 There are a couple of ping plugins in
 L<https://github.com/munin-monitoring/contrib/tree/master/plugins/ping>. Many
-of these require additional software to be installed. The plugin
+of these perform ICMP pings. The plugin
 L<multi_tcp_ping|https://gallery.munin-monitoring.org/plugins/munin-contrib/multi_tcp_ping/>
-provides timing statistics similar to this plugin.
+tests TCP ports and provides timing statistics similar to this plugin, but it
+does not provide a reachability graph and it does not define any alarm limits.
 
 =head1 AUTHOR
 
@@ -199,10 +200,15 @@ short_label=${short_label:-"false"}
 
 for target in $targets; do
     if [[ ! "$target" =~ $host_port_regex ]]; then
-        >&2 echo "Invalid configuration: target $target is not a valid 'host/port' combination"
+        >&2 echo "Invalid configuration: target $target is not a valid 'host/port' combination. Aborting."
         exit 1
     fi
 done
+
+if [[ ! "$max_time" =~ ^[0-9]+$ ]]; then
+    >&2 echo "Invalid configuration: max_time $max_time must contain only digits. Aborting."
+    exit 1
+fi
 
 if [[ "$1" == "config" ]]; then
     echo 'multigraph tcp_reachability'
