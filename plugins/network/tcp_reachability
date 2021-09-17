@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# vim: expandtab:ts=4:sw=4
+
+: << =cut
+
+=head1 NAME
+
+tcp_reachability - Test if a (remote) TCP port is reachable and monitor
+connection time statistics
+
+=head1 CONFIGURATION
+
+The following environment variables are used:
+
+=over
+
+=item *
+
+targets - The targets to test
+
+=over
+
+=item *
+
+separated by spaces
+
+=item *
+
+each target must be in the form C<host/port>
+
+=item *
+
+host can be an IP address or a DNS name
+
+=item *
+
+port can be a port number or a service name
+
+=item *
+
+defaults to C<localhost/22>
+
+=back
+
+=item *
+
+max_time - Timeout for each target check in seconds
+
+=over
+
+=item *
+
+defaults to C<2>
+
+=back
+
+=item *
+
+short_label - Switch for shortening the label below the graph
+
+=over
+
+=item *
+
+defaults to C<false>
+
+=back
+
+=back
+
+This plugin does not need any specific privileges and can be run as a totally
+unprivileged user like nobody.
+
+=head2 CONFIGURATION EXAMPLE
+
+ [tcp_reachability]
+  env.targets 10.19.23.42/5432 munin-monitoring.org/https
+  env.max_time 5
+  env.short_label true
+
+=head1 PREREQUISITES
+
+This plugin needs at least bash version 4 to run.
+
+Additionally the following basic programs must be present on your system:
+
+=over
+
+=item *
+
+awk
+
+=item *
+
+date
+
+=item *
+
+echo
+
+=item *
+
+timeout
+
+=back
+
+=head1 SEE ALSO
+
+There are a couple of ping plugins in
+L<https://github.com/munin-monitoring/contrib/tree/master/plugins/ping>. Many
+of these require additional software to be installed. The plugin
+L<multi_tcp_ping|https://gallery.munin-monitoring.org/plugins/munin-contrib/multi_tcp_ping/>
+provides timing statistics similar to this plugin.
+
+=head1 AUTHOR
+
+Copyright (C) 2021 Klaus Sperner
+
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; version 2 dated June,
+1991.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+# shellcheck disable=SC1091
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+# Basic regex for checking that "host/port" contains allowed characters only.
+# We don't check for RFC compliance of IP addresses, DNS names or service names
+# here.
+readonly host_port_regex='^[a-zA-Z0-9\.:-]+/[a-zA-Z0-9-]+$'
+
+# If the target is an IP address and therefore starts with a number, the first
+# digit is converted to an underscore by clean_fieldname. This causes the
+# effect that two targets differing in the first digit only result in the same
+# cleaned fieldname. Therefore we prefix every target with the same character
+# before calling clean_fieldname, so different IP addresses will always result
+# in different fieldnames. The following example shows the problem and its
+# solution:
+#
+#  +------------------+------------------+--------------------+
+#  | host/port        | clean_fieldname  | my_clean_fieldname |
+#  +------------------+------------------+--------------------+
+#  | 10.19.23.42/5432 | _0_19_23_42_5432 | x10_19_23_42_5432  |
+#  | 20.19.23.42/5432 | _0_19_23_42_5432 | x20_19_23_42_5432  |
+#  +------------------+------------------+--------------------+
+#
+my_clean_fieldname() {
+    clean_fieldname "x$1"
+}
+
+compute_label() {
+    if [[ "${short_label,,}" == "true" || "${short_label,,}" == "yes" ]]; then
+        if [[ ${#1} -gt 33 ]]; then
+            echo "${1:0:30}..."
+        else
+            echo "$1"
+        fi
+    else
+        echo "$1"
+    fi
+}
+
+check_programs_installed() {
+    for program in "$@"; do
+        if ! hash "$program" 2>/dev/null; then
+            >&2 echo "The plugin tcp_reachability needs $program but it is not installed. Aborting."
+            exit 1
+        fi
+    done
+}
+
+if [[ "${BASH_VERSINFO:-0}" -lt 4 ]]; then
+    >&2 echo "The plugin tcp_reachability needs at least bash version 4. Aborting."
+    exit 1
+fi
+
+check_programs_installed awk date echo timeout
+
+targets=${targets:-"localhost/22"}
+max_time=${max_time:-2}
+short_label=${short_label:-"false"}
+
+for target in $targets; do
+    if [[ ! "$target" =~ $host_port_regex ]]; then
+        >&2 echo "Invalid configuration: target $target is not a valid 'host/port' combination"
+        exit 1
+    fi
+done
+
+if [[ "$1" == "config" ]]; then
+    echo 'multigraph tcp_reachability'
+    echo 'graph_args --base 1000 --lower-limit -0.25 --upper-limit 1.25 --rigid'
+    echo 'graph_title TCP Reachability Status'
+    echo 'graph_vlabel Reachability Status'
+    echo 'graph_category network'
+    echo 'graph_info This graph shows TCP reachability statuses'
+    echo 'graph_printf %1.0lf'
+    for target in $targets; do
+        targetId="$( my_clean_fieldname "$target" )"
+        echo "$targetId.label $( compute_label "$target" )"
+        echo "$targetId.info TCP reachability status for $target"
+        echo "$targetId.critical 1:"
+    done
+    echo 'multigraph tcp_connection_time'
+    echo 'graph_args --base 1000 -l 0'
+    echo 'graph_title TCP Connection Times'
+    echo 'graph_vlabel Connection Time in seconds'
+    echo 'graph_category network'
+    echo 'graph_info This graph shows TCP connection time statistics'
+    for target in $targets; do
+        targetId="$( my_clean_fieldname "$target" )"
+        echo "$targetId.label $( compute_label "$target" )"
+        echo "$targetId.info TCP connection time statistics for $target"
+    done
+    exit 0
+fi
+
+declare -A reachabilities
+declare -A connection_times
+
+for target in $targets; do
+    target_id="$( my_clean_fieldname "$target" )"
+    reachability=1
+    start=$(date +%s.%N)
+    timeout "$max_time" bash -c "(echo > /dev/tcp/${target}) &> /dev/null"
+    return_code=$?
+    connection_time=$( echo "$start" "$(date +%s.%N)" | awk '{ print($2 - $1); }' )
+    if [[ $return_code -ne 0 ]]; then
+        reachability=0
+        connection_time="U"
+    fi
+    reachabilities+=(["$target_id"]="$reachability")
+    connection_times+=(["$target_id"]="$connection_time")
+done
+
+echo 'multigraph tcp_reachability'
+for target_id in "${!reachabilities[@]}"; do
+    echo "${target_id}.value ${reachabilities[${target_id}]}"
+done
+
+echo 'multigraph tcp_connection_time'
+for target_id in "${!connection_times[@]}"; do
+    echo "${target_id}.value ${connection_times[${target_id}]}"
+done
