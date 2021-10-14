@@ -59,16 +59,27 @@ output_config() {
     echo "graph_category memory"
     for service in ${services:-"munin-node"}; do
         clean_name="$(clean_fieldname "$service")"
-        description=$(systemctl show "$service" --all | grep ^Description= | cut -d '=' -f 2)
+        description=$(systemctl show "$service" --property=Description | cut -d '=' -f 2)
+        warning=$(systemctl show "$service" --property=MemoryHigh | cut -d '=' -f 2)
+        critical=$(systemctl show "$service" --property=MemoryMax | cut -d '=' -f 2)
+        if [ "$critical" = "infinity" ] ; then
+            critical=$(systemctl show "$service" --property=MemoryLimit | cut -d '=' -f 2)
+        fi
         printf "%s.label %s\n" "$clean_name" "$description"
         printf "%s.info memory usage\n" "$clean_name"
+        if [ "$warning" != "infinity" ] ; then
+          printf "%s.warning %s\n" "$clean_name" "$warning"
+        fi
+        if [ "$critical" != "infinity" ] ; then
+          printf "%s.critical %s\n" "$clean_name" "$critical"
+        fi
     done
 }
 
 output_values() {
     for service in ${services:-"munin-node"}; do
         clean_name="$(clean_fieldname "$service")"
-        usage=$(systemctl show "$service" --all | grep ^MemoryCurrent= | cut -d '=' -f 2)
+        usage=$(systemctl show "$service" --property=MemoryCurrent | cut -d '=' -f 2)
         if [ "$usage" = "[not set]" ]; then
             usage=0
         fi
