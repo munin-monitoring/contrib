@@ -31,7 +31,7 @@ to have a better chance of getting the config data out nonetheless.
 
 =head1 CAVEAT
 
-Only tested on a Fronius Primo.
+Only tested on a Fronius Primo and Fronius Symo.
 
 =head1 AUTHOR
 
@@ -180,6 +180,7 @@ check_deps() {
 	for CMD in curl jq recode; do
 		if ! command -v "${CMD}" >/dev/null; then
 			echo "no (${CMD} not found)"
+			exit 0
 		fi
 	done
 }
@@ -261,11 +262,12 @@ inverter\(.key).draw AREASTACK
 }
 
 get_data() {
-cached 0 get_power_flow_realtime_data | jq -r '.Body.Data.Inverters
+cached 0 get_power_flow_realtime_data | jq -r 'def roundit: . + 0.5 | floor;
+			   .Body.Data.Inverters
 			   | to_entries[]
 			   | @text "
-inverter\(.key).value \(.value.E_Year | round)
-inverter\(.key).extinfo Immediate output: \(.value.P) W; Daily total: \(.value.E_Day | round) Wh; Yearly total: \(.value.E_Year / 1000 | round) kWh
+inverter\(.key).value \(.value.E_Year | roundit)
+inverter\(.key).extinfo Immediate output: \(.value.P) W; Daily total: \(.value.E_Day | roundit) Wh; Yearly total: \(.value.E_Year / 1000 | roundit) kWh
 "'
 }
 
