@@ -4,11 +4,12 @@
 
 =head1 NAME
 
-unit - monitor NGINX Unit applications
+nginx_unit - monitor NGINX Unit applications
 
 =head1 APPLICABLE SYSTEMS
 
-Systems with NGINX Unit running.
+Systems with NGINX Unit running. See https://unit.nginx.org/ for more
+information.
 
 =head1 CONFIGURATION
 
@@ -30,6 +31,7 @@ GPLv2
 =cut
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -68,7 +70,7 @@ def parse_time(value):
 
 
 def find_apps():
-    """Return dict of found unit applications."""
+    """Return dict of found applications."""
     apps = {}
     ps_lines = run_binary(['ps', '-eo', '%cpu,etime,rss,command']).splitlines()
     for line in ps_lines:
@@ -78,7 +80,7 @@ def find_apps():
             continue
         cpu = float(appmatch.group(1))
         age = parse_time(appmatch.group(2))
-        memory = int(appmatch.group(3))  # KiB
+        memory = int(appmatch.group(3)) * 1024
         appname = appmatch.group(4)
         if appname in apps:
             apps[appname]['count'] += 1
@@ -97,7 +99,7 @@ def find_apps():
 
 def config(apps):
     """Print plugin config."""
-    print('multigraph unit_process')
+    print('multigraph nginx_unit_process')
     print('graph_title Unit application processes')
     print('graph_info NGINX Unit application process counts.')
     print('graph_category appserver')
@@ -109,7 +111,7 @@ def config(apps):
         print(f'{safe}.label {app} processes')
         print(f'{safe}.draw AREASTACK')
 
-    print('multigraph unit_cpu')
+    print('multigraph nginx_unit_cpu')
     print('graph_title Unit application average CPU usage')
     print('graph_info NGINX Unit application average CPU usage per process.')
     print('graph_category appserver')
@@ -120,67 +122,67 @@ def config(apps):
         safe = safename(app)
         print(f'{safe}.label {app} CPU')
 
-    print('multigraph unit_age')
+    print('multigraph nginx_unit_age')
     print('graph_title Unit application average age')
     print('graph_info NGINX Unit application average age per process.')
     print('graph_category appserver')
     print('graph_vlabel seconds')
     print('graph_args --lower-limit 0')
-    print('graph_scale no')
     for app in sorted(apps):
         safe = safename(app)
         print(f'{safe}.label {app} age')
 
-    print('multigraph unit_memory')
+    print('multigraph nginx_unit_memory')
     print('graph_title Unit application average memory')
     print('graph_info NGINX Unit application average memory per process.')
     print('graph_category appserver')
-    print('graph_vlabel MiB')
+    print('graph_vlabel bytes')
     print('graph_args --lower-limit 0 --base 1024')
-    print('graph_scale no')
     for app in sorted(apps):
         safe = safename(app)
         print(f'{safe}.label {app} memory')
 
-    print('multigraph unit_total_memory')
+    print('multigraph nginx_unit_total_memory')
     print('graph_title Unit application total memory')
     print('graph_info NGINX Unit application total memory.')
     print('graph_category appserver')
-    print('graph_vlabel MiB')
+    print('graph_vlabel bytes')
     print('graph_args --lower-limit 0 --base 1024')
-    print('graph_scale no')
     for app in sorted(apps):
         safe = safename(app)
         print(f'{safe}.label {app} memory')
         print(f'{safe}.draw AREASTACK')
 
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch(apps)
+
 
 def fetch(apps):
     """Print values."""
-    print('multigraph unit_process')
+    print('multigraph nginx_unit_process')
     for app, values in apps.items():
         safe = safename(app)
         print(f'{safe}.value {values["count"]}')
 
-    print('multigraph unit_cpu')
+    print('multigraph nginx_unit_cpu')
     for app, values in apps.items():
         safe = safename(app)
         print(f'{safe}.value {values["cpu"] / values["count"]}')
 
-    print('multigraph unit_age')
+    print('multigraph nginx_unit_age')
     for app, values in apps.items():
         safe = safename(app)
         print(f'{safe}.value {values["age"] / values["count"]}')
 
-    print('multigraph unit_memory')
+    print('multigraph nginx_unit_memory')
     for app, values in apps.items():
         safe = safename(app)
-        print(f'{safe}.value {values["memory"] / values["count"] / 1024}')
+        print(f'{safe}.value {values["memory"] / values["count"]}')
 
-    print('multigraph unit_total_memory')
+    print('multigraph nginx_unit_total_memory')
     for app, values in apps.items():
         safe = safename(app)
-        print(f'{safe}.value {values["memory"] / 1024}')
+        print(f'{safe}.value {values["memory"]}')
 
 
 if __name__ == '__main__':
