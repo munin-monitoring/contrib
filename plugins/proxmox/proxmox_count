@@ -1,0 +1,63 @@
+#!/bin/bash
+#%# family=auto
+#%# capabilities=autoconf
+
+# Michael Grote
+# michael.grote ät posteo.de
+# Outputs the running, stopped and total counts of ProxMox VMs and LXCs.
+# needs to be run as user: root AND group: root
+# [proxmox_count]
+# user root
+# group root
+
+# Pfade zu binaries
+wqm=$(command -v qm)
+wpct=$(command -v pct)
+# Berechne VMs
+total_vm=$($wqm list | sed 1d | wc -l)
+running_vm=$($wqm list | sed 1d | grep -c running )
+stopped_vm=$($wqm list | sed 1d | grep -c stopped )
+# Berechne LXCs
+total_lxc=$($wpct list | sed 1d | wc -l)
+running_lxc=$($wpct list | sed 1d | grep -c running )
+stopped_lxc=$($wpct list | sed 1d | grep -c stopped )
+# Berechne Gesamtwert
+total=$((total_vm + total_lxc))
+
+# wenn parameter = ...
+if [ "$1" = "autoconf" ]; then
+    echo yes
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    # setze label
+    echo total_vm.label total Virtual Machines
+    echo total.label total VMs and LXCs
+
+    echo running_vm.label running Virtual Machines
+    echo running_lxc.label running LXCs
+
+    echo stopped_vm.label stopped Virtual Machines
+    echo stopped_lxc.label stopped LXCs
+
+    echo total_lxc.label total LXCs
+
+    # setze optionen
+    echo 'graph_title ProxMox - Number of VMs and LXCs'
+    echo 'graph_vlabel Count'
+    echo 'graph_category virtualization'
+    echo 'graph_args -l 0'
+    exit 0
+fi
+echo total.value "$total"
+
+echo total_vm.value "$total_vm"
+echo total_lxc.value "$total_lxc"
+
+echo running_vm.value "$running_vm"
+echo running_lxc.value "$running_lxc"
+
+echo stopped_vm.value "$stopped_vm"
+echo stopped_lxc.value "$stopped_lxc"
+exit 0
