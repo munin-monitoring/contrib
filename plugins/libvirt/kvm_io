@@ -1,18 +1,40 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-# vim: set fileencoding=utf-8
-#
-# Munin plugin to show io by vm
-#
-# Copyright Maxence Dunnewind, Rodolphe Quiédeville
-#
-# License : GPLv3
-#
-# parsed environment variables:
-# vmsuffix: part of vm name to be removed
-#
-# %# capabilities=autoconf
-# %# family=contrib
+"""
+=encoding utf8
+
+=head1 NAME
+
+kvm_io - show IO usage of VM
+
+
+=head1 CONFIGURATION
+
+Parsed environment variables:
+
+ vmsuffix: part of VM name to be removed
+
+
+=head1 LICENSE
+
+GPLv3
+
+SPDX-License-Identifier: GPL-3.0-only
+
+
+=head1 AUTHORS
+
+Maxence Dunnewind
+
+Rodolphe Quiédeville
+
+
+=head1 MAGIC MARKERS
+
+ #%# capabilities=autoconf
+ #%# family=contrib
+
+=cut
+"""
 
 import re
 import os
@@ -21,7 +43,7 @@ from subprocess import Popen, PIPE
 
 
 def config(vm_names):
-    ''' Print the plugin's config
+    ''' print(the plugin's config
     @param vm_names : a list of "cleaned" vms' name
     '''
     base_config = """graph_title KVM Virtual Machine IO usage
@@ -68,18 +90,16 @@ def fetch(vms):
     ''' Fetch values for a list of pids
     @param dictionary {kvm_pid: cleaned vm name}
     '''
-    res = {}
     for pid in vms:
-        f = open("/proc/%s/io" % pid.decode("utf-8"), "r")
-        for line in f.readlines():
-            if "read_bytes" in line:
-                read = line.split()[1]
-                print("%s_read.value %s" % (vms[pid], read))
-            if "write_bytes" in line:
-                write = line.split()[1]
-                print("%s_write.value %s" % (vms[pid], write))
-                break
-        f.close()
+        with open("/proc/%s/io" % pid.decode(), "r") as f:
+            for line in f.readlines():
+                if "read_bytes" in line:
+                    read = line.split()[1]
+                    print("%s_read.value %s" % (vms[pid], read))
+                if "write_bytes" in line:
+                    write = line.split()[1]
+                    print("%s_write.value %s" % (vms[pid], write))
+                    break
 
 
 def detect_kvm():
@@ -96,8 +116,8 @@ def find_vm_names(pids):
     '''
     result = {}
     for pid in pids:
-        cmdline = open("/proc/%s/cmdline" % pid.decode("utf-8"), "r")
-        result[pid] = clean_vm_name(re.sub(r"^.*guest=([a-zA-Z0-9.-_-]*).*$", r"\1", cmdline.readline()))
+        with open("/proc/%s/cmdline" % pid.decode(), "r") as cmdline:
+            result[pid] = clean_vm_name(re.sub(r"^.*guest=([a-zA-Z0-9.-_-]*).*$", r"\1", cmdline.readline()))
     return result
 
 
@@ -115,7 +135,7 @@ if __name__ == "__main__":
             if detect_kvm():
                 print("yes")
             else:
-                print("no")
+                print("no (detect_kvm failed - is kvm installed?)")
         elif sys.argv[1] == "config":
             config(find_vm_names(list_pids()).values())
         else:
