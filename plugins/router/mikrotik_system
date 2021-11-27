@@ -45,6 +45,23 @@ ssh_password=${ssh_password:-password}
 ssh_host=${ssh_host:-192.168.2.1}
 c=0 # zähler; wird für verschiedene Schleifen benötigt
 
+# Function to get stderr from command
+# USAGE: catch STDOUT STDERR cmd args..
+catch()
+{
+eval "$({
+__2="$(
+  { __1="$("${@:3}")"; } 2>&1;
+  ret=$?;
+  printf '%q=%q\n' "$1" "$__1" >&2;
+  exit $ret
+  )";
+ret="$?";
+printf '%s=%q\n' "$2" "$__2" >&2;
+printf '( exit %q )' "$ret" >&2;
+} 2>&1 )";
+}
+
 # Funktionen
 function get_name {
   while read -r line; do
@@ -71,9 +88,31 @@ function get_cpu_count {
     fi
   done <<< "$data"
 }
+catch()
+{
+eval "$({
+__2="$(
+  { __1="$("${@:3}")"; } 2>&1;
+  ret=$?;
+  printf '%q=%q\n' "$1" "$__1" >&2;
+  exit $ret
+  )";
+ret="$?";
+printf '%s=%q\n' "$2" "$__2" >&2;
+printf '( exit %q )' "$ret" >&2;
+} 2>&1 )";
+}
 function get_data {
   # hole daten per ssh
-  data=$(sshpass -p  "$ssh_password" ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$ssh_user"@"$ssh_host" -q ':delay 6s; /system health print; /system resource print; /system resource cpu print; /system identity print')
+  catch data stderr sshpass -p  "$ssh_password" ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$ssh_user"@"$ssh_host" ':delay 6s; /system health print; /system resource print; /system resource cpu print; /system identity print'
+  data_ret=$?
+}
+function validate_data {
+  if [ $data_ret -ne 0 ]; then
+    echo "SSH returned errorcode = $data_ret:"
+    echo "$stderr"
+    exit $data_ret
+  fi
 }
 function get_mem_total {
   mem_total=$(
@@ -368,6 +407,7 @@ function get_disk_value {
 
 # rufe funktionen auf, reihenfolge ist wichtig
 get_data
+validate_data
 get_name
 get_cpu_count
 # munin-Logik
