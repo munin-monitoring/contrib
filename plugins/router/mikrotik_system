@@ -172,10 +172,10 @@ function get_bad_blocks_label {
       print "graph_title bad blocks " "'"$name"'";
       print "graph_vlabel %";
       print "graph_category mikrotik";
-      print "graph_args -l 0 --upper-limit 100";
+      print "graph_args -l 0 --upper-limit 5";
       print "bad_blocks.label bad_blocks";
-      print "bad_blocks.warning 50";
-      print "bad_blocks.critical 90";
+      print "bad_blocks.warning 3;
+      print "bad_blocks.critical 4";
       print "graph_info Percentage of Bad Blocks."
       }'
   done <<< "$data"
@@ -358,18 +358,18 @@ function get_memory_value {
   while read -r line; do
     echo "$line" | awk '/total-memory:/{
         gsub(/MiB/,"",$2);
-        print "total_memory.value " $2
+        printf "total_memory.value %d\n", $2
       }'
   done <<< "$data"
   while read -r line; do
     echo "$line" | awk '/free-memory:/{
         gsub(/MiB/,"",$2);
-        print "free_memory.value " $2
+        printf "free_memory.value %d\n", $2
       }'
   done <<< "$data"
   # berechne used-memory
   # gesamt + frei = benutzt
-  echo used_memory.value "$(echo $mem_total $mem_free | awk '{print ($1 - $2)}')"
+  printf "used_memory.value %.0f\n" "$(echo $mem_total $mem_free | awk '{print ($1 - $2)}')"
 }
 
 function get_disk_label {
@@ -392,16 +392,16 @@ function get_disk_value {
   while read -r line; do
     echo "$line" | grep KiB | awk '/free-hdd-space:/ {
       gsub(/KiB/,"",$2)
-      print "free_disk.value " $2*1024 }'
+      printf "free_disk.value %d\n", $2*1024 }'
     echo "$line" |  grep MiB | awk '/free-hdd-space:/ {
       gsub(/MiB/,"",$2)
-      print "free_disk.value " $2*1048576}'
+      printf "free_disk.value %d\n", $2*1048576}'
     echo "$line" | grep KiB | awk '/total-hdd-space:/ {
       gsub(/KiB/,"",$2)
-      print "total_disk.value " $2*1024 }'
+      printf "total_disk.value %d\n", $2*1024 }'
     echo "$line" |  grep MiB | awk '/total-hdd-space:/ {
       gsub(/MiB/,"",$2)
-      print "total_disk.value " $2*1048576 }'
+      printf "total_disk.value %d\n", $2*1048576 }'
   done <<< "$data"
 }
 
