@@ -2,27 +2,58 @@
 #
 # Copyright Jean-Samuel Reynaud <js.reynaud@free.fr>
 # Licensed under GPL v2
-#
-# We use this script to produce graph with munin for dns requests
-# This script must have his name start with bind95_
-# bind95_ : Global bind statistic
-# bind95_test.com : Bind statistic for test.com zone (no view)
-# bind95_test.com@internal : Bind statistic for test.com zone (view internal)
-# This version work with bind 9.5
-#
-# Thanks for Benjamin Pineau for perl cleaning and corrections
-#
-# You should have to add the following lines to you plugin configuration
-# (/etc/munin/plugin-conf.d/munin-node):
-#[bind95_*]
-#user root
-#stat_file /var/cache/bind/named.stats
-#rndc /usr/sbin/rndc
-#
-#
-# Magic markers
-#%# family=auto
-#%# capabilities=autoconf
+
+=head1 NAME
+
+bind95_ - Graph dns requests by type
+
+=head1 DESCRIPTION
+
+We use this script to produce graph with munin for dns requests.
+
+This version work with bind 9.5
+
+Thanks to Benjamin Pineau for perl cleaning and corrections
+
+=head1 CONFIGURATION
+
+This script must have his name start with bind95_
+
+=over 2
+
+  bind95_ : Global bind statistic
+  bind95_test.com : Bind statistic for test.com zone (no view)
+  bind95_test.com@internal : Bind statistic for test.com zone (view internal)
+
+=back
+
+You should have to add the following lines to you plugin configuration
+(/etc/munin/plugin-conf.d/munin-node):
+
+=over 2
+
+  [bind95_*]
+  user root
+  stat_file /var/cache/bind/named.stats
+  rndc /usr/sbin/rndc
+
+=back
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 AUTHORS
+
+Jean-Samuel Reynaud <js.reynaud@free.fr>
+Andreas Perhab <a.perhab@wtioit.at>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
 
 use strict;
 use warnings;
@@ -76,6 +107,17 @@ my @counters = (
 );
 
 
+sub munin_key {
+    my $key = shift @_;
+    $key = md5_hex($key);
+    if ($key =~ /^[0-9]/) {
+        # if md5 starts with a number we need to prefix it to be a valid munin key
+        # keys not starting with numbers are untouched (because for those old rrd files may already have valid data)
+        $key = "_$key";
+    }
+    return $key
+}
+
 # Parse the statistic file
 sub parseFile {
     my $dom = shift @_;
@@ -94,7 +136,7 @@ sub parseFile {
             if ($l =~ /^[0-9]/ && $current_zone eq $domain) {
                 my ($val,$desc) = split(' ',$l,2);
                 if (grep { $desc eq $_ } @counters) {
-                    printf "%s.value %u\n",md5_hex($desc),$val;
+                    printf "%s.value %u\n",munin_key($desc),$val;
                 }
             }
         }
@@ -113,9 +155,9 @@ if ( defined($ARGV[0]) && $ARGV[0] eq "config" ) {
 
     foreach(@counters) {
         my $s = $_;
-        printf "%s.label %s\n",md5_hex($s),$s;
-        printf "%s.type DERIVE\n",md5_hex($s);
-        printf "%s.min 0\n",md5_hex($s);
+        printf "%s.label %s\n",munin_key($s),$s;
+        printf "%s.type DERIVE\n",munin_key($s);
+        printf "%s.min 0\n",munin_key($s);
     }
     exit 0;
 }
