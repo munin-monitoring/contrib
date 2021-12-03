@@ -13,6 +13,7 @@ For openvpn ca.crt and crl.pem
  [certificate_file_expiry]
  user root
  env.CERTS crl:/etc/openvpn/easy-rsa/keys/crl.pem x509:/etc/openvpn/easy-rsa/keys/ca.crt
+ env.LOGARITHMIC yes
 
 For letsencrypt certificates
 
@@ -26,6 +27,8 @@ Warning and Critical levels can also be configured with env variables like this:
  ...
  # warn when certificate will be invalid within 5 days
  env.warning 5:
+ # for this certificate warn us 10 days before because it takes longer to renew
+ env._etc_letsencrypt_live_example_com_cert_pem_warning 10:
  # critical when certificate will be invalid within 1 day
  env.critical 1:
 
@@ -35,7 +38,11 @@ File patterns can be a single file (e.g. /etc/openvpn/easy-rsa/keys/crl.pem) or 
 (e.g. /etc/letsencrypt/live/*/cert.pem).
 
 env.warning and env.critical are configurable values for the warning and critical levels according to
-http://munin-monitoring.org/wiki/fieldname.warning and http://munin-monitoring.org/wiki/fieldname.critical
+http://guide.munin-monitoring.org/en/latest/tutorial/alert.html?highlight=warning#syntax-of-warning-and-critical
+
+env.LOGARITHMIC "yes" enables the logarithmic display of values which is useful if some of your certs are relatively
+long lived in respect to the warning level. e.g. a ca.crt that is valid for 10 years together with a crl.pem that is
+valid for only a few months combined with warning levels of 5 days. default is "yes" to disable set it to "no".
 
 =head1 Dependencies
 
@@ -53,16 +60,19 @@ GPLv2
 
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
+LOGARITHMIC=${LOGARITHMIC:-yes}
+
 if [ "$1" = "config" ] ; then
   echo "graph_title Certificate validity"
-  echo "graph_args --base 1000"
+  if [ "$LOGARITHMIC" = "yes" ] ; then
+    graph_args="--logarithmic --units=si"
+  fi
+  echo "graph_args --base 1000 $graph_args"
   echo "graph_vlabel days"
   echo "graph_category security"
 fi
 
 now=$(date +%s)
-warning=${warning:-5:}
-critical=${critical:-1:}
 for cert in ${CERTS}; do
   cert_type=${cert%:*}
   cert_pattern=${cert#*:}
