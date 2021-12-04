@@ -39,11 +39,11 @@ munin-node.
 =cut
 EOF
 
-# setze Variablen mit default-Werten
+# set variables with default values
 ssh_user=${ssh_user:-user}
 ssh_password=${ssh_password:-password}
 ssh_host=${ssh_host:-192.168.2.1}
-c=0 # z채hler; wird f체r verschiedene Schleifen ben철tigt
+c=0 # counter, it is used in a few loops
 
 # Function to get stderr from command
 # USAGE: catch STDOUT STDERR cmd args..
@@ -63,11 +63,11 @@ printf '( exit %q )' "$ret" >&2;
 } 2>&1 )";
 }
 
-# Funktionen
+# functions
 function get_name {
   while read -r line; do
     if echo "$line" | grep -q 'name:'; then
-      name="$(echo "$line" | grep -E '\s+name:' | cut -f2 -d: | sed 's/^ *//g' | sed 's/[^A-Za-z0-9]/_/')"
+      name=$(echo "$line" | grep name: | awk '{ print $2 }')
     fi
   done <<< "$data"
 }
@@ -90,7 +90,7 @@ function get_cpu_count {
   done <<< "$data"
 }
 function get_data {
-  # hole daten per ssh
+  # fetch data per ssh
   catch data stderr sshpass -p  "$ssh_password" ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$ssh_user"@"$ssh_host" ':delay 6s; /system health print; /system resource print; /system resource cpu print; /system identity print'
   data_ret=$?
 }
@@ -115,12 +115,12 @@ function get_mem_free {
 }
 
 function get_voltage_label {
-  while read -r line; do # f체r jede zeile in... ; siehe "done"
-    # gebe die zeile aus
-    # suche mit awk nach "voltage:"
-    # wenn gefunden:
-    # gebe jede zeile per print text aus
-    # externe/bash-variablen mit "'"<var>"'"
+  while read -r line; do # for every line
+    # output line
+    # search with awk for "voltage:"
+    # if found
+    # print line
+    # external/bash-variables with "'"<var>"'"
     echo "$line" | awk '/voltage:/{
       print "multigraph voltage_graph_""'"$name"'";
       print "graph_title voltage " "'"$name"'";
@@ -134,17 +134,16 @@ function get_voltage_label {
 }
 function get_voltage_value {
   while read -r line; do
-    # funktion wie bei den "label"-funktionen
-    # gib 체berschrift aus wenn dirtyconfig nicht gesetzt ist
-    # weil aufruf dann nicht in "config" erfolgt
-    # wenn dirtyconfig nicht gesetzt ist oder =0, gebe 체berschrift aus
+    # like the label functions
+    # print title if dirtyconfig is not set
+    # because the call does not come in "config"
     if [ "$MUNIN_CAP_DIRTYCONFIG" = "0" ] || [ -z "$MUNIN_CAP_DIRTYCONFIG" ]; then
       echo "$line" | awk '/voltage:/{
         print "multigraph voltage_graph_""'"$name"'";
         }'
     fi
-    # entferne mit gsub das zeichen % in wert $2
-    # gebe $2 aus
+    # remove with gsub the char % in argument $2
+    # print $2
     echo "$line" | awk '/voltage:/{
       gsub(/V/,"",$2);
       print "voltage.value " $2
@@ -238,7 +237,7 @@ function get_temperature_label {
     echo "$line" | awk '/temperature/{
       print "multigraph temperature_graph_""'"$name"'";
       print "graph_title temperature " "'"$name"'";
-      print "graph_vlabel 째C";
+      print "graph_vlabel 캜";
       print "graph_category mikrotik";
       print "graph_args -l 0";
       print "temperature.label cpu temperature";
@@ -340,7 +339,7 @@ function get_memory_value {
   get_mem_total
   get_mem_free
   if [ "$MUNIN_CAP_DIRTYCONFIG" = "0" ] || [ -z "$MUNIN_CAP_DIRTYCONFIG" ]; then
-    echo multigraph memory_graph_"$name"
+    echo multigraph memory_"$name"
   fi
   while read -r line; do
     echo "$line" | awk '/total-memory:/{
@@ -354,8 +353,8 @@ function get_memory_value {
         printf "free_memory.value %.0f\n", $2
       }'
   done <<< "$data"
-  # berechne used-memory
-  # gesamt + frei = benutzt
+  # calculate used-memory
+  # total - free = used
   printf "used_memory.value %.0f\n" "$(echo $mem_total $mem_free | awk '{print ($1 - $2)}')"
 }
 
@@ -392,13 +391,13 @@ function get_disk_value {
   done <<< "$data"
 }
 
-# rufe funktionen auf, reihenfolge ist wichtig
+# call functions, the order is important
 get_data
 validate_data
 get_name
 get_cpu_count
-# munin-Logik
-# wenn $1 = X; dann
+# munin-Logic
+# id $1 = X; then
 if [ "$1" = "autoconf" ]; then
     if ! command -v sshpass &> /dev/null; then
         echo "[ERROR] sshpass could not be found!"
@@ -408,8 +407,8 @@ if [ "$1" = "autoconf" ]; then
     exit 0
 fi
 if [ "$1" = "config" ]; then
-  # gebe label aus
-  # wenn dirtyconfig gesetzt rufe value funktion auf
+  # print label
+  # if dirtyconfig is set print the value
   get_voltage_label
   if [ "$MUNIN_CAP_DIRTYCONFIG" = "1" ]; then
     get_voltage_value
@@ -444,8 +443,7 @@ if [ "$1" = "config" ]; then
   fi
   exit 0
 fi
-# wird nie aufgerufen wenn dirtyconfig gesetzt ist
-# dann wird nur config aufgerufen und dabei werden zus채tzlich die values ausgegeben
+# does not get called if dirtyconfig is set
 get_voltage_value
 get_bad_blocks_value
 get_write_sect_total_value
@@ -456,7 +454,7 @@ get_memory_value
 get_disk_value
 exit 0
 
-# Beispieloutput ROS 6.4*
+# Example Output ROS 6.4*
 #  voltage: 24.5V
 #   cpu-temperature: 31C
 #                    uptime: 4w3d21h28m58s
@@ -482,7 +480,7 @@ exit 0
 #  1 cpu1                                                                                                                                         19%          0%          0%
 #   name: crs309
 
-# Beispieloutput ROS 7*
+# Example Output ROS 7*
 # Columns: NAME, VALUE, TYPE
 #   #  NAME             VA  T
 #   0  cpu-temperature  44  C
