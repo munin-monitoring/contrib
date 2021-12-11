@@ -1,0 +1,52 @@
+#!/bin/bash
+#%# family=auto
+#%# capabilities=autoconf
+
+# Michael Grote
+# michael.grote ät posteo.de
+# Outputs various metrics about same page merging.
+
+# Variablen
+ksm_dir_run="/sys/kernel/mm/ksm/run"
+
+function labels {
+cat << EOF
+graph_title kernel same page merging
+graph_category system
+graph_order pages_unshared pages_volatile pages_shared pages_sharing
+pages_shared.info how many shared pages are being used
+pages_sharing.info how many more sites are sharing them i.e. how much saved
+pages_unshared.info how many pages unique but repeatedly checked for merging
+pages_volatile.info how many pages changing too fast to be placed in a tree
+pages_shared.label pages_shared
+pages_sharing.label pages_sharing
+pages_unshared.label pages_unshared
+pages_volatile.label pages_volatile
+pages_shared.draw AREASTACK
+pages_sharing.draw AREASTACK
+pages_unshared.draw AREASTACK
+pages_volatile.draw AREASTACK
+EOF
+}
+
+# prüfe ob ksm aktiviert ist
+if [ ! -f "$ksm_dir_run" ]; then
+  exit 1
+fi
+
+# wenn parameter = ...
+if [ "$1" = "autoconf" ]; then
+  echo yes
+  exit 0
+fi
+
+if [ "$1" = "config" ]; then
+  # setze label
+  labels
+  exit 0
+fi
+
+echo pages_shared.value $(cat "/sys/kernel/mm/ksm/pages_shared")
+echo pages_sharing.value $(cat "/sys/kernel/mm/ksm/pages_sharing")
+echo pages_unshared.value $(cat "/sys/kernel/mm/ksm/pages_unshared")
+echo pages_volatile.value $(cat "/sys/kernel/mm/ksm/pages_volatile")
