@@ -30,8 +30,18 @@ if [ "$1" = "suggest" ]; then
 	exit 0
 fi
 
+ignore_datasets_string=""
+
+if [ -z "$ignore_datasets_string" ]; then
+  search_term=$(zfs list -Hp -t filesystem,volume | grep -v "$ignore_datasets_string" | awk '{print $1}')
+else
+  search_term=$(zfs list -Hp -t filesystem,volume | awk '{print $1}')
+fi
+
+
+
 if [ "$1" = "config" ]; then
-	for i in `zfs list -Hp -t filesystem,volume | awk '{print $1}'`; do
+	for i in $search_term; do
 		values=( $(zfs get -p usedbydataset,usedbychildren,usedbysnapshots,usedbyrefreservation,available,quota $i | awk 'BEGIN {total=0;} { if( NR==1 ) next; } !/quota/ {total=total+$3;} {print $3} END{print total;}') )
 		fsname=$(clean_fieldname $(echo "$i" | sed 's/\//__/g'))
 
@@ -75,7 +85,7 @@ EOF
 	exit 0
 fi
 
-for i in `zfs list -Hp -t filesystem,volume | awk '{print $1}'`; do
+for i in $search_term; do
 	values=( $(zfs get -p usedbydataset,usedbychildren,usedbysnapshots,usedbyrefreservation,available,quota $i | awk 'BEGIN {total=0;} { if( NR==1 ) next; } !/quota/ {total=total+$3;} {print $3} END{print total;}') )
 	fsname=$(clean_fieldname $(echo "$i" | sed 's/\//__/g'))
 
