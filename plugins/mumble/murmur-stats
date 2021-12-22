@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8
 # Python Plugin for Munin
 # Copyright (C) 2010 Natenom (Natenom@googlemail.com)
@@ -14,31 +14,70 @@ iceslice='/usr/share/slice/Murmur.ice'
 #Murmur-Port (not needed to work, only for display purposes)
 serverport=64738
 
-#Port where ice listen
+#Server and Port where ice listens
+icehost="127.0.0.1"
 iceport=6502
-
 
 import Ice, sys
 Ice.loadSlice('', ['-I' + Ice.getSliceDir(), iceslice])
-ice = Ice.initialize()
 import Murmur
 
 if (sys.argv[1:]):
   if (sys.argv[1] == "config"):
-    print 'graph_title Murmur (Port %s)' % (serverport)
-    print 'graph_category voip'
-    print 'graph_vlabel Count'
-    print 'users.label Users'
-    print 'uptime.label Uptime in days'
-    print 'chancount.label Channelcount/10'
-    print 'bancount.label Bans on server'
+    print('multigraph murmur_stats_users')
+    print('graph_title Users on mumble server')
+    print('graph_category voip')
+    print('graph_vlabel Count')
+    print('users_total.label Total users')
+    print('users_muted.label Muted users')
+    print('users_registered.label Registered users')
+    print('users_unregistered.label Unregistered users')
+    print('bancount.label Bans on server')
+    print('multigraph murmur_stats_channels')
+    print('graph_title Channels on mumble server')
+    print('graph_category voip')
+    print('graph_vlabel Channels')
+    print('graph_args -l 0')
+    print('chancount.draw AREA')
+    print('chancount.label Channels')
+    print('multigraph murmur_stats_uptime')
+    print('graph_title Uptime of mumble server')
+    print('graph_category voip')
+    print('graph_vlabel Uptime')
+    print('uptime.label Uptime in days')
     sys.exit(0)
 
-meta = Murmur.MetaPrx.checkedCast(ice.stringToProxy("Meta:tcp -h 127.0.0.1 -p %s" % (iceport)))
-server=meta.getServer(1)
-print "users.value %i" % (len(server.getUsers()))
-print "uptime.value %.2f" % (float(meta.getUptime())/60/60/24)
-print "chancount.value %.1f" % (len(server.getChannels())/10)
-print "bancount.value %i" % (len(server.getBans()))
+ice = Ice.initialize()
 
-ice.shutdown()
+try:
+  meta = Murmur.MetaPrx.checkedCast(ice.stringToProxy("Meta:tcp -h %s -p %s" % (icehost, iceport)))
+except Ice.ConnectionRefusedException:
+  print('Could not connect to mumble server via Ice.', file=sys.stderr)
+  ice.destroy()
+  sys.exit(1)
+
+try:
+  server=meta.getServer(1)
+except Murmur.InvalidSecretException:
+  print('Given icesecretread password is wrong.', file=sys.stderr)
+  ice.destroy()
+  sys.exit(1)
+
+users = server.getUsers()
+
+users_unregistered = len(list(user for user in users.values() if user.userid == -1))
+users_registered = len(list(user for user in users.values() if user.userid >= 0))
+users_muted = len(list(user for user in users.values() if user.mute or user.selfMute or user.suppress))
+
+print("multigraph murmur_stats_users")
+print("users_total.value %i" % (len(users)))
+print("users_muted.value %i" % users_muted)
+print("users_registered.value %i" % (users_registered))
+print("users_unregistered.value %i" % (users_unregistered))
+print("bancount.value %i" % (len(server.getBans())))
+print("multigraph murmur_stats_channels")
+print("chancount.value %i" % (len(server.getChannels())))
+print("multigraph murmur_stats_uptime")
+print("uptime.value %.2f" % (float(meta.getUptime())/60/60/24))
+
+ice.destroy()
