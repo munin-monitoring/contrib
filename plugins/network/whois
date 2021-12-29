@@ -13,11 +13,12 @@ only query the WHOIS database C<cache_expiry_mins> minutes.
 
 =head1 CONFIGURATION
 
-First, create a section in your munin-node configuration files. The domain envvar
-is mandatory, others are optional.
+First, create a section in your munin-node configuration files. The domain
+envvar is mandatory, others are optional. Optionally, a specific WHOIS server
+to query for a given domain can be specified with the @WHOIS_SERVER suffix
 
 	[whois]
-	env.domains example.com example.org
+	env.domains example.com example.org@whois.example.net
 	env.extract_re s/PATTERN/REPL/
 	env.warning_days <default: 7 days>
 	env.critical_days <default: 3 days>
@@ -41,7 +42,7 @@ Then create a symlink to enable this plugin:
 
 Olivier Mehani
 
-Copyright (C) 2020 Olivier Mehani <shtrom+munin@ssji.net>
+Copyright (C) 2020,2021 Olivier Mehani <shtrom+munin@ssji.net>
 
 =head1 LICENSE
 
@@ -74,6 +75,7 @@ graph_config() {
 graph_title Domain registration expiry
 graph_category network
 graph_vlabel days
+graph_args --units-exponent 0
 EOF
 }
 
@@ -84,6 +86,8 @@ config() {
 	local FIELDNAME
 	for NAME in $DOMAINS
 	do
+		NAME="$(echo "${NAME}" | cut -d @ -f 1)"
+
 		FIELDNAME="$(clean_fieldname "${NAME}")"
 
 		cat << EOF
@@ -98,17 +102,24 @@ EOF
 # Args: domain name
 fetch() {
 	local NAME
+	local SERVER
 	local FIELDNAME
 	local CACHEFILE
 
 	for NAME in $DOMAINS
 	do
+		SERVER=''
+		if echo "${NAME}" | grep -q '@'; then
+			SERVER="$(echo "${NAME}" | cut -d @ -f 2)"
+			NAME="$(echo "${NAME}" | cut -d @ -f 1)"
+		fi
+
 		FIELDNAME="$(clean_fieldname "${NAME}")"
 
 		CACHEFILE="${MUNIN_PLUGSTATE}/$(basename "${0}").${FIELDNAME}.cache"
 
 		if [ -z "$(find "${CACHEFILE}" -mmin -"${CACHE_EXPIRY}" 2>/dev/null)" ]; then
-			EXPIRY="$(whois "${NAME}" 2>/dev/null | sed -n "${EXTRACT_RE}p;T;q")" # T;q exits after printing the first match
+			EXPIRY="$(whois "${NAME}" "${SERVER:+-h${SERVER}}" 2>/dev/null | sed -n "${EXTRACT_RE}p;T;q")" # T;q exits after printing the first match
 			DELTA_TS=U
 			if [ -n "${EXPIRY}" ]; then
 				EXPIRY_TS="$(date +%s -d "${EXPIRY}")"
@@ -126,17 +137,14 @@ fetch() {
 
 main() {
 	local MODE="${1:-}"
-	local NAME
-
-	NAME="$(echo "${0}" | sed 's/.*_//')"
 
 	case "${MODE}" in
 		'config')
-			graph_config "${NAME}"
-			config "${NAME}"
+			graph_config
+			config
 			;;
 		*)
-			fetch "${NAME}"
+			fetch
 			;;
 	esac
 }
