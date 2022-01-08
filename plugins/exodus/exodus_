@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""
+=head1 NAME
+
+exodus_ - Exodus wildcard-plugin to monitor an L<Exodus|https://github.com/Exodus-Privacy/exodus/>
+instance.
+
+This wildcard plugin provides at the moment only the suffixes C<applications>, C<reports>
+and C<trackers>.
+
+=head1 INSTALLATION
+
+- Copy this plugin in your munin plugins directory
+
+=over 2
+
+    ln -s /usr/share/munin/plugins/exodus_ /etc/munin/plugins/exodus_applications
+    ln -s /usr/share/munin/plugins/exodus_ /etc/munin/plugins/exodus_reports
+    ln -s /usr/share/munin/plugins/exodus_ /etc/munin/plugins/exodus_trackers
+
+=back
+
+After the installation you need to restart your munin-node:
+
+=over 2
+
+    systemctl restart munin-node
+
+=back
+
+=head1 CONFIGURATION
+
+You need to create a file named exodus placed in the directory
+/etc/munin/plugin-conf.d/ with the following config:
+
+=over 2
+
+    [exodus_*]
+    env.exodus_url https://reports.exodus-privacy.eu.org
+    env.exodus_token your-api-token
+
+=back
+
+=head1 AUTHORS
+
+Codimp <contact@lithio.fr>
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=suggest
+
+=cut
+"""
+
+import os
+import sys
+import requests
+
+
+def print_count(type):
+    endpoint = os.getenv('exodus_url') + '/api/' + type + '/count'
+    headers = {"Authorization": "Token " + os.getenv('exodus_token')}
+    count = requests.post(endpoint, headers=headers)
+    if count.status_code == 200:
+        print(type + '.value', count.json()['count'])
+
+
+def main():
+    try:
+        mode = sys.argv[1]
+    except IndexError:
+        mode = ""
+    wildcard = sys.argv[0].split("exodus_")[1].split("_")[0]
+
+    if mode == "suggest":
+        print("applications")
+        print("reports")
+        print("trackers")
+
+    if wildcard == "applications":
+        if mode == "config":
+            print("graph_title Exodus applications")
+            print("graph_vlabel applications")
+            print("graph_category exodus")
+            print("applications.label Applications")
+        else:
+            print_count('applications')
+    elif wildcard == "reports":
+        if mode == "config":
+            print("graph_title Exodus reports")
+            print("graph_vlabel reports")
+            print("graph_category exodus")
+            print("reports.label Reports")
+        else:
+            print_count('reports')
+    elif wildcard == "trackers":
+        if mode == "config":
+            print("graph_title Exodus trackers")
+            print("graph_vlabel trackers")
+            print("graph_category exodus")
+            print("trackers.label Trackers")
+        else:
+            print_count('trackers')
+
+
+if __name__ == '__main__':
+    main()
