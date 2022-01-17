@@ -33,7 +33,7 @@ reality. The stored values would need to be adjusted.
 bytes to bits. Conversely, they do now need a CDEF to convert bits to bytes.
 
 To reflect this aspect explicitely, the root graph's totals are named
-recv_bits and send_bits.
+`recv_bits` and `send_bits`.
 
 =head1 CONFIGURATION
 
@@ -45,6 +45,7 @@ configuration (shown here) will only work on insecure sites/devices:
    env.community public
    env.ifTypeOnly ethernetCsmacd
    env.stackedRoot 1
+   env.stackedMax 0
 
 In general SNMP is not very secure at all unless you use SNMP version
 3 which supports authentication and privacy (encryption).  But in any
@@ -161,12 +162,18 @@ issue (compounded by the first) is that of wraparound. When one of the counters
 wraps around, the sum jumps backwards. With a `min` set to 0, and other counters
 having kept increasing, this looks like a huge increase the total counter.
 Depending on the `max` (which should match the backplane bandwidth), this may
-not be correctly recognised as a spurious value, just reconded as valid.
+not be correctly recognised as a spurious value, just recorded as valid.
 
-There is no clear solution to this bug at the moment, save for trying to salvage
-the data after the fact. This can be done my either clipping all values beyond a
-maximum (e.g., the known use of the switch, rather that its full backplane
-bandwith).
+As a workaround, the `stackedMax` option is available. It will be set as the max
+values for the `send_bits` and `recv_bits` sum series, allowing to prevent
+overshoot. It should be set to around the expected maximum given the monitored
+network, rather than the sum of the theoretical maxes of the interfaces. This is
+a blunt tool that is not going to be very precise, but it should get rid of the
+largest outliers, keeping the graphs useful.
+
+Barring that, it should be possible to salvage the data after the fact. This can
+be done my either clipping all values beyond a maximum (e.g., the known use of
+the switch, rather that its full backplane bandwith).
 
     RANGE='[0-9.]\+e+\(0[789]\|[1-9][0-9]\)'  # Anything >=1e07
     rrdtool dump ${RRD_FILE} \
@@ -273,6 +280,10 @@ if (defined $ARGV[0] and $ARGV[0] eq "snmpconf") {
 my $stackedRoot = 0;
 if (exists $ENV{'stackedRoot'}) {
     $stackedRoot = $ENV{'stackedRoot'};
+}
+my $stackedMax = 0;
+if (exists $ENV{'stackedMax'}) {
+    $stackedMax = $ENV{'stackedMax'};
 }
 
 my $sysDescr           = '1.3.6.1.2.1.1.1.0';
@@ -704,6 +715,12 @@ send_bits.draw LINE1
 send_bits.colour 000000
 send_bits.negative recv_bits
 END
+        if ($stackedMax > 0) {
+        print <<END;
+recv_bits.max $stackedMax
+send_bits.max $stackedMax
+END
+        }
     }
 
     print <<END;
@@ -951,6 +968,14 @@ foreach my $if (sort {$a <=> $b} keys %{$snmpinfo}) {
     ($recv_if, $send_if) = do_fetch_if($if);
     $recv += ($recv_if || 0);
     $send += ($send_if || 0);
+}
+if ($stackedMax > 0) {
+    if ($recv > $stackedMax) {
+        $recv = 'U';
+    }
+    if ($send > $stackedMax) {
+        $send = 'U';
+    }
 }
 if ($stackedRoot) {
     print "multigraph $scriptname\n";
