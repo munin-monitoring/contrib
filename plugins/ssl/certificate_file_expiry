@@ -15,6 +15,14 @@ For openvpn ca.crt and crl.pem
  env.CERTS crl:/etc/openvpn/easy-rsa/keys/crl.pem x509:/etc/openvpn/easy-rsa/keys/ca.crt
  env.LOGARITHMIC yes
 
+For openvpn inline <ca> and <cert> certificates, as described here
+https://community.openvpn.net/openvpn/wiki/Openvpn23ManPage#lbAV
+
+ [certificate_file_expiry]
+ user root
+ env.CERTS openvpn_inline:/etc/openvpn/client.conf
+ env.LOGARITHMIC yes
+
 For letsencrypt certificates
 
  [certificate_file_expiry]
@@ -32,8 +40,11 @@ Warning and Critical levels can also be configured with env variables like this:
  # critical when certificate will be invalid within 1 day
  env.critical 1:
 
-env.CERTS should be a space separated list of patterns prefixed by the type of certificate to check and a colon. All types of
-certificates that openssl supports as standard commands and have a validity output are supported (e.g. x509, crl).
+env.CERTS should be a space separated list of patterns prefixed by the type of certificate to check and a colon. All
+types of certificates that openssl supports as standard commands and have a validity output are supported
+(e.g. x509, crl).
+A special type is openvpn_inline where the plugin gets the certificates directly from the openvpn conf file in between
+the <ca>\n...\n</ca> and <cert>\n...\n</cert> lines and checks those with openssl x509.
 File patterns can be a single file (e.g. /etc/openvpn/easy-rsa/keys/crl.pem) or a pattern that matches multiple files
 (e.g. /etc/letsencrypt/live/*/cert.pem).
 
@@ -78,22 +89,60 @@ warning=${warning:-5:}
 critical=${critical:-1:}
 
 now=$(date +%s)
+get_validity() {
+  local file
+  local openssl_type
+  local validity_line
+  local validity_str_value
+  local validity_timestamp
+  local validity_seconds
+  openssl_type=$1
+  file=$2
+  if [ "$file" != "-" ] ; then
+    validity_line=$(/usr/bin/openssl "$openssl_type" -text -noout -in "$file" | grep -E '(Next Update|Not After)')
+  else
+    # when file is set to -- read from stdin
+    validity_line=$(/usr/bin/openssl "$openssl_type" -text -noout | grep -E '(Next Update|Not After)')
+  fi
+  validity_str_value=${validity_line#*:}
+  validity_timestamp=$(date --date="$validity_str_value" +%s)
+  validity_seconds=$((validity_timestamp - now))
+  echo "$validity_seconds" | awk '{ print ($1 / 86400) }'
+}
+print_config_lines() {
+  name=$1
+  label=$2
+  echo "${name}.label ${label}"
+  print_warning "$name"
+  print_critical "$name"
+}
+get_openvpn_inline_cert() {
+  file=$1
+  type=$2
+  # print content between <type> and </type> lines (ca and cert)
+  awk 'BEGIN{content=0}/^<\/'"$type"'>$/{content=0}(content==1){ print $0 }/^<'"$type"'>$/{content=1}' < "$file"
+}
+
 for cert in ${CERTS}; do
   cert_type=${cert%:*}
   cert_pattern=${cert#*:}
   for cert_file in $cert_pattern; do
-    cert_name=$(clean_fieldname "$cert_file")
-    if [ "$1" = "config" ] ; then
-      echo "${cert_name}.label ${cert_file}"
-      print_warning "$cert_name"
-      print_critical "$cert_name"
-    elif [ "$1" = "" ] ; then
-      validity=$(/usr/bin/openssl "$cert_type" -text -noout -in "$cert_file" | grep -E '(Next Update|Not After)')
-      validity=${validity#*:}
-      validity=$(date --date="$validity" +%s)
-      validity=$((validity - now))
-      validity=$(echo "$validity" | awk '{ print ($1 / 86400) }')
-      echo "${cert_name}.value $validity"
+    if [ "$cert_type" = "openvpn_inline" ] ; then
+      for type in "ca" "cert"; do
+        cert_name=$(clean_fieldname "$cert_file-$type")
+        if [ "$1" = "config" ] ; then
+          print_config_lines "$cert_name" "${cert_file} ${type}"
+        elif [ "$1" = "" ] ; then
+          echo "${cert_name}.value $(get_openvpn_inline_cert "$cert_file" "$type" | get_validity "x509" "-")"
+        fi
+      done
+    else
+      cert_name=$(clean_fieldname "$cert_file")
+      if [ "$1" = "config" ] ; then
+        print_config_lines "$cert_name" "${cert_file}"
+      elif [ "$1" = "" ] ; then
+        echo "${cert_name}.value $(get_validity "$cert_type" "$cert_file")"
+      fi
     fi
   done
 done
