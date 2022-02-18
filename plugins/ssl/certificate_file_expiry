@@ -55,6 +55,9 @@ env.LOGARITHMIC "yes" enables the logarithmic display of values which is useful 
 long lived in respect to the warning level. e.g. a ca.crt that is valid for 10 years together with a crl.pem that is
 valid for only a few months combined with warning levels of 5 days. default is "yes" to disable set it to "no".
 
+env.IGNORE_UNEXPANDED_PATTERNS "yes" ignores patterns that did not expand to any files. this is useful to define one
+config that handles multiple types of certs where only one pattern is used. default is "no".
+
 =head1 Dependencies
 
 Dependencies: openssl
@@ -72,6 +75,7 @@ GPLv2
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
 LOGARITHMIC=${LOGARITHMIC:-yes}
+IGNORE_UNEXPANDED_PATTERNS=${IGNORE_UNEXPANDED_PATTERNS:-no}
 
 if [ "$1" = "config" ] ; then
   echo "graph_title Certificate validity"
@@ -127,6 +131,16 @@ for cert in ${CERTS}; do
   cert_type=${cert%:*}
   cert_pattern=${cert#*:}
   for cert_file in $cert_pattern; do
+    # note: if file contains a * (e.g. /etc/letsencrypt/live/*/cert.pem) it might be an unexpanded pattern
+    # to supress errors see IGNORE_UNEXPANDED_PATTERNS above
+    # shellcheck disable=SC2063
+    if [ "$IGNORE_UNEXPANDED_PATTERNS" = "yes" ] \
+      && [ "$cert_file" = "$cert_pattern" ] \
+      && ! [ -e "$cert_file" ] \
+      && echo "$cert_file" | grep -q "*" ; then
+        # skip unexpanded patterns when IGNORE_UNEXPANDED_PATTERNS is set to yes
+        continue
+    fi
     if [ "$cert_type" = "openvpn_inline" ] ; then
       for type in "ca" "cert"; do
         cert_name=$(clean_fieldname "$cert_file-$type")
