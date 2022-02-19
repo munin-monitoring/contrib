@@ -1,25 +1,62 @@
 #!/usr/bin/env ruby
+@dummyvar = <<-'=cut'
+=head1 NAME
 
-# This plugin reports the duration of the most recent puppet agent run.
-# It requires read access to the puppet logfile (defaults to /var/log/messages).
-#
-# CONFIGURATION
-#
-# [puppet*]
-# env.puppet_logfile /var/log/message
-# env.puppet_logformat "^%b %d"
-#
-# The logfile is where the puppet agent is expected to log its run time statistics.
-# The format is the format of the date syslog writes to the file, which may vary
-# according to locale and configuration.
+puppet_runtime - Munin plugin that reports the duration of puppet runs.
 
-# reports how long the puppet agent took to apply the catalog
+=head1 Compatibility
+
+This Plugin is tested with the following configurations:
+
+  Debian: {
+    version => 11 {
+      Puppet: {
+        version => 5.5.22,
+        version => 7.14.0,
+      }
+    }
+  }
+  Redhat: {
+    version => 8 {
+      Puppet: {
+        version => 6.4.0,
+        version => 7.9.2,
+      }
+    }
+  }
+  Fedora: {
+    version => 35 {
+      Puppet: {
+        version => 7.12.1,
+        version => 7.14.0,
+      }
+    }
+  }
+
+=head1 Configuration
+
+This plugin works without any further configuration. If it does 
+not work, then run "puppet config print lastrunreport" and make 
+sure that the specified file is readable.
+
+  $ puppet config print lastrunreport
+    
+The duration of the Puppet run is determined from the Puppet report. 
+This information can be found in the file last_run_report.yaml. 
+The location of the file is determined via the Puppet client: 
+
+An example Output:
+
+  $ munin-run puppet_runtime 
+  runtime.value 0.90
+
+
+
+=cut
+
 def get_runtime
-  logfile = ENV['puppet_logfile'] || '/var/log/daemon.log'
-  t = Time.now
-  dateformat = ENV['puppet_logformat'] || '^%b %d'
-  today = t.strftime(dateformat)
-  File.open(logfile).grep(/#{today}/).grep(/Applied catalog in/).reverse_each do |line|
+  reportfile = %x{printf $(puppet config print lastrunreport)}
+  File.open(reportfile).grep(/Applied catalog in/).reverse_each do |line|
     if line =~ /in (.*) seconds/
       puts "runtime.value #{Regexp.last_match(1)}"
       exit 0
@@ -32,7 +69,7 @@ when 'config'
   puts 'graph_category other'
   puts 'graph_args --base 1000 -l 0'
   puts 'graph_scale no'
-  puts 'graph_title puppet catalog run time'
+  puts 'graph_title Puppet catalog run time'
   puts 'graph_vlabel Seconds'
   puts 'runtime.label Catalog application time'
   exit 0
