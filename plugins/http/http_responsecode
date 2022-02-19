@@ -13,12 +13,26 @@ The following environment variables are used
 
  sites       - Sites to check
  max_time    - Timeout for each site check - defaults to 5 seconds
+ host_name   - To put the graph onto a different host
 
 Configuration example
 
  [http_responsecode]
   env.sites example.com example2.de
   env.max_time 5
+
+You can display the graph on another host (e.g., the actual server) than the
+one running http_responsecode.
+To do so, first configure the plugin to use a different hostname.
+
+    env.host_name server
+
+Then configure munin (in /etc/munin/munin-conf or /etc/munin/munin-conf.d), to
+support a new host.
+
+  [example.net;server]
+    address 127.0.0.1
+    use_node_name no
 
 =head1 AUTHOR
 
@@ -53,6 +67,9 @@ if [ "$1" = "config" ]; then
     echo 'graph_category network'
     echo 'graph_info This graph shows HTTP response code statistics.'
     echo 'graph_printf %3.0lf'
+    if [ -n "$host_name" ]; then
+        echo "host_name $host_name"
+    fi
     for site in $sites; do
 	siteid=`echo $site | sed 's/[^a-z]*//g'`
 	echo "$siteid.label $site"
