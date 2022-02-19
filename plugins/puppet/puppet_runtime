@@ -35,22 +35,57 @@ This Plugin is tested with the following configurations:
 
 =head1 Configuration
 
-This plugin works without any further configuration. If it does 
-not work, then run "puppet config print lastrunreport" and make 
-sure that the specified file is readable.
+The following configuration is mandatory. It must be ensured that 
+the plugin is executed by the root user.
+
+  $ cat /etc/munin/plugin-conf.d/puppet.conf 
+    [puppet_runtime]
+    user root
+
+Further configurations are not necessary. If it does not work, 
+then run "puppet config print lastrunreport" and make sure that 
+the specified file is readable.
 
   $ puppet config print lastrunreport
+
+To check the function, perform the following:
+
+  $ munin-run puppet_runtime
+
+An example Output:
+
+  $ munin-run puppet_runtime 
+    runtime.value 0.90
     
 The duration of the Puppet run is determined from the Puppet report. 
 This information can be found in the file last_run_report.yaml. 
 The location of the file is determined via the Puppet client: 
 
-An example Output:
+=head1 Tips & Tricks
 
-  $ munin-run puppet_runtime 
-  runtime.value 0.90
+Since you want to integrate the runtime of a puppet run into Munin, 
+you will most likely use puppet as well. Here you can find an 
+example for your puppet configuration:
 
+  file {'/etc/munin/plugin-conf.d/puppet.conf':
+    source => 'puppet:///modules/munin/puppet.conf',
+    notify => Service['munin-node'],
+  }
+  file {'/etc/munin/plugins/puppet_runtime':
+    ensure => 'link',
+    target => '/usr/share/munin/plugins/puppet_runtime',
+  }
 
+The only known problem that can occur is that it does not find the 
+puppet client when running because the environment variable is not 
+known. This can occur when using the puppetlabs repository.
+
+Here, a simple link is enough to fix the problem:
+
+  file {'/usr/bin/puppet':
+    ensure => 'link',
+    target => '/opt/puppetlabs/bin/puppet',
+  }
 
 =cut
 
