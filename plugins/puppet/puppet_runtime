@@ -94,24 +94,17 @@ In this case, a simple link is enough to fix this issue:
 require 'yaml'
 
 report = YAML.load(File.read(`puppet config print lastrunfile`.strip))
-total = report.dig "time", "total"
-if total
-  puts "total.value #{report["time"]["total"]}"
-end
+time_report = report["time"]
 
-fact_generation = report.dig "time", "fact_generation"
-if fact_generation
-  puts "fact_generation.value #{report["time"]["fact_generation"]}"
-end
+if time_report.is_a?(Hash)
+  total, fact_generation, catalog_application, plugin_sync = time_report.values_at(
+    "total", "fact_generation", "catalog_application", "plugin_sync"
+  )
 
-catalog_application = report.dig "time", "catalog_application"
-if catalog_application
-  puts "catalog_application.value #{report["time"]["catalog_application"]}"
-end
-
-plugin_sync = report.dig "time", "plugin_sync"
-if catalog_application
-  puts "plugin_sync.value #{report["time"]["plugin_sync"]}"
+  puts "total.value #{total}" if total
+  puts "fact_generation.value #{fact_generation}" if fact_generation
+  puts "catalog_application.value #{catalog_application}" if catalog_application
+  puts "plugin_sync.value #{plugin_sync}" if plugin_sync
 end
 
 case ARGV[0]
@@ -121,10 +114,10 @@ when 'config'
   puts 'graph_scale no'
   puts 'graph_title Puppet agent run time'
   puts 'graph_vlabel Seconds'
-  puts 'total.label Total puppet agent runtime'
-  puts 'fact_generation.label Fact generation'
-  puts 'catalog_application.label Catalog application'
-  puts 'plugin_sync.label Plugin sync'
+  puts 'total.label Puppet agent runtime'
+  puts 'fact_generation.label Fact generation runtime'
+  puts 'catalog_application.label Catalog application runtime'
+  puts 'plugin_sync.label Plugin sync runtime'
   exit 0
 when 'autoconf'
   puts 'yes'
