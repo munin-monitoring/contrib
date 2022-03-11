@@ -1,78 +1,71 @@
 #!/usr/bin/env ruby
-@dummyvar = <<-'=cut'
-=head2 Description
+=begin
+=head1 puppet_runtime
 
-puppet_runtime - Munin plugin that reports the duration of puppet runs.
+A munin plugin that reports the duration of puppet runs.
 
 =head2 Compatibility
 
 This Plugin is tested with the following configurations:
 
-  Debian: {
-    version => 11 {
-      Puppet: {
-        version => 5.5.22,
-        version => 7.14.0,
-      }
-    }
-  }
-  Redhat: {
-    version => 8 {
-      Puppet: {
-        version => 6.4.0,
-        version => 6.19.1,
-        version => 7.9.2,
-      }
-    }
-  }
-  Fedora: {
-    version => 35 {
-      Puppet: {
-        version => 7.12.1,
-        version => 7.14.0,
-      }
-    }
-  }
+  ---
+  Linux:
+    Debian:
+    - 11
+    - Puppet:
+      - 5.5.22
+      - 7.14.0
+    Redhat:
+    - 8
+    - Puppet:
+      - 6.4.0
+      - 6.19.1
+      - 7.9.2
+    Fedora:
+    - 35
+    - Puppet:
+      - 7.12.1
+      - 7.14.0
 
 =head2 Configuration
 
-The following configuration is mandatory. It must be ensured that 
-the plugin is executed by the root user.
+It must be ensured that the plugin is executed by root. For
+this create the follwing file:
 
-  $ cat /etc/munin/plugin-conf.d/puppet.conf 
+  $ cat /etc/munin/plugin-conf.d/puppet.conf
     [puppet_runtime]
       user root
 
-Further configurations are not necessary. If it does not work, 
-then run "puppet config print lastrunreport" and make sure that 
-the specified file is readable.
+Further configurations are not necessary.
+
+=head2 How it works
+
+Puppet generates a YAML file on each run which contains all
+information of the last run, the 'facts'.
+
+Where your puppet-agent stores the file, the plugin finds out
+with the following commansd:
 
   $ puppet config print lastrunreport
-    /opt/puppetlabs/puppet/cache/state/last_run_report.yaml
 
-To check the function, perform the following:
+=head3 Run it!
+
+To check the plugins function, perform the following:
 
   $ munin-run puppet_runtime
 
 An example Output:
 
-  $ munin-run puppet_runtime 
-    total.value 6.952583373
-    fact_generation.value 4.8415459030075
-    catalog_application.value 1.060418801032938
-    plugin_sync.value 0.6275155210169032
-    
-The duration of the Puppet run is determined from the Puppet report. 
-This information can be found in the file last_run_report.yaml. 
-The location of the file is determined via the Puppet client, for example:
+  $ munin-run puppet_runtime
+    total.value 9.571794571
+    fact_generation.value 6.210164764896035
+    catalog_application.value 2.0418781149201095
+    plugin_sync.value 0.6617366508580744
 
-  $ puppet config print lastrunreport
-    /opt/puppetlabs/puppet/cache/state/last_run_report.yaml
+=head3 Tips & Tricks
 
-=head2 Tips & Tricks
-
-Since you want to integrate the runtime of a puppet run into Munin, 
-you will most likely use puppet as well. Here you can find an 
+Since you want to integrate the runtime of a puppet run into Munin,
+you will most likely use puppet as well. Here you can find an
 example for your puppet configuration:
 
   file {'/etc/munin/plugin-conf.d/puppet.conf':
@@ -86,8 +79,8 @@ example for your puppet configuration:
 
 =head3 Known issues
 
-The only known issue that can occur is that puppet cannot be found. 
-This is because it is not known to the environment used. This issue 
+The only known issue that can occur is that puppet cannot be found.
+This is because it is not known to the environment used. This issue
 can occur when using the packages from the puppetlabs repo.
 
 In this case, a simple link is enough to fix this issue:
@@ -96,26 +89,26 @@ In this case, a simple link is enough to fix this issue:
     ensure => 'link',
     target => '/opt/puppetlabs/bin/puppet',
   }
+=end
 
-=cut
 require 'yaml'
 
-report = YAML.load(File.read(`puppet config print lastrunfile`.strip))
-time_report = report["time"]
+def output
+  report = YAML.load(File.read(`puppet config print lastrunfile`.strip))
+  time_report = report["time"]
 
-if time_report.is_a?(Hash)
-  total, fact_generation, catalog_application, plugin_sync = time_report.values_at(
+  if time_report.is_a?(Hash)
+    total, fact_generation, catalog_application, plugin_sync = time_report.values_at(
     "total", "fact_generation", "catalog_application", "plugin_sync"
-  )
-
-  puts "total.value #{total}" if total
-  puts "fact_generation.value #{fact_generation}" if fact_generation
-  puts "catalog_application.value #{catalog_application}" if catalog_application
-  puts "plugin_sync.value #{plugin_sync}" if plugin_sync
+    )
+    puts "total.value #{total}" if total
+    puts "fact_generation.value #{fact_generation}" if fact_generation
+    puts "catalog_application.value #{catalog_application}" if catalog_application
+    puts "plugin_sync.value #{plugin_sync}" if plugin_sync
+  end
 end
 
-case ARGV[0]
-when 'config'
+def config
   puts 'graph_category system'
   puts 'graph_args --base 1000 -l 0'
   puts 'graph_scale no'
@@ -125,13 +118,10 @@ when 'config'
   puts 'fact_generation.label Fact generation runtime'
   puts 'catalog_application.label Catalog application runtime'
   puts 'plugin_sync.label Plugin sync runtime'
-  exit 0
-when 'autoconf'
-  puts 'yes'
-  exit 0
+end
+
+if (ARGV.length == 1) && (ARGV[0] == 'config')
+  config
 else
-  total
-  fact_generation
-  catalog_application
-  plugin_sync
+  output
 end
