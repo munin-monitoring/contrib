@@ -5,7 +5,7 @@
 
 =head1 NAME
 
-pressure - Plugin to monitor the pressure stall information for CPU, Memory and
+linux_psi - Plugin to monitor the pressure stall information for CPU, Memory and
 IO as reported by the Linux kernel.
 
 This plugin monitors the pressure stall information (psi) as reported by the
@@ -38,7 +38,7 @@ internal name.
 
 Optional configuration examples:
 
-[pressure]
+[linux_psi]
 env.resources cpu io memory       - Specify the resources to monitor. Leave one
                                     out if you don't want this one to be
                                     monitored.
@@ -95,34 +95,43 @@ resource_defaults=('cpu' 'io' 'memory')
 interval_defaults=('avg10' 'avg60' 'avg300')
 scope_defaults=('some' 'full')
 pressure_dir=${pressure_dir:-'/proc/pressure/'}
-pressure_resources=${resources[@]:-${resource_defaults[@]}}
-pressure_intervals=${intervals[@]:-${interval_defaults[@]}}
-pressure_scopes=${scopes[@]:-${scope_defaults[@]}}
-summary_interval=${summary_interval:-avg300}
+pressure_resources=( "${resources[@]:-${resource_defaults[@]}}" )
+pressure_intervals=( "${intervals[@]:-${interval_defaults[@]}}" )
+pressure_scopes=( "${scopes[@]:-${scope_defaults[@]}}" )
+summary_interval="${summary_interval:-avg300}"
 
 check_autoconf() {
   if [ -d "${pressure_dir}" ]; then
     printf "yes\n"
   else
-    printf "no (%s not found)\n" ${pressure_dir}
+    printf "no (%s not found)\n" "${pressure_dir}"
   fi
 }
 
 get_pressure_value() {
-  resource=$1
-  interval=$2
-  scope=${3:-some}
-  grep "$scope" ${pressure_dir}//${resource} | grep -o -E "${interval}=[0-9]{1,}(\.[0-9]{1,}){0,1}" | cut -d '=' -f 2
+  local resource
+  local interval
+  local scope
+  
+  resource="$1"
+  interval="$2"
+  scope="${3:-some}"
+  
+  grep "$scope" "${pressure_dir}/${resource}" | grep -o -E "${interval}=[0-9]{1,}(\.[0-9]{1,}){0,1}" | cut -d '=' -f 2
 }
 
 get_printable_name() {
-  kind=$1
-  value=$2
+  local kind
+  local value
+  local printable_name
+  kind="$1"
+  value="$2"
+  printable_name=""
   
-  case $kind in
+  case "$kind" in
     
     interval)
-      case $interval in
+      case "$interval" in
         avg10)
           printable_name="10sec"
           ;;
@@ -136,14 +145,14 @@ get_printable_name() {
           printable_name="Total"
           ;;
         *)
-          printf "ERROR: Could not determine interval %s ! Must be one of 'avg10' 'avg60' 'avg300' 'total'\n" $value >&2
+          printf "ERROR: Could not determine interval %s ! Must be one of 'avg10' 'avg60' 'avg300' 'total'\n" "$value" >&2
           exit 2
           ;;
       esac
       ;;
     
     scope)
-      case $value in
+      case "$value" in
         some)
           printable_name="Some"
           ;;
@@ -151,14 +160,14 @@ get_printable_name() {
           printable_name="Full"
           ;;
         *)
-          printf "ERROR: Could not determine scope %s ! Must be one of 'full' 'some'.\n" $value >&2
+          printf "ERROR: Could not determine scope %s ! Must be one of 'full' 'some'.\n" "$value" >&2
           exit 2
           ;;
       esac
       ;;
     
     resource)
-      case $value in
+      case "$value" in
         cpu)
           printable_name="CPU"
           ;;
@@ -169,133 +178,150 @@ get_printable_name() {
           printable_name="Memory"
           ;;
         *)
-          printf "ERROR: Could not determine resource-type %s ! Must be one of 'cpu' 'io' 'memory'.\n" $value >&2
+          printf "ERROR: Could not determine resource-type %s ! Must be one of 'cpu' 'io' 'memory'.\n" "$value" >&2
           exit 2
           ;;
       esac
       ;;
     
     *)
-      printf "ERROR: Could not determine kind %s ! Must be one of 'interval' 'scope' 'resource'\n" $kind >&2
+      printf "ERROR: Could not determine kind %s ! Must be one of 'interval' 'scope' 'resource'\n" "$kind" >&2
       exit 2
       ;;
   esac
   
-  printf "%s\n" $printable_name
+  printf "%s" "$printable_name"
 }
 
 iterate_config() {
-  for resource in ${pressure_resources[@]}; do
-    printable_resource=$( get_printable_name resource $resource )
-    printf "multigraph pressure.%s_avg\n" $resource
-    printf "graph_title %s Pressure Stall Information - Average\n" $printable_resource
+  for resource in "${pressure_resources[@]}"; do
+    local printable_resource
+    printable_resource=$( get_printable_name resource "$resource" )
+    printf "multigraph linux_psi.%s_avg\n" "$resource"
+    printf "graph_title %s Pressure Stall Information - Average\n" "$printable_resource"
     printf "graph_category system\n"
-    printf "graph_info Average PSI based latency caused by lack of %s resources.\n" $printable_resource
+    printf "graph_info Average PSI based latency caused by lack of %s resources.\n" "$printable_resource"
     printf "graph_vlabel %%\n"
     printf "graph_scale no\n"
-    for interval in ${pressure_intervals[@]}; do
-      printable_interval=$( get_printable_name interval $interval )
-      output_config $resource $interval
+    for interval in "${pressure_intervals[@]}"; do
+      local printable_interval
+      printable_interval=$( get_printable_name interval "$interval" )
+      output_config "$resource" "$interval"
     done
     echo ""
   done
   
-  for resource in ${pressure_resources[@]}; do
-    printable_resource=$( get_printable_name resource $resource )
-    printf "multigraph pressure.%s_total\n" $resource
-    printf "graph_title %s Pressure Stall Information - Rate\n" $printable_resource
-    printf "graph_category system\n"
-    printf "graph_info Total PSI based latency rate caused by lack of %s resources.\n" $printable_resource
-    printf "graph_vlabel rate\n"
+  for resource in "${pressure_resources[@]}"; do
+    local interval
+    local printable_resource
     interval="total"
-    output_config $resource $interval
+    printable_resource=$( get_printable_name resource "$resource" )
+    
+    printf "multigraph linux_psi.%s_total\n" "$resource"
+    printf "graph_title %s Pressure Stall Information - Rate\n" "$printable_resource"
+    printf "graph_category system\n"
+    printf "graph_info Total PSI based latency rate caused by lack of %s resources.\n" "$printable_resource"
+    printf "graph_vlabel rate\n"
+    output_config "$resource" "$interval"
     echo ""
   done
   
-  printf "multigraph pressure\n"
+  printf "multigraph linux_psi\n"
   printf "graph_title Pressure Stall Information - Average\n"
   printf "graph_vlabel %%\n"
   printf "graph_scale no\n"
   printf "graph_category system\n"
   printf "graph_info Average PSI based latency caused by lack of resources.\n"
-  for resource in ${pressure_resources[@]}; do
-    output_config $resource $summary_interval
+  for resource in "${pressure_resources[@]}"; do
+    output_config "$resource" "$summary_interval"
   done
   echo ""
 }
 
 iterate_values() {
-  for resource in ${pressure_resources[@]}; do
-    printf "multigraph pressure.%s_avg\n" $resource
-    for interval in ${pressure_intervals[@]}; do
-      output_values $resource $interval
+  for resource in "${pressure_resources[@]}"; do
+    printf "multigraph linux_psi.%s_avg\n" "$resource"
+    for interval in "${pressure_intervals[@]}"; do
+      output_values "$resource" "$interval"
     done
     echo ""
   done
   
-  for resource in ${pressure_resources[@]}; do
-    printf "multigraph pressure.%s_total\n" $resource
+  for resource in "${pressure_resources[@]}"; do
+    local interval
     interval="total"
-    output_values $resource $interval
+    printf "multigraph linux_psi.%s_total\n" "$resource"
+    output_values "$resource" "$interval"
     echo ""
   done
   
-  printf "multigraph pressure\n"
-  for resource in ${pressure_resources[@]}; do
-    output_values $resource $summary_interval
+  printf "multigraph linux_psi\n"
+  for resource in "${pressure_resources[@]}"; do
+    output_values "$resource" "$summary_interval"
   done
   echo ""
 }
 
 output_config() {
-  resource=$1
-  interval=$2
+  local resource
+  local interval
+  local printable_resource
+  local printable_interval
+
+  resource="$1"
+  interval="$2"
+  printable_resource=$( get_printable_name resource "$resource" )
+  printable_interval=$( get_printable_name interval "$interval" )
   
-  printable_resource=$( get_printable_name resource $resource )
-  printable_interval=$( get_printable_name interval $interval )
-  
-  for scope in ${pressure_scopes[@]}; do
-    if [ ${resource} == "cpu" ] && [ ${scope} != "some" ]; then
+  for scope in "${pressure_scopes[@]}"; do
+    if [ "${resource}" == "cpu" ] && [ "${scope}" != "some" ]; then
       continue
     else
-      printable_scope=$( get_printable_name scope $scope )
-      printf "psi_%s_%s_%s.min 0\n" $resource $interval $scope
-      printf "psi_%s_%s_%s.label %s %s %s\n" $resource $interval $scope $printable_resource $printable_interval $printable_scope
+      local printable_scope
+      local this_warn_var
+      local this_crit_var
+      
+      printable_scope=$( get_printable_name scope "$scope" )
       this_warn_var=$( echo "warn_psi_${resource}_${interval}_${scope}" | sed 's/[^A-Za-z0-9_]/_/g' )
-      if [ -n "${!this_warn_var}" ]; then
-        printf "psi_%s_%s_%s.warning %s\n" $resource $interval $scope ${!this_warn_var}
-      fi
       this_crit_var=$( echo "crit_psi_${resource}_${interval}_${scope}" | sed 's/[^A-Za-z0-9_]/_/g' )
-      if [ -n "${!this_crit_var}" ]; then
-        printf "psi_%s_%s_%s.critical %s\n" $resource $interval $scope ${!this_crit_var}
+      
+      printf "psi_%s_%s_%s.min 0\n" "$resource" "$interval" "$scope"
+      printf "psi_%s_%s_%s.label %s %s %s\n" "$resource" "$interval" "$scope" "$printable_resource" "$printable_interval" "$printable_scope"
+      if [ -n "${!this_warn_var}" ]; then
+        printf "psi_%s_%s_%s.warning %s\n" "$resource" "$interval" "$scope" "${!this_warn_var}"
       fi
-      if [ $interval == "total" ]; then
-        printf "psi_%s_%s_%s.type DERIVE\n" $resource $interval $scope
+      if [ -n "${!this_crit_var}" ]; then
+        printf "psi_%s_%s_%s.critical %s\n" "$resource" "$interval" "$scope" "${!this_crit_var}"
+      fi
+      if [ "$interval" == "total" ]; then
+        printf "psi_%s_%s_%s.type DERIVE\n" "$resource" "$interval" "$scope"
       fi
     fi
   done
 }
 
 output_values() {
-  resource=$1
-  interval=$2
+  local resource
+  local interval
+  resource="$1"
+  interval="$2"
   
-  for scope in ${pressure_scopes[@]}; do
-    if [ ${resource} == "cpu" ] && [ ${scope} != "some" ]; then
+  for scope in "${pressure_scopes[@]}"; do
+    if [ "${resource}" == "cpu" ] && [ "${scope}" != "some" ]; then
       continue
     else
-      printf "psi_%s_%s_%s.value %s\n" $resource $interval $scope $(get_pressure_value $resource $interval $scope)
+      printf "psi_%s_%s_%s.value %s\n" "$resource" "$interval" "$scope" "$(get_pressure_value "$resource" "$interval" "$scope")"
     fi
   done
 }
 
 output_usage() {
-  printf >&2 "%s - munin plugin to graph pressure stall information for CPU, Memory and IO as reported by the Linux kernel.\n" ${0##*/}
-  printf >&2 "Usage: %s [config]\n" ${0##*/}
+  printf >&2 "%s - munin plugin to graph pressure stall information for CPU, Memory and IO as reported by the Linux kernel.\n" "${0##*/}"
+  printf >&2 "Usage: %s [config]\n" "${0##*/}"
   printf >&2 "You may use environment settings in a plugin-config file, used by munin (for example /etc/munin/plugin-conf.d/munin-node) to further adjust settings.\n"
   printf >&2 "You can use these settings to configure which resources, intervals or scopes are monitored or to configure warning and critical levels.\n"
   printf >&2 "To do so use a syntax like this:\n"
-  printf >&2 "[pressure]\n"
+  printf >&2 "[linux_psi]\n"
   printf >&2 "env.resources cpu io memory\n"
   printf >&2 "env.intervals avg10 avg60 avg300\n"
   printf >&2 "env.scopes some full\n"
@@ -304,18 +330,21 @@ output_usage() {
   printf >&2 "env.crit_psi_io_total_full 2000\n"
 }
 
-case $# in
+case "$#" in
   0)
     iterate_values
     ;;
   
   1)
-    case $1 in
-      auto|autoconf)
+    case "$1" in
+      autoconf)
         check_autoconf
         ;;
       config)
         iterate_config
+        ;;
+      fetch)
+        iterate_values
         ;;
       *)
         output_usage
