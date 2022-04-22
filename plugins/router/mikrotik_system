@@ -127,7 +127,7 @@ function get_voltage_label {
     # if found
     # print line
     # external/bash-variables with "'"<var>"'"
-    echo "$line" | awk '/voltage:/{
+    echo "$line" | awk '/voltage/{
       print "multigraph voltage_graph_""'"$name"'";
       print "graph_title voltage " "'"$name"'";
       print "graph_vlabel volt";
@@ -139,21 +139,29 @@ function get_voltage_label {
   done <<< "$data" # der variable data
 }
 function get_voltage_value {
+  get_ros_version
   while read -r line; do
     # like the label functions
     # print title if dirtyconfig is not set
     # because the call does not come in "config"
     if [ "$MUNIN_CAP_DIRTYCONFIG" = "0" ] || [ -z "$MUNIN_CAP_DIRTYCONFIG" ]; then
-      echo "$line" | awk '/voltage:/{
+      echo "$line" | awk '/voltage/{
         print "multigraph voltage_graph_""'"$name"'";
         }'
     fi
-    # remove with gsub the char % in argument $2
-    # print $2
-    echo "$line" | awk '/voltage:/{
-      gsub(/V/,"",$2);
-      print "voltage.value " $2
-      }'
+    if [ "$ros_version" == "6" ]; then
+      # remove with gsub the char % in argument $2
+      # print $2
+      echo "$line" | awk '/voltage/{
+        gsub(/V/,"",$2);
+        print "voltage.value " $2
+        }'
+    fi
+    if [ "$ros_version" == "7" ]; then
+      echo "$line" | awk '/voltage/{
+        print "voltage.value " $3
+        }'
+    fi
   done <<< "$data"
 }
 
