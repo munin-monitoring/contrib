@@ -41,14 +41,8 @@ if [ "${MUNIN_DEBUG:-0}" == "1" ]; then
 fi
 
 SMTP_COMMAND=${SMTP_COMMAND:-HELO localhost}
-SMTP_PORT=${SMTP_PORT:-25}
+SMTP_PORTS=${SMTP_PORTS:-25}
 TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-120}
-# if we have curl all non-zero exit codes indicate an error
-status_warning=${status_warning:-0:0}
-# default warning time begins at half the timeout
-host_warning=${host_warning:-:$((TIMEOUT_SECONDS/2))}
-# default when we get values bigger than 99% of timeout we mark the value as critical
-host_critical=${host_critical:-:$((TIMEOUT_SECONDS * 99 / 100))}
 
 host=$(basename "$0" | sed 's/^smtp_hello_//g')
 
@@ -95,19 +89,36 @@ fi
 
 if [ "$1" == "config" ]; then
 
-  echo "graph_title smtp response time"
+  echo "graph_title $host smtp response time"
   echo "graph_vlabel response in sec"
   echo "graph_period minute"
   echo "graph_category network"
   echo "graph_args --base 1000 --lower-limit 0"
-  echo "host.label $host"
-  print_warning "host"
-  print_critical "host"
-  if [ "$curl_with_smtp_support" == "1" ] ; then
-    echo "status.label $host smtp success"
-    print_warning "status"
-    print_critical "status"
-  fi
+  for port in $SMTP_PORTS; do
+    if [[ $port ]] ; then
+      if [[ $port = "25" ]] ; then
+        suffix=""
+      else
+        suffix="_$port"
+      fi
+      echo "host$suffix.label smtp port $port"
+
+      # default warning time begins at half the timeout
+      eval "export host${suffix}_warning=\${host${suffix}_warning:-:$((TIMEOUT_SECONDS / 2))}"
+      # default when we get values bigger than 99% of timeout we mark the value as critical
+      eval "export host${suffix}_critical=\${host${suffix}_critical:-:$((TIMEOUT_SECONDS * 99 / 100))}"
+      print_warning "host${suffix}"
+      print_critical "host${suffix}"
+      if [ "$curl_with_smtp_support" == "1" ] ; then
+        # if we have curl, all non-zero exit codes indicate an error
+        eval "export status${suffix}_warning=\${status${suffix}_warning:-0:0}"
+        echo "status$suffix.label smtp port $port check status"
+        print_warning "status${suffix}"
+        print_critical "status${suffix}"
+      fi
+    fi
+  done
+
 
 elif [ "$1" == "autoconf" ]; then
 
@@ -119,20 +130,29 @@ elif [ "$1" == "autoconf" ]; then
   exit 0
 
 else
-  if [ "$curl_with_smtp_support" == "1" ] ; then
-    value=$(take_the_time curl --silent -X "$SMTP_COMMAND" --max-time "$TIMEOUT_SECONDS" "smtp://$host:$SMTP_PORT/")
-    status=$?
-  else
-    # Note: "HELO localhost" only works if the SMTP server terminates the connection when presenting the HELO line
-    # if you have troubles here, try installing curl (with smtp support), and we will use a proper smtp client
-    # implementation. alternatively you can also set the SMTP_COMMAND environment variable to QUIT
-    value=$(echo "$SMTP_COMMAND" | take_the_time "$nc_executable" -C -w "$TIMEOUT_SECONDS" "$host" "$SMTP_PORT")
-    # with the simple echo command we would need to check a lot of conditions to determine a successful status
-    # if you want this feature, install curl instead
-    status=""
-  fi
-  echo "host.value $value"
-  if [ -n "$status" ] ; then
-    echo "status.value $status"
-  fi
+  for port in $SMTP_PORTS; do
+    if [[ $port ]] ; then
+      if [[ $port = "25" ]] ; then
+        suffix=""
+      else
+        suffix="_$port"
+      fi
+      if [ "$curl_with_smtp_support" == "1" ] ; then
+        value=$(take_the_time curl --silent -X "$SMTP_COMMAND" --max-time "$TIMEOUT_SECONDS" "smtp://$host:$port/")
+        status=$?
+      else
+        # Note: "HELO localhost" only works if the SMTP server terminates the connection when presenting the HELO line
+        # if you have troubles here, try installing curl (with smtp support), and we will use a proper smtp client
+        # implementation. alternatively you can also set the SMTP_COMMAND environment variable to QUIT
+        value=$(echo "$SMTP_COMMAND" | take_the_time "$nc_executable" -C -w "$TIMEOUT_SECONDS" "$host" "$port")
+        # with the simple echo command we would need to check a lot of conditions to determine a successful status
+        # if you want this feature, install curl instead
+        status=""
+      fi
+      echo "host$suffix.value $value"
+      if [ -n "$status" ] ; then
+        echo "status$suffix.value $status"
+      fi
+    fi
+  done
 fi
