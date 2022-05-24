@@ -141,6 +141,15 @@ my %config = (
 		config => \&common_config,
 		fetch => \&common_fetch,
 	},
+	power_emulated => {
+		filter => qr/^(.*)\.load$/,
+		title => 'UPS emulated power',
+		args => '--base 1000 -l 0',
+		vlabel => 'Watt',
+		config => \&common_config,
+                multiplier => 6.349,  # 400 watts at 63% load
+		fetch => \&multiplier_fetch,
+	},
 );
 
 sub read_ups_values {
@@ -268,6 +277,23 @@ sub common_fetch {
 		print $id . ".value " . $values->{$key} . "\n";
 	}
 }
+
+# just a copy of the above routine but with a multiplier
+sub multiplier_fetch {
+	my ($func, $ups) = @_;
+
+	my $values = read_ups_values($ups);
+	for my $key (sort keys %$values) {
+		my ($field, $nominal) = $key =~ $config{$func}->{'filter'};
+		next unless $field;
+
+		$field .= $nominal if $nominal;
+		my $id = clean_fieldname($field);
+
+		print $id . ".value " . $values->{$key}*$config{$func}->{'multiplier'} . "\n";
+	}
+}
+
 
 if ($ARGV[0] and $ARGV[0] eq 'autoconf') {
 	# The former nutups_ plugin parsed upsmon.conf. But for a large UPS
