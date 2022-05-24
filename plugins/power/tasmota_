@@ -1,0 +1,155 @@
+#!/bin/sh
+#
+# Copyright (C) 2019-2022 Tim Connors
+# GNU Library General Public License v2 or later
+#
+#
+# munin plugin that logs voltage, energy usage, power, power factor and current logged from tasmota power switches
+#
+# To install the plugin, copy or move the plugin to /usr/share/munin/plugins/ set
+# the chmod to 755 and create a symbolic link:
+# ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_voltage
+# ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_energy
+# ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_power
+# ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_powerfactor
+# ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_current
+#
+# Plugin also implements suggests, so if you have /etc/genders
+# populated with "tasmota,powermon" flags for those tasmota devices
+# that implement energy monitoring, and nodeattr installed, you can
+# run an ansible play like this to set up your links:
+# https://github.com/spacelama/ansible-initial-server-setup/tree/master/roles/monitoring/tasks
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+SWITCH=$(basename "$0" | cut -d_ -f2)
+FUNCTION=$(basename "$0" | cut -d_ -f3)
+
+if [ "$1" = "autoconf" ]; then
+    echo yes && exit 0
+fi
+
+if [ "$1" = "suggest" ]; then
+    nodeattr -n 'tasmota&&powermon' | while read device ; do
+	for i in voltage power powerfactor current energy; do
+	    echo "${device}_${i}"
+	done
+    done
+    exit
+fi
+
+voltage() {
+    if [ "$1" = "config" ]; then
+
+        echo "graph_title Tasmota Voltage: $SWITCH"
+        echo "graph_category sensors"
+        echo "graph_vlabel Volts"
+        echo "graph_args --base 1000 -l 0"
+
+	echo "Volts.label Volts"
+        exit 0
+    else
+        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$SWITCH/cm )
+        volts=$( echo "$res" | jq -c '.StatusSNS.ENERGY.Voltage' )
+        echo Volts.value $volts
+    fi
+}
+
+current() {
+    if [ "$1" = "config" ]; then
+
+        echo "graph_title Tasmota Current: $SWITCH"
+        echo "graph_category sensors"
+        echo "graph_vlabel Amps"
+        echo "graph_args --base 1000 -l 0"
+
+	echo "Current.label Current"
+        exit 0
+    else
+        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$SWITCH/cm )
+        current=$( echo "$res" | jq -c '.StatusSNS.ENERGY.Current' )
+        echo Current.value $current
+    fi
+}
+
+power() {
+    if [ "$1" = "config" ]; then
+
+	echo "graph_title Tasmota Power: $SWITCH"
+        echo "graph_category sensors"
+	echo "graph_vlabel Watts"
+        echo "graph_args --base 1000 -l 0"
+
+	for i in Power ApparentPower ReactivePower ; do
+	    echo "${i}.label $i"
+	    echo "${i}.type GAUGE"
+	    echo "${i}.min 0"
+	done
+    else
+        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$SWITCH/cm )
+	for i in Power ApparentPower ReactivePower ; do
+            power=$( echo "$res" | jq -c '.StatusSNS.ENERGY.'$i )
+            echo $i.value $power
+        done
+    fi
+}
+
+powerfactor() {
+    if [ "$1" = "config" ]; then
+
+        echo "graph_title Tasmota Power factor: $SWITCH"
+        echo "graph_category sensors"
+        echo "graph_vlabel Power Factor"
+        echo "graph_args --base 1000 -l 0"
+
+	echo "PowerFactor.min 0"
+	echo "PowerFactor.max 1"
+	echo "PowerFactor.label Power Factor"
+        exit 0
+    else
+        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$SWITCH/cm )
+        powerfactor=$( echo "$res" | sed 's/.*"Factor":\([0-9.]*\)[^0-9.]*.*/\1/' )
+        echo PowerFactor.value $powerfactor
+    fi
+}
+
+energy() {
+    if [ "$1" = "config" ]; then
+
+        echo "graph_title Tasmota Energy: $SWITCH"
+        echo "graph_category sensors"
+        echo "graph_args --base 1000"
+
+        echo "graph_vlabel kWh"
+	echo "Energy.label Energy"
+        echo "Energy.draw AREA"
+
+        exit 0
+    else
+        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$SWITCH/cm )
+        energy=$( echo "$res" | sed 's/.*"Total":\([0-9.]*\)[^0-9.]*.*/\1/' )
+        echo Energy.value $energy
+    fi
+}
+
+
+[ "$1" = "config" ] && echo "graph_category sensors"
+
+case "$FUNCTION" in
+    voltage)
+	voltage "$1"
+	;;
+    power)
+	power "$1"
+	;;
+    powerfactor)
+	powerfactor "$1"
+	;;
+    current)
+	current "$1"
+	;;
+    energy)
+	energy "$1"
+	;;
+esac
