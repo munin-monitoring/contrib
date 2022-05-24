@@ -147,8 +147,8 @@ my %config = (
 		args => '--base 1000 -l 0',
 		vlabel => 'Watt',
 		config => \&common_config,
-                multiplier => 6.349,  # 400 watts at 63% load
-		fetch => \&multiplier_fetch,
+		multiplier => 6.349,  # 400 watts at 63% load on powershield commander 1000
+		fetch => \&common_fetch,
 	},
 );
 
@@ -274,26 +274,11 @@ sub common_fetch {
 		$field .= $nominal if $nominal;
 		my $id = clean_fieldname($field);
 
-		print $id . ".value " . $values->{$key} . "\n";
+		print $id . ".value " . $values->{$key}*
+                  (defined $config{$func}->{'multiplier'} ? $config{$func}->{'multiplier'} : 1)
+                  . "\n";
 	}
 }
-
-# just a copy of the above routine but with a multiplier
-sub multiplier_fetch {
-	my ($func, $ups) = @_;
-
-	my $values = read_ups_values($ups);
-	for my $key (sort keys %$values) {
-		my ($field, $nominal) = $key =~ $config{$func}->{'filter'};
-		next unless $field;
-
-		$field .= $nominal if $nominal;
-		my $id = clean_fieldname($field);
-
-		print $id . ".value " . $values->{$key}*$config{$func}->{'multiplier'} . "\n";
-	}
-}
-
 
 if ($ARGV[0] and $ARGV[0] eq 'autoconf') {
 	# The former nutups_ plugin parsed upsmon.conf. But for a large UPS
