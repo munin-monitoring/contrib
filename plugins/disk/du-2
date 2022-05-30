@@ -8,6 +8,7 @@
 =head1 AUTHOR AND COPYRIGHT
 
   Copyright 2011-2014 Luc Didry <luc AT didry.org>
+  Copyright 2022 Andreas Perhab, WT-IO-IT GmbH <a.perhab@wtioit.at>
 
 =head1 HOWTO CONFIGURE AND USE :
 
@@ -160,15 +161,21 @@ sub cache_is_too_old {
 
 sub du_not_running {
     if (-e $LOCKFILE) {
-        my ($time) = `cat $TIMEFILE`;
-        chomp $time;
-        if ( (time - $time) > ($ENV{interval}*60*60) ) {
-            # The cache is really old (60xinterval) => Maybe the lockfile wasn't properly deleted.
-            # Let's delete it.
-            system("rm $LOCKFILE;");
-            return 1;
+        if (-e $TIMEFILE) {
+            my ($time) = `cat $TIMEFILE`;
+            chomp $time;
+            if ( (time - $time) > ($ENV{interval}*60*60) ) {
+                # The cache is really old (60xinterval) => Maybe the lockfile wasn't properly deleted.
+                # Let's delete it.
+                unlink($LOCKFILE);
+                return 1;
+            } else {
+                return 0;
+            }
         } else {
-	        return 0;
+            # when $TIMEFILE is not yet created (first run is not yet finished), $LOCKFILE is honoured
+            # to prevent spawning multiple resource intensive processes
+            return 0;
         }
     } else {
         return 1;
