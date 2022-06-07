@@ -185,12 +185,12 @@ class MuninNftCountersPlugin(MuninPlugin):
         graph_category = "network"
 
         try:
-            counters = getCounters()
-            if len(counters) <= 0:
-                print("# No counters in nftables. Try adding some first.",
-                      "# See 'munin-doc %s' for more information." % self.plugin_name,
-                      sep="\n")
-                sys.exit(1)
+            self.counters = getCounters()
+        except ValueError:
+            print("# No counters in nftables. Try adding some first.",
+                  "# See 'munin-doc %s' for more information." % self.plugin_name,
+                  sep="\n")
+            sys.exit(1)
         except Exception as err:
             print("# Plugin needs to be run as root since nftables can only be",
                   "# run as root.",
@@ -217,7 +217,7 @@ class MuninNftCountersPlugin(MuninPlugin):
         self.envRegisterFilter("counters")
 
         # add counters as field to each graph (packets and bytes)
-        for counter in counters:
+        for counter in self.counters:
             # JSON output does not contain "comment" attribute.
             # Until it does, use counter name as info
             try:
@@ -238,13 +238,25 @@ class MuninNftCountersPlugin(MuninPlugin):
         if not (count_only == "packets"):
             self.appendGraph("nft_counters_bytes", graph_bytes)
 
+
+    def retrieveVals(self):
+
+        """
+        Get values and add them to the graphs
+
+        Returns
+        -------
+        None.
+
+        """
+
         # add values for each field
-        for counter in counters:
+        for counter in self.counters:
             if self.envCheckFilter("counters", counter["name"]):
-                if not (count_only == "bytes"):
+                if self.hasGraph("nft_counters_packets"):
                     self.setGraphVal("nft_counters_packets", counter["name"],
                                      counter["packets"])
-                if not (count_only == "packets"):
+                if self.hasGraph("nft_counters_bytes"):
                     self.setGraphVal("nft_counters_bytes", counter["name"],
                                      counter["bytes"])
 
