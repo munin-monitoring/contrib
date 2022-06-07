@@ -100,14 +100,15 @@ import sys
 try:
     from nftables import Nftables
     from nftables import json
-except:
-    raise RuntimeError("Unable to load nftables module.")
-    sys.exit()
+except Exception as err:
+    print("Unable to load nftables module.")
+    sys.exit(err)
+
 try:
     from pymunin import MuninPlugin, MuninGraph, muninMain
-except:
-    raise RuntimeError("Unable to load PyMunin module.")
-    sys.exit()
+except Exception as err:
+    print("Unable to load PyMunin module.")
+    sys.exit(err)
 
 
 def _find_objects(ruleset, type):
@@ -119,11 +120,11 @@ def nft_cmd(nftlib, cmd):
     rc, output, error = nftlib.cmd(cmd)
     if rc != 0:
         # do proper error handling here, exceptions etc
-        raise RuntimeError("ERROR: running cmd nft {}".format(cmd))
+        raise RuntimeError("Error running cmd 'nft {}'".format(cmd))
 
     if len(output) == 0:
         # more error control
-        raise RuntimeError("ERROR: no output from libnftables")
+        raise ValueError("ERROR: no output from libnftables")
 
     # transform the libnftables JSON output into generic python data structures
     ruleset = json.loads(output)["nftables"]
@@ -186,23 +187,21 @@ class MuninNftCountersPlugin(MuninPlugin):
         try:
             counters = getCounters()
             if len(counters) <= 0:
-                print("""
-                      # No counters in nftables. Try adding some first.
-                      # See 'munin-doc %s' for more information.
-                      """ % self.plugin_name)
-                sys.exit()
-        except:
-            print("""
-                  # Plugin needs to be run as root since nftables can only be
-                  # run as root.
-                  #
-                  # Use the following setting in the configuration file
-                  # to enable root privileges:
-                  #
-                  # [%s]
-                  # user root
-                  """ % self.plugin_name)
-            sys.exit()
+                print("# No counters in nftables. Try adding some first.",
+                      "# See 'munin-doc %s' for more information." % self.plugin_name,
+                      sep="\n")
+                sys.exit(1)
+        except Exception as err:
+            print("# Plugin needs to be run as root since nftables can only be",
+                  "# run as root.",
+                  "#",
+                  "# Use the following setting in the configuration file",
+                  "# to enable root privileges:",
+                  "#",
+                  "# [%s]" % self.plugin_name,
+                  "# user root",
+                  sep="\n")
+            sys.exit(err)
 
         count_only = self.envGet("count_only")
 
