@@ -1,0 +1,277 @@
+#!/usr/bin/python
+
+"""
+Munin plugin for monitoring counters in nftables. For more information on
+nftables see https://wiki.nftables.org/wiki-nftables/index.php/Counters
+
+=head1 NAME
+
+nft_counters - Munin Plugin for monitoring counters in nftables
+
+=head1 DESCRIPTION
+
+Plugin reads counters [1] from nftables and shows the associated values in bytes
+and packets. Which counters and/or values are to be shown can be configured
+(see below).
+
+=head1 REQUIREMENTS
+
+Plugin runs on systems with nftables installed. It makes use of the excellent
+PyMunin module, so that needs to be installed as well.
+
+=head1 CONFIGURATION
+
+Since reading nftables needs root permissions, so does this plugin. That makes
+the 'user root' setting in the configuration file mandatory.
+
+To further tune what should be graphed or not, you can adjust the configuration
+usually found in /etc/munin/plugin-conf.d/nft_counters:
+
+    [nft_counters]
+    user root
+
+    env.counters_exclude counter_one,counter_two
+    env.counters_include counter_this,counter_that
+    env.count_only [bytes | packets]
+
+=head2 env.counters_exclude
+
+Exclude counters from graph. Comma separated list of counters, as known to
+nftables (see 'nft list counters'), to exclude from graphing.
+
+=head2 env.counters_include
+
+Include counters in graph, I<exclusively>. Comma separated list of counters,
+as known to nftables (see 'nft list counters'), to include in graphing.
+B<If this doesn't match any counter, nothing will be graphed.>
+
+=head2 env.count_only
+
+Show values only in bytes or packets. Default both counters are shown.
+
+=head1 BUGS
+
+=head2 {fieldname}.info
+
+The {fieldname}.info should show the comment associated with the counter.
+However, the JSON output of 'nft' does not contain the comment attribute. So,
+for now, the plugin uses the counter name for {fieldname}.info. There is an
+open L<bug|https://bugzilla.netfilter.org/show_bug.cgi?id=1611> upstream.
+
+=head1 AUTHOR
+
+Written and Blessed by (Holy) Penguinpee <L<devel@penguinpee.nl>>
+
+=head1 LICENSE
+
+GPLv3
+
+=head1 ACKNOWLEDGEMENT
+
+This plugin makes use of the excellent PyMunin [2] module by Ali Onur Uyar,
+adapted to Python3 [3] with the help of 2to3.
+
+The implementation of nftables interaction is based on the very helpful
+examples [4] provided by Arturo Borrero Gonzalez.
+
+=head1 SEE ALSO
+
+=over
+
+=item [1] L<https://wiki.nftables.org/wiki-nftables/index.php/Counters>
+
+=item [2] L<https://github.com/aouyar/PyMunin>
+
+=item [3] L<https://github.com/penguinpee/PyMunin/tree/changes_for_python3>
+
+=item [4] L<https://github.com/aborrero/python-nftables-tutorial>
+
+=back
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import sys
+try:
+    from nftables import Nftables
+    from nftables import json
+except:
+    raise RuntimeError("Unable to load nftables module.")
+    sys.exit()
+try:
+    from pymunin import MuninPlugin, MuninGraph, muninMain
+except:
+    raise RuntimeError("Unable to load PyMunin module.")
+    sys.exit()
+
+
+def _find_objects(ruleset, type):
+    # isn't this pure python?
+    return [o[type] for o in ruleset if type in o]
+
+
+def nft_cmd(nftlib, cmd):
+    rc, output, error = nftlib.cmd(cmd)
+    if rc != 0:
+        # do proper error handling here, exceptions etc
+        raise RuntimeError("ERROR: running cmd nft {}".format(cmd))
+
+    if len(output) == 0:
+        # more error control
+        raise RuntimeError("ERROR: no output from libnftables")
+
+    # transform the libnftables JSON output into generic python data structures
+    ruleset = json.loads(output)["nftables"]
+
+    # validate we understand the libnftables JSON schema version.
+    # if the schema bumps version, this program might require updates
+    for metainfo in _find_objects(ruleset, "metainfo"):
+        if metainfo["json_schema_version"] > 1:
+            print("WARNING: we might not understand the JSON produced by libnftables")
+
+    return ruleset
+
+def getCounters():
+
+    nft = Nftables()
+    nft.set_json_output(True)
+    nft.set_handle_output(True)
+
+    ruleset = nft_cmd(nft, "list counters")
+
+    return _find_objects(ruleset, "counter")
+
+
+class MuninNftCountersPlugin(MuninPlugin):
+
+    """
+    Munin Plugin for nftables counters
+    """
+
+    plugin_name = "nft_counters"
+    isMultigraph = True
+
+
+    def __init__(self, argv=(), env=None, debug=True):
+
+        """
+
+        Initialize Munin Plugin
+
+        Parameters
+        ----------
+        argv : TYPE, optional
+            List of commandline arguments. The default is ().
+        env : TYPE, optional
+            Dictionary of environment variables. The default is None.
+        debug : TYPE, optional
+            Print debugging messages. The default is False.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        MuninPlugin.__init__(self, argv, env, debug=True)
+
+        # Munin graph parameters
+        graph_category = "network"
+
+        try:
+            counters = getCounters()
+            if len(counters) <= 0:
+                print("""
+                      # No counters in nftables. Try adding some first.
+                      # See 'munin-doc %s' for more information.
+                      """ % self.plugin_name)
+                sys.exit()
+        except:
+            print("""
+                  # Plugin needs to be run as root since nftables can only be
+                  # run as root.
+                  #
+                  # Use the following setting in the configuration file
+                  # to enable root privileges:
+                  #
+                  # [%s]
+                  # user root
+                  """ % self.plugin_name)
+            sys.exit()
+
+        count_only = self.envGet("count_only")
+
+        # Create the graphs
+        if not (count_only == "bytes"):
+            graph_packets = MuninGraph("nftables packets per second", graph_category,
+                                       vlabel="packets / second", args="--base 1000")
+        if not (count_only == "packets"):
+            graph_bytes = MuninGraph("nftables bytes per second", graph_category,
+                                     vlabel="bytes / second", args="--base 1024")
+
+        # Define filter to allow for tuning of counters graphed
+        self.envRegisterFilter("counters")
+
+        # add counters as field to each graph (packets and bytes)
+        for counter in counters:
+            # JSON output does not contain "comment" attribute.
+            # Until it does, use counter name as info
+            try:
+                field_info = counter["comment"]
+            except:
+                field_info = counter["name"]
+
+            if self.envCheckFilter("counters", counter["name"]):
+                if not (count_only == "bytes"):
+                    graph_packets.addField(counter["name"], counter["name"], max=0,
+                                           type="DERIVE", info=field_info)
+                if not (count_only == "packets"):
+                    graph_bytes.addField(counter["name"], counter["name"], max=0,
+                                         type="DERIVE", info=field_info)
+
+        if not (count_only == "bytes"):
+            self.appendGraph("nft_counters_packets", graph_packets)
+        if not (count_only == "packets"):
+            self.appendGraph("nft_counters_bytes", graph_bytes)
+
+        # add values for each field
+        for counter in counters:
+            if self.envCheckFilter("counters", counter["name"]):
+                if not (count_only == "bytes"):
+                    self.setGraphVal("nft_counters_packets", counter["name"],
+                                     counter["packets"])
+                if not (count_only == "packets"):
+                    self.setGraphVal("nft_counters_bytes", counter["name"],
+                                     counter["bytes"])
+
+
+    def autoconf(self):
+
+        """
+
+        Checks if nft command can be run (needs root) and if so,
+        if there any counters present in nftables
+
+        """
+
+        try:
+            counters = getCounters()
+            if len(counters) > 0:
+                return True
+            else:
+                return False
+        except:
+            return False
+
+
+def main():
+    sys.exit(muninMain(MuninNftCountersPlugin))
+
+
+if __name__ == "__main__":
+    main()
