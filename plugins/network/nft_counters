@@ -124,7 +124,7 @@ def nft_cmd(nftlib, cmd):
 
     if len(output) == 0:
         # more error control
-        raise ValueError("ERROR: no output from libnftables")
+        raise RuntimeError("ERROR: no output from libnftables")
 
     # transform the libnftables JSON output into generic python data structures
     ruleset = json.loads(output)["nftables"]
@@ -144,8 +144,12 @@ def getCounters():
     nft.set_handle_output(True)
 
     ruleset = nft_cmd(nft, "list counters")
+    counters = _find_objects(ruleset, "counter")
 
-    return _find_objects(ruleset, "counter")
+    if len(counters) > 0:
+        return counters
+    else:
+        raise ValueError("No counters in nftables")
 
 
 class MuninNftCountersPlugin(MuninPlugin):
@@ -179,7 +183,7 @@ class MuninNftCountersPlugin(MuninPlugin):
 
         """
 
-        MuninPlugin.__init__(self, argv, env, debug)
+        MuninPlugin.__init__(self, argv, env, debug=True)
 
         # Munin graph parameters
         graph_category = "network"
