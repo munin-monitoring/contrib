@@ -1,0 +1,219 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# See documentation at the end of this file.
+
+require 'json'
+require 'net/http'
+require 'uri'
+
+if ARGV.length != 1 || ARGV.first != 'config'
+  raise 'Error: plugin designed for the dirtyconfig protocol, must be run with the config argument'
+end
+
+address = ENV.fetch('address', nil)
+raise 'Error: address not set' if address.nil?
+
+uri_prefix = "http://#{address}/api/1/"
+responses = {}
+
+%w[
+  vitals
+  wifi_status
+  lifetime
+].each do |endpoint|
+  responses[endpoint] = JSON.parse(
+    Net::HTTP.get_response(URI("#{uri_prefix}#{endpoint}")).body
+  )
+end
+
+puts <<~MUNIN
+  multigraph tesla_wall_connector_times
+  graph_title Tesla Wall Connector Times
+  graph_args --base 1000 --lower-limit 0
+  graph_scale no
+  graph_vlabel Time (days)
+  graph_category tesla
+  poweron.label Power On Time
+  poweron.draw AREA
+  poweron.type GAUGE
+  poweron.value #{responses['lifetime']['uptime_s'] / 86_400.0}
+  uptime.label Uptime
+  uptime.draw AREA
+  uptime.type GAUGE
+  uptime.value #{responses['vitals']['uptime_s'] / 86_400.0}
+  charging.label Charging Time
+  charging.type GAUGE
+  charging.draw LINE2
+  charging.value #{responses['lifetime']['charging_time_s'] / 86_400.0}
+  session.label Session
+  session.type GAUGE
+  session.draw LINE2
+  session.value #{responses['vitals']['session_s'] / 86_400.0}
+
+  multigraph tesla_wall_connector_power
+  graph_title Tesla Wall Connector Power Output
+  graph_args --base 1000 --lower-limit 0
+  graph_vlabel Power (W)
+  graph_category tesla
+  power.label Power output
+  power.type DERIVE
+  power.min 0
+  power.value #{(responses['vitals']['session_energy_wh'] * 3600.0).round}
+
+  multigraph tesla_wall_connector_cycles
+  graph_title Tesla Wall Connector Cycle Counts
+  graph_args --base 1000 --lower-limit 0
+  graph_scale no
+  graph_category tesla
+  contactor.label Contactor
+  contactor.draw AREA
+  contactor.type GAUGE
+  contactor.value #{responses['lifetime']['contactor_cycles']}
+  connector.label Connector
+  connector.draw AREA
+  connector.type GAUGE
+  connector.value #{responses['lifetime']['connector_cycles']}
+  contactor_loaded.label Contactor (loaded)
+  contactor_loaded.draw AREA
+  contactor_loaded.type GAUGE
+  contactor_loaded.value #{responses['lifetime']['contactor_cycles_loaded']}
+  alerts.label Alerts
+  alerts.type GAUGE
+  alerts.draw LINE2
+  alerts.value #{responses['lifetime']['alert_count']}
+  thermal_foldbacks.label Thermal foldbacks
+  thermal_foldbacks.type GAUGE
+  thermal_foldbacks.draw LINE2
+  thermal_foldbacks.value #{responses['lifetime']['thermal_foldbacks']}
+
+  multigraph tesla_wall_connector_voltage
+  graph_title Tesla Wall Connector Voltages
+  graph_category tesla
+  graph_vlabel Voltage (V)
+  grid.label Grid
+  grid.type GAUGE
+  grid.value #{responses['vitals']['grid_v']}
+  A.label A
+  A.type GAUGE
+  A.value #{responses['vitals']['voltageA_v']}
+  B.label B
+  B.type GAUGE
+  B.value #{responses['vitals']['voltageB_v']}
+  C.label C
+  C.type GAUGE
+  C.value #{responses['vitals']['voltageC_v']}
+  relay_coil.label Relay coil
+  relay_coil.type GAUGE
+  relay_coil.value #{responses['vitals']['relay_coil_v']}
+
+  multigraph tesla_wall_connector_frequency
+  graph_title Tesla Wall Connector Frequency
+  graph_category tesla
+  graph_args --base 1000 --lower-limit 0
+  graph_vlabel Frequency (Hz)
+  grid.label Grid
+  grid.type GAUGE
+  grid.value #{responses['vitals']['grid_hz']}
+
+  multigraph tesla_wall_connector_current
+  graph_title Tesla Wall Connector Currents
+  graph_category tesla
+  graph_args --base 1000 --lower-limit 0
+  graph_vlabel Current (A)
+  vehicle.label Vehicle
+  vehicle.type GAUGE
+  vehicle.value #{responses['vitals']['vehicle_current_a']}
+  A.label A
+  A.type GAUGE
+  A.value #{responses['vitals']['currentA_a']}
+  B.label B
+  B.type GAUGE
+  B.value #{responses['vitals']['currentB_a']}
+  C.label C
+  C.type GAUGE
+  C.value #{responses['vitals']['currentC_a']}
+  N.label N
+  N.type GAUGE
+  N.value #{responses['vitals']['currentN_a']}
+
+  multigraph tesla_wall_connector_temperature
+  graph_title Tesla Wall Connector Temperatures
+  graph_category tesla
+  graph_vlabel Temperature (°C)
+  pcba.label PCBA
+  pcba.type GAUGE
+  pcba.value #{responses['vitals']['pcba_temp_c']}
+  handle.label Handle
+  handle.type GAUGE
+  handle.value #{responses['vitals']['handle_temp_c']}
+  mcu.label MCU
+  mcu.type GAUGE
+  mcu.value #{responses['vitals']['mcu_temp_c']}
+
+  multigraph tesla_wall_connector_wifi
+  graph_title Tesla Wall Connector Wi-Fi
+  graph_category tesla
+  signal_strength.label Signal strength
+  signal_strength.type GAUGE
+  signal_strength.value #{responses['wifi_status']['wifi_signal_strength']}
+  rssi.label RSSI
+  rssi.type GAUGE
+  rssi.value #{responses['wifi_status']['wifi_rssi']}
+  snr.label SNR
+  snr.type GAUGE
+  snr.value #{responses['wifi_status']['wifi_snr']}
+MUNIN
+
+__END__
+
+=pod
+
+=encoding utf8
+
+=head1 NAME
+
+tesla_wall_connector - Munin plugin for graphing data from Tesla Wall
+Connector electric vehicle charging stations.
+
+=head1 CONFIGURATION
+
+Configuration in C</etc/munin/plugin-conf.d/munin-node>:
+
+ [tesla_wall_connector]
+   # IP address or hostname of your Tesla Wall Connector
+   env.address 10.0.0.136
+
+=head1 NOTES
+
+Requires the multigraph and dirtyconfig capabilities available in munin 2.0
+and newer.
+
+Developed and tested with Tesla Wall Connector generation 3 firmware
+version 22.7.0+gbc6c1736fa3426, part number 1457768-02-G (from
+C</api/1/version>).
+
+=head1 KNOWN ISSUES
+
+The Tesla Wall Connector stops responding to queries on its REST
+API during charging for unknown reasons.
+
+=head1 AUTHOR
+
+Copyright © 2022 Kenyon Ralph <kenyon@kenyonralph.com>
+
+=head1 LICENSE
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program.  If not, see L<https://www.gnu.org/licenses/>.
+
+=cut
