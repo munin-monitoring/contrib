@@ -183,7 +183,7 @@ class MuninNftCountersPlugin(MuninPlugin):
 
         """
 
-        MuninPlugin.__init__(self, argv, env, debug=True)
+        MuninPlugin.__init__(self, argv, env, debug)
 
         # Munin graph parameters
         graph_category = "network"
@@ -191,21 +191,27 @@ class MuninNftCountersPlugin(MuninPlugin):
         try:
             self.counters = getCounters()
         except ValueError:
-            print("# No counters in nftables. Try adding some first.",
-                  "# See 'munin-doc %s' for more information." % self.plugin_name,
-                  sep="\n")
-            sys.exit(1)
+            if self._argv[1] == "autoconf":
+                return
+            else:
+                print("# No counters in nftables. Try adding some first.",
+                      "# See 'munin-doc %s' for more information." % self.plugin_name,
+                      sep="\n")
+                raise
         except Exception as err:
-            print("# Plugin needs to be run as root since nftables can only be",
-                  "# run as root.",
-                  "#",
-                  "# Use the following setting in the configuration file",
-                  "# to enable root privileges:",
-                  "#",
-                  "# [%s]" % self.plugin_name,
-                  "# user root",
-                  sep="\n")
-            sys.exit(err)
+            if self._argv[1] == "autoconf":
+                return
+            else:
+                print("# Plugin needs to be run as root since nftables can only be",
+                      "# run as root.",
+                      "#",
+                      "# Use the following setting in the configuration file",
+                      "# to enable root privileges:",
+                      "#",
+                      "# [%s]" % self.plugin_name,
+                      "# user root",
+                      sep="\n")
+                raise
 
         count_only = self.envGet("count_only")
 
@@ -276,14 +282,10 @@ class MuninNftCountersPlugin(MuninPlugin):
 
         """
 
-        # Any exceptions (e.g. insufficient permissions, missing dependencies)
-        # will already throw an exception when the plugin is initialized since
-        # the plugin reads all its data from nftables. So below should always
-        # return True (print "yes").
         try:
             counters = getCounters()
             return True
-        except ValueError:
+        except:
             return False
 
 
