@@ -97,6 +97,7 @@ examples [4] provided by Arturo Borrero Gonzalez.
 """
 
 import sys
+
 try:
     from nftables import Nftables
     from nftables import json
@@ -137,6 +138,7 @@ def nft_cmd(nftlib, cmd):
 
     return ruleset
 
+
 def getCounters():
 
     nft = Nftables()
@@ -160,7 +162,6 @@ class MuninNftCountersPlugin(MuninPlugin):
 
     plugin_name = "nft_counters"
     isMultigraph = True
-
 
     def __init__(self, argv=(), env=None, debug=False):
 
@@ -194,34 +195,46 @@ class MuninNftCountersPlugin(MuninPlugin):
             if self._argv[1] == "autoconf":
                 return
             else:
-                print("# No counters in nftables. Try adding some first.",
-                      "# See 'munin-doc %s' for more information." % self.plugin_name,
-                      sep="\n")
+                print(
+                    "# No counters in nftables. Try adding some first.",
+                    "# See 'munin-doc %s' for more information." % self.plugin_name,
+                    sep="\n",
+                )
                 raise
-        except Exception as err:
+        except Exception:
             if self._argv[1] == "autoconf":
                 return
             else:
-                print("# Plugin needs to be run as root since nftables can only be",
-                      "# run as root.",
-                      "#",
-                      "# Use the following setting in the configuration file",
-                      "# to enable root privileges:",
-                      "#",
-                      "# [%s]" % self.plugin_name,
-                      "# user root",
-                      sep="\n")
+                print(
+                    "# Plugin needs to be run as root since nftables can only be",
+                    "# run as root.",
+                    "#",
+                    "# Use the following setting in the configuration file",
+                    "# to enable root privileges:",
+                    "#",
+                    "# [%s]" % self.plugin_name,
+                    "# user root",
+                    sep="\n",
+                )
                 raise
 
         count_only = self.envGet("count_only")
 
         # Create the graphs
         if not (count_only == "bytes"):
-            graph_packets = MuninGraph("nftables counters (packets)", graph_category,
-                                       vlabel="packets / second", args="--base 1000")
+            graph_packets = MuninGraph(
+                "nftables counters (packets)",
+                graph_category,
+                vlabel="packets / second",
+                args="--base 1000",
+            )
         if not (count_only == "packets"):
-            graph_bytes = MuninGraph("nftables counters (bytes)", graph_category,
-                                     vlabel="bytes / second", args="--base 1024")
+            graph_bytes = MuninGraph(
+                "nftables counters (bytes)",
+                graph_category,
+                vlabel="bytes / second",
+                args="--base 1024",
+            )
 
         # Define filter to allow for tuning of counters graphed
         self.envRegisterFilter("counters")
@@ -232,22 +245,31 @@ class MuninNftCountersPlugin(MuninPlugin):
             # Until it does, use counter name as info
             try:
                 field_info = counter["comment"]
-            except:
+            except Exception:
                 field_info = counter["name"]
 
             if self.envCheckFilter("counters", counter["name"]):
                 if not (count_only == "bytes"):
-                    graph_packets.addField(counter["name"], counter["name"], min=0,
-                                           type="DERIVE", info=field_info)
+                    graph_packets.addField(
+                        counter["name"],
+                        counter["name"],
+                        min=0,
+                        type="DERIVE",
+                        info=field_info,
+                    )
                 if not (count_only == "packets"):
-                    graph_bytes.addField(counter["name"], counter["name"], min=0,
-                                         type="DERIVE", info=field_info)
+                    graph_bytes.addField(
+                        counter["name"],
+                        counter["name"],
+                        min=0,
+                        type="DERIVE",
+                        info=field_info,
+                    )
 
         if not (count_only == "bytes"):
             self.appendGraph("nft_counters_packets", graph_packets)
         if not (count_only == "packets"):
             self.appendGraph("nft_counters_bytes", graph_bytes)
-
 
     def retrieveVals(self):
 
@@ -264,12 +286,13 @@ class MuninNftCountersPlugin(MuninPlugin):
         for counter in self.counters:
             if self.envCheckFilter("counters", counter["name"]):
                 if self.hasGraph("nft_counters_packets"):
-                    self.setGraphVal("nft_counters_packets", counter["name"],
-                                     counter["packets"])
+                    self.setGraphVal(
+                        "nft_counters_packets", counter["name"], counter["packets"]
+                    )
                 if self.hasGraph("nft_counters_bytes"):
-                    self.setGraphVal("nft_counters_bytes", counter["name"],
-                                     counter["bytes"])
-
+                    self.setGraphVal(
+                        "nft_counters_bytes", counter["name"], counter["bytes"]
+                    )
 
     def autoconf(self):
         """
@@ -283,9 +306,9 @@ class MuninNftCountersPlugin(MuninPlugin):
         """
 
         try:
-            counters = getCounters()
+            getCounters()
             return True
-        except:
+        except Exception:
             return False
 
 
