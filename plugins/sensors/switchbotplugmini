@@ -1,0 +1,137 @@
+#!/bin/bash
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+  switchbotplugmini - Munin plugin to monitor power consumption from Switchbot Plug Mini
+
+=head1 CONFIGURATION
+
+  Obtain a token and deviceid for SwitchBot API. See the following website.
+  https://github.com/OpenWonderLabs/SwitchBotAPI
+
+=head1 ENVIRONMENT VARIABLES
+
+  env.token    : Token to access SwitchBot API. (Required)
+  env.deviceid : Device ID(s) of SwitchBot Plug Mini. (Required)
+                 Multiple device IDs can be set by separating with white space.
+  env.interval : Interval in seconds for API access. (Optional, default is 0)
+
+=head1 NOTES
+
+  The amount of SwitchBot API calls per day is limited to 10000 times.
+  If munin-node executes this plugin every 5 minutes, the API will be called 288 times a day.
+  You can use env.interval parameter to prevent frequent API access. For example, if you set
+  env.interval 900, the API response will be cached to local file for 900 seconds(15 minutes).
+
+=head1 AUTHOR
+
+  K.Cima https://github.com/shakemid
+
+=head1 LICENSE
+
+  GPLv2
+  SPDX-License-Identifier: GPL-2.0-only
+
+=head1 Magic markers
+
+  #%# family=contrib
+  #%# capabilities=
+
+=cut
+
+. "${MUNIN_LIBDIR}/plugins/plugin.sh"
+
+set -o nounset
+set -o pipefail
+
+# Token to access SwitchBot API
+token=${token:?}
+
+# Device ID(s) of SwitchBot Plug Mini
+deviceid=${deviceid:?}
+
+# Interval for API access (second)
+interval=${interval:-0}
+
+config() {
+    cat <<EOF
+graph_title SwitchBot Plug Mini Watts
+graph_category sensors
+graph_scale no
+graph_vlabel Watts
+graph_args --base 1000
+EOF
+
+    for i in ${deviceid}; do
+        echo "weight${i}.label ${i}"
+    done
+}
+
+fetch() {
+    do_read_cache=0
+    do_store_cache=0
+
+    if [ "${interval}" -ne 0 ]; then
+        time_now=$( date +%s )
+
+        if [ -f "${MUNIN_STATEFILE}" ]; then
+            time_modified=$( stat --format=%Y "${MUNIN_STATEFILE}" )
+        else
+            time_modified=0
+        fi
+
+        if [ $(( time_now - time_modified )) -le "${interval}" ]; then
+            do_read_cache=1
+        else
+            do_store_cache=1
+        fi
+    fi
+
+    if [ "${do_read_cache}" -eq 1 ]; then
+        cat "${MUNIN_STATEFILE}"
+    else
+        if [ "${do_store_cache}" -eq 1 ]; then
+            cat /dev/null > "${MUNIN_STATEFILE}"
+        fi
+
+        for i in ${deviceid}; do
+            weight=$( fetch_api "${i}" )
+            echo "weight${i}.value ${weight}"
+            if [ "${do_store_cache}" -eq 1 ]; then
+               echo "weight${i}.value ${weight}" >> "${MUNIN_STATEFILE}"
+            fi
+        done
+    fi
+}
+
+fetch_api() {
+    local deviceid=$1
+
+    response=$( curl -s -H "Authorization:${token}" "https://api.switch-bot.com/v1.0/devices/${deviceid}/status" )
+
+    statusCode=$( echo "${response}" | jq '.statusCode' )
+    if [ "${statusCode}" -ne 100 ]; then
+        echo Error with statusCode = "${statusCode}" 1>&2
+        exit 1
+    fi
+
+    echo "${response}" | jq '.body.weight'
+}
+
+# Main
+case ${1:-} in
+config)
+    config
+    if [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ]; then
+        fetch
+    fi
+    ;;
+*)
+    fetch
+    ;;
+esac
+
+exit 0
