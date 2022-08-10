@@ -8,7 +8,7 @@ raid2 - monitor software and hardware RAID and scrub status
 
 =head1 APPLICABLE SYSTEMS
 
-Linux systems with mdraid, btrfs, cciss or megasasctl RAID.
+Linux systems with mdraid, btrfs, cciss, mpt3sas or megasasctl RAID.
 
 =head1 CONFIGURATION
 
@@ -111,11 +111,10 @@ def find_mdstat():
     """Parse /proc/mdstat."""
     # Read file
     try:
-        fhn = open('/proc/mdstat')
-    except IOError:
+        with open('/proc/mdstat', encoding='utf-8') as fhn:
+            lines = fhn.readlines()
+    except OSError:
         return []
-    lines = fhn.readlines()
-    fhn.close()
 
     # Parse it
     devices = []
@@ -138,11 +137,10 @@ def find_btrfs():
     """Parse /proc/mounts and btrfs scrub status. Ignore csum errors."""
     # Read file
     try:
-        fhn = open('/proc/mounts')
-    except IOError:
+        with open('/proc/mounts', encoding='utf-8') as fhn:
+            lines = fhn.readlines()
+    except OSError:
         return []
-    lines = fhn.readlines()
-    fhn.close()
 
     # Parse it
     devmap = {}
@@ -172,10 +170,24 @@ def find_btrfs():
     return devices
 
 
+def find_mpt3sas():
+    """Read LSI MPT Fusion RAID status from /sys files."""
+    statefiles = sorted(glob.glob('/sys/class/raid_devices/*/state'))
+    if not statefiles:
+        return []
+    status = 1
+    for statefile in statefiles:
+        with open(statefile, encoding='utf-8') as fhn:
+            if 'active' not in fhn.read():
+                status = 0
+                break
+    return [('mpt3sas', status, 'LSI MPT Fusion SAS 3.0')]
+
+
 def find_devices():
     """Return list of found device tuples."""
-    devices = find_cciss() + find_megasasctl() + find_mdstat() + find_btrfs()
-    return devices
+    return (find_mdstat() + find_btrfs() + find_cciss() + find_mpt3sas() +
+            find_megasasctl())
 
 
 def config(devices):
