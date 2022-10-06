@@ -36,8 +36,24 @@ if [[ "$1" == "autoconf" ]]; then
     exit 0
 fi
 
+# Dovecot 2.3 changes the stas format, but we can still access the older version with "doveadm oldstats".
+dovecot_version=$(/usr/sbin/dovecot --version | awk '{print $1}')
+
+verlte() {
+    [ "$1" = "$2" ] && return 1 || [  "$2" = "`echo -e "$1\n$2" | sort -V | head -n1`" ]
+}
+
+verlt() {
+    [ "$1" = "$2" ] && return 1 || verlte $2 $1
+}
+
+# The stats command is "stats" unless the version is NOT less than 2.3, in which case it's "oldstats".
+stats_command="stats"
+verlt $dovecot_version 2.3 || stats_command="oldstats"
+
+
 if [[ "$1" == "suggest" ]]; then
-    doveadm stats dump domain|awk 'NR!=1 {print $1}'
+    doveadm $stats_command dump domain|awk 'NR!=1 {print $1}'
     exit 0
 fi
 
@@ -112,7 +128,7 @@ fi
 
 # Fetch data
 # Gawk script cadged from http://awk.info/?JanisP
-doveadm stats dump domain domain=$domain | gawk -F\\t -v cols="user_cpu sys_cpu min_faults maj_faults vol_cs invol_cs read_count write_count num_logins num_cmds mail_lookup_path mail_lookup_attr mail_read_count mail_cache_hits " -v domain=${domain//\./_} '
+doveadm $stats_command dump domain domain=$domain | gawk -F\\t -v cols="user_cpu sys_cpu min_faults maj_faults vol_cs invol_cs read_count write_count num_logins num_cmds mail_lookup_path mail_lookup_attr mail_read_count mail_cache_hits " -v domain=${domain//\./_} '
     BEGIN {
         n=split(cols,col," ")
         for (i=1; i<=n; i++) s[col[i]]=i
