@@ -1,0 +1,77 @@
+#!/bin/sh
+
+: <<=cut
+
+=head CONFIGURATION
+
+    Plugin to monitor OpenSMTPD delivery and queue
+
+=head COPYRIGHT
+
+    Copyright (C) 2022 Rowan Wookey <https://www.rwky.net>
+
+=head LICENSE
+
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+=head MAGIC MARKERS
+
+    #%# family=auto
+    #%# capabilities=autoconf
+
+=cut
+
+if [ "$1" = "autoconf" ]
+then
+    if command -v smtpctl > /dev/null 2>&1 
+    then
+        echo 'yes'
+    fi
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    echo "graph_title OpenSMTPD status"
+    echo "graph_category mail"
+    echo "graph_period minute"
+    echo "graph_vlabel Mails per minute"
+    echo "graph_info This graph shows the delivery status for OpenSMTPD"
+    echo "graph_args -l 0"
+    echo "graph_scale no"
+    echo "ok.label Delivered"
+    echo "ok.type DERIVE"
+    echo "ok.min 0"
+    echo "permfail.label Permfail"
+    echo "permfail.type DERIVE"
+    echo "permfail.min 0"
+    echo "tempfail.label Tempfail"
+    echo "tempfail.type DERIVE"
+    echo "tempfail.min 0"
+    echo "loop.label Loop"
+    echo "loop.type DERIVE"
+    echo "loop.min 0"
+    echo "queued.label Queued"
+    echo "queued.type GAUGE"
+    echo "queued.min 0"
+    exit 0
+else
+	for stat in ok permfail tempfail loop
+	do
+		echo -n "${stat}.value " 
+		smtpctl show stats | grep "scheduler.delivery.$stat" | awk -F '=' '{ print $NF;} END { if (NR == "0") { print NR } }'
+
+	done
+		echo -n "queued.value " 
+		smtpctl show stats | grep "scheduler.envelope=" | awk -F '=' '{ print $NF;} END { if (NR == "0") { print NR } }'
+fi
