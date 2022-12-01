@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""
+=head1 NAME
+
+prosody_0.12_ - Munin wildcard-plugin to monitor a L<Prosody|https://prosody.im> XMPP server.
+
+This wildcard plugin provides at the moment only the suffixes C<c2s>, C<s2s>, C<presence>,
+C<uptime> and C<users> suffixes.
+
+=head1 INSTALLATION
+
+- Copy this plugin in your munin plugins directory
+- Rename it prosody_
+
+=over 2
+
+    ln -s /usr/share/munin/plugins/prosody_ /etc/munin/plugins/prosody_c2s
+    ln -s /usr/share/munin/plugins/prosody_ /etc/munin/plugins/prosody_s2s
+    ln -s /usr/share/munin/plugins/prosody_ /etc/munin/plugins/prosody_presence
+    ln -s /usr/share/munin/plugins/prosody_ /etc/munin/plugins/prosody_uptime
+    ln -s /usr/share/munin/plugins/prosody_ /etc/munin/plugins/prosody_users
+
+=back
+
+After the installation you need to restart your munin-node service.
+
+=head1 CONFIGURATION
+
+You can create a file named prosody placed in the directory
+/etc/munin/plugin-conf.d/ with the following config:
+
+=over 2
+
+    [prosody_*]
+    env.host example.com
+    env.port 5582
+
+=back
+
+=head1 AUTHORS
+
+Codimp <contact@lithio.fr>
+
+=head1 LICENSE
+
+GPLv3
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=suggest
+
+=cut
+"""
+
+import sys
+import os
+import telnetlib
+import re
+
+def create_table(table, start_pattern, end_pattern):
+    start = table.find(start_pattern)
+    end = table.find(end_pattern, start + 1)
+    return table[start:end].splitlines()[1:-1]
+
+def format_c2s_connections(c2s_table):
+    connections = []
+    for line in c2s_table:
+        line = line.split('|')
+        connection = {}
+        connection['session_id'] = line[1].strip()
+        connection['jid'] = line[2].strip()
+        connection['ip_type'] = line[3].strip()
+        connection['status'] = line[4].strip()
+        connection['security'] = line[5].strip()
+        connection['sm'] = line[6].strip()
+        connection['csi_state'] = line[7].strip()
+        connections.append(connection)
+    return connections
+
+def count_c2s_connections(connections):
+    secure_connections = 0
+    insecure_connections = 0
+    for connection in connections:
+        if connection['security'] == 'insecure':
+            insecure_connections += 1
+        else:
+            secure_connections += 1
+    return (secure_connections, insecure_connections)
+
+def format_s2s_connections(s2s_table):
+    connections = []
+    for line in s2s_table:
+        line = line.split('|')
+        connection = {}
+        connection['session_id'] = line[1].strip()
+        connection['host'] = line[2].strip()
+        connection['direction'] = line[3].strip()
+        connection['remote'] = line[4].strip()
+        connection['ip_type'] = line[5].strip()
+        connection['security'] = line[6].strip()
+        connection['sasl'] = line[7].strip()
+        connection['dialback'] = line[8].strip()
+        connections.append(connection)
+    return connections
+
+def count_s2s_connections(connections):
+    incoming_pattern = '<--'
+    outgoing_pattern = '-->'
+    incoming_connections = 0
+    outgoing_connections = 0
+    for connection in connections:
+        if connection['direction'] == incoming_pattern:
+            incoming_connections += 1
+        elif connection['direction'] == outgoing_pattern:
+            outgoing_connections += 1
+    return (incoming_connections, outgoing_connections)
+
+def count_presences(connections):
+    available = 0
+    chat = 0
+    away = 0
+    xa = 0
+    dnd = 0
+    for presence in connections:
+        if presence['status'] == 'online':
+            available += 1
+        elif presence['status'] == 'chat':
+            chat += 1
+        elif presence['status'] == 'away':
+            away += 1
+        elif presence['status'] == 'xa':
+            xa += 1
+        elif presence['status'] == 'dnd':
+            dnd += 1
+    return (available, chat, away, xa, dnd)
+
+def format_hosts(host_table):
+    hosts = []
+    for line in host_table:
+        host = line.strip('| ')
+        if '(' not in host:
+            hosts.append(host)
+    return hosts[1:]
+
+def main():
+    try:
+        mode = sys.argv[1]
+    except IndexError:
+        mode = ""
+    wildcard = sys.argv[0].split("prosody_")[1].split("_")[0]
+    host = os.environ.get('host', 'localhost')
+    port = int(os.environ.get('port', 5582))
+
+    if mode == "suggest":
+        print("c2s")
+        print("s2s")
+        print("presence")
+        print("uptime")
+        print("users")
+        sys.exit(0)
+
+    if wildcard == "c2s":
+        if mode == "config":
+            print("graph_title Prosody C2S Connections")
+            print("graph_vlabel users")
+            print("graph_category chat")
+            print("all_client_connections.label client connections")
+            print("secure_client_connections.label secure client connections")
+            print("insecure_client_connections.label insecure client connections")
+            sys.exit(0)
+        else:
+            telnet = telnetlib.Telnet(host, port)
+            telnet.write(b"c2s:show()\n")
+            telnet_response = telnet.read_until(b"| OK:", 5)
+            telnet_response = telnet_response.decode()
+            telnet.write(b"quit\n")
+            # Select table lines
+            c2s_table = create_table(telnet_response, "Session ID", "c2s sessions")
+            # Format, count and print result
+            connections = format_c2s_connections(c2s_table)
+            secure_client_connections, insecure_client_connections = count_c2s_connections(connections)
+            all_client_connections = secure_client_connections + insecure_client_connections
+            print("all_client_connections.value %s" % (all_client_connections))
+            print("secure_client_connections.value %s" % secure_client_connections)
+            print("insecure_client_connections.value %s" % insecure_client_connections)
+
+    elif wildcard == "s2s":
+        if mode == "config":
+            print("graph_title Prosody S2S Connections")
+            print("graph_vlabel servers")
+            print("graph_category chat")
+            print("outgoing_connections.label outgoing connections")
+            print("incoming_connections.label incoming connections")
+            sys.exit(0)
+        else:
+            telnet = telnetlib.Telnet(host, port)
+            telnet.write(b"s2s:show()\n")
+            telnet_response = telnet.read_until(b"| OK:", 5)
+            telnet_response = telnet_response.decode()
+            telnet.write(b"quit\n")
+            # Select table lines
+            s2s_table = create_table(telnet_response, "Session ID", "s2s connections")
+            # Format, count and print result
+            connections = format_s2s_connections(s2s_table)
+            incoming_connections, outgoing_connections = count_s2s_connections(connections)
+            print("outgoing_connections.value %s" % (outgoing_connections))
+            print("incoming_connections.value %s" % (incoming_connections))
+
+    elif wildcard == "presence":
+        if mode == "config":
+            print("graph_title Prosody Client Presence")
+            print("graph_vlabel clients")
+            print("graph_category chat")
+            print("available.label Available Clients")
+            print("chat.label Ready for Chat Clients")
+            print("away.label Away Clients")
+            print("xa.label Extended Away Clients")
+            print("dnd.label Do Not Disturb Clients")
+            sys.exit(0)
+        else:
+            telnet = telnetlib.Telnet(host, port)
+            telnet.write(b"c2s:show()\n")
+            telnet_response = telnet.read_until(b"| OK:", 5)
+            telnet_response = telnet_response.decode()
+            telnet.write(b"quit\n")
+            # Select table lines
+            c2s_table = create_table(telnet_response, "Session ID", "c2s sessions")
+            # Format, count and print result
+            connections = format_c2s_connections(c2s_table)
+            available, chat, away, xa, dnd = count_presences(connections)
+            print("available.value %s" % available)
+            print("chat.value %s" % chat)
+            print("away.value %s" % away)
+            print("xa.value %s" % xa)
+            print("dnd.value %s" % dnd)
+
+    elif wildcard == "uptime":
+        if mode == "config":
+            print("graph_title Prosody Uptime")
+            print("graph_args --base 1000 -l 0")
+            print("graph_scale no")
+            print("graph_vlabel uptime in days")
+            print("graph_category chat")
+            print("graph_order uptime")
+            print("uptime.draw AREA")
+            print("uptime.min U")
+            print("uptime.max U")
+            print("uptime.label uptime")
+            print("uptime.type GAUGE")
+            sys.exit(0)
+        else:
+            uptime_re = re.compile(r"\d+")
+            telnet = telnetlib.Telnet(host, port)
+            telnet.write(b"server:uptime()\n")
+            telnet_response = telnet.read_until(b"minutes (", 5)
+            telnet.write(b"quit\n")
+            parsed_info = uptime_re.findall(telnet_response.decode())
+            uptime_value = (float(parsed_info[0]) + float(parsed_info[1]) / 24
+                            + float(parsed_info[2]) / 60 / 24)
+            print("uptime.value %s" % (uptime_value))
+
+    elif wildcard == "users":
+        if mode == "config":
+            print("graph_title Prosody Registered Users")
+            print("graph_vlabel users")
+            print("graph_category chat")
+        else:
+            telnet = telnetlib.Telnet(host, port)
+            # Get host list
+            telnet.write(b"host:list()\n")
+            telnet_response = telnet.read_until(b"| OK:", 5)
+            telnet_response = telnet_response.decode()
+            host_table = create_table(telnet_response, "| https://prosody.im/doc/console", "| OK: ")
+            hosts = format_hosts(host_table)
+            # Get user list
+            for host in hosts:
+                telnet.write(b"user:list('" + host.encode() + b"')\n")
+                telnet_response = telnet.read_until(b"users", 5)
+                telnet_response = telnet_response.decode()
+                user_re = re.compile(r"\d+ users")
+                parsed_info = user_re.findall(telnet_response)
+                users = parsed_info[0].strip(' users')
+                print("%s.value %s" % (host, users))
+            telnet.write(b"quit\n")
+
+
+if __name__ == "__main__":
+    main()
