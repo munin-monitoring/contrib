@@ -1,0 +1,89 @@
+#!/bin/sh
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+privatebin - PrivateBin statistics
+
+=head1 APPLICABLE SYSTEMS
+
+PrivateBin instances (version 1.5.1+)
+
+=head1 CONFIGURATION
+
+Requires an installed PrivateBin instance
+
+You have to specify the path to your PrivateBin instance.
+
+ path - Path to the PrivateBin instance 
+
+ [privatebin]
+ env.path /var/www/privatebin
+
+=head1 AUTHOR
+
+Copyright (C) 2022 Sebastian L. (https://momou.ch)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+PRIVATEBIN=${path:-"/var/www/privatebin"}
+
+case $1 in
+
+   config)
+        echo "multigraph privatebin"
+        echo "graph_title PrivateBin statistics"
+        echo "graph_info PrivateBin statistics"
+        echo "graph_vlabel privatebin statistics"
+        echo "graph_args --base 1000 -l 0"
+        echo "total.label total"
+        echo "total.info total number of pastes"
+        echo "total.min 0"
+        echo "total.draw AREA"
+        echo "expired.label expired"
+        echo "expired.info expired pastes"
+        echo "expired.min 0"
+        echo "expired.draw AREA"
+        echo "plain.label plaintext"
+        echo "plain.info plaintext pastes"
+        echo "plain.min 0"
+        echo "plain.draw LINE2"
+        echo "markdown.label markdown"
+        echo "markdown.info markdown pastes"
+        echo "markdown.min 0"
+        echo "markdown.draw LINE2"
+        echo "code.label sourcecode"
+        echo "code.info sourcecode pastes"
+        echo "code.min 0"
+        echo "code.draw LINE2"
+        echo "burn.label burn after reading"
+        echo "burn.info burn-after-reading pastes"
+        echo "burn.min 0"
+        echo "burn.draw LINE"
+        echo "discussions.label discussions"
+        echo "discussions.info pastes with comments"
+        echo "discussions.min 0"
+        echo "discussions.draw LINE"
+        exit 0
+        ;;
+
+esac
+
+echo "multigraph privatebin"
+for KEY in total expired plain markdown code burn discussions;
+do
+echo "$KEY.value $("$PRIVATEBIN"/bin/administration  -s | grep -i "$KEY" | grep -owh '[0-9]*')"
+done
