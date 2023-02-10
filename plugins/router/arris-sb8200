@@ -98,13 +98,10 @@ import os
 import sys
 import base64
 
-# SB8200 has bad SSL cert, ignore warnings
-import urllib3
-
-urllib3.disable_warnings()
-
 # Extra Packages
+# SB8200 has bad SSL cert, ignore warnings
 import requests
+requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 from lxml import html
 
 
@@ -177,8 +174,9 @@ class Modem:
 
 # Sets maximum number of channels
 UPCOUNT = 8
-DOWNCOUNT = 33
-# DOWNCOUNT should be 32, but I have observed 33
+DOWNCOUNT = 32
+# DOWNCOUNT should be 32, I have observed "extra" channels with
+# modulation type of "Other" which only ever have errors
 
 if os.getenv("password", None) is None:
     print("Set password.", file=sys.stderr)
@@ -388,6 +386,8 @@ for row in trs:
     data = dict(
         zip(headings, ["".join(x.itertext()).strip() for x in row.findall("td")])
     )
+    if data["Modulation"] == "Other":
+        continue
     uncorr += int(data["Uncorrectables"])
     correct += int(data["Corrected"])
 
