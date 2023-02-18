@@ -1,0 +1,86 @@
+#!/bin/bash
+#%# family=auto
+#%# capabilities=autoconf
+
+# Michael Grote
+# michael.grote ät posteo.de
+# Outputs the current power, total yield, daily yield from a deye inverter.
+# Test with a "Deye SUN600G3-EU-230 600W" inverter.
+
+# Dependencies:
+# - wget
+# - awk
+# - sed
+
+# Config:
+# [deye]
+# env.user deyeadmin600
+# env.password SECRET_PASS
+# env.ip 192.168.10.180
+
+# Values in HTML
+# sn = serial number
+# msvn = Firmware version (main)
+# ssvn = Firmware version (slave)
+# pv_type = inverter _model
+# rate_p = rated power
+# now_p = current power
+# today_e = yield today
+# total_e = total yield
+# alarm = alarm
+# utime = last updated
+
+
+
+# set values
+serial_number=$(wget --quiet --user ${user} --password ${password} -O - ${ip}/status.html | grep "var webdata_sn" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g')
+current_power=$(wget --quiet --user ${user} --password ${password} -O - ${ip}/status.html | grep "var webdata_now_p" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g')
+daily_yield=$(wget --quiet --user ${user} --password ${password} -O - ${ip}/status.html | grep "var webdata_today_e" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g')
+total_yield=$(wget --quiet --user ${user} --password ${password} -O - ${ip}/status.html | grep "var webdata_total_e" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g')
+
+# wenn parameter = ...
+if [ "$1" = "autoconf" ]; then
+    echo yes
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    # setze optionen
+    echo multigraph current_power
+    echo graph_title current_power - SN: "$serial_number"
+    echo 'graph_vlabel Watt'
+    echo 'graph_category sensors'
+    echo 'graph_args -l 0'
+    echo  "graph_info Current generated power in Watt."
+    echo current_power.label watt
+
+    echo multigraph daily_yield
+    echo graph_title daily_yield - SN: "$serial_number"
+    echo 'graph_vlabel kWh'
+    echo 'graph_category sensors'
+    echo 'graph_args -l 0'
+    echo  "graph_info Power generated today."
+    echo daily_yield.label kWh
+    # hier farbe "voll"
+
+    echo multigraph total_yield
+    echo graph_title total_yield - SN: "$serial_number"
+    echo 'graph_vlabel kWh'
+    echo 'graph_category sensors'
+    echo 'graph_args -l 0'
+    echo  "graph_info Total generated power."
+    echo total_yield.label kWh
+    # hier farbe "voll"
+    exit 0
+fi
+
+echo multigraph current_power
+echo current_power.value "$current_power"
+
+echo multigraph daily_yield
+echo daily_yield.value "$daily_yield"
+
+echo multigraph total_yield
+echo total_yield.value "$total_yield"
+
+exit 0
