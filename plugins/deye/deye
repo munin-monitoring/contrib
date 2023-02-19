@@ -30,13 +30,22 @@
 # alarm = alarm
 # utime = last updated
 
+# check if inverter is reachable
+# inverter is off when there is not enough light to power it
+# so it is safe to assume that current power etc. are zero
+if ping "${ip}" -c1 -W 3 2>&1 > /dev/null ; then
+    current_power=$(wget --quiet --user "${user}" --password "${password}" -O - "${ip}"/status.html | grep "var webdata_now_p" | awk 'BEGIN {FS="="}{print $2}' | sed 's/   [^0-9]*//g')
+    daily_yield=$(wget --quiet --user "${user}" --password "${password}" -O - "${ip}"/status.html | grep "var webdata_today_e" | awk 'BEGIN {FS="="}{print $2}' | sed 's/   [^0-9]*//g')
+    total_yield=$(wget --quiet --user "${user}" --password "${password}" -O - "${ip}"/status.html | grep "var webdata_total_e" | awk 'BEGIN {FS="="}{print $2}' | sed 's/   [^0-9]*//g')
+    reachable="1"
+else
+    current_power="0"
+    daily_yield="0"
+    total_yield="0"
+    reachable="0"
+fi
 
 
-# set values
-serial_number=$(wget --quiet --user ${user} --password ${password} -O - ${ip}/status.html | grep "var webdata_sn" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g')
-current_power=$(wget --quiet --user ${user} --password ${password} -O - ${ip}/status.html | grep "var webdata_now_p" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g')
-daily_yield=$(wget --quiet --user ${user} --password ${password} -O - ${ip}/status.html | grep "var webdata_today_e" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g')
-total_yield=$(wget --quiet --user ${user} --password ${password} -O - ${ip}/status.html | grep "var webdata_total_e" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g')
 
 # wenn parameter = ...
 if [ "$1" = "autoconf" ]; then
@@ -72,6 +81,15 @@ if [ "$1" = "config" ]; then
     echo total_yield.label kWh
     echo total_yield.draw AREA
 
+    echo multigraph reachable
+    echo graph_title Deye Inverter reachable
+    echo 'graph_vlabel on/off'
+    echo 'graph_category sensors'
+    echo 'graph_args -l 0'
+    echo "graph_info Is the Inverter is reachable? 1 is On, 0 is Off"
+    echo reachable.label on/off
+    echo reachable.draw AREA
+
     exit 0
 fi
 
@@ -83,5 +101,8 @@ echo daily_yield.value "$daily_yield"
 
 echo multigraph total_yield
 echo total_yield.value "$total_yield"
+
+echo multigraph reachable
+echo reachable.value "$reachable"
 
 exit 0
