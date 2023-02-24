@@ -84,13 +84,21 @@ def find_pools():
 
     files = []
     dflist = run_binary(['df']).splitlines()
+    used_offset = 0
     for line in run_binary(['stratis', 'filesystem']).splitlines():
-        if line.startswith('Pool Name ') or '-snap-' in line:
+        if line.startswith('Pool Name  ') and used_offset == 0:
+            used_offset = 2  # Stratis v2
+            continue
+        if line.startswith('Pool  ') and used_offset == 0:
+            used_offset = 5  # Stratis v3
+            continue
+        if '-snap-' in line:
             continue
         tokens = line.split()
-        df_used = used = parse_unit(tokens[2], tokens[3])
+        df_used = used = parse_unit(tokens[used_offset],
+                                    tokens[used_offset + 1])
         for dfline in dflist:
-            if tokens[9] not in dfline:  # match by uuid
+            if tokens[-1] not in dfline:  # match by uuid
                 continue
             df_used = int(dfline.split()[2]) * 1024
         files.append((tokens[0], tokens[1], used, df_used))
