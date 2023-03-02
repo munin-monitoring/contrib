@@ -63,9 +63,6 @@ export SLRM_DATA_REQUEST_BODY=$(jq --null-input --arg deviceSn "${SLRM_DEVICE_SN
 ## get panel data
 export SLRM_DATA=$(curl --silent --request POST --url "https://api.solarmanpv.com/device/v1.0/currentData?appId=${SLRM_APPID}&language=en&=" --header "Authorization: bearer ${SLRM_BEARER_TOKEN}" --header 'Content-Type: application/json' --data "${SLRM_DATA_REQUEST_BODY}")
 
-# sometimes the api can not find the requested device, exit here
-echo $SLRM_DATA | grep "device not found" && exit 1
-
 # wenn parameter = ...
 if [ "$1" = "autoconf" ]; then
     echo yes
@@ -118,6 +115,9 @@ if [ "$1" = "config" ]; then
 
     exit 0
 fi
+
+# sometimes the api can not find the requested device, exit here
+echo $SLRM_DATA | grep "device not found" && exit 1
 
 echo "multigraph production_total"
 echo total_inverter.value    "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("Et_ge0"))|.value')"
