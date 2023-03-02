@@ -1,0 +1,107 @@
+#!/bin/bash
+#%# family=auto
+#%# capabilities=autoconf
+
+: << EOF
+=head1 NAME
+
+Outputs the total production, DC current, DC voltage, DC power from Solarman (Smart) API.
+To get the API-Keys a E-Mail to customerservice@solarmanpv.com is needed.
+
+=head1 CONFIGURATION
+
+Tested with a "Deye SUN600G3-EU-230 600W" inverter.
+
+Dependencies:
+ - curl
+ - jq
+
+plugin config:
+
+  [solarman_api_panels_<name>]
+    env.SLRM_APPID 2XXXXXXXX2
+    env.SLRM_DEVICE_SN=2XXXXXXXXX6-1
+    env.SLRM_MAIL "XXXX@YYY.de"
+    env.SLRM_PASSWORD 'aXXXXXXXXf'
+    env.SLRM_APPSECRET aXXXXXXXb
+
+=head1 AUTHOR
+
+Michael Grote
+
+=head1 LICENSE
+
+GPLv3 or later
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+
+=cut
+
+EOF
+
+# check if jq is installed
+if ! command -v "jq" &> /dev/null; then
+    echo "[ERROR] jq could not be found!"
+    exit 2
+fi
+
+# Combine Variables
+## hash password; -n is used because "echo" normally outputs a newline
+export SLRM_PASSWORD_SHA=$(echo -n $SLRM_PASSWORD | sha256sum | cut -f1 -d" ")
+## set url
+export SLRM_URL="https://api.solarmanpv.com/account/v1.0/token?appId=${SLRM_APPID}&language=en&="
+## create request body for bearer token
+export SLRM_BEARER_TOKEN_REQUEST_BODY=$(jq --null-input --arg appSecret "${SLRM_APPSECRET}" --arg email "${SLRM_MAIL}" --arg password "${SLRM_PASSWORD_SHA}" '{"appSecret": $appSecret, "email": $email, "password": $password}')
+## get bearer token
+export SLRM_BEARER_TOKEN=$(curl --silent --request POST --url "${SLRM_URL}" --header 'Content-Type: application/json' --data "$SLRM_BEARER_TOKEN_REQUEST_BODY" | jq .access_token | sed -r 's/"//g')
+## create request body for panel data
+export SLRM_DATA_REQUEST_BODY=$(jq --null-input --arg deviceSn "${SLRM_DEVICE_SN}" '{"deviceSn": $deviceSn}')
+## get panel data
+export SLRM_DATA=$(curl --silent --request POST --url "https://api.solarmanpv.com/device/v1.0/currentData?appId=${SLRM_APPID}&language=en&=" --header "Authorization: bearer ${SLRM_BEARER_TOKEN}" --header 'Content-Type: application/json' --data "${SLRM_DATA_REQUEST_BODY}")
+
+# sometimes the api can not find the requested device, exit here
+echo $SLRM_DATA | grep "device not found" && exit 1
+
+# wenn parameter = ...
+if [ "$1" = "autoconf" ]; then
+    echo yes
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    # setze optionen
+    echo multigraph voltage_current_input
+    echo "graph_title Panel DC Voltage/Current/Power - SN: $SLRM_DEVICE_SN"
+    echo 'graph_vlabel V/A/W'
+    echo 'graph_category sensors'
+    echo 'graph_args -l 0'
+    echo "graph_info The Current DC Voltage, Current and Power of Panel SN: $SLRM_DEVICE_SN"
+    echo voltage.label Volt
+    echo current.label Ampere
+    echo power.label Watt
+
+    echo multigraph production
+    echo "graph_title Panel Total production - SN: $SLRM_DEVICE_SN"
+    echo 'graph_vlabel kWh'
+    echo 'graph_category sensors'
+    echo 'graph_args -l 0'
+    echo "graph_info The total Production in kWh of Panel SN: $SLRM_DEVICE_SN"
+    echo total.label kWh
+    echo total.draw AREA
+
+    exit 0
+fi
+
+echo multigraph voltage_current_input
+echo voltage.value "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DV1"))|.value')"
+echo current.value "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DC1"))|.value')"
+echo power.value   "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DPi_t1"))|.value')"
+
+echo multigraph production
+echo total.value   "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("Et_ge0"))|.value')"
+
+exit 0
