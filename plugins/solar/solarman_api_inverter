@@ -43,19 +43,41 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 EOF
 
-# Combine Variables
-## hash password; -n is used because "echo" normally outputs a newline
-SLRM_PASSWORD_SHA=$(echo -n $SLRM_PASSWORD | sha256sum | cut -f1 -d" ")
-## set url
-SLRM_URL="https://api.solarmanpv.com/account/v1.0/token?appId=${SLRM_APPID}&language=en&="
-## create request body for bearer token
-SLRM_BEARER_TOKEN_REQUEST_BODY=$(jq --null-input --arg appSecret "${SLRM_APPSECRET}" --arg email "${SLRM_MAIL}" --arg password "${SLRM_PASSWORD_SHA}" '{"appSecret": $appSecret, "email": $email, "password": $password}')
-## get bearer token
-SLRM_BEARER_TOKEN=$(curl --silent --request POST --url "${SLRM_URL}" --header 'Content-Type: application/json' --data "$SLRM_BEARER_TOKEN_REQUEST_BODY" | jq .access_token | sed -r 's/"//g')
-## create request body for panel data
-SLRM_DATA_REQUEST_BODY=$(jq --null-input --arg deviceSn "${SLRM_DEVICE_SN}" '{"deviceSn": $deviceSn}')
-## get panel data
-SLRM_DATA=$(curl --silent --request POST --url "https://api.solarmanpv.com/device/v1.0/currentData?appId=${SLRM_APPID}&language=en&=" --header "Authorization: bearer ${SLRM_BEARER_TOKEN}" --header 'Content-Type: application/json' --data "${SLRM_DATA_REQUEST_BODY}")
+
+
+function get_token {
+    # Combine Variables
+    ## hash password; -n is used because "echo" normally outputs a newline
+    SLRM_PASSWORD_SHA=$(echo -n $SLRM_PASSWORD | sha256sum | cut -f1 -d" ")
+    ## set url
+    SLRM_URL="https://api.solarmanpv.com/account/v1.0/token?appId=${SLRM_APPID}&language=en&="
+    ## create request body for bearer token
+    SLRM_BEARER_TOKEN_REQUEST_BODY=$(jq --null-input --arg appSecret "${SLRM_APPSECRET}" --arg email "${SLRM_MAIL}" --arg password "${SLRM_PASSWORD_SHA}" '{"appSecret": $appSecret, "email": $email, "password": $password}')
+    ## get bearer token
+    SLRM_BEARER_TOKEN=$(curl --silent --request POST --url "${SLRM_URL}" --header 'Content-Type: application/json' --data "$SLRM_BEARER_TOKEN_REQUEST_BODY" | jq .access_token | sed -r 's/"//g')
+}
+
+function get_data {
+    # setze zählvariablen
+    retry=1
+    count=0
+    # solange count < 16 UND retry != 0
+    while [[ $count -lt 16 ]] || [[ $retry != "0" ]]; do
+        ## create request body for panel data
+        SLRM_DATA_REQUEST_BODY=$(jq --null-input --arg deviceSn "${SLRM_DEVICE_SN}" '{"deviceSn": $deviceSn}')
+        ## get panel data
+        SLRM_DATA=$(curl --silent --request POST --url "https://api.solarmanpv.com/device/v1.0/currentData?appId=${SLRM_APPID}&language=en&=" --header "Authorization: bearer ${SLRM_BEARER_TOKEN}" --header 'Content-Type: application/json' --data "${SLRM_DATA_REQUEST_BODY}")
+        # wenn "device not found" nicht gefunden wird, dann breche aus beiden Schleifen heraus
+        if $(echo $SLRM_DATA | grep -v -i "device not found") ; then
+            retry=0
+            count=17
+        fi
+        # ansonsten warte n sec
+        sleep $count
+        # erhöhe zählvariable
+        count=$(($count + $count + 1 ))
+    done
+}
 
 # wenn parameter = ...
 if [ "$1" = "autoconf" ]; then
@@ -135,6 +157,10 @@ if [ "$1" = "config" ]; then
 
     exit 0
 fi
+
+# Funktionsaufrufe
+get_token
+get_data
 
 echo "multigraph production_total"
 echo total_inverter.value    "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("Et_ge0"))|.value' 2> /dev/null || echo U )"
