@@ -63,6 +63,7 @@ function get_data {
     # setze zählvariablen
     retry=1
     count=0
+    reachable=0
     # solange count < 16 UND retry != 0
     while [[ $retry != "0" ]]; do
         ## create request body for panel data
@@ -70,11 +71,13 @@ function get_data {
         ## get panel data
         SLRM_DATA=$(curl --silent --request POST --url "https://api.solarmanpv.com/device/v1.0/currentData?appId=${SLRM_APPID}&language=en&=" --header "Authorization: bearer ${SLRM_BEARER_TOKEN}" --header 'Content-Type: application/json' --data "${SLRM_DATA_REQUEST_BODY}")
         # wenn "device not found" nicht gefunden wird, dann breche aus beiden Schleifen heraus
-        if echo "$SLRM_DATA" | grep -v -i "device not found" ; then
-            retry=0
+	 if [[ $(echo "$SLRM_DATA" | grep -v -i "device not found") ]] ; then
+            retry="0"
+            # Variable für reachable graph
+            reachable="1"
         fi
         if [[ $count -gt 10 ]]  ; then
-            retry=0
+            retry="0"
         fi
         # ansonsten warte n sec
         sleep 1
@@ -107,6 +110,13 @@ if [ "$1" = "config" ]; then
     #echo "total_panel3.label Panel 3"
     #echo "total_panel4.label Panel 4"
     echo "total_inverter.draw AREA"
+    echo "multigraph api_reachable"
+    echo "graph_title API reachable/Device found"
+    echo "graph_category sensors"
+    echo "graph_args -l 0"
+    echo "graph_info Is the API reachable and could the device found?"
+    echo "reachable.label online"
+    echo "reachable.draw AREA"
 
     echo "multigraph production_daily"
     echo "graph_title Daily Yield- SN: $SLRM_DEVICE_SN"
@@ -202,5 +212,8 @@ echo voltage_inverter.value  "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.k
 echo current_inverter.value  "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("AC1"))|.value' 2> /dev/null || echo U )"
 echo power_inverter.value    "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("APo_t1"))|.value' 2> /dev/null || echo U )"
 echo frequency_inverter.value "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("AC_Fo1"))|.value' 2> /dev/null || echo U )"
+
+echo "multigraph api_reachable"
+echo "reachable.value $reachable"
 
 exit 0
