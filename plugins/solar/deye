@@ -60,20 +60,22 @@ EOF
 
 # check if inverter is reachable
 # inverter is off when there is not enough light to power it
-# so it is safe to assume that current power etc. are zero
 if ping "${ip}" -c1 -W 3 2>&1 > /dev/null ; then
-    current_power=$(wget --quiet --user "${user}" --password "${password}" -O - "${ip}"/status.html | grep "var webdata_now_p" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g')
-    daily_yield=$(wget --quiet --user "${user}" --password "${password}" -O - "${ip}"/status.html | grep "var webdata_today_e" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g')
-    total_yield=$(wget --quiet --user "${user}" --password "${password}" -O - "${ip}"/status.html | grep "var webdata_total_e" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g')
+    # get data
+    data=$(wget --quiet --user "${user}" --password "${password}" -O - "${ip}"/status.html)
+    truncate -s 0  "$MUNIN_STATEFILE"
+    current_power=$(echo "$data" | grep "var webdata_now_p"   | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g' )
+    daily_yield=$(echo "$data"   | grep "var webdata_today_e" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9\.]*//g')
+    total_yield=$(echo "$data"   | grep "var webdata_total_e" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9\.]*//g')
     reachable="1"
+    echo "$daily_yield" >> "$MUNIN_STATEFILE"
+    echo "$total_yield" >> "$MUNIN_STATEFILE"
 else
     current_power="0"
-    daily_yield=0
-    total_yield=0
     reachable="0"
+    daily_yield=$(cat $MUNIN_STATEFILE | head -n1)
+    total_yield=$(cat $MUNIN_STATEFILE | tail -n1)
 fi
-
-
 
 # wenn parameter = ...
 if [ "$1" = "autoconf" ]; then
@@ -130,16 +132,16 @@ if [ "$1" = "config" ]; then
     exit 0
 fi
 
-echo multigraph current_power
+echo "multigraph current_power"
 echo "current_power.value $current_power"
 
-echo multigraph daily_yield
-echo "daily_yield.value $(echo "scale=2 ; $daily_yield / 100" | bc | sed 's/^\./0./')"
+echo "multigraph daily_yield"
+echo "daily_yield.value $daily_yield"
 
-echo multigraph total_yield
-echo "total_yield.value $(echo "scale=2 ; $total_yield / 10" | bc | sed 's/^\./0./')"
+echo "multigraph total_yield"
+echo "total_yield.value $total_yield"
 
-echo multigraph reachable
+echo "multigraph reachable"
 echo "reachable.value $reachable"
 
 exit 0
