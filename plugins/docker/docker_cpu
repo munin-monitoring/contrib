@@ -80,6 +80,50 @@ for my $i (1 .. $#containers)
          push @result, {'name'=>$name, 'label'=>$label, 'total_cpu_ns'=>$total_cpu_ns, 'ncpu'=>$#ncpu};
       }
    }
+   elsif (open($file, '<', "/sys/fs/cgroup/system.slice/docker-$id.scope/cpu.stat"))
+   {
+      # handle cpu stats with cgroup v2
+      # hexdump -C /sys/fs/cgroup/system.slice/docker-01fc4fa4d6cf7ad66efabc818dd1d99cc51fd8cebf6ba2345988b145029df09a.scope/cpu.stat
+      # 00000000  75 73 61 67 65 5f 75 73  65 63 20 32 35 37 36 33  |usage_usec 25763|
+      # 00000010  37 34 31 0a 75 73 65 72  5f 75 73 65 63 20 32 30  |741.user_usec 20|
+      # 00000020  37 34 31 35 37 37 0a 73  79 73 74 65 6d 5f 75 73  |741577.system_us|
+      # 00000030  65 63 20 35 30 32 32 31  36 33 0a 6e 72 5f 70 65  |ec 5022163.nr_pe|
+      # 00000040  72 69 6f 64 73 20 30 0a  6e 72 5f 74 68 72 6f 74  |riods 0.nr_throt|
+      # 00000050  74 6c 65 64 20 30 0a 74  68 72 6f 74 74 6c 65 64  |tled 0.throttled|
+      # 00000060  5f 75 73 65 63 20 30 0a                           |_usec 0.|
+      # 00000068
+      my $total_cpu_ns = <$file>;
+      $total_cpu_ns =~ s/^usage_usec ([0-9]+).*/$1/;
+      $total_cpu_ns *= 1000;
+      close $file;
+      if (open($file, '<', "/sys/fs/cgroup/system.slice/docker-$id.scope/cpuset.cpus.effective"))
+      {
+         # hexdump -C /sys/fs/cgroup/system.slice/docker-5915a2718628754f9185a052b96c4ac4249692269ad03c54f9037cd9e530f93c.scope/cpuset.cpus.effective
+         # 00000000  30 2d 31 31 0a                                    |0-11.|
+         # 00000005
+         #
+         # docker run --cpuset-cpus 0,2,3,5,6,7,8 --rm bash sleep 60
+         # 00000000  30 2c 32 2d 33 2c 35 2d  38 0a                    |0,2-3,5-8.|
+         # 0000000a
+         my $cpus = <$file>;
+         $cpus =~ s/\s+$//;
+         close $file;
+         my $ncpu = 0;
+         for $c (split /,/, $cpus)
+         {
+            @cpu_range = split /-/, $c;
+            if ($#cpu_range == 0)
+            {
+               $ncpu += 1;
+            }
+            else
+            {
+               $ncpu += $cpu_range[1] - $cpu_range[0] + 1;
+            }
+         }
+         push @result, {'name'=>$name, 'label'=>$label, 'total_cpu_ns'=>$total_cpu_ns, 'ncpu'=>$ncpu};
+      }
+   }
 }
 
 if (defined $ARGV[0] and $ARGV[0] eq "config")
