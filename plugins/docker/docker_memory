@@ -67,6 +67,18 @@ for my $i (1 .. $#containers)
    $name =~ s/,.*//g;
    if (open(my $file, '<', "/sys/fs/cgroup/memory/docker/$id/memory.usage_in_bytes"))
    {
+      # https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt
+      my $memory_bytes = <$file>;
+      $memory_bytes =~ s/\s+$//;
+      push @result, {'name'=>$name, 'memory_bytes'=>$memory_bytes};
+      $total = $total + $memory_bytes;
+   }
+   elsif(open($file, '<', "/sys/fs/cgroup/system.slice/docker-$id.scope/memory.current"))
+   {
+      # https://www.kernel.org/doc/Documentation/cgroup-v2.txt
+      # hexdump -C < /sys/fs/cgroup/system.slice/docker-f226ca5e7e61b884a87ae25912b6da1a62cc7c518add8940dfd81c6e6015a738.scope/memory.current
+      # 00000000  39 35 30 32 37 32 30 0a                           |9502720.|
+      # 00000008
       my $memory_bytes = <$file>;
       $memory_bytes =~ s/\s+$//;
       push @result, {'name'=>$name, 'memory_bytes'=>$memory_bytes};
