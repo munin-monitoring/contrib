@@ -73,6 +73,24 @@ if [ "$1" = "config" ]; then
       echo $slug.critical 1
     done
 
+    echo "multigraph drone_build_count"
+    echo "graph_title Drone CI/CD build count per project"
+    echo "graph_vlabel Count"
+    echo "graph_category devel"
+    echo "graph_printf %6.0lf"
+    echo "graph_args -l 0 --base 1000"
+    echo "graph_info This graph displays the build count per project."
+
+    echo $data | jq -r '.[] | select(.active == true) | "\(.slug) \(.namespace) \(.name)"'  | while read line
+    do
+      slug=$(echo $line | cut -f1 -d" " | sed 's/[\/-]/_/g' | tr '[:upper:]' '[:lower:]')
+      namespace=$(echo $line | cut -f2 -d" ")
+      name=$(echo $line | cut -f3 -d" ")
+
+      echo $slug.label $namespace/$name
+    done
+
+
     exit 0
 fi
 
@@ -83,4 +101,13 @@ do
   rc=$(echo $line | cut -f3 -d" " | awk '{if ($2 == "success") { $2 = 0 } else { $2 = 1 }}  1')
   # wenn $2 != success, dann gebe 1 zurück
   echo $slug.value $rc
+done
+
+echo "multigraph drone_build_count"
+echo $data | jq -r '.[] | select(.active == true) | "\(.slug) \(.counter)"' | while read line
+do
+  slug=$(echo $line | cut -f1 -d" " | sed 's/[\/-]/_/g' | tr '[:upper:]' '[:lower:]')
+  count=$(echo $line | cut -f2 -d" " )
+  # wenn $2 != success, dann gebe 1 zurück
+  echo $slug.value $count
 done
