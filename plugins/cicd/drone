@@ -11,8 +11,6 @@ gitea_commit_time_diff - Plugin to monitor the time since the last commit for a 
   env.url http://docker10.grote.lan:81/api/user/repos?latest=true
   env.token WXXXXXXXXXXXXXX
 
-
-
 =head1 AUTHOR
 
 Michael Grote (michael.grote@posteo.de)
@@ -65,18 +63,24 @@ if [ "$1" = "config" ]; then
     echo "graph_args -l 0 --base 1000"
     echo "graph_info This graph displays the count of errors per project."
 
-    echo $data | jq -r '.[] | select(.active == true) | "\(.slug) \(.build.status)"' | sed 's/[\/-]/_/g' | tr '[:upper:]' '[:lower:]' | awk '{ print $1 }' | while read line
+    echo $data | jq -r '.[] | select(.active == true) | "\(.slug) \(.namespace) \(.name) \(.build.status)"'  | while read line
     do
-       echo $line.label $line
-       echo $line.critical 1
+      slug=$(echo $line | cut -f1 -d" " | sed 's/[\/-]/_/g' | tr '[:upper:]' '[:lower:]')
+      namespace=$(echo $line | cut -f2 -d" ")
+      name=$(echo $line | cut -f3 -d" ")
+
+      echo $slug.label $namespace/$name
+      echo $slug.critical 1
     done
 
     exit 0
 fi
 
 echo "multigraph drone_build_status"
-echo $data | jq -r '.[] | select(.active == true) | "\(.slug) \(.build.status)"' | sed 's/[\/-]/_/g' | tr '[:upper:]' '[:lower:]'| while read line
+echo $data | jq -r '.[] | select(.active == true) | "\(.slug) \(.build.status)"' | while read line
 do
+  slug=$(echo $line | cut -f1 -d" " | sed 's/[\/-]/_/g' | tr '[:upper:]' '[:lower:]')
+  rc=$(echo $line | cut -f3 -d" " | awk '{if ($2 == "success") { $2 = 0 } else { $2 = 1 }}  1')
   # wenn $2 != success, dann gebe 1 zurück
-  echo $line | awk '{if ($2 == "success") { $2 = 0 } else { $2 = 1 }} { $1 = $1 ".value" } 1'
+  echo $slug.value $rc
 done
