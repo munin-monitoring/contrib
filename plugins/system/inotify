@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+
+: << EOF
+=head1 NAME
+
+inotify - Shows per user usage of inotify
+
+=head1 CONFIGURATION
+
+ [inotify]
+ user root
+
+=head1 AUTHOR
+
+Copyright (C) 2023 Andreas Perhab, WT-IO-IT GmbH
+
+=head1 LICENSE
+
+GPLv3 or later
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+#%# family=manual
+
+EOF
+#set -x
+# shellcheck source=/usr/share/munin/plugins/plugin.sh
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+# keep cache file to support MUNIN_CAP_DIRTYCONFIG
+CACHE_FILE=${MUNIN_PLUGSTATE}/numbers
+
+function fetch_numbers() {
+  if [[ -e $CACHE_FILE ]]; then
+    cat "$CACHE_FILE"
+  else
+    lsof -F puLftn0 -d 0-999999 -n 2>/dev/null | awk -F'\x00' '
+    /^p[0-9]+\x00u[0-9]+\x00/ {
+      # e.g.
+      #  p598480\x00u0\x00Lroot
+      #  p3024879\x00u112\x00
+      # marking a new process with ta_inode\x00ninotify\x00 following
+      user=substr($3, 2)
+      process=substr($1, 2)
+      if (user == "") {
+        # if login name is not present, add a uid... user
+        user="uid" substr($2, 2)
+      }
+      next
+    }
+    /^f[0-9]+\x00ta_inode\x00ninotify\x00$/ {
+      # e.g.
+      #  f331\x00ta_inode\x00ninotify\x00
+      # aggregate instances by (process ":" fd)
+      if ($2 != "ta_inode" || $3 != "ninotify") {
+        # double check that $2 and $3 are as expected (non gawk seems to ignore everything after \x00)
+        next
+      }
+      fd=substr($1, 2)
+      instance=process ":" fd
+      if (!users[user]) {
+        users[user]=1
+      }
+      if (instances[user, instance]) {
+        instances[user, instance] += 1;
+      } else {
+        instances[user, instance] = 1;
+      }
+      if (!watches[user, instance]) {
+        fd_info = "grep -R \"^inotify wd:\" --count /proc/" process "/fdinfo/" fd " 2>/dev/null"
+        fd_info | getline watch_count
+        watches[user, instance] = watch_count
+      }
+      next
+    }
+
+    END {
+      for (user in users) {
+        user_key = user
+        # make usernames safe for munin-node keys
+        gsub(/[-]/, "_", user_key)
+        watch_count = 0
+        for (user_fd in watches) {
+          if (index(user_fd, user) == 1) {
+            watch_count += watches[user_fd]
+          }
+        }
+        instance_count = 0
+        for (user_instance in instances) {
+          if (index(user_instance, user) == 1) {
+            instance_count += 1
+          } 
+        }
+        print user_key " " user " " instance_count " " watch_count
+      }
+    }
+    ' | tee "$CACHE_FILE"
+  fi
+}
+
+if [[ $1 == "config" ]]; then
+  if [[ $MUNIN_CAP_MULTIGRAPH ]]; then
+    echo "multigraph inotify_instances"
+    echo "graph_title inotify instance usage"
+    echo "graph_info This graphs shows how many inotify instances each user has open"
+  else
+    echo "graph_title inotify usage"
+    echo "graph_info This graphs shows how many inotify instances and watches each user has open"
+  fi
+  echo "graph_args --base 1000 -r --lower-limit 0"
+  echo "graph_vlabel #"
+  echo "graph_scale no"
+  echo "graph_category system"
+
+  # remember env setting (plugin-conf.d) before we override them
+  env_warning=${warning:-}
+  env_critical=${critical:-}
+
+  max_user_instances=$(cat /proc/sys/fs/inotify/max_user_instances)
+  while read -r key username instances watches; do
+    echo "${key}_instances.label ${username} instances"
+    echo "${key}_instances.info instances used by processes of ${username}"
+    echo "${key}_instances.draw LINE"
+    # use max_user_instances - 5 as default warning (if none is defined in plugin-conf.d)
+    warning=${env_warning:-$((max_user_instances * 95 / 100))}
+    # use max_user_instances as default critical (if none is defined in plugin-conf.d)
+    critical=${env_critical:-$((max_user_instances * 98 / 100))}
+    print_warning "${key}_instances"
+    print_critical "${key}_instances"
+  done < <(fetch_numbers)
+
+  if [[ $MUNIN_CAP_MULTIGRAPH ]]; then
+    echo "multigraph inotify_watches"
+    echo "graph_title inotify watch usage"
+    echo "graph_args --base 1000 -r --lower-limit 0"
+    echo "graph_vlabel #"
+    echo "graph_scale no"
+    echo "graph_info This graphs shows how many inotify watches each user has open"
+    echo "graph_category system"
+  fi
+
+  max_user_watches=$(cat /proc/sys/fs/inotify/max_user_watches)
+  while read -r key username instances watches; do
+    echo "${key}_watches.label ${username} watches"
+    echo "${key}_watches.info watches used by processes of ${username}"
+    echo "${key}_watches.draw LINE"
+    # use max_user_watches - 5 as default warning (if none is defined in plugin-conf.d)
+    warning=${env_warning:-$((max_user_watches * 95 / 100))}
+    # use max_user_watches as default critical (if none is defined in plugin-conf.d)
+    critical=${env_critical:-$((max_user_watches * 98 / 100))}
+    print_warning "${key}_watches"
+    print_critical "${key}_watches"
+  done < <(fetch_numbers)
+
+fi
+if [[ $1 != "config" || $MUNIN_CAP_DIRTYCONFIG ]]; then
+  if [[ $MUNIN_CAP_MULTIGRAPH ]]; then
+    echo "multigraph inotify_instances"
+  fi
+  while read -r key username instances watches; do
+    echo "${key}_instances.value ${instances}"
+  done < <(fetch_numbers)
+  if [[ $MUNIN_CAP_MULTIGRAPH ]]; then
+    echo "multigraph inotify_watches"
+  fi
+  while read -r key username instances watches; do
+    echo "${key}_watches.value ${watches}"
+  done < <(fetch_numbers)
+fi
+if [[ -e $CACHE_FILE ]]; then
+  rm "$CACHE_FILE"
+fi
