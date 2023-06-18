@@ -5,25 +5,19 @@
 =head1 NAME
 docker_volumesize - Plugin to monitor the sizes of docker volumes.
 
-=head1 CONFIGURATION
-
-#  [drone]
-#  env.url http://docker10.grote.lan:81/api/user/repos?latest=true
-#  env.token WXXXXXXXXXXXXXX
-
 =head1 AUTHOR
 
 Michael Grote (michael.grote@posteo.de)
 
 =head1 MAGIC MARKERS
 
- #%# family=auto
+#%# family=auto
 
- =head1 LICENSE
+=head1 LICENSE
 
- GPLv3 or later
+GPLv3 or later
 
- SPDX-License-Identifier: GPL-3.0-or-later
+SPDX-License-Identifier: GPL-3.0-or-later
 
 =cut
 
@@ -31,14 +25,14 @@ EOF
 
 
 if [ "$1" = "autoconf" ]; then
-    if ! command -v jq &> /dev/null; then
-        echo "no (jq could not be found)"
-    elif ! command -v docker &> /dev/null; then
-        echo "no (docker could not be found)"
-    else
-        echo "yes"
-    fi
-    exit 0
+  if ! command -v jq &> /dev/null; then
+    echo "no (jq could not be found)"
+  elif ! command -v docker &> /dev/null; then
+    echo "no (docker could not be found)"
+  else
+    echo "yes"
+  fi
+  exit 0
 fi
 
 volume_info=$(docker system df -v --format '{{json .Volumes}}' | jq -r '.[] | "\(.Name):\(.Size):\(.Labels)"')
@@ -46,19 +40,17 @@ volume_info=$(docker system df -v --format '{{json .Volumes}}' | jq -r '.[] | "\
 
 
 if [ "$1" = "config" ]; then
-    echo "multigraph volumesize"
-    echo "graph_title Docker Volume Size"
-    echo "graph_vlabel Bytes"
-    echo "graph_category virtualization"
-    #echo "graph_printf %6.0lf"
-    #echo "graph_args -l 0 --base 1000"
-    echo "graph_info This graph displays the size per volume."
-    while IFS= read -r line; do
-        echo "$line" | awk 'BEGIN {FS = ":"} {print $1".label "$1}'
-        echo "$line" | awk 'BEGIN {FS = ":"} {print $1".info "$3}'
-    done <<< $volume_info
-
-
+  echo "multigraph volumesize"
+  echo "graph_title Docker Volume Size"
+  echo "graph_vlabel Bytes"
+  echo "graph_category virtualization"
+  #echo "graph_printf %6.0lf"
+  #echo "graph_args -l 0 --base 1000"
+  echo "graph_info This graph displays the size per volume."
+  while IFS= read -r line; do
+    echo "$line" | awk 'BEGIN {FS = ":"} {print $1".label "$1}'
+    echo "$line" | awk 'BEGIN {FS = ":"} {print $1".info "$3}'
+  done <<< $volume_info
 exit 0
 fi
 
@@ -67,13 +59,14 @@ while IFS= read -r line; do
   name=$(echo "$line" | awk 'BEGIN {FS = ":"} {print $1}')
   value=$(echo "$line" | awk 'BEGIN {FS = ":"} {print $2}')
 
-if [[ $value == *k* ]]; then
-bytes=$(echo "$(echo $value | sed 's/[^0-9]//g') * 1024" | bc)
-elif [[ $value == *M* ]]; then
-bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024 * 1024" | bc)
-elif [[ $value == *G* ]]; then
-bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024 * 1024 * 1024" | bc)
-fi
-
+  if [[ $value == *k* ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9]//g') * 1024" | bc)
+  elif [[ $value == *M* ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024 * 1024" | bc)
+  elif [[ $value == *G* ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024 * 1024 * 1024" | bc)
+  elif [[ $value == *T* ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024 * 1024 * 1024 * 1024" | bc)
+  fi
   echo $name.label $bytes
 done <<< "$volume_info"
