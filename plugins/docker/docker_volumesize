@@ -64,14 +64,16 @@ while IFS= read -r line; do
   name=$(echo "$line" | awk 'BEGIN { FS = ":" } { print $1 }')
   value=$(echo "$line" | awk 'BEGIN { FS = ":" } { print $2 }')
 
-  if [[ $value == *k* ]]; then
-    bytes=$(echo "$(echo $value | sed 's/[^0-9]//g') * 1024" | bc)
-  elif [[ $value == *M* ]]; then
-    bytes=$(echo "$(echo $value | sed 's/[^0-9]//g') * 1024 * 1024" | bc)
-  elif [[ $value == *G* ]]; then
-    bytes=$(echo "$(echo $value | sed 's/[^0-9]//g') * 1024 * 1024 * 1024" | bc)
-  elif [[ $value == *T* ]]; then
-    bytes=$(echo "$(echo $value | sed 's/[^0-9]//g') * 1024 * 1024 * 1024 * 1024" | bc)
+  if [[ $value =~ ([0-9.]+)TB$ ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024 * 1024 * 1024 * 1024" | bc)
+  elif [[ $value =~ ([0-9.]+)GB$ ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024 * 1024 * 1024" | bc)
+  elif [[ $value =~ ([0-9.]+)MB$ ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024 * 1024" | bc)
+  elif [[ $value =~ ([0-9.]+)kB$ ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024" | bc)
+  elif [[ $value =~ ([0-9.]+)B$ ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g')")
   fi
   echo "$name.value" "$bytes"
 done <<< "$volume_info"
