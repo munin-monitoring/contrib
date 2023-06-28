@@ -94,6 +94,7 @@ None known.
 =head1 AUTHOR
 
 Kjetil Torgrim Homme <kjetil.homme@redpill-linpro.com>
+Andreas Perhab, WT-IO-IT GmbH <andreas.perhab@wt-io-it.at>
 
 =head1 LICENSE
 
@@ -124,6 +125,10 @@ sub autoconf_problem {
 sub run_nvme {
     my (@cmd) = @_;
     my @lines;
+    # make sure we cancel all LC_ variables for number formatting
+    # to get rid of thousands dots e.g. use 8814484 instead of 8.814.484 or 8,814,484
+    # and also get rid of scientific formatting e.g. 1.168384e-06
+    $ENV{LC_ALL} = "C";
     if (can_run('nvme') && open(my $nvme, '-|', 'nvme', @cmd)) {
         @lines = <$nvme>;
         close($nvme);
@@ -146,9 +151,15 @@ sub human_to_bytes {
 }
 
 sub nvme_list {
+    # version < 2
     # Node             SN                   Model                                    Namespace Usage                      Format           FW Rev
     # ---------------- -------------------- ---------------------------------------- --------- -------------------------- ---------------- --------
     # /dev/nvme1n1     S464NB0K601188N      Samsung SSD 970 EVO 2TB                  1         695.50  GB /   2.00  TB    512   B +  0 B   1B2QEXE7
+    # version > 2
+    # Node                  Generic               SN                   Model                                    Namespace Usage                      Format           FW Rev
+    # --------------------- --------------------- -------------------- ---------------------------------------- --------- -------------------------- ---------------- --------
+    # /dev/nvme1n1          /dev/ng1n1            23103F009522         Micron_3400_MTFDKBA1T0TFH                1           1.02  TB /   1.02  TB    512   B +  0 B   P7MU002
+    # /dev/nvme0n1          /dev/ng0n1            23103F00956D         Micron_3400_MTFDKBA1T0TFH                1           1.02  TB /   1.02  TB    512   B +  0 B   P7MU002
     my %devices;
 
     my $recognised_output;
@@ -156,7 +167,21 @@ sub nvme_list {
     for (run_nvme('list')) {
         ++$lineno;
         if (m:^Node\s+SN\s+Model\s+Namespace Usage:) {
+            # version < 2 header
             ++$recognised_output;
+        } elsif (m:^Node\s+Generic\s+SN\s+Model\s+Namespace\s+Usage\s+:) {
+            # version 2 header
+            ++$recognised_output;
+        } elsif (m:^(/\S+)\s+(/\S+)\s+(\S+)\s+(\S.*\S)\s{3,}(\d+)\s+(\S+\s+.B)\s+/\s+(\S+\s+.B):) {
+            # version 2 data (first 2 columns start with /)
+            $devices{'SN_'.$3} = {
+                device    => $1,
+                sn        => $3,
+                model     => $4,
+                namespace => $5,
+                usage     => human_to_bytes($6),
+                capacity  => human_to_bytes($7),
+            };
         } elsif (m:^(/\S+)\s+(\S+)\s+(\S.*\S)\s{3,}(\d+)\s+(\S+\s+.B)\s+/\s+(\S+\s+.B):) {
             $devices{'SN_'.$2} = {
                 device    => $1,
@@ -180,10 +205,26 @@ sub nvme_list {
 sub smart_log {
     my ($dev) = @_;
     my %info;
+    # version < 2
+    # Smart Log for NVME device:nvme0 namespace-id:ffffffff
+    # ...
+    # data_units_read                     : 92220078
+    # data_units_written                  : 203504195
+    # ...
+    # version > 2
+    # Smart Log for NVME device:nvme0 namespace-id:ffffffff
+    # ...
+    # Data Units Read                           : 72034055 (36.88 TB)
+    # Data Units Written                        : 82741919 (42.36 TB)
+    # ...
     for (run_nvme('smart-log', $dev)) {
         next if /^Smart Log/;
         if (/(.*?)\s+:\s+(.*)/) {
             my ($var, $value) = ($1, $2);
+            # remove version 2 human readable numbers in brackets ... (1.2 GB)
+            if ($value =~ / \([0-9.]+ [KMGTP]?B\)$/) {
+                $value =~ s/ \([0-9.]+ [KMGTP]?B\)$//
+            }
             $var =~ s/\s/_/g;
             if ($value =~ /^\d+(,\d\d\d)+$/) {
                 $value =~ s/,//g;
