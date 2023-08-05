@@ -1,12 +1,11 @@
-/* MunCollapse Template DynaZoom JavaScript File
-*
-* Notes:
-* 
-*  - No Internet Explorer support (uses "URLSearchParams")
-*  - This is not even really a fork of the upstream version any more
-*  - Drops upstream requirement of "QueryString" include (URL.URLSearchParams)
-*  - Drops upstream requirement of "FormatDate" include (Date.toISOString())
-*/
+MunCollapse Template DynaZoom JavaScript File
+
+ Notes:
+ 
+  - No Internet Explorer support (uses "URLSearchParams")
+  - This is not even really a fork of the upstream version any more
+  - Drops upstream requirement of "QueryString" include (URL.URLSearchParams)
+  - Drops upstream requirement of "FormatDate" include (Date.toISOString())
 
 URLSearchParams.prototype.getDefault = function ( name, value ) {
     // Overload URLSearchParams to allow "default" values.
@@ -50,10 +49,10 @@ function refreshZoom( query, form, image ) {
     form.btnShowYear.onclick  = function() { showPeriod( 4 ); };
     form.onsubmit             = function() { document.activeElement.blur(); refreshImg(); return false; };
 
-    // Sets the onClick handler
+    Sets the onClick handler
     image.onclick = click;
 
-    //FUNCTIONS
+    FUNCTIONS
     function init() {
         form.plugin_name.value = qs.getDefault( "plugin_name", "localdomain/localhost.localdomain/if_eth0" );
         form.start_epoch.value = qs.getDefault( "start_epoch", "1236561663" );
@@ -69,7 +68,7 @@ function refreshZoom( query, form, image ) {
     function reset( event ) {
         init();
 
-        //Can be not the initial ones in case of manual refresh
+        Can be not the initial ones in case of manual refresh
         form.start_epoch.value = start_epoch;
         form.stop_epoch.value  = stop_epoch;
         updateStartStop();
@@ -77,7 +76,7 @@ function refreshZoom( query, form, image ) {
         //Redraw
         scale = refreshImg();
 
-        //Reset gui
+        Reset gui
         clickCounter                = 0;
         image.onmousemove           = undefined;
         form.start_iso8601.disabled = false;
@@ -95,12 +94,12 @@ function refreshZoom( query, form, image ) {
     function refreshImg(event) {
         image.src = qs.getDefault( "cgiurl_graph", "/munin-cgi/munin-cgi-graph" ) + "/" +
             form.plugin_name.value +
-            "-pinpoint=" + parseInt( form.start_epoch.value, 10 ) + "," + parseInt( form.stop_epoch.value, 10 ) +
-            ".png" + "?" +
-            "&lower_limit=" + form.lower_limit.value +
-            "&upper_limit=" + form.upper_limit.value +
-            "&size_x=" + form.size_x.value +
-            "&size_y=" + form.size_y.value;
+            -pinpoint=" + parseInt( form.start_epoch.value, 10 ) + "," + parseInt( form.stop_epoch.value, 10 ) +
+            .png" + "?" +
+            &lower_limit=" + form.lower_limit.value +
+            &upper_limit=" + form.upper_limit.value +
+            &size_x=" + form.size_x.value +
+            &size_y=" + form.size_y.value;
     }
 
     function updateStartStop() {
