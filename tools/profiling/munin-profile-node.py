@@ -1,12 +1,11 @@
-#!/usr/bin/python
-# Copyright (C) 2013 Helmut Grohne <helmut@subdivi.de>
-# License: GPLv2 like the rest of munin
-"""
+/usr/bin/python
+Copyright (C) 2013 Helmut Grohne <helmut@subdivi.de>
+License: GPLv2 like the rest of munin
 Usage:
     tcpdump -npi lo "tcp port 4949" -w munin.pcap
-    # wait for one munin run, then press Ctrl-C
-    ./munin-profile-node.py munin.pcap
-"""
+    wait for one munin run, then press Ctrl-C
+    /munin-profile-node.py munin.pcap
+
 
 import collections
 import sys
@@ -15,13 +14,11 @@ import scapy.layers.l2
 from scapy.layers.inet import IP, TCP
 
 class ConnectionProfile:
-    """
     @ivar times: mapping of commands to durations waiting for answers in
         seconds
     @type times: {str: [float]}
     @ivar idles: list of durations waiting for client in seconds
     @type idles: [float]
-    """
     def __init__(self):
         self.times = dict()
         self.idles = []
@@ -33,7 +30,6 @@ class ConnectionProfile:
             self.idles.append(timestamp - self.commandstart)
         self.curcommand = line
         self.commandstart = timestamp
-
     def handle_from_node(self, timestamp, line):
         if line != ".":
             return
@@ -46,8 +42,8 @@ class ConnectionProfile:
 
 class MuninProfiler:
     def __init__(self):
-        self.to_node = ""
-        self.from_node = ""
+        self.to_node = 
+        self.from_node = 
         self.connprof = collections.defaultdict(ConnectionProfile)
 
     def handle_packet(self, packet):
@@ -70,8 +66,7 @@ class MuninProfiler:
         self.from_node = lines.pop()
         for line in lines:
             self.connprof[conn].handle_from_node(packet.time, line)
-
-    @property
+            
     def times(self):
         times = dict()
         for prof in self.connprof.values():
@@ -79,7 +74,6 @@ class MuninProfiler:
                 times.setdefault(com, []).extend(durations)
         return times
 
-    @property
     def idles(self):
         return sum((prof.idles for prof in self.connprof.values()), [])
 
