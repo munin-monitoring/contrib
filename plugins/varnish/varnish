@@ -60,7 +60,7 @@ def get_values():
     """Run varnishstat and parse it's output."""
     output = run_binary(['/usr/bin/varnishstat', '-j'])
     try:
-        return json.loads(output)
+        return json.loads(output)['counters']
     except (TypeError, ValueError):
         return {}
 
@@ -92,9 +92,6 @@ def config():
     print('backend_fail.label Backend conn. failures')
     print('backend_fail.min 0')
     print('backend_fail.type DERIVE')
-    print('backend_toolate.label Backend conn. was closed')
-    print('backend_toolate.min 0')
-    print('backend_toolate.type DERIVE')
     print('backend_reuse.label Backend conn. reuses')
     print('backend_reuse.min 0')
     print('backend_reuse.type DERIVE')
@@ -106,16 +103,16 @@ def config():
     print('multigraph varnish_bad')
     print('graph_category webserver')
     print('graph_title Misbehavior')
-    print('sess_drop.label Sessions dropped')
-    print('sess_drop.type DERIVE')
+    print('sess_dropped.label Sessions dropped')
+    print('sess_dropped.type DERIVE')
     print('threads_failed.label Thread creation failed')
     print('threads_failed.type DERIVE')
     print('threads_destroyed.label Threads destroyed')
     print('threads_destroyed.type DERIVE')
     print('thread_queue_len.label Length of session queue')
     print('thread_queue_len.type GAUGE')
-    print('sess_pipe_overflow.label Session pipe overflow')
-    print('sess_pipe_overflow.type DERIVE')
+    print('sc_pipe_overflow.label Session pipe overflow')
+    print('sc_pipe_overflow.type DERIVE')
     print('esi_warnings.label ESI parse warnings (unlock)')
     print('esi_warnings.type DERIVE')
     print('sess_fail.label Session accept failures')
@@ -124,8 +121,6 @@ def config():
     print('backend_busy.type DERIVE')
     print('esi_errors.label ESI parse errors (unlock)')
     print('esi_errors.type DERIVE')
-    print('SMF_s0_c_fail.label Allocator failures SMF s0')
-    print('SMF_s0_c_fail.type DERIVE')
     print('SMA_Transient_c_fail.label Allocator failures SMA Transient')
     print('SMA_Transient_c_fail.type DERIVE')
     print('losthdr.label HTTP header overflows')
@@ -187,14 +182,6 @@ def config():
     print('SMA_Transient_g_bytes.type GAUGE')
     print('SMA_Transient_g_space.label Bytes available SMA Transient')
     print('SMA_Transient_g_space.type GAUGE')
-    print('SMF_s0_g_bytes.label Bytes outstanding SMF s0')
-    print('SMF_s0_g_bytes.type GAUGE')
-    print('sms_nbytes.label SMS outstanding bytes')
-    print('sms_nbytes.type GAUGE')
-    print('sms_balloc.label SMS bytes allocated')
-    print('sms_balloc.type GAUGE')
-    print('SMF_s0_g_space.label Bytes available SMF s0')
-    print('SMF_s0_g_space.type GAUGE')
     print('SMA_Transient_c_bytes.label Bytes allocated SMA Transient')
     print('SMA_Transient_c_bytes.type DERIVE')
 
@@ -334,7 +321,6 @@ def fetch():
             'backend_unhealthy',
             'backend_recycle',
             'backend_fail',
-            'backend_toolate',
             'backend_reuse',
             'backend_req',
     ):
@@ -343,11 +329,11 @@ def fetch():
     # bad
     print('multigraph varnish_bad')
     for key in (
-            'sess_drop',
+            'sess_dropped',
             'threads_failed',
             'threads_destroyed',
             'thread_queue_len',
-            'sess_pipe_overflow',
+            'sc_pipe_overflow',
             'esi_warnings',
             'sess_fail',
             'backend_busy',
@@ -360,7 +346,6 @@ def fetch():
         print('{0}.value {1}'.format(key, data['MAIN.' + key]['value']))
     print('SMA_Transient_c_fail.value {0}'.format(
         data['SMA.Transient.c_fail']['value']))
-    print('SMF_s0_c_fail.value {0}'.format(data['SMF.s0.c_fail']['value']))
 
     # expunge
     print('multigraph varnish_expunge')
@@ -390,10 +375,6 @@ def fetch():
         data['SMA.Transient.g_bytes']['value']))
     print('SMA_Transient_g_space.value {0}'.format(
         data['SMA.Transient.g_space']['value']))
-    print('SMF_s0_g_bytes.value {0}'.format(data['SMF.s0.g_bytes']['value']))
-    print('sms_nbytes.value {0}'.format(data['MAIN.sms_nbytes']['value']))
-    print('sms_balloc.value {0}'.format(data['MAIN.sms_balloc']['value']))
-    print('SMF_s0_g_space.value {0}'.format(data['SMF.s0.g_space']['value']))
     print('SMA_Transient_c_bytes.value {0}'.format(
         data['SMA.Transient.c_bytes']['value']))
 
