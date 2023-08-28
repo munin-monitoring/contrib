@@ -57,7 +57,7 @@ Just try to explain in the pull comment the ''why'' we should merge it (if it's 
 Tim Pope wrote a [very nice tuto](http://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html) on making good commit comments.
 
 
-Licenses
+Licenes
 
 All the code here is licensed with the same terms as munin itself (GPLv2), unless specified otherwise inside a file.
 In all cases the code shall have an OSI-compatible license. Asking for a pull implies that you agree with that fact.
