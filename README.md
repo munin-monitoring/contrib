@@ -2,9 +2,9 @@ This is the repository for all user contributed stuff related to
 [munin](http://munin-monitoring.org).
 
 
-# contrib/plugins/ - 3rd-party plugins
+contrib/plugins/ - 3rd-party plugins
 
-**This is usually where you want to begin your journey.**
+This is usually where you want to begin your journey.
 
 Here you find a plethora of plugins for the most diverse topics. Please take a look and
 improve existing or propose new plugins.
@@ -14,7 +14,7 @@ Please read the [hints for plugin contributions](./plugins#contributed-munin-plu
 See the [gallery](http://gallery.munin-monitoring.org/) for a browsable overview of these plugins.
 
 
-# contrib/templates/ -  3rd-party templates
+contrib/templates/ -  3rd-party templates
 
 Feel free to update templates here, or even to create new ones.
 
@@ -26,21 +26,20 @@ It should serves as a base for small editions that can be merged into munin, so 
 * don't copy the whole template
 * directly edit files in this directory
 
-
-# contrib/tools/ - 3rd-party tools
+contrib/tools/ - 3rd-party tools
 
 Here, you can put just any kind of tool. Please use this directory instead of a random place on the internet.
 It makes things way more easy to search for others.
 
 
-# contrib/samples/ - 3rd-party examples of configs
+contrib/samples/ - 3rd-party examples of configs
 
 This serves as a repository for examples of various configs. You know, the ''learn by example'' way of doing things.
 
 
-## Notes to contributors
+Notes to contributors
 
-### Commits, Comments & Pull requests
+Commits, Comments & Pull requests
 
 We like to have _elementary_ commits as it is much easier to manage for reviewing and debugging.
 So please **don't** be afraid to make **as many** commits as needed. Merging many commits is as easy
@@ -58,7 +57,7 @@ Just try to explain in the pull comment the ''why'' we should merge it (if it's 
 Tim Pope wrote a [very nice tuto](http://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html) on making good commit comments.
 
 
-### Licenses
+Licenses
 
 All the code here is licensed with the same terms as munin itself (GPLv2), unless specified otherwise inside a file.
 In all cases the code shall have an OSI-compatible license. Asking for a pull implies that you agree with that fact.
@@ -68,6 +67,6 @@ This change was made on Jun 1st 2012. If you wrote some code earlier and you do 
 - submit a removal pull
 
 
-# Building status
+Building status
 
 master: [![Build Status](https://travis-ci.org/munin-monitoring/contrib.svg?branch=master)](https://travis-ci.org/munin-monitoring/contrib)
