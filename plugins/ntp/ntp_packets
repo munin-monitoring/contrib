@@ -28,14 +28,17 @@
 # pull request with your commits.
 
 import os
-import subprocess
+from subprocess import check_output
 import sys
+import re
+
 
 if len(sys.argv) == 2 and sys.argv[1] == 'config':
     print('graph_title NTP traffic')
     print('graph_vlabel Packets/${graph_period} received(-)/sent(+)')
-    print('graph_info This graph shows the packet rates of this ntpd. Bad means packets received '
-          'with bad length or format. Authfailed means packets for which authentication failed.')
+    print('graph_info This graph shows the packet rates of this ntpd. '
+          'Bad means packets received with bad length or format. '
+          'Authfailed means packets for which authentication failed.')
     print('graph_category time')
     print('received.label Received')
     print('received.type DERIVE')
@@ -70,27 +73,35 @@ if len(sys.argv) == 2 and sys.argv[1] == 'config':
 
 os.environ['PATH'] = '/usr/local/sbin:/usr/local/bin:' + os.environ['PATH']
 
-# Assuming that the ntpd version is the same as the ntpq or ntpdc
-# version. This is how a proper install should be.
 
-version = subprocess.check_output(['ntpq', '-c', 'version'],
-                                  universal_newlines=True).split()[1][0:5].replace('.', '')
+def get_stats(cmd):
+    return check_output([cmd, '-c', 'iostats', '-c', 'sysstats'],
+                        universal_newlines=True).splitlines()
 
-if int(version) >= 427:
-    cmd = 'ntpq'
+
+# compute the stats binary to be used
+version = check_output(['ntpq', '-c', 'version'], universal_newlines=True)
+ntpsec = False
+if version.startswith('ntpsec'):
+    ntpsec = True
+    stats_output = get_stats('ntpq')
+elif int(version.split()[1][0:5].replace('.', '')) >= 427:
+    stats_output = get_stats('ntpq')
 else:
-    cmd = 'ntpdc'
+    stats_output = get_stats('ntpdc')
 
+
+# ntpsec uses a multi value output format
 stats = dict()
+if ntpsec is True:
+    for line in stats_output:
+        s_line = line.split(':', 1)
+        stats[s_line[0]] = re.split(r'\s+', s_line[1])[1]
+else:
+    for line in stats_output:
+        if len(line.split(':')) == 2:
+            stats[line.split(':')[0]] = int(line.split(':')[1])
 
-stats_output = subprocess.check_output([cmd, '-c', 'iostats', '-c', 'sysstats'],
-                                       universal_newlines=True).splitlines()
-
-# Split the cmd output into key/value pairs
-# Lines that can't be split into 2 individual elements by delimiter ':' will be skipped
-for line in stats_output:
-    if len(line.split(':')) == 2:
-        stats[line.split(':')[0]] = int(line.split(':')[1])
 
 print('received.value ' + str(stats['received packets']))
 print('sent.value ' + str(stats['packets sent']))
@@ -101,5 +112,3 @@ print('authfail.value ' + str(stats['authentication failed']))
 print('declined.value ' + str(stats['declined']))
 print('restricted.value ' + str(stats['restricted']))
 print('kod.value ' + str(stats['KoD responses']))
-
-sys.exit(0)
