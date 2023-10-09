@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # pylint: disable=invalid-name
 # pylint: enable=invalid-name
+# pylint: disable=consider-using-f-string
 
 """Munin plugin to monitor Knot DNS server.
 
@@ -90,6 +91,16 @@ CONFIG = {
         'vlabel': 'operations / second',
         'info': '',
     },
+    'cookies': {
+        'title': 'cookies',
+        'vlabel': 'queries / second',
+        'info': '',
+    },
+    'rrl': {
+        'title': 'response rate limiting',
+        'vlabel': 'queries / second',
+        'info': '',
+    },
 }
 
 
@@ -124,25 +135,30 @@ def get_stats():
     # instead, needed for plugin config when using munin-async.
     cachename = os.path.join(os.getenv('MUNIN_PLUGSTATE'), 'knot.state')
     if len(output) > 2048:
-        with open(cachename, 'wt') as cache:
+        with open(cachename, 'wt', encoding='utf-8') as cache:
             cache.write(output)
     elif (
             os.path.exists(cachename) and
             os.stat(cachename).st_mtime > time.time() - 900
     ):
-        with open(cachename, 'rt') as cache:
+        with open(cachename, 'rt', encoding='utf-8') as cache:
             output = cache.read()
 
     # Parse output. Keep graph labels in knotc-order.
     values = defaultdict(dict)
     for line in output.splitlines():
-        if not line.startswith('mod-stats.') or ' = ' not in line:
+        # Parse line to key1.key2 = value
+        if ' = ' not in line:
             continue
-
-        # Parse key
         key, value = line.split(' = ', 1)
-        key = key[10:-1]
-        key1, key2 = key.split('[', 1)
+        if key.startswith('mod-stats.'):
+            # "mod-stats.server-operation[axfr] = 7"
+            key1, key2 = key[10:-1].split('[', 1)
+        elif key.startswith(('mod-cookies.', 'mod-rrl.')):
+            # "mod-cookies.presence = 94647"
+            key1, key2 = key[4:].split('.', 1)
+        else:
+            continue
 
         # Parse value
         try:
