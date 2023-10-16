@@ -15,17 +15,18 @@ ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_powe
 ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_current
 
 Plugin also implements suggests, so if you have nodeattr installed and
-/etc/genders populated with "tasmota" as well as "powermon" or
-"DS18B20temp" flags for those tasmota devices that implement energy or
-temperature monitoring, you can run an ansible play like this to set
-up your links:
+/etc/genders populated with "tasmota" as well as "powermon",
+"DS18B20","SCD40" or "PMS5003" flags for those tasmota devices that
+implement energy or temperature monitoring, you can run an ansible
+play like this to set up your links:
 https://github.com/spacelama/ansible-initial-server-setup/tree/master/roles/monitoring/tasks
 
 =head1 APPLICABLE SYSTEMS
 
 Any host that can access tasmota systems and has "jq" installed.  Can
 auto suggest values if nodeattr genders (debian: apt install genders)
-installed and configured with tasmota, powermon, DS18B20temp flags.
+installed and configured with tasmota, powermon, DS18B20, SCD40,
+PMS5003 flags.
 
 =head1 AUTHOR
 
@@ -81,8 +82,18 @@ if [ "$1" = "suggest" ]; then
             echo "${device}_${i}"
         done
     done
-    nodeattr -n 'tasmota&&DS18B20temp' | while read -r device ; do
-        for i in DS18B20temp ; do
+    nodeattr -n 'tasmota&&DS18B20' | while read -r device ; do
+        for i in DS18B20 ; do
+            echo "${device}_${i}"
+        done
+    done
+    nodeattr -n 'tasmota&&SCD40' | while read -r device ; do
+        for i in SCD40 ; do
+            echo "${device}_${i}"
+        done
+    done
+    nodeattr -n 'tasmota&&PMS5003' | while read -r device ; do
+        for i in PMS5003 ; do
             echo "${device}_${i}"
         done
     done
@@ -173,7 +184,7 @@ energy() {
     fi
 }
 
-DS18B20temp() {
+DS18B20() {
     if [ "$1" = "config" ]; then
 
         echo "graph_title Tasmota Temperature: $DEVICE"
@@ -191,10 +202,53 @@ DS18B20temp() {
     fi
 }
 
+SCD40() {
+    if [ "$1" = "config" ]; then
+
+        echo "graph_title Tasmota Carbon Dioxide: $DEVICE"
+        echo "graph_args --base 1000"
+
+        echo "graph_vlabel PPM"
+        echo "CO2.label Carbon Dioxide"
+        echo "CO2.type GAUGE"
+
+        exit 0
+    else
+        get_value 8 ".StatusSNS.SCD40.CarbonDioxide"
+        echo "CO2.value $res"
+    fi
+}
+
+PMS5003() {
+    if [ "$1" = "config" ]; then
+
+        echo "graph_title Tasmota Particulate Pollution: $DEVICE"
+        echo "graph_args --base 1000"
+
+        for v in 'PB1=<1μm PPD' 'PB2_5=<2.5μm PPD' 'PB10=<10μm PPD' ; do
+            i=$( echo "$v" | cut -d= -f 1 )
+            lab=$( echo "$v" | cut -d= -f 2 )
+
+            echo "${i}.label $lab"
+            echo "${i}.type GAUGE"
+            echo "${i}.min 0"
+        done
+
+        exit 0
+    else
+        for v in 'PB1="PB1"' 'PB2_5="PB2.5"' 'PB10="PB10"' ; do
+            i=$( echo "$v" | cut -d= -f 1 )
+            field=$( echo "$v" | cut -d= -f 2 )
+            get_value 8 ".StatusSNS.PMS5003.$field"
+            echo "$i.value $res"
+        done
+    fi
+}
+
 [ "$1" = "config" ] && echo "graph_category sensors"
 
 case "$FUNCTION" in
-    voltage|power|powerfactor|current|energy|DS18B20temp)
+    voltage|power|powerfactor|current|energy|DS18B20|SCD40|PMS5003)
         $FUNCTION "$1"
         ;;
     *)
