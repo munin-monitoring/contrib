@@ -42,23 +42,49 @@ GPLv2 or later
 
 =cut
 
+cached_curl=none
+# runs curl on "Status $1", and parses through jq -c "$2", setting the value in "$res"
+# Caches the curl results for when we're plotting multiple (power) values
+#  -- don't forget to make sure we're not being called in a subshell!
+get_value() {
+    if [ "$cached_curl" = none ] ; then
+        # run curl, cache the result, and if there was an error, set value to "U"
+        if ! cached_curl=$( curl --max-time 5 -fsS --data-urlencode "cmnd=Status $1" "http://$DEVICE/cm" ) ; then
+            cached_curl='{}'
+        fi
+    fi
+    res=$( echo "$cached_curl" | jq -c "$2" )
+    if [ "$res" = null ] ; then
+        res=U
+    fi
+}
+
 DEVICE=$(basename "$0" | cut -d_ -f2)
 FUNCTION=$(basename "$0" | cut -d_ -f3)
 
 if [ "$1" = "autoconf" ]; then
+    if ! which curl > /dev/null 2>&1 ; then
+        echo "no (no curl)"
+        exit 0
+    fi
+    if ! which jq > /dev/null 2>&1 ; then
+        echo "no (no jq)"
+        exit 0
+    fi
+
     echo yes && exit 0
 fi
 
 if [ "$1" = "suggest" ]; then
-    nodeattr -n 'tasmota&&powermon' | while read device ; do
-	for i in voltage power powerfactor current energy ; do
-	    echo "${device}_${i}"
-	done
+    nodeattr -n 'tasmota&&powermon' | while read -r device ; do
+        for i in voltage power powerfactor current energy ; do
+            echo "${device}_${i}"
+        done
     done
-    nodeattr -n 'tasmota&&DS18B20temp' | while read device ; do
-	for i in DS18B20temp ; do
-	    echo "${device}_${i}"
-	done
+    nodeattr -n 'tasmota&&DS18B20temp' | while read -r device ; do
+        for i in DS18B20temp ; do
+            echo "${device}_${i}"
+        done
     done
     exit
 fi
@@ -67,16 +93,14 @@ voltage() {
     if [ "$1" = "config" ]; then
 
         echo "graph_title Tasmota Voltage: $DEVICE"
-        echo "graph_category sensors"
         echo "graph_vlabel Volts"
         echo "graph_args --base 1000 -l 0"
 
-	echo "Volts.label Volts"
+        echo "Volts.label Voltage"
         exit 0
     else
-        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$DEVICE/cm )
-        volts=$( echo "$res" | jq -c '.StatusSNS.ENERGY.Voltage' )
-        echo Volts.value $volts
+        get_value 8 ".StatusSNS.ENERGY.Voltage"
+        echo "Volts.value $res"
     fi
 }
 
@@ -84,37 +108,33 @@ current() {
     if [ "$1" = "config" ]; then
 
         echo "graph_title Tasmota Current: $DEVICE"
-        echo "graph_category sensors"
         echo "graph_vlabel Amps"
         echo "graph_args --base 1000 -l 0"
 
-	echo "Current.label Current"
+        echo "Current.label Current"
         exit 0
     else
-        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$DEVICE/cm )
-        current=$( echo "$res" | jq -c '.StatusSNS.ENERGY.Current' )
-        echo Current.value $current
+        get_value 8 ".StatusSNS.ENERGY.Current"
+        echo "Current.value $res"
     fi
 }
 
 power() {
     if [ "$1" = "config" ]; then
 
-	echo "graph_title Tasmota Power: $DEVICE"
-        echo "graph_category sensors"
-	echo "graph_vlabel Watts"
+        echo "graph_title Tasmota Power: $DEVICE"
+        echo "graph_vlabel Watts"
         echo "graph_args --base 1000 -l 0"
 
-	for i in Power ApparentPower ReactivePower ; do
-	    echo "${i}.label $i"
-	    echo "${i}.type GAUGE"
-	    echo "${i}.min 0"
-	done
+        for i in Power ApparentPower ReactivePower ; do
+            echo "${i}.label $i"
+            echo "${i}.type GAUGE"
+            echo "${i}.min 0"
+        done
     else
-        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$DEVICE/cm )
-	for i in Power ApparentPower ReactivePower ; do
-            power=$( echo "$res" | jq -c '.StatusSNS.ENERGY.'$i )
-            echo $i.value $power
+        for i in Power ApparentPower ReactivePower ; do
+            get_value 8 ".StatusSNS.ENERGY.$i"
+            echo "$i.value $res"
         done
     fi
 }
@@ -123,18 +143,16 @@ powerfactor() {
     if [ "$1" = "config" ]; then
 
         echo "graph_title Tasmota Power factor: $DEVICE"
-        echo "graph_category sensors"
         echo "graph_vlabel Power Factor"
         echo "graph_args --base 1000 -l 0"
 
-	echo "PowerFactor.min 0"
-	echo "PowerFactor.max 1"
-	echo "PowerFactor.label Power Factor"
+        echo "PowerFactor.min 0"
+        echo "PowerFactor.max 1"
+        echo "PowerFactor.label Power Factor"
         exit 0
     else
-        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$DEVICE/cm )
-        powerfactor=$( echo "$res" | jq -c '.StatusSNS.ENERGY.Factor' )
-        echo PowerFactor.value $powerfactor
+        get_value 8 ".StatusSNS.ENERGY.Factor"
+        echo "PowerFactor.value $res"
     fi
 }
 
@@ -142,18 +160,16 @@ energy() {
     if [ "$1" = "config" ]; then
 
         echo "graph_title Tasmota Energy: $DEVICE"
-        echo "graph_category sensors"
         echo "graph_args --base 1000"
 
         echo "graph_vlabel kWh"
-	echo "Energy.label Energy"
+        echo "Energy.label Energy"
         echo "Energy.draw AREA"
 
         exit 0
     else
-        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$DEVICE/cm )
-        energy=$( echo "$res" | jq -c '.StatusSNS.ENERGY.Total' )
-        echo Energy.value $energy
+        get_value 8 ".StatusSNS.ENERGY.Total"
+        echo "Energy.value $res"
     fi
 }
 
@@ -161,19 +177,17 @@ DS18B20temp() {
     if [ "$1" = "config" ]; then
 
         echo "graph_title Tasmota Temperature: $DEVICE"
-        echo "graph_category sensors"
         echo "graph_args --base 1000"
 
         echo "graph_vlabel °C"
-	echo "Temperature.label Temperature"
+        echo "Temperature.label Temperature"
         echo "Temperature.type GAUGE"
-	#echo "Temperature.min 0"
+        #echo "Temperature.min 0"
 
         exit 0
     else
-        res=$( curl -fsS --data-urlencode "cmnd=Status 10" http://$DEVICE/cm )
-        energy=$( echo "$res" | jq -c '.StatusSNS.DS18B20.Temperature' )
-        echo Temperature.value $energy
+        get_value 10 ".StatusSNS.DS18B20.Temperature"
+        echo "Temperature.value $res"
     fi
 }
 
@@ -181,8 +195,8 @@ DS18B20temp() {
 
 case "$FUNCTION" in
     voltage|power|powerfactor|current|energy|DS18B20temp)
-	$FUNCTION "$1"
-	;;
+        $FUNCTION "$1"
+        ;;
     *)
         echo "Unknown Function"
         ;;
