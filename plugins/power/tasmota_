@@ -14,17 +14,18 @@ ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_powe
 ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_powerfactor
 ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_current
 
-Plugin also implements suggests, so if you have /etc/genders
-populated with "tasmota,powermon" flags for those tasmota devices
-that implement energy monitoring, and nodeattr installed, you can
-run an ansible play like this to set up your links:
+Plugin also implements suggests, so if you have nodeattr installed and
+/etc/genders populated with "tasmota" as well as "powermon" or
+"DS18B20temp" flags for those tasmota devices that implement energy or
+temperature monitoring, you can run an ansible play like this to set
+up your links:
 https://github.com/spacelama/ansible-initial-server-setup/tree/master/roles/monitoring/tasks
 
 =head1 APPLICABLE SYSTEMS
 
 Any host that can access tasmota systems and has "jq" installed.  Can
 auto suggest values if nodeattr genders (debian: apt install genders)
-installed and configured with tasmota,powermon flag.
+installed and configured with tasmota, powermon, DS18B20temp flags.
 
 =head1 AUTHOR
 
@@ -41,7 +42,7 @@ GPLv2 or later
 
 =cut
 
-SWITCH=$(basename "$0" | cut -d_ -f2)
+DEVICE=$(basename "$0" | cut -d_ -f2)
 FUNCTION=$(basename "$0" | cut -d_ -f3)
 
 if [ "$1" = "autoconf" ]; then
@@ -50,7 +51,12 @@ fi
 
 if [ "$1" = "suggest" ]; then
     nodeattr -n 'tasmota&&powermon' | while read device ; do
-	for i in voltage power powerfactor current energy; do
+	for i in voltage power powerfactor current energy ; do
+	    echo "${device}_${i}"
+	done
+    done
+    nodeattr -n 'tasmota&&DS18B20temp' | while read device ; do
+	for i in DS18B20temp ; do
 	    echo "${device}_${i}"
 	done
     done
@@ -60,7 +66,7 @@ fi
 voltage() {
     if [ "$1" = "config" ]; then
 
-        echo "graph_title Tasmota Voltage: $SWITCH"
+        echo "graph_title Tasmota Voltage: $DEVICE"
         echo "graph_category sensors"
         echo "graph_vlabel Volts"
         echo "graph_args --base 1000 -l 0"
@@ -68,7 +74,7 @@ voltage() {
 	echo "Volts.label Volts"
         exit 0
     else
-        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$SWITCH/cm )
+        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$DEVICE/cm )
         volts=$( echo "$res" | jq -c '.StatusSNS.ENERGY.Voltage' )
         echo Volts.value $volts
     fi
@@ -77,7 +83,7 @@ voltage() {
 current() {
     if [ "$1" = "config" ]; then
 
-        echo "graph_title Tasmota Current: $SWITCH"
+        echo "graph_title Tasmota Current: $DEVICE"
         echo "graph_category sensors"
         echo "graph_vlabel Amps"
         echo "graph_args --base 1000 -l 0"
@@ -85,7 +91,7 @@ current() {
 	echo "Current.label Current"
         exit 0
     else
-        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$SWITCH/cm )
+        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$DEVICE/cm )
         current=$( echo "$res" | jq -c '.StatusSNS.ENERGY.Current' )
         echo Current.value $current
     fi
@@ -94,7 +100,7 @@ current() {
 power() {
     if [ "$1" = "config" ]; then
 
-	echo "graph_title Tasmota Power: $SWITCH"
+	echo "graph_title Tasmota Power: $DEVICE"
         echo "graph_category sensors"
 	echo "graph_vlabel Watts"
         echo "graph_args --base 1000 -l 0"
@@ -105,7 +111,7 @@ power() {
 	    echo "${i}.min 0"
 	done
     else
-        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$SWITCH/cm )
+        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$DEVICE/cm )
 	for i in Power ApparentPower ReactivePower ; do
             power=$( echo "$res" | jq -c '.StatusSNS.ENERGY.'$i )
             echo $i.value $power
@@ -116,7 +122,7 @@ power() {
 powerfactor() {
     if [ "$1" = "config" ]; then
 
-        echo "graph_title Tasmota Power factor: $SWITCH"
+        echo "graph_title Tasmota Power factor: $DEVICE"
         echo "graph_category sensors"
         echo "graph_vlabel Power Factor"
         echo "graph_args --base 1000 -l 0"
@@ -126,7 +132,7 @@ powerfactor() {
 	echo "PowerFactor.label Power Factor"
         exit 0
     else
-        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$SWITCH/cm )
+        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$DEVICE/cm )
         powerfactor=$( echo "$res" | jq -c '.StatusSNS.ENERGY.Factor' )
         echo PowerFactor.value $powerfactor
     fi
@@ -135,7 +141,7 @@ powerfactor() {
 energy() {
     if [ "$1" = "config" ]; then
 
-        echo "graph_title Tasmota Energy: $SWITCH"
+        echo "graph_title Tasmota Energy: $DEVICE"
         echo "graph_category sensors"
         echo "graph_args --base 1000"
 
@@ -145,29 +151,39 @@ energy() {
 
         exit 0
     else
-        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$SWITCH/cm )
+        res=$( curl -fsS --data-urlencode "cmnd=Status 8" http://$DEVICE/cm )
         energy=$( echo "$res" | jq -c '.StatusSNS.ENERGY.Total' )
         echo Energy.value $energy
     fi
 }
 
+DS18B20temp() {
+    if [ "$1" = "config" ]; then
+
+        echo "graph_title Tasmota Temperature: $DEVICE"
+        echo "graph_category sensors"
+        echo "graph_args --base 1000"
+
+        echo "graph_vlabel °C"
+	echo "Temperature.label Temperature"
+        echo "Temperature.type GAUGE"
+	#echo "Temperature.min 0"
+
+        exit 0
+    else
+        res=$( curl -fsS --data-urlencode "cmnd=Status 10" http://$DEVICE/cm )
+        energy=$( echo "$res" | jq -c '.StatusSNS.DS18B20.Temperature' )
+        echo Temperature.value $energy
+    fi
+}
 
 [ "$1" = "config" ] && echo "graph_category sensors"
 
 case "$FUNCTION" in
-    voltage)
-	voltage "$1"
+    voltage|power|powerfactor|current|energy|DS18B20temp)
+	$FUNCTION "$1"
 	;;
-    power)
-	power "$1"
-	;;
-    powerfactor)
-	powerfactor "$1"
-	;;
-    current)
-	current "$1"
-	;;
-    energy)
-	energy "$1"
-	;;
+    *)
+        echo "Unknown Function"
+        ;;
 esac
