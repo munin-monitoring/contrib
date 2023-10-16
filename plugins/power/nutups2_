@@ -36,10 +36,11 @@ You can also control individual fields like:
 =head1 FEATURES
 
 The plugin supports reporting battery charge, UPS load, input/output
-frequencies/currents/voltages, apparent and real power output, humidity and
-temperature readings. Note however that different UPS models report different
-levels of detail; the plugin reports whatever information the NUT UPS driver
-(and in turn the UPS itself) provides.
+frequencies/currents/voltages, apparent and real power output, as well
+as emulated power output if only % load is available, humidity and
+temperature readings. Note however that different UPS models report
+different levels of detail; the plugin reports whatever information
+the NUT UPS driver (and in turn the UPS itself) provides.
 
 Although the 'suggest' command will only offer UPSes for which the local host
 is the master, you can also monitor remote UPSes if you include the host name
@@ -48,6 +49,19 @@ in the symlink, like:
 	nutups2_<upsname>.<hostname or address>_frequency
 
 etc.
+
+If your UPS only outputs % load instead of an actual power value, you
+can emulate it based on readings you can manually make such as by
+comparing against a power meter.  Configure the plugin via with
+settings like these:
+
+[nutups2_powershield-commander*]
+# powershield commander 1000: 400 watts at 63% load on powershield commander 1000: 400/63
+env.power_emulated_multiplier 6.349
+
+[nutups2_powershield-centurion*]
+# powershield centurion 1000: 445 watts at 48% load on powershield centurion 1000: 445/49
+env.power_emulated_multiplier 9.294
 
 =head1 AUTHOR
 
@@ -147,7 +161,7 @@ my %config = (
 		args => '--base 1000 -l 0',
 		vlabel => 'Watt',
 		config => \&common_config,
-		multiplier => 6.349,  # 400 watts at 63% load on powershield commander 1000
+		multiplier => $ENV{'power_emulated_multiplier'} || 1,
 		fetch => \&common_fetch,
 	},
 );
