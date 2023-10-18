@@ -63,6 +63,8 @@ get_value() {
 DEVICE=$(basename "$0" | cut -d_ -f2)
 FUNCTION=$(basename "$0" | cut -d_ -f3)
 
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
 if [ "$1" = "autoconf" ]; then
     if ! which curl > /dev/null 2>&1 ; then
         echo "no (no curl)"
@@ -106,169 +108,163 @@ if [ "$1" = "suggest" ]; then
 fi
 
 voltage() {
+    axis=Volts
     if [ "$1" = "config" ]; then
-
         echo "graph_title Tasmota Voltage: $DEVICE"
         echo "graph_vlabel Volts"
         echo "graph_args --base 1000 -l 0"
 
-        echo "Volts.label Voltage"
-        exit 0
+        echo "$axis.label Voltage"
     else
         get_value 8 ".StatusSNS.ENERGY.Voltage"
-        echo "Volts.value $res"
+        echo "$axis.value $res"
     fi
 }
 
 current() {
+    axis=Current
     if [ "$1" = "config" ]; then
-
         echo "graph_title Tasmota Current: $DEVICE"
         echo "graph_vlabel Amps"
         echo "graph_args --base 1000 -l 0"
 
-        echo "Current.label Current"
-        exit 0
+        echo "$axis.label Current"
     else
         get_value 8 ".StatusSNS.ENERGY.Current"
-        echo "Current.value $res"
+        echo "$axis.value $res"
     fi
 }
 
 power() {
     if [ "$1" = "config" ]; then
-
         echo "graph_title Tasmota Power: $DEVICE"
         echo "graph_vlabel Watts"
         echo "graph_args --base 1000 -l 0"
 
-        for i in Power ApparentPower ReactivePower ; do
-            echo "${i}.label $i"
-            echo "${i}.type GAUGE"
-            echo "${i}.min 0"
+        for axis in ApparentPower ReactivePower Power ; do
+            echo "$axis.label $axis"
+            echo "$axis.type GAUGE"
+            echo "$axis.min 0"
+
+            print_thresholds "$axis"
         done
     else
-        for i in Power ApparentPower ReactivePower ; do
-            get_value 8 ".StatusSNS.ENERGY.$i"
-            echo "$i.value $res"
+        for axis in ApparentPower ReactivePower Power ; do
+            get_value 8 ".StatusSNS.ENERGY.$axis"
+            echo "$axis.value $res"
         done
     fi
 }
 
 powerfactor() {
+    axis=PowerFactor
     if [ "$1" = "config" ]; then
-
         echo "graph_title Tasmota Power factor: $DEVICE"
         echo "graph_vlabel Power Factor"
         echo "graph_args --base 1000 -l 0"
 
-        echo "PowerFactor.min 0"
-        echo "PowerFactor.max 1"
-        echo "PowerFactor.label Power Factor"
-        exit 0
+        echo "$axis.min 0"
+        echo "$axis.max 1"
+        echo "$axis.label Power Factor"
     else
         get_value 8 ".StatusSNS.ENERGY.Factor"
-        echo "PowerFactor.value $res"
+        echo "$axis.value $res"
     fi
 }
 
 energy() {
+    axis=Energy
     if [ "$1" = "config" ]; then
-
         echo "graph_title Tasmota Energy: $DEVICE"
         echo "graph_args --base 1000"
 
         echo "graph_vlabel kWh"
-        echo "Energy.label Energy"
-        echo "Energy.draw AREA"
-
-        exit 0
+        echo "$axis.label Energy"
+        echo "$axis.draw AREA"
     else
         get_value 8 ".StatusSNS.ENERGY.Total"
-        echo "Energy.value $res"
+        echo "$axis.value $res"
     fi
 }
 
 DS18B20() {
+    axis=Temperature
     if [ "$1" = "config" ]; then
-
         echo "graph_title Tasmota Temperature: $DEVICE"
         echo "graph_args --base 1000"
 
         echo "graph_vlabel °C"
-        echo "Temperature.label Temperature"
-        echo "Temperature.type GAUGE"
-        #echo "Temperature.min 0"
-
-        exit 0
+        echo "$axis.label Temperature"
+        echo "$axis.type GAUGE"
+        #echo "$axis.min 0"
     else
         get_value 10 ".StatusSNS.DS18B20.Temperature"
-        echo "Temperature.value $res"
+        echo "$axis.value $res"
     fi
 }
 
 SCD40() {
+    axis=CO2
     if [ "$1" = "config" ]; then
-
         echo "graph_title Tasmota Carbon Dioxide: $DEVICE"
         echo "graph_args --base 1000"
 
         echo "graph_vlabel PPM"
-        echo "CO2.label Carbon Dioxide"
-        echo "CO2.type GAUGE"
-
-        exit 0
+        echo "$axis.label Carbon Dioxide"
+        echo "$axis.type GAUGE"
     else
         get_value 8 ".StatusSNS.SCD40.CarbonDioxide"
-        echo "CO2.value $res"
+        echo "$axis.value $res"
     fi
 }
 
 PMS5003() {
     if [ "$1" = "config" ]; then
-
         echo "graph_title Tasmota Particulate Pollution: $DEVICE"
         echo "graph_args --base 1000"
 
         for v in 'PB1=<1μm PPD' 'PB2_5=<2.5μm PPD' 'PB10=<10μm PPD' ; do
-            i=$( echo "$v" | cut -d= -f 1 )
+            axis=$( echo "$v" | cut -d= -f 1 )
             lab=$( echo "$v" | cut -d= -f 2 )
 
-            echo "${i}.label $lab"
-            echo "${i}.type GAUGE"
-            echo "${i}.min 0"
+            echo "$axis.label $lab"
+            echo "$axis.type GAUGE"
+            echo "$axis.min 0"
         done
-
-        exit 0
     else
         for v in 'PB1="PB1"' 'PB2_5="PB2.5"' 'PB10="PB10"' ; do
-            i=$( echo "$v" | cut -d= -f 1 )
+            axis=$( echo "$v" | cut -d= -f 1 )
             field=$( echo "$v" | cut -d= -f 2 )
             get_value 8 ".StatusSNS.PMS5003.$field"
-            echo "$i.value $res"
+            echo "$axis.value $res"
         done
     fi
 }
 
 millivolts() {
+    axis=Volts
     if [ "$1" = "config" ]; then
-
+        limits=
+        if [ -n "$lower" ] ; then
+            limits="$limits --lower-limit $lower"
+        fi
+        if [ -n "$upper" ] ; then
+            limits="$limits --upper-limit $upper"
+        fi
         echo "graph_title Tasmota Volts: $DEVICE"
-        echo "graph_args --base 1000"
+        echo "graph_args --base 1000$limits"
 
         echo "graph_vlabel Volts"
-        echo "volts.label V"
-        echo "volts.type GAUGE"
-
-        exit 0
+        echo "$axis.label V"
+        echo "$axis.type GAUGE"
+#        echo "$axis.min 10"
+#        echo "$axis.max 14"
     else
         get_value 8 ".StatusSNS.ANALOG.Range"
         res=$( echo "$res" | awk '{printf "%0.3f", $1/1000}' )
-        echo "volts.value $res"
+        echo "$axis.value $res"
     fi
 }
-
-[ "$1" = "config" ] && echo "graph_category sensors"
 
 case "$FUNCTION" in
     voltage|power|powerfactor|current|energy|DS18B20|SCD40|PMS5003|millivolts)
@@ -278,3 +274,8 @@ case "$FUNCTION" in
         echo "Unknown Function"
         ;;
 esac
+
+if [ "$1" = "config" ] ; then
+    echo "graph_category sensors"
+    print_thresholds "$axis"
+fi
