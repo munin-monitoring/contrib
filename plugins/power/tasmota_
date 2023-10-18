@@ -16,9 +16,9 @@ ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_curr
 
 Plugin also implements suggests, so if you have nodeattr installed and
 /etc/genders populated with "tasmota" as well as "powermon",
-"DS18B20","SCD40" or "PMS5003" flags for those tasmota devices that
-implement energy or temperature monitoring, you can run an ansible
-play like this to set up your links:
+"DS18B20","SCD40", "PMS5003" or "millivolts" flags for those tasmota
+devices that implement energy or temperature monitoring, you can run
+an ansible play like this to set up your links:
 https://github.com/spacelama/ansible-initial-server-setup/tree/master/roles/monitoring/tasks
 
 =head1 APPLICABLE SYSTEMS
@@ -26,7 +26,7 @@ https://github.com/spacelama/ansible-initial-server-setup/tree/master/roles/moni
 Any host that can access tasmota systems and has "jq" installed.  Can
 auto suggest values if nodeattr genders (debian: apt install genders)
 installed and configured with tasmota, powermon, DS18B20, SCD40,
-PMS5003 flags.
+PMS5003, millivolts flags.
 
 =head1 AUTHOR
 
@@ -94,6 +94,11 @@ if [ "$1" = "suggest" ]; then
     done
     nodeattr -n 'tasmota&&PMS5003' | while read -r device ; do
         for i in PMS5003 ; do
+            echo "${device}_${i}"
+        done
+    done
+    nodeattr -n 'tasmota&&millivolts' | while read -r device ; do
+        for i in millivolts ; do
             echo "${device}_${i}"
         done
     done
@@ -245,10 +250,28 @@ PMS5003() {
     fi
 }
 
+millivolts() {
+    if [ "$1" = "config" ]; then
+
+        echo "graph_title Tasmota Volts: $DEVICE"
+        echo "graph_args --base 1000"
+
+        echo "graph_vlabel Volts"
+        echo "volts.label V"
+        echo "volts.type GAUGE"
+
+        exit 0
+    else
+        get_value 8 ".StatusSNS.ANALOG.Range"
+        res=$( echo "$res" | awk '{printf "%0.3f", $1/1000}' )
+        echo "volts.value $res"
+    fi
+}
+
 [ "$1" = "config" ] && echo "graph_category sensors"
 
 case "$FUNCTION" in
-    voltage|power|powerfactor|current|energy|DS18B20|SCD40|PMS5003)
+    voltage|power|powerfactor|current|energy|DS18B20|SCD40|PMS5003|millivolts)
         $FUNCTION "$1"
         ;;
     *)
