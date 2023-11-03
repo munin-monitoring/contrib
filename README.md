@@ -67,6 +67,9 @@ This change was made on Jun 1st 2012. If you wrote some code earlier and you do 
 - submit a licensing change pull
 - submit a removal pull
 
+### Impact Categories for CE464 Project by John Kim
+
+Please contribute in appropriate categories of significant impact of each plugin to Munin such as “High”, “Mid”, “Low” folders. The intended audience are both users and developers.
 
 # Building status
 
