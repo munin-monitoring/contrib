@@ -1,0 +1,290 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+fronius - Plugin to monitor Fronius Solar inverter using the JSON Solar API.
+
+The Solar API reports both an immediate power output reading at
+time-of-request, and an incremental sum of daily and yearly produced energy.
+This plugin uses the yearly energy sum as a DERIVE value, and calculates the
+average power output during the last measurement interval. This will likely be
+lower than the immediate reading, but the aggregation in weekly/monthly/yearly
+graphs will be more correct.  The immediate power output is output as extra
+information.
+
+=head1 CONFIGURATION
+
+	[fronius]
+	env.inverter_base_url http://fronius	# this is the default
+	env.host_name solar_inverter		# optional, host name to report data as in munin
+	env.connect_timeout 1			# optional, amount to wait for requests, in seconds
+
+=head1 CACHING
+
+As the inverter may go to sleep at night, the initial service information is cached
+locally, with a twelve-hour lifetime, before hitting the Solar API again. However,
+if hitting the API to refresh the cache fails, the stale cache is used anyway,
+to have a better chance of getting the config data out nonetheless.
+
+=head1 CAVEAT
+
+Only tested on a Fronius Primo and Fronius Symo.
+
+=head1 AUTHOR
+
+Olivier Mehani
+
+Copyright (C) 2020 Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+# Example outputs
+#
+## http://fronius/solar_api/v1/GetInverterInfo.cgi
+#GetInverterInfo='
+#{
+#   "Body" : {
+#      "Data" : {
+#         "1" : {
+#            "CustomName" : "&#80;&#114;&#105;&#109;&#111;&#32;&#53;&#46;&#48;&#45;&#49;&#32;&#40;&#49;&#41;",
+#            "DT" : 76,
+#            "ErrorCode" : 0,
+#            "PVPower" : 5200,
+#            "Show" : 1,
+#            "StatusCode" : 7,
+#            "UniqueID" : "1098861"
+#         }
+#      }
+#   },
+#   "Head" : {
+#      "RequestArguments" : {},
+#      "Status" : {
+#         "Code" : 0,
+#         "Reason" : "",
+#         "UserMessage" : ""
+#      },
+#      "Timestamp" : "2020-06-11T10:55:23+10:00"
+#   }
+#}
+#'
+#
+## http://fronius/solar_api/v1/GetPowerFlowRealtimeData.fcgi
+#GetPowerFlowRealtimeData='
+#{
+#   "Body" : {
+#      "Data" : {
+#         "Inverters" : {
+#            "1" : {
+#               "DT" : 76,
+#               "E_Day" : 1201,
+#               "E_Total" : 1201,
+#               "E_Year" : 1201.4000244140625,
+#               "P" : 2521
+#            }
+#         },
+#         "Site" : {
+#            "E_Day" : 1201,
+#            "E_Total" : 1201,
+#            "E_Year" : 1201.4000244140625,
+#            "Meter_Location" : "unknown",
+#            "Mode" : "produce-only",
+#            "P_Akku" : null,
+#            "P_Grid" : null,
+#            "P_Load" : null,
+#            "P_PV" : 2521,
+#            "rel_Autonomy" : null,
+#            "rel_SelfConsumption" : null
+#         },
+#         "Version" : "12"
+#      }
+#   },
+#   "Head" : {
+#      "RequestArguments" : {},
+#      "Status" : {
+#         "Code" : 0,
+#         "Reason" : "",
+#         "UserMessage" : ""
+#      },
+#      "Timestamp" : "2020-06-11T10:55:21+10:00"
+#   }
+#}
+#'
+#
+## http://fronius/solar_api/v1/GetActiveDeviceInfo.cgi?DeviceClass=SensorCard
+#GetActiveDeviceInfo='
+#{
+#   "Body" : {
+#      "Data" : {}
+#   },
+#   "Head" : {
+#      "RequestArguments" : {
+#         "DeviceClass" : "SensorCard"
+#      },
+#      "Status" : {
+#         "Code" : 0,
+#         "Reason" : "",
+#         "UserMessage" : ""
+#      },
+#      "Timestamp" : "2020-06-11T10:55:24+10:00"
+#   }
+#}
+#'
+#
+## http://fronius/solar_api/v1/GetLoggerConnectionInfo.cgi
+#GetLoggerConnectionInfo='
+#{
+#   "Body" : {
+#      "Data" : {
+#         "SolarNetConnectionState" : 2,
+#         "SolarWebConnectionState" : 2,
+#         "WLANConnectionState" : 2
+#      }
+#   },
+#   "Head" : {
+#      "RequestArguments" : {},
+#      "Status" : {
+#         "Code" : 0,
+#         "Reason" : "",
+#         "UserMessage" : ""
+#      },
+#      "Timestamp" : "2020-06-11T10:55:25+10:00"
+#   }
+#}
+#'
+
+set -eu
+
+# shellcheck disable=SC1090
+. "${MUNIN_LIBDIR}/plugins/plugin.sh"
+
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+
+INVERTER_BASE_URL=${inverter_base_url:-http://fronius}
+HOST_NAME=${host_name:-}
+CONNECT_TIMEOUT=${connect_timeout:-1}
+
+check_deps() {
+	for CMD in curl jq recode; do
+		if ! command -v "${CMD}" >/dev/null; then
+			echo "no (${CMD} not found)"
+			exit 0
+		fi
+	done
+}
+
+CURL_ARGS="-s --connect-timeout ${CONNECT_TIMEOUT}"
+fetch() {
+	# shellcheck disable=SC2086
+	curl -f ${CURL_ARGS} "$@" \
+		|| { echo "error fetching ${*}" >&2; false; }
+}
+
+get_inverter_info() {
+	fetch "${INVERTER_BASE_URL}/solar_api/v1/GetInverterInfo.cgi" \
+		| recode html..ascii
+}
+
+get_power_flow_realtime_data() {
+	fetch "${INVERTER_BASE_URL}/solar_api/v1/GetPowerFlowRealtimeData.fcgi"
+	#echo "${GetPowerFlowRealtimeData}
+}
+
+# Run the command and arguments passed as arguments to this method, and cache
+# the response.  The first argument is a timeout (in minutes) after which the
+# cache is ignored and a new request is attempted.  If the request fails, the
+# cache is used. If the timeout is 0, the request is always attempted, using
+# the cache as a backup on failure.
+cached() {
+	timeout="${1}"
+	shift
+	fn="${1}"
+	shift
+	# shellcheck disable=SC2124
+	args="${@}"
+
+	# shellcheck disable=SC2039
+	api_data=''
+	# shellcheck disable=SC2039
+	cachefile="${MUNIN_PLUGSTATE}/$(basename "${0}").${fn}.cache.json"
+	if [ -n "$(find "${cachefile}" -mmin "-${timeout}" 2>/dev/null)" ]; then
+		api_data=$(cat "${cachefile}")
+	else
+		# shellcheck disable=SC2086
+		api_data="$("${fn}" ${args} \
+			|| true)"
+
+		if [ -n "${api_data}" ]; then
+			echo "${api_data}" > "${cachefile}"
+		else
+			api_data=$(cat "${cachefile}")
+		fi
+	fi
+	echo "${api_data}"
+}
+
+config() {
+	if test -n "${HOST_NAME}"; then
+		echo "host_name ${HOST_NAME}"
+	fi
+	# graph_period is not a shell variable
+	cat <<'EOF'
+graph_title Solar Inverter Output
+graph_info Power generated from solar inverters
+graph_total Total output
+graph_category sensors
+graph_vlabel Average output [W]
+graph_args -l 0 --base 1000
+EOF
+cached 720 get_inverter_info | jq -r '.Body.Data
+			   | to_entries[]
+			   | @text "
+inverter\(.key).label \(.value.CustomName)
+inverter\(.key).info Power generated by the solar array (total size \(.value.PVPower / 1000) kW) connected to inverter \(.value.CustomName) (ID: \(.value.UniqueID))
+inverter\(.key).cdef inverter\(.key),3600,*
+inverter\(.key).type DERIVE
+inverter\(.key).min 0
+inverter\(.key).max \(.value.PVPower)
+inverter\(.key).draw AREASTACK
+"'
+}
+
+get_data() {
+cached 0 get_power_flow_realtime_data | jq -r 'def roundit: . + 0.5 | floor;
+			   .Body.Data.Inverters
+			   | to_entries[]
+			   | @text "
+inverter\(.key).value \(.value.E_Year | roundit)
+inverter\(.key).extinfo Immediate output: \(.value.P) W; Daily total: \(.value.E_Day | roundit) Wh; Yearly total: \(.value.E_Year / 1000 | roundit) kWh
+"'
+}
+
+main () {
+	check_deps
+
+	case ${1:-} in
+		config)
+			config
+			if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = "1" ]; then
+				get_data
+			fi
+			;;
+		*)
+			get_data
+			;;
+	esac
+}
+
+main "${1:-}"

@@ -1,0 +1,266 @@
+#!/bin/bash
+#%# family=auto
+#%# capabilities=autoconf
+
+: << EOF
+=head1 NAME
+
+Outputs the total and daily production, DC current, DC voltage, DC power for the inverter and the connected panels from Solarman (Smart) API.
+To get the API-Keys a E-Mail to customerservice@solarmanpv.com is needed.
+
+=head1 CONFIGURATION
+
+Tested with a "Deye SUN600G3-EU-230 600W" inverter.
+
+If you have 4 Panels just remove the "#" from all lines with *panel[3|4].
+
+Dependencies:
+ - curl
+ - jq
+
+plugin config:
+
+  [solarman_api_inverter]
+    env.SLRM_APPID 2XXXXXXXX2
+    env.SLRM_DEVICE_SN 2XXXXXXXXX6-1
+    env.SLRM_MAIL "XXXX@YYY.de"
+    env.SLRM_PASSWORD 'aXXXXXXXXf'
+    env.SLRM_APPSECRET aXXXXXXXb
+
+=head1 AUTHOR
+
+Michael Grote
+
+=head1 LICENSE
+
+GPLv3 or later
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+
+=cut
+
+EOF
+
+
+function get_token {
+    # Combine Variables
+    ## hash password; -n is used because "echo" normally outputs a newline
+    SLRM_PASSWORD_SHA=$(echo -n $SLRM_PASSWORD | sha256sum | cut -f1 -d" ")
+    ## set url
+    SLRM_URL="https://api.solarmanpv.com/account/v1.0/token?appId=${SLRM_APPID}&language=en&="
+    ## create request body for bearer token
+    SLRM_BEARER_TOKEN_REQUEST_BODY=$(jq --null-input --arg appSecret "${SLRM_APPSECRET}" --arg email "${SLRM_MAIL}" --arg password "${SLRM_PASSWORD_SHA}" '{"appSecret": $appSecret, "email": $email, "password": $password}')
+    ## get bearer token
+    SLRM_BEARER_TOKEN=$(curl --silent --request POST --url "${SLRM_URL}" --header 'Content-Type: application/json' --data "$SLRM_BEARER_TOKEN_REQUEST_BODY" | jq .access_token | sed -r 's/"//g')
+}
+
+function get_data {
+    # setze zählvariablen
+    retry=1
+    count=0
+    reachable=0
+    # solange count < 16 UND retry != 0
+    while [[ $retry != "0" ]]; do
+        ## create request body for panel data
+        SLRM_DATA_REQUEST_BODY=$(jq --null-input --arg deviceSn "${SLRM_DEVICE_SN}" '{"deviceSn": $deviceSn}')
+        ## get panel data
+        SLRM_DATA=$(curl --silent --request POST --url "https://api.solarmanpv.com/device/v1.0/currentData?language=en&=" --header "Authorization: bearer ${SLRM_BEARER_TOKEN}" --header 'Content-Type: application/json' --data "${SLRM_DATA_REQUEST_BODY}")
+        # wenn "device not found" nicht gefunden wird, dann breche aus beiden Schleifen heraus
+	 if [[ $(echo "$SLRM_DATA" | grep -v -i "device not found") ]] ; then
+            retry="0"
+            # Variable für reachable graph
+            reachable="1"
+	    # schreibe daten in statefile
+ 	    touch "$MUNIN_STATEFILE"
+	    echo "$SLRM_DATA" > "$MUNIN_STATEFILE"
+        fi
+        if [[ $count -gt 10 ]]  ; then
+            retry="0"
+        fi
+        # ansonsten warte n sec
+        sleep 1
+        # erhöhe zählvariable
+        count=$((count + 1 ))
+    done
+}
+
+# wenn parameter = ...
+if [ "$1" = "autoconf" ]; then
+    if [ ! -x "$(command -v curl)" ]; then
+        echo "no (curl not found)"
+    elif [ ! -x "$(command -v jq)" ]; then
+        echo "no (jq not found)"
+    fi
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    # setze optionen
+    echo "multigraph production_total"
+    echo "graph_scale no"
+    echo "graph_title Total Yield- SN: $SLRM_DEVICE_SN"
+    echo "graph_vlabel kWh"
+    echo "graph_category sensors"
+    echo "graph_args -l 0 --base 1000"
+    echo "graph_info The total Production in kWh of Inverter SN: $SLRM_DEVICE_SN"
+    echo "total_inverter.label Inverter"
+    echo "total_panel1.label Panel 1"
+    echo "total_panel2.label Panel 2"
+    #echo "total_panel3.label Panel 3"
+    #echo "total_panel4.label Panel 4"
+    echo "total_inverter.draw AREA"
+    echo "total_panel1.unknown_limit 3"
+    echo "total_panel2.unknown_limit 3"
+    #echo "total_panel3.unknown_limit 3"
+    #echo "total_panel4.unknown_limit 3"
+
+    echo "multigraph api_reachable"
+    echo "graph_scale no"
+    echo "graph_title API reachable/Device found"
+    echo "graph_category sensors"
+    echo "graph_args -l 0"
+    echo "graph_printf %6.0lf"
+    echo "graph_info Is the API reachable and could the device found?"
+    echo "reachable.label online"
+    echo "reachable.info 0 = offline; 1 = online"
+    echo "reachable.draw AREA"
+    echo "retries.label connection retries"
+    echo "retries.info how many retries were needed to get the data"
+
+    echo "multigraph production_daily"
+    echo "graph_scale no"
+    echo "graph_title Daily Yield- SN: $SLRM_DEVICE_SN"
+    echo "graph_vlabel kWh"
+    echo "graph_category sensors"
+    echo "graph_args -l 0 --base 1000"
+    echo "graph_info The daily Production in kWh of Inverter SN: $SLRM_DEVICE_SN"
+    echo "daily_inverter.label Inverter"
+    echo "daily_panel1.label Panel 1"
+    echo "daily_panel2.label Panel 2"
+    #echo "daily_panel3.label Panel 3"
+    #echo "daily_panel4.label Panel 4"
+    echo "daily_inverter.draw AREA"
+    echo "daily_panel1.unknown_limit 3"
+    echo "daily_panel2.unknown_limit 3"
+    #echo "daily_panel3.unknown_limit 3"
+    #echo "daily_panel4.unknown_limit 3"
+
+    echo "multigraph temp"
+    echo "graph_scale no"
+    echo "graph_title Temperature - SN: $SLRM_DEVICE_SN"
+    echo "graph_vlabel °C"
+    echo "graph_category sensors"
+    echo "graph_args -l 0 --base 1000"
+    echo "graph_info The AC Radiator Temp in Celsius of Inverter SN: $SLRM_DEVICE_SN"
+    echo "temp.label AC Radiator Temp"
+
+    echo "multigraph voltage_current_input_panels"
+    echo "graph_scale no"
+    echo "graph_title DC Measurements - SN: $SLRM_DEVICE_SN"
+    echo "graph_vlabel V/A/W"
+    echo "graph_category sensors"
+    echo "graph_args -l 0 --base 1000"
+    echo "graph_info The current DC Voltage, Current and Power of Inverter SN: $SLRM_DEVICE_SN"
+    echo "voltage_panel1.label DC Voltage Panel 1 (Volt)"
+    echo "voltage_panel2.label DC Voltage Panel 2 (Volt)"
+    #echo "voltage_panel3.label DC Voltage Panel 3 (Volt)"
+    #echo "voltage_panel4.label DC Voltage Panel 4 (Volt)"
+    echo "current_panel1.label DC Current Panel 1 (Ampere)"
+    echo "current_panel2.label DC Current Panel 2 (Ampere)"
+    #echo "current_panel3.label DC Current Panel 3 (Ampere)"
+    #echo "current_panel4.label DC Current Panel 4 (Ampere)"
+    echo "power_panel1.label   DC Power   Panel 1 (Watt)"
+    echo "power_panel2.label   DC Power   Panel 2 (Watt)"
+    #echo "power_panel3.label   DC Power   Panel 3 (Watt)"
+    #echo "power_panel4.label   DC Power   Panel 4 (Watt)"
+    echo "voltage_panel1.unknown_limit 3"
+    echo "voltage_panel2.unknown_limit 3"
+    #echo "voltage_panel3.unknown_limit 3"
+    #echo "voltage_panel4.unknown_limit 3"
+    echo "current_panel1.unknown_limit 3"
+    echo "current_panel2.unknown_limit 3"
+    #echo "current_panel3.unknown_limit 3"
+    #echo "current_panel4.unknown_limit 3"
+    echo "power_panel1.unknown_limit 3"
+    echo "power_panel2.unknown_limit 3"
+    #echo "power_panel3.unknown_limit 3"
+    #echo "power_panel4.unknown_limit 3"
+
+    echo "multigraph voltage_current_input_inverter"
+    echo "graph_scale no"
+    echo "graph_title AC Measurements - SN: $SLRM_DEVICE_SN"
+    echo "graph_vlabel V/A/W/H"
+    echo "graph_category sensors"
+    echo "graph_args -l 0 --base 1000"
+    echo "graph_info The current AC Voltage, Frequency, Current and Power of Inverter SN: $SLRM_DEVICE_SN"
+    echo "voltage_inverter.label   AC Voltage      (Volt)"
+    echo "current_inverter.label   AC Current      (Ampere)"
+    echo "power_inverter.label     AC Output Power (Watt)"
+    echo "frequency_inverter.label AC Frequency    (Hertz)"
+    echo "frequency_inverter.warning 49.82:50.18"
+    echo "frequency_inverter.critical 49:51.5"
+    echo "frequency_inverter.info www.netzfrequenz.info/aktuelle-netzfrequenz-full"
+    echo "voltage_inverter.warning 207:253"
+    echo "current_inverter.warning :14"
+    echo "current_inverter.critical :16"
+    echo "voltage_inverter.unknown_limit 3"
+    echo "current_inverter.unknown_limit 3"
+    echo "power_inverter.unknown_limit 3"
+    echo "frequency_inverter.unknown_limit 3"
+
+    exit 0
+fi
+
+# Funktionsaufrufe
+get_token
+get_data
+
+echo "multigraph production_total"
+# hier kein echo, lese werte aus STATEFILE aus, sorgt dafür das der Graph nachts nicht unterbrochen wird
+echo total_inverter.value    "$(cat "$MUNIN_STATEFILE" | jq -r '.dataList[]|select(.key|IN("Et_ge0"))|.value' 2> /dev/null || echo U)"
+echo total_panel1.value      "$(cat "$MUNIN_STATEFILE" | jq -r '.dataList[]|select(.key|IN("Et_ge1"))|.value' 2> /dev/null || echo U)"
+echo total_panel2.value      "$(cat "$MUNIN_STATEFILE" | jq -r '.dataList[]|select(.key|IN("Et_ge2"))|.value' 2> /dev/null || echo U)"
+#echo total_panel3.value      "$(cat "$MUNIN_STATEFILE" | jq -r '.dataList[]|select(.key|IN("Et_ge3"))|.value' 2> /dev/null || echo U)"
+#echo total_panel4.value      "$(cat "$MUNIN_STATEFILE" | jq -r '.dataList[]|select(.key|IN("Et_ge4"))|.value' 2> /dev/null || echo U)"
+
+echo "multigraph temp"
+echo temp.value              "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("AC_RDT_T1"))|.value' 2> /dev/null || echo U )"
+
+echo "multigraph production_daily"
+# hier kein echo, lese werte aus STATEFILE aus, sorgt dafür das der Graph nachts nicht unterbrochen wird
+echo daily_inverter.value    "$(cat "$MUNIN_STATEFILE" | jq -r '.dataList[]|select(.key|IN("Etdy_ge0"))|.value' 2> /dev/null || echo U )"
+echo daily_panel1.value      "$(cat "$MUNIN_STATEFILE" | jq -r '.dataList[]|select(.key|IN("Etdy_ge1"))|.value' 2> /dev/null || echo U )"
+echo daily_panel2.value      "$(cat "$MUNIN_STATEFILE" | jq -r '.dataList[]|select(.key|IN("Etdy_ge2"))|.value' 2> /dev/null || echo U )"
+#echo daily_panel3.value      "$(cat "$MUNIN_STATEFILE" | jq -r '.dataList[]|select(.key|IN("Etdy_ge3"))|.value' 2> /dev/null || echo U )"
+#echo daily_panel4.value      "$(cat "$MUNIN_STATEFILE" | jq -r '.dataList[]|select(.key|IN("Etdy_ge4"))|.value' 2> /dev/null || echo U )"
+
+echo "multigraph voltage_current_input_panels"
+echo voltage_panel1.value    "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DV1"))|.value' 2> /dev/null || echo U )"
+echo current_panel1.value    "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DC1"))|.value' 2> /dev/null || echo U )"
+echo power_panel1.value      "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DP1"))|.value' 2> /dev/null || echo U )"
+echo voltage_panel2.value    "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DV2"))|.value' 2> /dev/null || echo U )"
+echo current_panel2.value    "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DC2"))|.value' 2> /dev/null || echo U )"
+echo power_panel2.value      "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DP2"))|.value' 2> /dev/null || echo U )"
+#echo voltage_panel3.value    "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DV3"))|.value' 2> /dev/null || echo U )"
+#echo current_panel3.value    "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DC3"))|.value' 2> /dev/null || echo U )"
+#echo power_panel3.value      "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DP3"))|.value' 2> /dev/null || echo U )"
+#echo voltage_panel4.value    "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DV4"))|.value' 2> /dev/null || echo U )"
+#echo current_panel4.value    "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DC4"))|.value' 2> /dev/null || echo U )"
+#echo power_panel4.value      "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("DP4"))|.value' 2> /dev/null || echo U )"
+
+
+echo "multigraph voltage_current_input_inverter"
+echo voltage_inverter.value  "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("AV1"))|.value' 2> /dev/null || echo U )"
+echo current_inverter.value  "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("AC1"))|.value' 2> /dev/null || echo U )"
+echo power_inverter.value    "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("APo_t1"))|.value' 2> /dev/null || echo U )"
+echo frequency_inverter.value "$(echo "$SLRM_DATA" | jq -r '.dataList[]|select(.key|IN("AC_Fo1"))|.value' 2> /dev/null || echo U )"
+
+echo "multigraph api_reachable"
+echo "reachable.value $reachable"
+echo "retries.value $count"
+
+exit 0

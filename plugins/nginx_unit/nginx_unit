@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to monitor NGINX Unit applications.
+
+=head1 NAME
+
+nginx_unit - monitor NGINX Unit applications
+
+=head1 APPLICABLE SYSTEMS
+
+Systems with NGINX Unit running. See https://unit.nginx.org/ for more
+information.
+
+=head1 CONFIGURATION
+
+No configuration is required for this plugin.
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import os
+import re
+import subprocess
+import sys
+import unicodedata
+
+
+def safename(name):
+    """Return safe variable name."""
+    # Convert ä->a as isalpha('ä') is true
+    value = unicodedata.normalize('NFKD', name)
+    value = value.encode('ASCII', 'ignore').decode('utf-8')
+
+    # Remove non-alphanumeric chars
+    return ''.join(char.lower() if char.isalnum() else '_' for char in value)
+
+
+def run_binary(arg):
+    """Run binary and return output."""
+    try:
+        return subprocess.run(arg, stdout=subprocess.PIPE, check=False,
+                              encoding='utf-8', errors='ignore').stdout
+    except FileNotFoundError:
+        return ''
+
+
+def parse_time(value):
+    """Parse "dd-hh:mm:ss", "hh:mm:ss" and "mm:ss" to seconds."""
+    days = hours = '0'
+    if '-' in value:
+        days, value = value.split('-', 1)
+    if value.count(':') == 2:
+        hours, value = value.split(':', 1)
+    minutes, seconds = value.split(':')
+    return (int(days) * 86400 + int(hours) * 3600 + int(minutes) * 60 +
+            int(seconds))
+
+
+def find_apps():
+    """Return dict of found applications."""
+    apps = {}
+    ps_lines = run_binary(['ps', '-eo', '%cpu,etime,rss,command']).splitlines()
+    for line in ps_lines:
+        appmatch = re.match(r' *([.0-9]+) +([-:0-9]+) +([0-9]+) '
+                            r'unit: "(.*)" application', line)
+        if not appmatch:
+            continue
+        cpu = float(appmatch.group(1))
+        age = parse_time(appmatch.group(2))
+        memory = int(appmatch.group(3)) * 1024
+        appname = appmatch.group(4)
+        if appname in apps:
+            apps[appname]['count'] += 1
+            apps[appname]['cpu'] += cpu
+            apps[appname]['age'] += age
+            apps[appname]['memory'] += memory
+        else:
+            apps[appname] = {
+                'count': 1,
+                'cpu': cpu,
+                'age': age,
+                'memory': memory,
+            }
+    return apps
+
+
+def config(apps):
+    """Print plugin config."""
+    print('multigraph nginx_unit_process')
+    print('graph_title Unit application processes')
+    print('graph_info NGINX Unit application process counts.')
+    print('graph_category appserver')
+    print('graph_vlabel processes')
+    print('graph_args --lower-limit 0')
+    print('graph_scale no')
+    for app in sorted(apps):
+        safe = safename(app)
+        print(f'{safe}.label {app} processes')
+        print(f'{safe}.draw AREASTACK')
+
+    print('multigraph nginx_unit_cpu')
+    print('graph_title Unit application average CPU usage')
+    print('graph_info NGINX Unit application average CPU usage per process.')
+    print('graph_category appserver')
+    print('graph_vlabel %')
+    print('graph_args --lower-limit 0')
+    print('graph_scale no')
+    for app in sorted(apps):
+        safe = safename(app)
+        print(f'{safe}.label {app} CPU')
+
+    print('multigraph nginx_unit_age')
+    print('graph_title Unit application average age')
+    print('graph_info NGINX Unit application average age per process.')
+    print('graph_category appserver')
+    print('graph_vlabel days')
+    print('graph_args --lower-limit 0')
+    for app in sorted(apps):
+        safe = safename(app)
+        print(f'{safe}.label {app} age')
+
+    print('multigraph nginx_unit_memory')
+    print('graph_title Unit application average memory')
+    print('graph_info NGINX Unit application average memory per process.')
+    print('graph_category appserver')
+    print('graph_vlabel bytes')
+    print('graph_args --lower-limit 0 --base 1024')
+    for app in sorted(apps):
+        safe = safename(app)
+        print(f'{safe}.label {app} memory')
+
+    print('multigraph nginx_unit_total_memory')
+    print('graph_title Unit application total memory')
+    print('graph_info NGINX Unit application total memory.')
+    print('graph_category appserver')
+    print('graph_vlabel bytes')
+    print('graph_args --lower-limit 0 --base 1024')
+    for app in sorted(apps):
+        safe = safename(app)
+        print(f'{safe}.label {app} memory')
+        print(f'{safe}.draw AREASTACK')
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch(apps)
+
+
+def fetch(apps):
+    """Print values."""
+    print('multigraph nginx_unit_process')
+    for app, values in apps.items():
+        safe = safename(app)
+        print(f'{safe}.value {values["count"]}')
+
+    print('multigraph nginx_unit_cpu')
+    for app, values in apps.items():
+        safe = safename(app)
+        print(f'{safe}.value {values["cpu"] / values["count"]}')
+
+    print('multigraph nginx_unit_age')
+    for app, values in apps.items():
+        safe = safename(app)
+        print(f'{safe}.value {values["age"] / values["count"] / 86400}')
+
+    print('multigraph nginx_unit_memory')
+    for app, values in apps.items():
+        safe = safename(app)
+        print(f'{safe}.value {values["memory"] / values["count"]}')
+
+    print('multigraph nginx_unit_total_memory')
+    for app, values in apps.items():
+        safe = safename(app)
+        print(f'{safe}.value {values["memory"]}')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if find_apps() else 'no (NGINX Unit is not running)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config(find_apps())
+    else:
+        fetch(find_apps())

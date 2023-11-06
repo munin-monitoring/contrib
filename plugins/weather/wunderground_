@@ -1,0 +1,367 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+wunderground - Plugin to monitor weather stations through Weather Underground
+
+The precipitation rate is recalculated from the daily cumulative sum
+precipTotal, as a DERIVE value, rather than using the immediate precipRate as a
+GAUGE. This allows to have more correct aggregates for the
+weekly/monstly/yearly graphs, particularly in case of missing values.
+
+However, to work around the limitation that DERIVE only supports integers, the
+decimal point is also shifted two places right (*100) from the reported value,
+so even small values can be represented. The value is then rescaled to cancel
+this shift (/100), and expressed per hour rather than second (*3600), as it is
+the usual unit for precipitation.
+
+=head1 CONFIGURATION
+
+	[wunderground]
+	env.api_key e1f10a1e78da46f5b10a1e78da96f525 # this is the default; it seems to be what the website uses
+	env.station_id KCASANFR1708
+	env.units metric		# optional, this is the default
+	env.base_url			# optional, default to https://api.weather.com/v2/pws/observations/current
+	env.connect_timeout 1		# optional, amount to wait for requests, in seconds
+	env.alerts yes			# optional, controls whether to report alerts, enabled by default
+
+Alternatively, the station_id can be encoded in the name of the symlink as
+wunderground_STATIONID (e.g., wundergound_KCASANFR1708). This allows to monitor
+multiple stations at once. The configuration can then omit the station_id (it
+will be ignored if present), and only one section can be used for all instances
+of the plugin.
+
+	[wunderground_*]
+	env.api_key e1f10a1e78da46f5b10a1e78da96f525 # this is the default; it seems to be what the website uses
+	env.units metric		# optional, this is the default
+	env.base_url			# optional, default to https://api.weather.com/v2/pws/observations/current
+	env.connect_timeout 1		# optional, amount to wait for requests, in seconds
+
+=head1 AUTHOR
+
+Olivier Mehani
+
+Copyright (C) 2020--2021 Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+# Example output
+#
+# curl 'https://api.weather.com/v2/pws/observations/current?apiKey=e1f10a1e78da46f5b10a1e78da96f525&stationId=KCASANFR1708&numericPrecision=decimal&format=json&units=m'
+#{"observations":[{"stationID":"KCASANFR1708","obsTimeUtc":"2020-06-15T06:30:54Z","obsTimeLocal":"2020-06-14 23:30:54","neighborhood":"Van Ness - Civic Center","softwareType":"Weather logger V3.0.8","country":"US","solarRadiation":null,"lon":-122.423,"realtimeFrequency":null,"epoch":1592202654,"lat":37.788,"uv":null,"winddir":null,"humidity":90.0,"qcStatus":1,"imperial":{"temp":58.6,"heatIndex":58.6,"dewpt":55.8,"windChill":null,"windSpeed":null,"windGust":null,"pressure":29.85,"precipRate":null,"precipTotal":null,"elev":187.0}}]}
+
+set -eu
+
+# shellcheck disable=SC1090
+. "${MUNIN_LIBDIR}/plugins/plugin.sh"
+
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+
+PLUGIN_NAME="$(basename "${0}")"
+STATION_ID="$(echo "${PLUGIN_NAME}" | sed 's/.*_//')"
+# Use the station ID from the config only if the plugin doesn't specify one
+STATION_ID=${STATION_ID:-${station_id:-KCASANFR1708}}
+
+API_KEY=${api_key:-e1f10a1e78da46f5b10a1e78da96f525}
+UNITS=${units:-metric}
+BASE_URL=${base_url:-https://api.weather.com/v2/pws/observations/current}
+CONNECT_TIMEOUT=${connect_timeout:-1}
+if [ "${alerts:-yes}" = yes ]; then
+	USE_ALERTS=yes
+fi
+
+UNITS_ARG='&units=m'
+DISTANCE_UNIT='m'
+PRESSURE_UNIT='hPa'
+PRECIPITATION_UNIT='mm'
+SPEED_UNIT='km/h'
+TEMP_UNIT='°C'
+# https://en.wikipedia.org/wiki/Wind_chill#/media/File:Windchill_effect_en.svg
+WIND_CHILL_CAUTION=-35:
+WIND_CHILL_DANGER=-60:
+# https://en.wikipedia.org/wiki/Heat_index#Table_of_values
+HEAT_INDEX_CAUTION=27
+HEAT_INDEX_EXTREME_CAUTION=33
+HEAT_INDEX_DANGER=41
+HEAT_INDEX_EXTREME_DANGER=54
+if [ "${UNITS}" = "imperial" ]; then
+	UNITS_ARG='&units=e'
+	DISTANCE_UNIT='ft'
+	PRESSURE_UNIT='in'
+	PRECIPITATION_UNIT='in'
+	SPEED_UNIT='mph'
+	TEMP_UNIT='°F'
+	WIND_CHILL_CAUTION=-31:
+	WIND_CHILL_DANGER=-76:w
+	HEAT_INDEX_CAUTION=80
+	HEAT_INDEX_EXTREME_CAUTION=91
+	HEAT_INDEX_DANGER=105
+	HEAT_INDEX_EXTREME_DANGER=130
+fi
+API_URL="${BASE_URL}?apiKey=${API_KEY}&stationId=${STATION_ID}&numericPrecision=decimal&format=json${UNITS_ARG}"
+
+check_deps() {
+	for CMD in curl jq; do
+		if ! command -v "${CMD}" >/dev/null; then
+			echo "no (${CMD} not found)"
+		fi
+	done
+}
+
+CURL_ARGS="-s --connect-timeout ${CONNECT_TIMEOUT}"
+fetch() {
+	# shellcheck disable=SC2086
+	curl -f ${CURL_ARGS} "$@" \
+		|| { echo "error fetching ${*}" >&2; false; }
+}
+
+config() {
+	local STATION_INFO="in \(.neighborhood), \(.country) reported by station \(.stationID) (\(.lon), \(.lat), \(.${UNITS}.elev) m) at \(.obsTimeLocal) (\(.obsTimeUtc))"
+	fetch "${API_URL}" | jq -r ".observations[0]
+				| @text \"
+multigraph wunderground_${STATION_ID}
+graph_title Weather in \(.neighborhood)
+graph_info Weather ${STATION_INFO}
+graph_category weather
+graph_vlabel Temperature / UV Index / Precipitation
+graph_order temp=temperature.temp windChill=temperature.windChill heatIndex=temperature.heatIndex uv=uv_index.uv precipRate=precipitation.precipRate
+temp.label Temperature [${TEMP_UNIT}]
+windChill.label Wind chill [${TEMP_UNIT}]
+heatIndex.label Heat index [${TEMP_UNIT}]
+uv.label UV index
+precipRate.draw AREA
+precipRate.label Precipitation rate [${PRECIPITATION_UNIT} per hour]
+
+multigraph wunderground_${STATION_ID}.air_humidity
+graph_title Humidity in \(.neighborhood)
+graph_info Humidity ${STATION_INFO}
+graph_category weather
+graph_args -l 0 --upper-limit 100
+graph_vlabel Humidity [%]
+humidity.label Humidity
+humidity.min 0
+humidity.max 100
+
+multigraph wunderground_${STATION_ID}.location
+graph_title Location of \(.stationID)
+graph_info Track geographic coordinates of station \(.stationID); last: \(.lon), \(.lat), \(.${UNITS}.elev) ${DISTANCE_UNIT} at \(.obsTimeLocal) (\(.obsTimeUtc))
+graph_category weather
+graph_scale no
+graph_vlabel lon/lat [°] / elevation [${DISTANCE_UNIT}]
+lon.label Longitude [°]
+lat.label Latitude [°]
+elev.label Elevation [${DISTANCE_UNIT}]
+
+multigraph wunderground_${STATION_ID}.precipitation
+graph_title Precipitation in \(.neighborhood)
+graph_info Precipitation ${STATION_INFO}
+graph_category weather
+graph_args -l 0 --base 1000
+graph_vlabel Precipitation [${PRECIPITATION_UNIT} per hour]
+precipRate.label Precipitation rate
+avgRate.label Average precipitation rate
+avgRate.type DERIVE
+avgRate.draw AREA
+avgRate.min 0
+avgRate.cdef avgRate,36,*
+
+multigraph wunderground_${STATION_ID}.air_pressure
+graph_title Pressure in \(.neighborhood)
+graph_info Pressure ${STATION_INFO}
+graph_category weather
+graph_scale no
+graph_vlabel Pressure [${PRESSURE_UNIT}]
+pressure.label Pressure
+
+multigraph wunderground_${STATION_ID}.solar_radiation
+graph_title Solar radiation in \(.neighborhood)
+graph_info Solar radiation ${STATION_INFO}
+graph_category weather
+graph_args -l 0 --base 1000
+graph_vlabel Solar radiation [W/m^2]
+solarRadiation.label Solar radiation
+
+multigraph wunderground_${STATION_ID}.temperature
+temp.label Temperature
+graph_title Temperature in \(.neighborhood)
+graph_info Temperature ${STATION_INFO}
+graph_category weather
+graph_vlabel Temperature [${TEMP_UNIT}]
+temp.label Temperature
+
+dewpt.label Dew point
+dewpt.info Temperature to which air must be cooled to become saturated with water vapor. When cooled further, the airborne water vapor will condense to form liquid water (dew). When air cools to its dew point through contact with a surface that is colder than the air, water will condense on the surface. When the temperature is below the freezing point of water, the dew point is called the frost point, as frost is formed rather than dew.
+
+windChill.label Wind chill
+windChill.info Represent the lowering of body temperature due to the passing-flow of lower-temperature air.  Wind chill numbers are always lower than the air temperature for values where the formula is valid. When the apparent temperature is higher than the air temperature, the heat index is used instead.
+${USE_ALERTS:+
+windChill.warning ${WIND_CHILL_CAUTION}
+windChill.critical ${WIND_CHILL_DANGER}
+}
+windChillCaution.label Wind chill Caution
+windChillCaution.info Danger of frostbite
+windChillCaution.colour 5358f6
+windChillCaution.line ${WIND_CHILL_CAUTION}
+windChillDanger.label Wind chill Danger
+windChillDanger.info Great danger of frostbite
+windChillDanger.colour 5c1ff5
+windChillDanger.line ${WIND_CHILL_DANGER}
+
+heatIndex.label Heat index
+heatIndex.info Index that combines air temperature and relative humidity, in shaded areas, to posit a human-perceived equivalent temperature, as how hot it would feel if the humidity were some other value in the shade.
+${USE_ALERTS:+
+heatIndex.warning ${HEAT_INDEX_EXTREME_CAUTION}
+heatIndex.critical ${HEAT_INDEX_DANGER}
+}
+heatIndexCaution.label Heat index Caution
+heatIndexCaution.info Fatigue is possible with prolonged exposure and activity. Continuing activity could result in heat cramps.
+heatIndexCaution.colour ffff66
+heatIndexCaution.line ${HEAT_INDEX_CAUTION}
+heatIndexECaution.label Heat index Extreme Caution
+heatIndexECaution.info Heat cramps and heat exhaustion are possible. Continuing activity could result in heat stroke.
+heatIndexECaution.colour ffd700
+heatIndexECaution.line ${HEAT_INDEX_EXTREME_CAUTION}
+heatIndexDanger.label Heat index Danger
+heatIndexDanger.info Heat cramps and heat exhaustion are likely; heat stroke is probable with continued activity.
+heatIndexDanger.colour ff8c00
+heatIndexDanger.line ${HEAT_INDEX_DANGER}
+heatIndexEDanger.label Heat index Extreme Danger
+heatIndexEDanger.info Heat stroke is imminent.
+heatIndexEDanger.colour ff0000
+heatIndexEDanger.line ${HEAT_INDEX_EXTREME_DANGER}
+
+multigraph wunderground_${STATION_ID}.uv_index
+graph_title UV Index in \(.neighborhood)
+graph_info UV index ${STATION_INFO}
+graph_category weather
+graph_args -l 0
+graph_vlabel UV index
+uv.label UV index
+uv.min 0
+${USE_ALERTS:+
+uv.warning 5
+uv.critical 7
+}
+moderate.label Moderate
+moderate.info Stay in shade near midday when the Sun is strongest. If outdoors, wear Sun protective clothing, a wide-brimmed hat, and UV-blocking sunglasses. Generously apply broad spectrum SPF 30+ sunscreen every 1.5 hours, even on cloudy days, and after swimming or sweating. Bright surfaces, such as sand, water, and snow, will increase UV exposure.
+moderate.colour fff300
+moderate.line 3
+high.label High
+high.info Reduce time in the Sun between 10 a.m. and 4 p.m. If outdoors, seek shade and wear Sun protective clothing, a wide-brimmed hat, and UV-blocking sunglasses. Generously apply broad spectrum SPF 30+ sunscreen every 1.5 hours, even on cloudy days, and after swimming or sweating. Bright surfaces, such as sand, water, and snow, will increase UV exposure.
+high.colour f18b00
+high.line 6
+veryhigh.label Very high
+veryhigh.info Minimize Sun exposure between 10 a.m. and 4 p.m. If outdoors, seek shade and wear Sun protective clothing, a wide-brimmed hat, and UV-blocking sunglasses. Generously apply broad spectrum SPF 30+ sunscreen every 1.5 hours, even on cloudy days, and after swimming or sweating. Bright surfaces, such as sand, water, and snow, will increase UV exposure.
+veryhigh.colour e53210
+veryhigh.line 8
+extreme.label Extreme
+extreme.info Try to avoid Sun exposure between 10 a.m. and 4 p.m. If outdoors, seek shade and wear Sun protective clothing, a wide-brimmed hat, and UV-blocking sunglasses. Generously apply broad spectrum SPF 30+ sunscreen every 1.5 hours, even on cloudy days, and after swimming or sweating. Bright surfaces, such as sand, water, and snow, will increase UV exposure.
+extreme.colour b567a4
+extreme.line 11
+
+multigraph wunderground_${STATION_ID}.wind
+graph_title Wind Speed in \(.neighborhood)
+graph_info Wind speed and gusts ${STATION_INFO}
+graph_category weather
+graph_args -l 0 --base 1000
+graph_vlabel Wind speed [${SPEED_UNIT}]
+windSpeed.label Wind speed
+windGust.label Wind gusts
+
+multigraph wunderground_${STATION_ID}.wind_direction
+graph_title Wind Direction in \(.neighborhood)
+graph_info Wind direction ${STATION_INFO}
+graph_category weather
+graph_args --base 1000 -l 0 --upper-limit 360
+graph_vlabel Wind [°]
+winddir.label Wind origin
+winddir.min 0
+winddir.max 360
+winddir.line 0
+north.label North
+north.colour COLOUR0
+north.line 360
+east.label East
+east.colour COLOUR1
+east.line 90
+south.label South
+south.colour COLOUR2
+south.line 180
+west.label West
+west.colour COLOUR9
+west.line 270
+\""
+}
+
+get_data() {
+	fetch "${API_URL}" | jq -r ".observations[0]
+				| @text \"
+multigraph wunderground_${STATION_ID}
+
+multigraph wunderground_${STATION_ID}.air_humidity
+humidity.value \(.humidity)
+
+multigraph wunderground_${STATION_ID}.location
+lon.value \(.lon)
+lat.value \(.lat)
+elev.value \(.${UNITS}.elev)
+
+multigraph wunderground_${STATION_ID}.precipitation
+precipRate.value \(.${UNITS}.precipRate)
+avgRate.value \(.${UNITS}.precipTotal*100 | round)
+avgRate.extinfo Immediate precipitation: \(.${UNITS}.precipRate) ${PRECIPITATION_UNIT}/h; Daily total: \(.${UNITS}.precipTotal) ${PRECIPITATION_UNIT}
+
+multigraph wunderground_${STATION_ID}.air_pressure
+pressure.value \(.${UNITS}.pressure)
+
+multigraph wunderground_${STATION_ID}.solar_radiation
+solarRadiation.value \(.solarRadiation)
+
+multigraph wunderground_${STATION_ID}.temperature
+temp.value \(.${UNITS}.temp)
+dewpt.value \(.${UNITS}.dewpt)
+windChill.value \(.${UNITS}.windChill)
+heatIndex.value \(.${UNITS}.heatIndex)
+
+multigraph wunderground_${STATION_ID}.uv_index
+uv.value \(.uv)
+
+multigraph wunderground_${STATION_ID}.wind
+windSpeed.value \(.${UNITS}.windSpeed)
+windGust.value \(.${UNITS}.windGust)
+
+multigraph wunderground_${STATION_ID}.wind_direction
+winddir.value \(.winddir)
+\"" | sed 's/ null$/U/'
+}
+
+main () {
+	check_deps
+
+	case ${1:-} in
+		config)
+			config
+			if [ "${MUNIN_CAP_DIRTYCONFIG:-0}" = "1" ]; then
+				get_data
+			fi
+			;;
+		*)
+			get_data
+			;;
+	esac
+}
+
+main "${1:-}"

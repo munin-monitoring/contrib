@@ -1,0 +1,91 @@
+#!/bin/sh
+# -*- sh -*-
+
+: <<=cut
+
+=head1 NAME
+
+tr_ratios - monitor transfer ratios of the "transmission" bittorent program
+
+=head1 APPLICABLE SYSTEMS
+
+Any system with "transmission" installed and a transmission daemon running.
+
+=head1 CONFIGURATION
+
+Maybe you need to configure access credentials and connection settings:
+
+  [tr_ratios]
+  env.host localhost
+  env.port 9091
+  env.username alice
+  env.password secret
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 AUTHOR
+
+unspecified
+
+=head1 LICENSE
+
+unspecified
+
+=cut
+
+
+CONNECTION_ARG="${host:-localhost}:${port:-9091}"
+USERNAME="${username:-}"
+PASSWORD="${password:-}"
+
+
+# return a space separated list of transmissions with the following columns:
+#  * fieldname
+#  * ratio (in percent)
+#  * name of the transmissions
+request_transmission_stats() {
+	if [ -n "$USERNAME$PASSWORD" ]; then
+		transmission-remote "$CONNECTION_ARG" --auth "$USERNAME:$PASSWORD" --list
+	else
+		transmission-remote "$CONNECTION_ARG" --list
+	fi | awk '
+		BEGIN { FIELDWIDTHS = "7 4 13 10 7 9 7 13 40" }
+		NR > 1 {
+			split($1,torrentid," ")
+			# remove "*" from the ID of stopped transmissions
+			sub(/\*/, "", torrentid[1])
+			if (torrentid[1] != "Sum:") {
+				split($7,ratio," ")
+				ratio[1] = ratio[1] * 100
+				print "ID" torrentid[1], ratio[1], $9
+			}
+		}'
+}
+
+
+if [ "$1" = "autoconf" ]; then
+	if [ -n "$(request_transmission_stats 2>/dev/null)" ]; then
+		echo "yes"
+	else
+		if which transmission-remote >/dev/null; then
+			echo "no (failed to connect to daemon)"
+		else
+			echo "no (missing 'transmission-remote' program)"
+		fi
+	fi
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+        echo "graph_title Transmission seed ratios"
+	echo "graph_vlabel Seed ratio %"
+	echo "graph_category filetransfer"
+	echo "graph_info This plugin shows your transmission ratios per torrent"
+	request_transmission_stats | awk '{print $1 ".label " $3 }' | iconv -f utf-8 -t ascii//translit
+        exit 0
+fi
+
+request_transmission_stats | awk '{print $1 ".value " $2 }'

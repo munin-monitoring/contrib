@@ -1,18 +1,19 @@
 #!/usr/bin/perl -w
 use strict;
+use JSON qw(decode_json);
 #
 # byprojects_access
 #
-# Perl script to monitor access *byprojects* (e.g. vhost) from multiple files 
+# Perl script to monitor access *byprojects* (e.g. vhost) from multiple files
 # and/or regex.
 #
-# Danny Fullerton <northox@mantor.org> 
+# Danny Fullerton <northox@mantor.org>
 # Mantor Organization <www.mantor.org>
 # This work is licensed under a MIT license.
 #
 # You need logtail (https://www.fourmilab.ch/webtools/logtail/)
 #
-# Log can be gathered from multiple sources by simply specifying multiple log 
+# Log can be gathered from multiple sources by simply specifying multiple log
 # filename or using wildcards (glob). File content can be selected using regex.
 #
 # - 'prod' => [ {'path' => '/home/prod/log/access.log'} ],
@@ -23,25 +24,23 @@ use strict;
 #   Test graph will be using everything file matching /home/test/log/access*.log
 #   and stuff that match the expression '"[A-Z] /test/' in /var/log/access.log
 #   such as '"GET /test/'
+#
+# Configuration
+# [byprojects_*]
+# env.logtail_path /usr/local/bin/logtail
+# env.site.prod  [{"path":"/home/prod/log/access.log"}]
+# env.site.dev   [{"path":"/var/log/httpd/ssl-dev-access.log"}, {"path":"/home/dev/log/access*.log"}]
+# env.site.test  [{"path":"/var/log/access.log","regex":"\"[A-Z]+ /test/"}, {"path":"/home/test/log/access.log"}]
 
 my $server = 'Nginx';
 
-my $statepath = '/usr/local/var/munin/plugin-state';
-my $logtail = '/usr/local/bin/logtail';
+my $statepath = $ENV{MUNIN_PLUGSTATE};
+my $logtail = $ENV{logtail_path} || '/usr/local/bin/logtail';
 
-my %logs = (
-    'prod' => [
-                {'path' => '/home/prod/log/access.log'}
-              ],
-    'dev'  => [
-                {'path' => '/var/log/httpd/ssl-dev-access.log'},
-                {'path' => '/home/dev/log/access*.log'} # glob is supported
-              ],
-    'test' => [
-                {'path' => '/var/log/access.log', 'regex' => '"[A-Z]+ /test/'},
-                {'path' => '/home/test/log/access.log'}
-              ],
-);
+my @loglist = grep {$_ =~ /site\./} keys(%ENV);
+my %envLogs = %ENV{@loglist};
+my %logs;
+while(my($k, $v) = each %envLogs) { @logs{substr($k, 5)} = decode_json($v); }
 
 ###########
 
@@ -56,7 +55,7 @@ if(defined($ARGV[0])) {
     print "graph_title $server access byprojects\n";
     print "graph_total Total\n";
     print "graph_vlabel Access by \${graph_period}\n";
-    print "graph_category $server\n";
+    print "graph_category webserver\n";
     print "graph_info This graph show $server access by various projects.\n";
     while ((my $project, my @files) = each(%logs)) {
       print $project.".label $project\n";
@@ -74,7 +73,7 @@ foreach my $project ( keys %logs )  {
     my @paths = glob $log->{'path'};
     foreach my $path (@paths) {
       my $state = $statepath.'/'.$project.$x.'_access.state';
-      open(LT, "$logtail -f ".$log->{'path'}." -o $state |") or 
+      open(LT, "$logtail -f ".$log->{'path'}." -o $state |") or
         die "Can't open $logtail: $!";
       while (<LT>) {
         my $buf = $_;

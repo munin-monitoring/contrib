@@ -1,0 +1,193 @@
+#!/bin/sh
+
+: <<=cut
+
+=head1 NAME
+
+rsnapshot_duration - monitor duration of rsnapshot backups in detail
+
+
+=head1 APPLICABLE SYSTEMS
+
+Any system with local access to an rsnapshot log file.
+
+
+=head1 CONFIGURATION
+
+rsnapshot's configuration file (e.g. /etc/rsnapshot.conf) needs to
+contain the directive "loglevel 3" in order to write the required
+log messages to the log file.
+
+
+The following configuration represents the plugin's defaults:
+
+  [rsnapshot_duration]
+  env.rsnapshot_log_file        /var/log/rsnapshot
+  env.rsnapshot_operation_name  beta
+  env.rsnapshot_description     Backup Duration
+
+"rsnapshot_description" is used for the title of the graph.
+
+"rsnapshot_operation_name" refers to the interval/retain/level of the
+rsnapshot operation to be monitored.  This should be the lowest
+executed backup interval (e.g. "daily" or "beta").  In case of the
+rsnapshot setting "sync_first 1", it should be "sync".
+
+Multiple rsnapshot log files (with different sets of backup sources)
+can be monitored.  Simply create one plugin symlink for each log file
+and specify suitable plugin configurations for each symlink name.
+
+
+=head1 INTERPRETATION
+
+The backup duration for each single "backup" task is calculated based
+on the difference of the timestamps in the log file.
+
+
+=head1 AUTHOR
+
+Lars Kruse <devel@sumpfralle.de>
+
+
+=head1 LICENSE
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+
+=cut
+
+
+set -eu
+
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+
+LOG_FILE=${rsnapshot_log_file:-/var/log/rsnapshot.log}
+RSNAPSHOT_OPERATION_NAME=${rsnapshot_operation_name:-beta}
+RSNAPSHOT_DESCRIPTION=${rsnapshot_description:-Backup Duration}
+
+
+# retrieve the latest set of log files for a complete backup operation
+get_latest_process_log() {
+    tac "$LOG_FILE" \
+        | awk '
+            BEGIN { in_process = 0; is_finished = 0; }
+            / '"$RSNAPSHOT_OPERATION_NAME"': completed[, ]/ { if (is_finished == 0) in_process = 1; }
+            / '"$RSNAPSHOT_OPERATION_NAME"': started$/ { if (in_process == 1) { in_process = 0; is_finished = 1; }}
+            { if (in_process == 1) print($0); }' \
+        | tac
+}
+
+
+# parse rsnapshot log lines
+# output format:
+#     BACKUP_NAME DURATION_SECONDS [ERROR_MESSAGES]
+get_backups_with_duration() {
+    get_latest_process_log | while read -r timestamp command details; do
+        parsed_timestamp=$(date +%s --date "$(printf '%s' "$timestamp" | tr -d '[]')")
+        if [ -n "${backup_name:-}" ] && printf '%s' "$command" | grep -q "/rsnapshot$" && printf '%s' "$details" | grep -q "ERROR:"; then
+            backup_errors=$(printf '%s' "$details" | sed 's/^.*ERROR: //')
+        elif printf '%s' "$command" | grep -q "/rsync$"; then
+            if [ -n "${backup_name:-}" ]; then
+                printf '%s\t%d\t%s\n' "$backup_name" "$((parsed_timestamp - backup_start))" "${backup_errors:-}"
+            fi
+            backup_name=$(printf '%s' "$details" | sed 's#/$##' | sed 's#^.*/##')
+            backup_start=$parsed_timestamp
+            backup_errors=
+        elif printf '%s' "$command" | grep -q "/rm$"; then
+            # the backup is finished
+            if [ -n "${backup_name:-}" ]; then
+                printf '%s\t%d\t%s\n' "$backup_name" "$((parsed_timestamp - backup_start))" "${backup_errors:-}"
+            fi
+            cat >/dev/null
+        fi
+    done | sort
+}
+
+
+do_autoconf() {
+    if [ -e "$LOG_FILE" ]; then
+        if [ -r "$LOG_FILE" ]; then
+            if command -v "tac" >/dev/null; then
+                echo "yes"
+            else
+                echo "no (executable 'tac' (coreutils) is missing)"
+            fi
+        else
+            echo "no (rsnapshot log file is not readable: $LOG_FILE)"
+        fi
+    else
+        echo "no (rsnapshot log file missing: $LOG_FILE)"
+    fi
+    exit 0
+}
+
+
+get_backup_fieldname() {
+    local backup_name="$1"
+    clean_fieldname "backup_${backup_name}"
+}
+
+
+print_backup_details() {
+    local backup_name="$1"
+    local backup_duration="$2"
+    local backup_messages="$3"
+    local fieldname
+    fieldname=$(get_backup_fieldname "$backup_name")
+    printf '%s.value %s\n' "$fieldname" "$backup_duration"
+    if [ -n "$backup_messages" ]; then
+        printf '%s.extinfo %s\n' "$fieldname" "$backup_messages"
+    fi
+}
+
+
+do_config() {
+    local do_emit_values="${1:-0}"
+    echo "graph_title rsnapshot - $RSNAPSHOT_DESCRIPTION"
+    echo 'graph_vlabel Duration of backup in minutes'
+    echo 'graph_category backup'
+    echo 'graph_scale no'
+    get_backups_with_duration | while read -r name duration messages; do
+        fieldname=$(clean_fieldname "backup_$name")
+        printf '%s.label %s\n' "$fieldname" "$name"
+        printf '%s.draw %s\n' "$fieldname" "AREASTACK"
+        # The duration is stored as an SI unit (seconds).
+        # The visualization as the number of minutes should be suitable for most backups.
+        printf '%s.cdef %s,60,/\n' "$fieldname" "$fieldname"
+        if [ "$do_emit_values" = "1" ]; then
+            print_backup_details "$name" "$duration" "$messages"
+        fi
+    done
+}
+
+
+do_fetch() {
+    get_backups_with_duration | while read -r name duration messages; do
+        print_backup_details "$name" "$duration" "$messages"
+    done
+}
+
+
+case ${1:-} in
+    autoconf)
+        do_autoconf
+        ;;
+    config)
+        do_config "${MUNIN_CAP_DIRTYCONFIG:-0}"
+        ;;
+    "")
+        do_fetch
+        ;;
+    *)
+        echo >&2 "Unknown command: $1"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,193 @@
+#!/usr/bin/perl 
+# -*- perl -*-
+
+=encoding utf8
+
+=head1 NAME
+
+certbot_expiry - Munin plugin to certbot (letsencrypt) certificate expiry
+
+=head1 APPLICABLE SYSTEMS
+
+Servers running certbot certificates.  This script auto-discovers the current set of certificates
+
+=head1 CONFIGURATION
+
+This script requires root permissions to run, in your munin-node configuration:
+
+  [certbot_expiry]
+  user root
+  env.openssl_bin Path to openssl, default: /usr/bin/openssl
+  env.certs_path Path to certificate renewal files, default: /etc/letsencrypt/renewal
+
+=head1 CAPABILITIES
+
+This plugin supports L<DIRTYCONFIG|http://guide.munin-monitoring.org/en/latest/plugin/protocol-dirtyconfig.html>
+
+=head1 LICENSE
+
+Copyright (C) 2018 J.T.Sage (jtsage@gmail.com)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see L<http://www.gnu.org/licenses/>.
+
+=head1 MAGIC MARKERS
+
+  #%# family=manual
+  #%# capabilities=
+
+=cut
+
+use warnings;
+use strict;
+use Munin::Plugin;
+use Date::Parse;
+use POSIX;
+
+my $openSSL  = $ENV{'OPENSSL_BIN'} || "/usr/bin/openssl";
+my $certPATH = $ENV{'CERTS_PATH'}  || "/etc/letsencrypt/renewal";
+my $DEBUG    = $ENV{'MUNIN_DEBUG'} || 0;
+
+if ( defined($ARGV[0]) && $ARGV[0] eq "autoconf" ) {
+	my $keyPATH = $certPATH;
+	$keyPATH =~ s/renewal/live/; 
+	if ( ! ( -e $openSSL) ) {
+		print "no (OpenSSL not found)\n";
+	} else {
+		if ( ! (-e -r -d $certPATH) )  {
+			print "no (Certificates folder not found or not readable)\n";
+		} else {
+			if ( !( -e -r -d $keyPATH ) ) {
+				print "no (Key folder not found or not readable - requires elevated permissions [root])\n";
+			} else {
+				print "yes\n";
+			}
+		}
+	}
+	exit;
+}
+
+# Sanity Check environment.
+if ( ! -e $openSSL ) {
+	die "FATAL: OpenSSL not found.";
+}
+if ( ! (-e -r -d $certPATH) ) {
+	die "FATAL: Certificate folder not found or not readable";
+}
+
+my %thecerts = get_data();
+
+
+
+
+if ( defined($ARGV[0]) && $ARGV[0] eq "config" ) {
+	# Do the config step for each set of graphs
+	do_config(%thecerts);
+
+	# If dirtyconfig is not supported, or turned off, exit here.  Otherwise, continue to fetch section
+	if ( !defined($ENV{'MUNIN_CAP_DIRTYCONFIG'}) || !$ENV{'MUNIN_CAP_DIRTYCONFIG'} ) {  exit 0; }
+}
+
+# Do the fetch step for each set of graphs
+do_values(%thecerts);
+
+
+
+sub do_config {
+	print "graph_title LetsEncrypt Certificate Expiry\n";
+	print "graph_args --upper-limit 90 -l 0\n";
+	print "graph_vlabel days\n";
+	print "graph_category security\n";
+	print "graph_info This graph shows the number of days until certificate expiry\n";
+	
+	my ( %certs ) = @_;
+	
+	foreach my $key ( keys %certs ) {
+		print $certs{$key}{"safename"} . ".label " . $certs{$key}{"name"} . "\n";
+		print $certs{$key}{"safename"} . ".info " . $certs{$key}{"info"} . "\n";
+		print $certs{$key}{"safename"} . ".warning 29:\n";
+		print $certs{$key}{"safename"} . ".critical 15:\n";
+	}
+}
+
+sub do_values {
+	my ( %certs ) = @_;
+	
+	foreach my $key ( keys %certs ) {
+		print $certs{$key}{"safename"} . ".value " . $certs{$key}{"expdays"} . "\n";
+	}
+}
+
+sub get_data {
+	my $runtime = time();
+	my %cert_files;
+	# Get Renewal Files
+	opendir(DIR, $certPATH);
+	my @renew_files = grep(/\.conf$/,readdir(DIR));
+	closedir(DIR);
+
+	# Each renewal file
+	foreach my $file (@renew_files) {
+		my @this_renew = `cat $certPATH/$file`;
+
+		my $cert_name = $file;
+		$cert_name =~ s/\.conf//;
+
+		my $safe_name = $cert_name;
+		$safe_name =~ s/\./_/g;
+
+		# define some sane defaults should something go wrong.
+		$cert_files{$cert_name} = {
+			"name"		=> $cert_name,
+			"safename"	=> $safe_name,
+			"cert"		=> "",
+			"expdays"	=> 0,
+			"info"		=> ""
+		};
+
+		# key file is listed in renewal file, get it.
+		foreach ( @this_renew ) {
+			if ( $_ =~ /cert = (.+?)$/ ) {
+				$cert_files{$cert_name}{"cert"} = $1;
+			}
+		}
+
+		if ( $cert_files{$cert_name}{"cert"} ne "" ) {
+			if ( ! -f -r $cert_files{$cert_name}{"cert"}) {
+				# warn, only on debugging, that a file couldn't be opened.  sane defaults will show zero days remaining for this certificate
+				if ( $DEBUG ) { print "# WARNING: {$cert_name} certificate not found or not readable" }
+			} else {
+				# use openssl for the info
+				my @ssl_info = `$openSSL x509 -noout -in $cert_files{$cert_name}{"cert"} -text -certopt no_subject,no_header,no_version,no_serial,no_signame,no_validity,no_issuer,no_pubkey,no_sigdump,no_aux -enddate`;
+
+				foreach my $line ( @ssl_info ) {
+					if ( $line =~ /notAfter=(.+?)$/ ) {
+						# Grab the expiration date, convert it to days, rounding down.
+						$cert_files{$cert_name}{"expdays"} = floor((str2time($1) - $runtime)/(60*60*24));
+					}
+					if ( $line =~ /(DNS:.+?)$/ ) {
+						# Grab the list of SubjectAlternativeNames, set the info line to that.
+						my $san_line = $1;
+						$san_line =~ s/DNS://g;
+						$cert_files{$cert_name}{"info"} = $san_line;
+					}
+				}	
+			}
+		}	
+	}
+
+	return %cert_files;
+
+}
+
+

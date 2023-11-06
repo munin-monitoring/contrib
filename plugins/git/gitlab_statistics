@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+# -*- python -*-
+
+"""
+=head1 INTRODUCTION
+
+Plugin to monitor Gitlab status
+
+=head1 INSTALLATION
+
+Place in /etc/munin/plugins/ (or link it there using ln -s)
+
+=head1 CONFIGURATION
+
+Add this to your /etc/munin/plugin-conf.d/munin-node:
+
+=over 2
+
+    [gitlab_statistics]
+    env.logarithmic 1
+    env.hostname gitlab.example.com # required
+    env.token YourPrivateTokenHere # required
+
+=back
+
+=head1 AUTHORS
+
+Copyright (C) 2019 pcy <pcy.ulyssis.org>
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import os
+import json
+import urllib.request
+import sys
+
+
+def weakbool(x):
+    return x.lower().strip() in {"true", "yes", "y", "1"}
+
+
+url = None
+if 'hostname' in os.environ and 'token' in os.environ:
+    url = "https://" + os.getenv('hostname') \
+        + "/api/v4/application/statistics?private_token=" \
+        + os.getenv('token')
+
+logarithmic = weakbool(os.getenv('logarithmic', 'N'))
+
+
+def reqjson():
+    try:
+        raw_data = urllib.request.urlopen(url)
+        return json.loads(raw_data.read().decode())
+    except IOError:
+        print("Cannot reach the GitLab API endpoint.", file=sys.stderr)
+        exit(1)
+
+
+def autoconf():
+    if 'hostname' not in os.environ:
+        print("no ('hostname' envvar not set)")
+    elif 'token' not in os.environ:
+        print("no ('token' envvar not set)")
+    else:
+        print("yes")
+
+
+def config():
+    print("""\
+graph_title GitLab statistics
+graph_vlabel amount
+graph_category devel""")
+    if logarithmic:
+        print("graph_args --logarithmic")
+
+    for x in reqjson().keys():
+        print(x + ".label " + x)
+
+
+def fetch():
+    rj = reqjson()
+    for (x, y) in rj.items():
+        print("%s.value %d" % (x, int(y.replace(',', ''))))
+
+
+if len(sys.argv) >= 2:
+    if sys.argv[1] == 'autoconf':
+        autoconf()
+    elif sys.argv[1] == 'config':
+        config()
+    else:
+        fetch()
+else:
+    fetch()

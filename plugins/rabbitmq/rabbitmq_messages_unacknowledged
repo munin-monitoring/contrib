@@ -1,5 +1,5 @@
 #!/bin/sh
-# 
+#
 # Plugin to monitor the queues of a virtual_host in RabbitMQ
 #
 # Usage: Link or copy into /etc/munin/node.d/
@@ -16,7 +16,7 @@
 #%# capabilities=autoconf
 
 # If run with the "autoconf"-parameter, give our opinion on whether we
-# should be run on this system or not. This is optinal, and only used by
+# should be run on this system or not. This is optional, and only used by
 # munin-config. In the case of this plugin, we should most probably
 # always be included.
 
@@ -26,14 +26,14 @@ if [ "$1" = "autoconf" ]; then
 fi
 
 # If run with the "config"-parameter, give out information on how the
-# graphs should look. 
+# graphs should look.
 
 HOME=/tmp/
 VHOST=${vhost:-"/"}
 QUEUES=$(HOME=$HOME rabbitmqctl list_queues -p $VHOST name | \
-		grep -v '^Listing' | \
+		grep -vE '^Timeout:|^Listing|^name' | \
 		grep -v 'done\.$' | sed -e 's/[.=-]/_/g' )
- 
+
 if [ "$1" = "config" ]; then
         QUEUE_WARN=${queue_warn:-10000}
         QUEUE_CRIT=${queue_crit:-20000}
@@ -51,7 +51,7 @@ if [ "$1" = "config" ]; then
 	# We want Cur/Min/Avg/Max unscaled (i.e. 0.42 load instead of
 	# 420 milliload)
 	#echo 'graph_scale no'
-	echo 'graph_category RabbitMQ'
+	echo 'graph_category chat'
 
 	for queue in $QUEUES; do
 		echo "$queue.label $queue"
@@ -71,5 +71,5 @@ fi
 # "value" subfield for every data field.
 
 HOME=$HOME rabbitmqctl list_queues -p $VHOST name messages_unacknowledged | \
-	grep -v "^Listing" | grep -v "done.$" | \
+	grep -vE "^Timeout:|^Listing|^name" | grep -v "done.$" | \
     perl -nle'($q, $s) = split; $q =~ s/[.=-]/_/g; print("$q.value $s")'

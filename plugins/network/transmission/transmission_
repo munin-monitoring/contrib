@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+
+
+from transmission_rpc import Client
+import sys
+import os
+import yaml
+import re
+import time
+from datetime import datetime, timezone
+
+torrent_status = {
+                    'stopped': 0,
+                    'check_pending': 0,
+                    'checking': 0,
+                    'download_pending': 0,
+                    'downloading': 0,
+                    'seed_pending': 0,
+                    'seeding': 0
+                 }
+
+
+def config_activity():
+    print('graph_title Transmission - torrent activity')
+    print('graph_vlabel number of torrents')
+    print('graph_scale no')
+    print('graph_args -l 0')
+    print('graph_category network')
+    print('graph_order torrent_inactive torrent_active_30d torrent_active_1w torrent_active_1d torrent_active_1h torrent_active_5m')
+
+    print('torrent_inactive.label inactive for more than 30 days')
+    print('torrent_inactive.draw AREA')
+
+    print('torrent_active_5m.label active in last 5 mins')
+    print('torrent_active_5m.draw STACK')
+    #print('torrent_active_5m.info .......')
+
+    print('torrent_active_1h.label active in last hour')
+    print('torrent_active_1h.draw STACK')
+
+    print('torrent_active_1d.label active in last 24 hours')
+    print('torrent_active_1d.draw STACK')
+
+    print('torrent_active_1w.label active in last 7 days')
+    print('torrent_active_1w.draw STACK')
+
+    print('torrent_active_30d.label active in last 30 days')
+    print('torrent_active_30d.draw STACK')
+
+def config_status():
+    print('graph_title Transmission - torrent status')
+    print('graph_vlabel number of torrents')
+    print('graph_scale no')
+    print('graph_args -l 0')
+    print('graph_category network')
+
+    first = True
+    for key in torrent_status.keys():
+        if first:
+            draw = 'AREA'
+            first = False
+        else:
+            draw = 'STACK'
+        print(f'torrent_{key}.label {key}')
+        print(f'torrent_{key}.draw {draw}')
+
+def config_traffic():
+    print('graph_title Transmission - traffic')
+    print('graph_vlabel bit/s download (-) / upload (+)')
+    print('graph_scale yes')
+    #print('graph_order download upload')
+    print('graph_category network')
+
+    print(f'upload.label upload')
+    print(f'upload.type DERIVE')
+    print(f'upload.cdef upload,8,*')
+    #print(f'upload.graph no')
+    print(f'upload.min 0')
+
+
+    print(f'download.label download')
+    print(f'download.type DERIVE')
+    print(f'download.cdef download,-8,*')
+    print(f'download.min 0')
+
+def _tr_connect():
+    tr_host = os.getenv('host') or 'localhost'
+    tr_port = os.getenv('port') or '9091'
+    tr_user = os.getenv('user') or ''
+    tr_pass = os.getenv('pass') or ''
+    try:
+        trc = Client(host=tr_host, port=tr_port, username=tr_user, password=tr_pass)
+    except:
+        print(f'Transmission connection error: {tr_host}:{tr_port}',file=sys.stderr)
+        sys.exit(1)
+    return trc
+
+def print_transmission_activity():
+    trc = _tr_connect()
+
+
+    torrent_stat = { }
+    torrent_active_5m = 0
+    torrent_active_1h = 0
+    torrent_active_1d = 0
+    torrent_active_1w = 0
+    torrent_active_30d = 0
+    torrent_inactive = 0
+
+    for torrent in trc.get_torrents():
+        last_active_diff = (datetime.utcnow() - torrent.date_active.replace(tzinfo=None)).total_seconds()
+        if last_active_diff < 300:
+            torrent_active_5m += 1
+        elif last_active_diff < 3600:
+            torrent_active_1h += 1
+        elif last_active_diff < 3600*24:
+            torrent_active_1d += 1
+        elif last_active_diff < 3600*24*7:
+            torrent_active_1w += 1
+        elif last_active_diff < 3600*24*30:
+            torrent_active_30d += 1
+        else:
+            torrent_inactive += 1
+        if str(torrent.status) in torrent_stat.keys():
+            torrent_stat[str(torrent.status)] += 1
+        else:
+            torrent_stat[str(torrent.status)] = 1
+
+    print(f'torrent_inactive.value {torrent_inactive}')
+    print(f'torrent_active_5m.value {torrent_active_5m}')
+    print(f'torrent_active_1h.value {torrent_active_1h}')
+    print(f'torrent_active_1d.value {torrent_active_1d}')
+    print(f'torrent_active_1w.value {torrent_active_1w}')
+    print(f'torrent_active_30d.value {torrent_active_30d}')
+
+def print_transmission_status():
+    trc = _tr_connect()
+
+    for torrent in trc.get_torrents():
+        torrent_status[str(torrent.status).replace(' ', '_')] += 1
+
+    for key in torrent_status.keys():
+        print(f'torrent_{key}.value {torrent_status[key]}')
+
+
+def print_transmission_traffic():
+    trc = _tr_connect()
+
+    session_stats = trc.session_stats()
+
+    print(f'download.value {session_stats.cumulative_stats["downloadedBytes"]}')
+    print(f'upload.value {session_stats.cumulative_stats["uploadedBytes"]}')
+
+
+### MAIN ###
+
+if __name__ == "__main__":
+    command = os.path.basename(sys.argv[0])
+    if len(sys.argv) > 2:
+        sys.exit(1)
+    if len(sys.argv) > 1 and sys.argv[1] == 'config':
+        match command:
+            case 'transmission_activity': config_activity()
+            case 'transmission_status':   config_status()
+            case 'transmission_traffic':  config_traffic()
+            case '_': sys.exit(1)
+    else:
+        match command:
+            case 'transmission_activity': print_transmission_activity()
+            case 'transmission_status':   print_transmission_status()
+            case 'transmission_traffic':  print_transmission_traffic()
+            case '_': sys.exit(1)
+

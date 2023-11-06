@@ -65,7 +65,7 @@ if (count($argv) === 2 && $argv[1] === 'config') {
   echo "graph_title Drupal Page Speed Test\n";
   echo "graph_args --base 1000 --lower-limit 0\n";
   echo "graph_vlabel Page Load Time / ${graph_period}\n";
-  echo "graph_category Drupal\n";
+  echo "graph_category cms\n";
   echo "graph_scale no\n";
   echo "graph_info Displays the time it took for several pages to load\n";
 

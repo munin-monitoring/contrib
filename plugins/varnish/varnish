@@ -1,0 +1,436 @@
+#!/usr/bin/env python3
+# pylint: disable=invalid-name
+# pylint: enable=invalid-name
+
+"""Munin plugin to monitor Varnish status.
+
+=head1 NAME
+
+varnish - monitor Varnish status
+
+=head1 APPLICABLE SYSTEMS
+
+Systems running Varnish cache.
+
+=head1 CONFIGURATION
+
+No configuration is required for this plugin.
+
+=head1 NOTES
+
+This plugin is tested on Varnish 4 but it should also work with v5 and v6.
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+This is based heavily on varnish4_ plugin from Munin contrib
+by Kristian Lyngstol <kristian@bohemians.org> / Redpill Linpro AS.
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import json
+import subprocess
+import sys
+
+
+def run_binary(arg):
+    """Run binary and return output."""
+    try:
+        cmd = subprocess.Popen(
+            arg, shell=False, close_fds=True, bufsize=-1,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        outdata, dummy_errdata = cmd.communicate()
+    except OSError:
+        return ''
+    return outdata.decode('utf-8', 'ignore')
+
+
+def get_values():
+    """Run varnishstat and parse it's output."""
+    output = run_binary(['/usr/bin/varnishstat', '-j'])
+    try:
+        return json.loads(output)['counters']
+    except (TypeError, ValueError):
+        return {}
+
+
+def config():
+    """Print plugin config."""
+    # pylint: disable=too-many-statements
+
+    # backend_traffic
+    print('multigraph varnish_backend_traffic')
+    print('graph_category webserver')
+    print('graph_title Backend traffic')
+    print('backend_busy.label Backend conn. too many')
+    print('backend_busy.min 0')
+    print('backend_busy.type DERIVE')
+    print('backend_conn.label Backend conn. success')
+    print('backend_conn.min 0')
+    print('backend_conn.type DERIVE')
+    print('backend_retry.label Backend conn. retry')
+    print('backend_retry.min 0')
+    print('backend_retry.type DERIVE')
+    print('backend_unhealthy.label Backend conn. not attempted')
+    print('backend_unhealthy.min 0')
+    print('backend_unhealthy.warning :1')
+    print('backend_unhealthy.type DERIVE')
+    print('backend_recycle.label Backend conn. recycles')
+    print('backend_recycle.min 0')
+    print('backend_recycle.type DERIVE')
+    print('backend_fail.label Backend conn. failures')
+    print('backend_fail.min 0')
+    print('backend_fail.type DERIVE')
+    print('backend_reuse.label Backend conn. reuses')
+    print('backend_reuse.min 0')
+    print('backend_reuse.type DERIVE')
+    print('backend_req.label Backend requests made')
+    print('backend_req.min 0')
+    print('backend_req.type DERIVE')
+
+    # bad
+    print('multigraph varnish_bad')
+    print('graph_category webserver')
+    print('graph_title Misbehavior')
+    print('sess_dropped.label Sessions dropped')
+    print('sess_dropped.type DERIVE')
+    print('threads_failed.label Thread creation failed')
+    print('threads_failed.type DERIVE')
+    print('threads_destroyed.label Threads destroyed')
+    print('threads_destroyed.type DERIVE')
+    print('thread_queue_len.label Length of session queue')
+    print('thread_queue_len.type GAUGE')
+    print('sc_pipe_overflow.label Session pipe overflow')
+    print('sc_pipe_overflow.type DERIVE')
+    print('esi_warnings.label ESI parse warnings (unlock)')
+    print('esi_warnings.type DERIVE')
+    print('sess_fail.label Session accept failures')
+    print('sess_fail.type DERIVE')
+    print('backend_busy.label Backend conn. too many')
+    print('backend_busy.type DERIVE')
+    print('esi_errors.label ESI parse errors (unlock)')
+    print('esi_errors.type DERIVE')
+    print('SMA_Transient_c_fail.label Allocator failures SMA Transient')
+    print('SMA_Transient_c_fail.type DERIVE')
+    print('losthdr.label HTTP header overflows')
+    print('losthdr.type DERIVE')
+    print('backend_unhealthy.label Backend conn. not attempted')
+    print('backend_unhealthy.type DERIVE')
+    print('threads_limited.label Threads hit max')
+    print('threads_limited.type DERIVE')
+    print('fetch_failed.label Fetch failed (all causes)')
+    print('fetch_failed.type DERIVE')
+
+    # expunge
+    print('multigraph varnish_expunge')
+    print('graph_category webserver')
+    print('graph_title Object expunging')
+    print('graph_order n_expired n_lru_nuked')
+    print('n_lru_nuked.label Number of LRU nuked objects')
+    print('n_lru_nuked.min 0')
+    print('n_lru_nuked.type DERIVE')
+    print('n_expired.label Number of expired objects')
+    print('n_expired.min 0')
+    print('n_expired.type DERIVE')
+
+    # hit_rate
+    print('multigraph varnish_hit_rate')
+    print('graph_category webserver')
+    print('graph_title Hit rates')
+    print('graph_order client_req cache_hit cache_miss cache_hitpass')
+    print('graph_scale no')
+    print('graph_vlabel %')
+    print('graph_args -l 0 -u 100 --rigid')
+    print('client_req.label Good client requests received')
+    print('client_req.graph off')
+    print('client_req.min 0')
+    print('client_req.type DERIVE')
+    print('cache_miss.label Cache misses')
+    print('cache_miss.min 0')
+    print('cache_miss.draw STACK')
+    print('cache_miss.cdef cache_miss,client_req,/,100,*')
+    print('cache_miss.type DERIVE')
+    print('cache_hit.label Cache hits')
+    print('cache_hit.min 0')
+    print('cache_hit.draw AREA')
+    print('cache_hit.cdef cache_hit,client_req,/,100,*')
+    print('cache_hit.type DERIVE')
+    print('cache_hitpass.label Cache hits for pass')
+    print('cache_hitpass.min 0')
+    print('cache_hitpass.draw STACK')
+    print('cache_hitpass.cdef cache_hitpass,client_req,/,100,*')
+    print('cache_hitpass.type DERIVE')
+
+    # memory_usage
+    print('multigraph varnish_memory_usage')
+    print('graph_category webserver')
+    print('graph_title Memory usage')
+    print('graph_vlabel bytes')
+    print('graph_args --base 1024')
+    print('SMA_Transient_g_bytes.label Bytes outstanding SMA Transient')
+    print('SMA_Transient_g_bytes.type GAUGE')
+    print('SMA_Transient_g_space.label Bytes available SMA Transient')
+    print('SMA_Transient_g_space.type GAUGE')
+    print('SMA_Transient_c_bytes.label Bytes allocated SMA Transient')
+    print('SMA_Transient_c_bytes.type DERIVE')
+
+    # objects
+    print('multigraph varnish_objects')
+    print('graph_category webserver')
+    print('graph_title Number of objects')
+    print('graph_order n_object n_objectcore n_vampireobject n_objecthead')
+    print('n_object.label Number of objects')
+    print('n_object.type GAUGE')
+    print('n_vampireobject.label Number of unresurrected objects')
+    print('n_vampireobject.type GAUGE')
+    print('n_objectcore.label Number of object cores')
+    print('n_objectcore.type GAUGE')
+    print('n_objecthead.label Number of object heads')
+    print('n_objecthead.info Each object head can have one or more object '
+          'attached, typically based on the Vary: header')
+    print('n_objecthead.type GAUGE')
+
+    # request_rate
+    print('multigraph varnish_request_rate')
+    print('graph_category webserver')
+    print('graph_title Request rates')
+    print('graph_order cache_hit cache_hitpass cache_miss backend_conn '
+          'backend_unhealthy client_req client_conn')
+    print('client_req.label Good client requests received')
+    print('client_req.min 0')
+    print('client_req.colour 111111')
+    print('client_req.type DERIVE')
+    print('s_pipe.label Total pipe sessions seen')
+    print('s_pipe.min 0')
+    print('s_pipe.colour 1d2bdf')
+    print('s_pipe.type DERIVE')
+    print('sess_conn.label Sessions accepted')
+    print('sess_conn.graph ON')
+    print('sess_conn.min 0')
+    print('sess_conn.colour 444444')
+    print('sess_conn.type DERIVE')
+    print('cache_miss.label Cache misses')
+    print('cache_miss.min 0')
+    print('cache_miss.draw STACK')
+    print('cache_miss.colour FF0000')
+    print('cache_miss.type DERIVE')
+    print('backend_conn.label Backend conn. success')
+    print('backend_conn.min 0')
+    print('backend_conn.colour 995599')
+    print('backend_conn.type DERIVE')
+    print('s_pass.label Total pass-ed requests seen')
+    print('s_pass.min 0')
+    print('s_pass.colour 785d0d')
+    print('s_pass.type DERIVE')
+    print('backend_unhealthy.label Backend conn. not attempted')
+    print('backend_unhealthy.min 0')
+    print('backend_unhealthy.colour FF55FF')
+    print('backend_unhealthy.type DERIVE')
+    print('cache_hitpass.label Cache hits for pass')
+    print('cache_hitpass.min 0')
+    print('cache_hitpass.draw STACK')
+    print('cache_hitpass.colour FFFF00')
+    print('cache_hitpass.info Hitpass are cached passes: An entry in the '
+          'cache instructing Varnish to pass. Typically achieved after a '
+          'pass in vcl_fetch.')
+    print('cache_hitpass.type DERIVE')
+    print('cache_hit.label Cache hits')
+    print('cache_hit.min 0')
+    print('cache_hit.draw AREA')
+    print('cache_hit.colour 00FF00')
+    print('cache_hit.type DERIVE')
+
+    # threads
+    print('multigraph varnish_threads')
+    print('graph_category webserver')
+    print('graph_title Thread status')
+    print('threads_created.label Threads created')
+    print('threads_created.min 0')
+    print('threads_created.type DERIVE')
+    print('threads_failed.label Thread creation failed')
+    print('threads_failed.min 0')
+    print('threads_failed.warning :1')
+    print('threads_failed.type DERIVE')
+    print('threads_destroyed.label Threads destroyed')
+    print('threads_destroyed.min 0')
+    print('threads_destroyed.warning :1')
+    print('threads_destroyed.type DERIVE')
+    print('threads_limited.label Threads hit max')
+    print('threads_limited.min 0')
+    print('threads_limited.type DERIVE')
+    print('threads.label Total number of threads')
+    print('threads.min 0')
+    print('threads.warning 1:')
+    print('threads.type GAUGE')
+
+    # transfer_rates
+    print('multigraph varnish_transfer_rates')
+    print('graph_category webserver')
+    print('graph_title Transfer rates')
+    print('graph_order s_resp_bodybytes s_resp_hdrbytes')
+    print('graph_vlabel bit/s')
+    print('graph_args -l 0')
+    print('s_resp_bodybytes.label Body traffic')
+    print('s_resp_bodybytes.min 0')
+    print('s_resp_bodybytes.draw AREA')
+    print('s_resp_bodybytes.cdef s_resp_bodybytes,8,*')
+    print('s_resp_bodybytes.type DERIVE')
+    print('s_resp_hdrbytes.label Header traffic')
+    print('s_resp_hdrbytes.min 0')
+    print('s_resp_hdrbytes.draw STACK')
+    print('s_resp_hdrbytes.cdef s_resp_hdrbytes,8,*')
+    print('s_resp_hdrbytes.info HTTP Header traffic. TCP/IP overhead is not '
+          'included.')
+    print('s_resp_hdrbytes.type DERIVE')
+
+    # uptime
+    print('multigraph varnish_uptime')
+    print('graph_category webserver')
+    print('graph_title Varnish uptime')
+    print('graph_scale no')
+    print('graph_vlabel days')
+    print('uptime.label Management process uptime')
+    print('uptime.cdef uptime,86400,/')
+    print('uptime.type GAUGE')
+
+
+def fetch():
+    """Print values."""
+    # pylint: disable=too-many-statements
+    data = get_values()
+    if not data:
+        return
+
+    # backend_traffic
+    print('multigraph varnish_backend_traffic')
+    for key in (
+            'backend_busy',
+            'backend_conn',
+            'backend_retry',
+            'backend_unhealthy',
+            'backend_recycle',
+            'backend_fail',
+            'backend_reuse',
+            'backend_req',
+    ):
+        print('{0}.value {1}'.format(key, data['MAIN.' + key]['value']))
+
+    # bad
+    print('multigraph varnish_bad')
+    for key in (
+            'sess_dropped',
+            'threads_failed',
+            'threads_destroyed',
+            'thread_queue_len',
+            'sc_pipe_overflow',
+            'esi_warnings',
+            'sess_fail',
+            'backend_busy',
+            'esi_errors',
+            'losthdr',
+            'backend_unhealthy',
+            'threads_limited',
+            'fetch_failed',
+    ):
+        print('{0}.value {1}'.format(key, data['MAIN.' + key]['value']))
+    print('SMA_Transient_c_fail.value {0}'.format(
+        data['SMA.Transient.c_fail']['value']))
+
+    # expunge
+    print('multigraph varnish_expunge')
+    for key in (
+            'n_lru_nuked',
+            'n_expired',
+    ):
+        print('{0}.value {1}'.format(key, data['MAIN.' + key]['value']))
+
+    # hit_rate
+    print('multigraph varnish_hit_rate')
+    print('client_req.value {0}'.format(
+        data['MAIN.cache_hit']['value'] +
+        data['MAIN.cache_miss']['value'] +
+        data['MAIN.cache_hitpass']['value']))
+    for key in (
+            'cache_miss',
+            'cache_hit',
+            'cache_hitpass',
+    ):
+        print('{0}.value {1}'.format(
+            key, data['MAIN.' + key]['value']))
+
+    # memory_usage
+    print('multigraph varnish_memory_usage')
+    print('SMA_Transient_g_bytes.value {0}'.format(
+        data['SMA.Transient.g_bytes']['value']))
+    print('SMA_Transient_g_space.value {0}'.format(
+        data['SMA.Transient.g_space']['value']))
+    print('SMA_Transient_c_bytes.value {0}'.format(
+        data['SMA.Transient.c_bytes']['value']))
+
+    # objects
+    print('multigraph varnish_objects')
+    for key in (
+            'n_object',
+            'n_vampireobject',
+            'n_objectcore',
+            'n_objecthead',
+    ):
+        print('{0}.value {1}'.format(key, data['MAIN.' + key]['value']))
+
+    # request_rate
+    print('multigraph varnish_request_rate')
+    for key in (
+            'client_req',
+            's_pipe',
+            'sess_conn',
+            'cache_miss',
+            'backend_conn',
+            's_pass',
+            'backend_unhealthy',
+            'cache_hitpass',
+            'cache_hit',
+    ):
+        print('{0}.value {1}'.format(key, data['MAIN.' + key]['value']))
+
+    # threads
+    print('multigraph varnish_threads')
+    for key in (
+            'threads_created',
+            'threads_failed',
+            'threads_destroyed',
+            'threads_limited',
+            'threads',
+    ):
+        print('{0}.value {1}'.format(key, data['MAIN.' + key]['value']))
+
+    # transfer_rates
+    print('multigraph varnish_transfer_rates')
+    for key in (
+            's_resp_bodybytes',
+            's_resp_hdrbytes',
+    ):
+        print('{0}.value {1}'.format(key, data['MAIN.' + key]['value']))
+
+    # uptime
+    print('multigraph varnish_uptime')
+    print('uptime.value {0}'.format(data['MAIN.uptime']['value']))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if get_values() else 'no (varnish is not running)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config()
+    else:
+        fetch()

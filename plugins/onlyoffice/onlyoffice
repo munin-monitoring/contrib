@@ -1,0 +1,79 @@
+#!/bin/sh
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+onlyoffice - Monitor usage (editing and viewing connections) of onlyoffice
+
+=head1 APPLICABLE SYSTEMS
+
+OnlyOffice instances
+
+=head1 CONFIGURATION
+
+Requires installed curl and jq.
+
+=head1 AUTHOR
+
+Copyright (C) 2023 Sebastian L. (https://momou.ch)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+INFO_URL=${url:-"http://127.0.0.1/info/info.json"}
+TIMEOUT="${timeout:-2}"
+
+fetch_url () {
+    curl -s -f -m "${TIMEOUT}" "$@"
+}
+
+case $1 in
+	autoconf)
+		if [ ! -x "$(command -v curl)" ]; then
+			echo "no (curl not found)"
+		elif [ ! -x "$(command -v jq)" ]; then
+			echo "no (jq not found)"
+		else
+			fetch_url -I "${INFO_URL}" \
+				| grep -iq "Content-Type: application/json" \
+				&& echo "yes" \
+				|| echo "no (invalid or empty response from onlyoffice info api)"
+		fi
+		exit 0
+		;;
+
+	config)
+		echo "multigraph onlyoffice_usage"
+		echo "graph_title OnlyOffice usage"
+		echo "graph_category appserver"
+		echo "graph_vlabel connections"
+		echo "graph_info This graph shows current editing and viewing connections."
+		echo "graph_args --base 1000 --lower-limit 0"
+		echo "edits.label editing"
+		echo "edits.info Current number of editing connections"
+		echo "edits.min 0"
+		echo "views.label viewing"
+		echo "views.info Current number of viewing connections"
+		echo "views.min 0"
+		exit 0
+		;;
+
+esac
+
+INFOS=$(fetch_url "$INFO_URL")
+echo "multigraph onlyoffice_usage"
+echo "edits.value $(echo "$INFOS" | jq .quota.edit.connectionsCount)"
+echo "views.value $(echo "$INFOS" | jq .quota.view.connectionsCount)"

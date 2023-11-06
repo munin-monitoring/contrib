@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+
+
+"""
+=pod
+
+=head1 NAME
+
+btrfs_device_stats - Script to monitor btrfs device statistics
+
+=head1 CONFIGURATION
+
+Simply create a symlink in your plugins directory like with any other plugin.
+Must be run as root.
+
+[btrfs_device_stats]
+user root
+
+You can optionaly configure the warning and critical limits. By default warning
+is set to 1 and critical is not set at all. You can set the limits either for
+the entire plugin or per individual metric and down to a specific device. The
+more specific values take precedence over the general ones.
+See the following example:
+
+[btrfs_device_stats]
+user root
+env.warning 2
+env.critical 4
+env.flags_warning 23
+env.read_errs_critical 42
+env.generation_errs_a04f3d6b_438c_4b61_979b_e5fda7fb858c_1_warning 187
+
+=head2 DEFAULT CONFIGURATION
+
+=head1 BUGS
+
+=head1 AUTHOR
+
+2019-2021, HaseHarald
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=head1 LICENSE
+
+LGPLv3
+
+=cut
+"""
+
+
+# This file contains a munin-plugin to gather btrfs statistics per device.
+#
+# This is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this plugin.  If not, see <http://www.gnu.org/licenses/>.
+
+
+import btrfs
+import os
+import sys
+
+
+def munin_config(fs):
+    fsid = str(fs.fsid).replace('-', '_')
+    print("multigraph btrfs_device_stats_" + fsid)
+    print("graph_args --base 1000 -l 0")
+    print("graph_vlabel total btrfs attribute value")
+    print("graph_title btrfs total device stats for " + fs.path)
+    print("graph_category disk")
+    print("graph_info This graph shows the total stats of devices used by btrfs")
+
+    print("corruption_errs_total.label Corruption Errors")
+    print("flush_errs_total.label Flush Errors")
+    print("generation_errs_total.label Generation Errors")
+    print("read_errs_total.label Read Errors")
+    print("write_errs_total.label Write Errors")
+    print("nr_items_total.label Nr. of Items")
+    print("flags_total.label Nr. of Flags")
+
+    print("")
+
+    devices = fs.devices()
+    for this_device in devices:
+        # Set defaults
+        warning = os.getenv('warning', default="1")
+        critical = os.getenv('critical', default=False)
+        # Get device informations
+        this_dev_info = fs.dev_info(this_device.devid)
+        this_dev_name = this_dev_info.path.replace('/dev/', '')
+
+        print("multigraph btrfs_device_stats_" + fsid + "." +
+              str(this_device.devid))
+        print("graph_args --base 1000 -l 0")
+        print("graph_vlabel btrfs attribute value")
+        print("graph_title btrfs device stats for " + this_dev_name)
+        print("graph_category disk")
+        print("graph_info This graph shows stats of devices used by btrfs")
+
+        # Labels and warning/critical values for Corruption Errors
+        this_corr_errs_warn = os.getenv('corruption_errs_warning',
+                                        default=warning)
+        this_corr_errs_warn = os.getenv('corruption_errs_' + fsid + "_" +
+                                        str(this_device.devid) + '_warning',
+                                        default=this_corr_errs_warn)
+        this_corr_errs_crit = os.getenv('corruption_errs_critical',
+                                        default=critical)
+        this_corr_errs_crit = os.getenv('corruption_errs_' + fsid + "_" +
+                                        str(this_device.devid) + '_critical',
+                                        default=this_corr_errs_crit)
+        print("corruption_errs.label Corruption Errors")
+        print("corruption_errs.warning " + this_corr_errs_warn)
+        if this_corr_errs_crit:
+            print("corruption_errs.critical " + this_corr_errs_crit)
+
+        # Labels and warning/critical values for Flush Errors
+        this_flush_errs_warn = os.getenv('flush_errs_warning', default=warning)
+        this_flush_errs_warn = os.getenv('flush_errs_' + fsid + "_" +
+                                         str(this_device.devid) + '_warning',
+                                         default=this_flush_errs_warn)
+        this_flush_errs_crit = os.getenv('flush_errs_critical',
+                                         default=critical)
+        this_flush_errs_crit = os.getenv('flush_errs_' + fsid + "_" +
+                                         str(this_device.devid) + '_critical',
+                                         default=this_flush_errs_crit)
+        print("flush_errs.label Flush Errors")
+        print("flush_errs.warning " + this_flush_errs_warn)
+        if this_flush_errs_crit:
+            print("flush_errs.critical " + this_flush_errs_crit)
+
+        # Labels and warning/critical values for Generation Errors
+        this_gen_errs_warn = os.getenv('generation_errs_warning',
+                                       default=warning)
+        this_gen_errs_warn = os.getenv('generation_errs_' + fsid + "_" +
+                                       str(this_device.devid) + '_warning',
+                                       default=this_gen_errs_warn)
+        this_gen_errs_crit = os.getenv('generation_errs_critical',
+                                       default=critical)
+        this_gen_errs_crit = os.getenv('generation_errs_' + fsid + "_" +
+                                       str(this_device.devid) + '_critical',
+                                       default=this_gen_errs_crit)
+        print("generation_errs.label Generation Errors")
+        print("generation_errs.warning " + this_gen_errs_warn)
+        if this_gen_errs_crit:
+            print("generation_errs.critical " + this_gen_errs_crit)
+
+        # Labels and warning/critical values for Read Errors
+        this_read_errs_warn = os.getenv('read_errs_warning', default=warning)
+        this_read_errs_warn = os.getenv('read_' + fsid + "_" +
+                                        str(this_device.devid) + '_warning',
+                                        default=this_read_errs_warn)
+        this_read_errs_crit = os.getenv('read_errs_critical', default=critical)
+        this_read_errs_crit = os.getenv('read_errs_' + fsid + "_" +
+                                        str(this_device.devid) + '_critical',
+                                        default=this_read_errs_crit)
+        print("read_errs.label Read Errors")
+        print("read_errs.warning " + this_read_errs_warn)
+        if this_read_errs_crit:
+            print("read_errs.critical " + this_read_errs_crit)
+
+        # Labels and warning/critical values for Write Errors
+        this_write_errs_warn = os.getenv('write_errs_warning', default=warning)
+        this_write_errs_warn = os.getenv('write_errs_' + fsid + "_" +
+                                         str(this_device.devid) + '_warning',
+                                         default=this_write_errs_warn)
+        this_write_errs_crit = os.getenv('write_errs_critical',
+                                         default=critical)
+        this_write_errs_crit = os.getenv('write_errs_' + fsid + "_" +
+                                         str(this_device.devid) + '_critical',
+                                         default=this_write_errs_crit)
+        print("write_errs.label Write Errors")
+        print("write_errs.warning " + this_write_errs_warn)
+        if this_write_errs_crit:
+            print("write_errs.critical " + this_write_errs_crit)
+
+        print("nr_items.label Nr. of Items")
+
+        # Labels and warning/critical values for Flags
+        this_flags_warn = os.getenv('flags_warning', default=warning)
+        this_flags_warn = os.getenv('flags_' + fsid + "_" +
+                                    str(this_device.devid) + '_warning',
+                                    default=this_flags_warn)
+        this_flags_crit = os.getenv('flags_critical', default=critical)
+        this_flags_crit = os.getenv('flags_' + fsid + "_" +
+                                    str(this_device.devid) + '_critical',
+                                    default=this_flags_crit)
+        print("flags.label Nr. of Flags")
+        print("flags.warning " + this_flags_warn)
+        if this_flags_crit:
+            print("flags.critical " + this_flags_crit)
+
+        print("")
+
+
+def munin_values(fs):
+    corruption_errs_total = 0
+    flush_errs_total = 0
+    generation_errs_total = 0
+    read_errs_total = 0
+    write_errs_total = 0
+    nr_items_total = 0
+    flags_total = 0
+
+    fsid = str(fs.fsid).replace('-', '_')
+    devices = fs.devices()
+
+    for this_device in devices:
+        this_dev_stat = fs.dev_stats(this_device.devid, False)
+
+        corruption_errs = this_dev_stat.corruption_errs
+        flush_errs = this_dev_stat.flush_errs
+        generation_errs = this_dev_stat.generation_errs
+        read_errs = this_dev_stat.read_errs
+        write_errs = this_dev_stat.write_errs
+        nr_items = this_dev_stat.nr_items
+        flags = this_dev_stat.flags
+
+        corruption_errs_total = corruption_errs_total + corruption_errs
+        flush_errs_total = flush_errs_total + flush_errs
+        generation_errs_total = generation_errs_total + generation_errs
+        read_errs_total = read_errs_total + read_errs
+        write_errs_total = write_errs_total + write_errs
+        nr_items_total = nr_items_total + nr_items
+        flags_total = flags_total + flags
+
+        print("multigraph btrfs_device_stats_" + fsid + "." +
+              str(this_device.devid))
+
+        print("corruption_errs.value " + str(corruption_errs))
+        print("flush_errs.value " + str(flush_errs))
+        print("generation_errs.value " + str(generation_errs))
+        print("read_errs.value " + str(read_errs))
+        print("write_errs.value " + str(write_errs))
+        print("nr_items.value " + str(nr_items))
+        print("flags.value " + str(flags))
+
+        print("")
+
+    print("multigraph btrfs_device_stats_" + fsid)
+
+    print("corruption_errs_total.value " + str(corruption_errs_total))
+    print("flush_errs_total.value " + str(flush_errs_total))
+    print("generation_errs_total.value " + str(generation_errs_total))
+    print("read_errs_total.value " + str(read_errs_total))
+    print("write_errs_total.value " + str(write_errs_total))
+    print("nr_items_total.value " + str(nr_items_total))
+    print("flags_total.value " + str(flags_total))
+
+    print("")
+
+
+def main():
+    for path in btrfs.utils.mounted_filesystem_paths():
+        with btrfs.FileSystem(path) as fs:
+            if len(sys.argv) > 1 and sys.argv[1] == "config":
+                munin_config(fs)
+            else:
+                munin_values(fs)
+
+
+if __name__ == "__main__":
+    main()
+
+exit(0)

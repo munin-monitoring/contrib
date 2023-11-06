@@ -25,19 +25,18 @@
 #   env.logtail /usr/bin/logtail
 
 PROGNAME=vsftpd
-STATEDIR=/var/lib/munin/plugin-state
 
 LOGFILE=${logfile:-/var/log/vsftpd.log}
 LOGTAIL=${logtail:-`which logtail`}
 
-OFFSET=${STATEDIR}/${PROGNAME}.offset
-STATE=${STATEDIR}/${PROGNAME}.state
-PIVOT=${STATEDIR}/${PROGNAME}.pivot
+OFFSET=${MUNIN_PLUGSTATE}/${PROGNAME}.offset
+STATE=${MUNIN_PLUGSTATE}/${PROGNAME}.state
+PIVOT=${MUNIN_PLUGSTATE}/${PROGNAME}.pivot
 
 
 install_ok()
 {
-    tempfile=$(which tempfile)
+    tempfile=$(which mktemp)
     if [ ! -r ${LOGFILE} -o \
 	 -z "${LOGTAIL}" -o ! -x "${LOGTAIL}" -o \
 	 -z "${tempfile}" -o ! -x "${tempfile}" ]
@@ -50,14 +49,14 @@ install_ok()
 
 if [ "$1" = "autoconf" ]
 then
-    tmpfile=`which tempfile`
+    tmpfile=`which mktemp`
     if install_ok
     then
 	echo yes
 	exit 0
     else
 	echo no
-	exit 1
+	exit 0
     fi
 fi
 
@@ -66,7 +65,7 @@ then
     echo 'system.type ABSOLUTE'
     echo 'graph_title Very Secure FTP Server'
     echo 'graph_vlabel Requests'
-    echo 'graph_category FTP'
+    echo 'graph_category network'
     echo 'ftp_conn.label connections'
     echo 'ftp_loginok.label successful logins'
     echo 'ftp_loginfail.label failed logins'
@@ -82,7 +81,7 @@ fi
 test install_ok || exit 1
 
 touch -d now-5minutes+30seconds $PIVOT
-TEMP=`tempfile`
+TEMP=`mktemp`
 trap "rm -f ${PIVOT} ${TEMP}" INT EXIT
 
 test -n "$TEMP" -a -w "$TEMP" || exit 1

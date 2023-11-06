@@ -6,6 +6,7 @@
 
 nn_ - Munin plugin to display misc newznab stats.
 
+
 =head1 CONFIGURATION
 
 This script is used to generate data for several graphs. To generate
@@ -13,9 +14,12 @@ data for one specific graph, you need to create a symbolic link with a
 name like nn_<GRAPH> to this script.
 
 To get a graph over numbers of users use nn_users
+
+
 =head1 APPLICABLE SYSTEMS
 
 Any MySQL platform, tested by the author on MySQL 5.1.29 and 5.0.51
+
 
 =head1 CONFIGURATION
 
@@ -25,10 +29,10 @@ name like nn_<GRAPH> to this script.
 
 connection parameters - use this in your plugin configuration file.
 
-[nn_*]
-env.mysqlconnection DBI:mysql:<yourdatabase>;host=127.0.0.1;port=3306
-env.mysqluser <user>
-env.mysqlpassword <password>
+ [nn_*]
+ env.mysqlconnection DBI:mysql:<yourdatabase>;host=127.0.0.1;port=3306
+ env.mysqluser <user>
+ env.mysqlpassword <password>
 
 
 =head1 DEPENDENCIES
@@ -39,9 +43,12 @@ env.mysqlpassword <password>
 
 =back
 
+
 =head1 THANKS
+
 A special thanks to Kjell-Magne Øierud for the mysql_ plugin in munin which
 gave me the inspiration and reusable code to create this plugin.
+
 
 =head1 LICENSE
 
@@ -60,6 +67,8 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
 USA.
+
+SPDX-License-Identifier: GPL-2.0-only
 
 =cut
 
@@ -101,7 +110,7 @@ $graphs{releases} = {
 		},
 		data_source_attrs => {
 			min   => '0',
-			
+
 		},
 	},
 	data_sources => [
@@ -218,7 +227,7 @@ sub config {
     while (my ($k, $v) = each %conf) {
 	print "graph_$k $v\n";
     }
-    print "graph_category newznab\n";
+    print "graph_category search\n";
 
     my $i = 0;
     for my $ds (@{$graph->{data_sources}}) {
@@ -254,7 +263,7 @@ sub main {
 		'config'	=>	\&config,
 		'show'		=>	\&show,
 	);
-	
+
 	die "Unknown command: $command" unless exists $commands{$command};
 	return $commands{$command}->($graph);
 }
@@ -265,7 +274,7 @@ sub show {
 		unless $graphs{$graph_name};
 
 	my $graph = $graphs{$graph_name};
-	run_queries($graph_name);	
+	run_queries($graph_name);
 	for my $ds (@{$graph->{data_sources}}) {
 		printf "%s.value %s\n", clean_fieldname($ds->{label}), ($data->{$ds->{name}} ? $data->{$ds->{name}} : '0');
 	}
@@ -298,22 +307,22 @@ sub run_queries {
 }
 
 sub update_requests {
-	my ($dbh) = @_;                                                                                         
+	my ($dbh) = @_;
 	my %queries = (
-		request => 'select count(*) as requests from userrequests where timestamp > now() - INTERVAL 5 MINUTE;',                 
-		download => 'select count(*) as downloads from userdownloads where timestamp > now() - INTERVAL 5 MINUTE;',                                              
-	); 
+		request => 'select count(*) as requests from userrequests where timestamp > now() - INTERVAL 5 MINUTE;',
+		download => 'select count(*) as downloads from userdownloads where timestamp > now() - INTERVAL 5 MINUTE;',
+	);
 	for my $name ( qw(request download) ) {
-		my $query = $queries{$name};                                                                              
-		my $sth = $dbh->prepare($query);                                                                
-		$sth->execute();                                                                                
-		while (my $row = $sth->fetch) {                                                                 
+		my $query = $queries{$name};
+		my $sth = $dbh->prepare($query);
+		$sth->execute();
+		while (my $row = $sth->fetch) {
 			$data->{$name} = $row->[0];
 		}
-		$sth->finish();                                                                                 
-	}       
+		$sth->finish();
+	}
 }
-      
+
 sub update_category {
 	my ($dbh) = @_;
 	my $sth = $dbh->prepare('select count(*) as releases, category.title, category.id from releases LEFT JOIN category ON releases.categoryID = category.ID group by releases.categoryID');
@@ -322,7 +331,7 @@ sub update_category {
 	while (my $row = $sth->fetch) {
 	$data->{$row->[2]} = $row->[0];
 	}
-	
+
 }
 sub update_releases {
 	my ($dbh) = @_;
@@ -331,7 +340,7 @@ sub update_releases {
 		$sth->execute();
 	};
 	if ($@) { die $@; }
-	my $row = $sth->fetchrow_hashref();	
+	my $row = $sth->fetchrow_hashref();
 	$data->{releases} = $row->{'releases'};
 	$sth->finish();
 }
@@ -343,7 +352,7 @@ sub update_users {
 		$sth->execute();
 	};
 	if ($@) { die $@; }
-	my $row = $sth->fetchrow_hashref();	
+	my $row = $sth->fetchrow_hashref();
 	$data->{users} = $row->{'users'};
 	$sth->finish();
 }

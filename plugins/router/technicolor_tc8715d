@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+
+"""
+=pod
+
+=encoding utf8
+
+=head1 NAME
+
+technicolor_tc8715d - Munin plugin for graphing statistics from
+Technicolor TC8715D cable modems.
+
+=head1 DESCRIPTION
+
+The following values are graphed:
+
+=over
+
+=item *
+
+upstream and downstream power levels
+
+=item *
+
+downstream signal to noise ratio
+
+=item *
+
+downstream signal statistics (codeword counts)
+
+=back
+
+=head1 USAGE
+
+Install as you would with any Munin plugin. No configuration is
+needed. Requires the multigraph and dirtyconfig capabilities available
+in munin 2.0 and newer.
+
+=head1 NOTES
+
+Developed and tested with Python 3.7.3, Technicolor TC8715D cable
+modem hardware revision 1.1, software image name
+TC8715D-01.EF.04.38.00-180405-S-FF9-D.img, advanced services
+2.6.30-1.0.11mp1-g24a0ad5-dirty.
+
+=head1 DEVELOPMENT
+
+The latest version of this plugin can be found in the munin contrib
+repository at https://github.com/munin-monitoring/contrib. Issues
+with this plugin may be reported there. Patches accepted through the
+normal github process of forking the repository and submitting a
+pull request with your commits.
+
+=head1 AUTHOR
+
+Copyright © 2019 Kenyon Ralph <kenyon@kenyonralph.com>
+
+=head1 LICENSE
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+=cut
+
+"""
+
+import html.parser
+import urllib.request
+import sys
+
+
+class TechnicolorHTMLParser(html.parser.HTMLParser):
+    def __init__(self):
+        html.parser.HTMLParser.__init__(self)
+        self.signaldatapage = list()
+
+        # Number of downstream channels.
+        self.downstream_channels = 0
+
+        # Number of upstream channels.
+        self.upstream_channels = 0
+
+        self.downstream_SNRs = list()
+        self.downstream_powers = list()
+        self.upstream_powers = list()
+        self.unerrored_codewords = list()
+        self.correctable_codewords = list()
+        self.uncorrectable_codewords = list()
+
+    def handle_data(self, data):
+        data = data.strip()
+        if data != "":
+            self.signaldatapage.append(data)
+
+    def process(self):
+        # Delete the junk before the statistics start. This list
+        # should start with 'Downstream' after this deletion.
+        del self.signaldatapage[0:119]
+
+        index_positions = [i for i, x in enumerate(self.signaldatapage) if x == "Index"]
+        lock_status_positions = [
+            i for i, x in enumerate(self.signaldatapage) if x == "Lock Status"
+        ]
+        self.downstream_channels = lock_status_positions[0] - index_positions[0] - 1
+        self.upstream_channels = lock_status_positions[1] - index_positions[1] - 1
+
+        self.downstream_SNRs = self.signaldatapage[
+            6 + 3 * self.downstream_channels : 22 + 3 * self.downstream_channels
+        ]
+        self.downstream_SNRs = [x.split()[0] for x in self.downstream_SNRs]
+
+        self.downstream_powers = self.signaldatapage[
+            7 + 4 * self.downstream_channels : 23 + 4 * self.downstream_channels
+        ]
+        self.downstream_powers = [x.split()[0] for x in self.downstream_powers]
+
+        self.upstream_powers = self.signaldatapage[
+            15
+            + 6 * self.downstream_channels
+            + 4 * self.upstream_channels : 15
+            + 6 * self.downstream_channels
+            + 5 * self.upstream_channels
+        ]
+        self.upstream_powers = [x.split()[0] for x in self.upstream_powers]
+
+        self.unerrored_codewords = self.signaldatapage[
+            19
+            + 6 * self.downstream_channels
+            + 7 * self.upstream_channels : 19
+            + 7 * self.downstream_channels
+            + 7 * self.upstream_channels
+        ]
+
+        self.correctable_codewords = self.signaldatapage[
+            20
+            + 7 * self.downstream_channels
+            + 7 * self.upstream_channels : 20
+            + 8 * self.downstream_channels
+            + 7 * self.upstream_channels
+        ]
+
+        self.uncorrectable_codewords = self.signaldatapage[
+            21
+            + 8 * self.downstream_channels
+            + 7 * self.upstream_channels : 21
+            + 9 * self.downstream_channels
+            + 7 * self.upstream_channels
+        ]
+
+
+if len(sys.argv) != 2 or sys.argv[1] != "config":
+    print(
+        "Error: plugin designed for the dirtyconfig protocol, must be run with the config argument"
+    )
+    sys.exit(1)
+
+parser = TechnicolorHTMLParser()
+
+for line in urllib.request.urlopen("http://192.168.100.1/vendor_network.asp"):
+    parser.feed(line.decode())
+
+parser.process()
+
+print(
+    """multigraph technicolor_tc8715d_power
+graph_title Technicolor TC8715D Cable Modem Power
+graph_vlabel Signal Strength (dBmV)
+graph_info This graph shows the channel power values reported by a Technicolor TC8715D cable modem.
+graph_category network"""
+)
+
+for i in range(parser.downstream_channels):
+    print(
+        f"""ds_power_{i+1}.label Channel {i+1} Downstream Power
+ds_power_{i+1}.type GAUGE
+ds_power_{i+1}.value {parser.downstream_powers[i]}"""
+    )
+
+for i in range(parser.upstream_channels):
+    print(
+        f"""us_power_{i+1}.label Channel {i+1} Upstream Power
+us_power_{i+1}.type GAUGE
+us_power_{i+1}.value {parser.upstream_powers[i]}"""
+    )
+
+print(
+    """multigraph technicolor_tc8715d_snr
+graph_title Technicolor TC8715D Cable Modem SNR
+graph_vlabel Signal-to-Noise Ratio (dB)
+graph_info Downstream signal-to-noise ratio reported by a Technicolor TC8715D cable modem.
+graph_category network"""
+)
+
+for i in range(parser.downstream_channels):
+    print(
+        f"""snr_{i+1}.label Channel {i+1} SNR
+snr_{i+1}.type GAUGE
+snr_{i+1}.value {parser.downstream_SNRs[i]}"""
+    )
+
+print(
+    """multigraph technicolor_tc8715d_codewords
+graph_title Technicolor TC8715D Cable Modem Codewords
+graph_vlabel Codewords/${graph_period}
+graph_info Downstream codeword rates reported by a Technicolor TC8715D cable modem.
+graph_category network"""
+)
+
+for i in range(parser.downstream_channels):
+    print(
+        f"""unerr_{i+1}.label Channel {i+1} Unerrored Codewords
+unerr_{i+1}.type DERIVE
+unerr_{i+1}.min 0
+unerr_{i+1}.value {parser.unerrored_codewords[i]}
+corr_{i+1}.label Channel {i+1} Correctable Codewords
+corr_{i+1}.type DERIVE
+corr_{i+1}.min 0
+corr_{i+1}.value {parser.correctable_codewords[i]}
+uncorr_{i+1}.label Channel {i+1} Uncorrectable Codewords
+uncorr_{i+1}.type DERIVE
+uncorr_{i+1}.min 0
+uncorr_{i+1}.value {parser.uncorrectable_codewords[i]}"""
+    )

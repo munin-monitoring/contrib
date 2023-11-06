@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to read various data from Philips Hue devices.
+
+=head1 NAME
+
+hue - monitor various data from Philips Hue devices
+
+=head1 APPLICABLE SYSTEMS
+
+Homes with Philips Hue light bulbs and motion sensors.
+
+=head1 CONFIGURATION
+
+Following config is needed:
+
+    [hue]
+    env.host hue-bridge-ip-or-hostname
+    env.auth auth-key
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+=cut
+"""
+
+import json
+import os
+import sys
+import unicodedata
+import urllib.request
+
+
+def safename(name):
+    """Return safe variable name."""
+    # Convert ä->a as isalpha('ä') is true
+    value = unicodedata.normalize('NFKD', name)
+    value = value.encode('ASCII', 'ignore').decode('utf-8')
+
+    # Remove non-alphanumeric chars
+    return ''.join(char.lower() if char.isalnum() else '_' for char in value)
+
+
+def sensor_name(data, sensor):
+    """Find "parent" sensor for temperatue/light."""
+    uniqueid = sensor['uniqueid'][:27]
+    name = sensor['name']
+    for item in data['sensors'].values():
+        if item.get('uniqueid', '').startswith(uniqueid):
+            name = item['name']
+            break
+    return name
+
+
+def print_temperatures(data, config, both):
+    """Motion sensor has temperature sensor - Read it's value."""
+    if not any([sensor['type'] == 'ZLLTemperature'
+                for sensor in data['sensors'].values()]):
+        return
+
+    print('multigraph hue_temp')
+    if config:
+        print('graph_title Hue temperatures')
+        print('graph_vlabel Celsius')
+        print('graph_category sensors')
+        print('graph_args --base 1000')
+        print('graph_info Temperature sensor values.')
+    for sensor in data['sensors'].values():
+        if sensor['type'] != 'ZLLTemperature':
+            continue
+        label = safename(sensor['name'])
+        if config:
+            print('{}.label {}'.format(label, sensor_name(data, sensor)))
+        if not config or both:
+            value = sensor['state']['temperature'] / 100
+            print('{}.value {}'.format(label, value))
+
+
+def print_light_levels(data, config, both):
+    """Motion sensor has light level sensor - Read it's value."""
+    if not any([sensor['type'] == 'ZLLLightLevel'
+                for sensor in data['sensors'].values()]):
+        return
+
+    print('multigraph hue_light_level')
+    if config:
+        print('graph_title Hue light levels')
+        print('graph_vlabel Lux')
+        print('graph_category sensors')
+        print('graph_args --base 1000')
+        print('graph_scale no')
+        print('graph_info Light level sensor values.')
+    for sensor in data['sensors'].values():
+        if sensor['type'] != 'ZLLLightLevel':
+            continue
+        label = safename(sensor['name'])
+        if config:
+            print('{}.label {}'.format(label, sensor_name(data, sensor)))
+        if not config or both:
+            value = 10 ** ((sensor['state']['lightlevel'] - 1) / 10000)
+            print('{}.value {}'.format(label, value))
+
+
+def print_lights(data, config, both):
+    """Light bulbs on/off."""
+    if not data['lights']:
+        return
+
+    print('multigraph hue_lights')
+    if config:
+        print('graph_title Hue lights on')
+        print('graph_vlabel Count')
+        print('graph_category sensors')
+        print('graph_args --base 1000 --lower-limit 0')
+        print('graph_info Number of turned on lights.')
+    count = 0
+    for light in data['lights'].values():
+        if light['state']['on']:
+            count += 1
+    if config:
+        print('lights.label Number of lights on')
+    if not config or both:
+        print('lights.value {}'.format(count))
+
+
+def print_data(config):
+    """Print config or values."""
+    # Get values
+    url = 'http://{}/api/{}/'.format(os.getenv('host'), os.getenv('auth'))
+    try:
+        data = json.loads(urllib.request.urlopen(url, timeout=50).read())
+    except (OSError, ValueError, TypeError):
+        return
+    both = os.getenv('MUNIN_CAP_DIRTYCONFIG') == '1'
+
+    # Print config/values
+    print_temperatures(data, config, both)
+    print_light_levels(data, config, both)
+    print_lights(data, config, both)
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('no (this is not autoconf plugin)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        print_data(True)
+    else:
+        print_data(False)

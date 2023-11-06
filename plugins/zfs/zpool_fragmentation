@@ -1,0 +1,66 @@
+#!/bin/bash
+#%# family=auto
+
+: << EOF
+=head1 NAME
+
+zpool_fragmentation - Outputs the zpool fragmentation per zfs pool.
+
+=head1 AUTHOR
+
+Michael Grote - git.mgrote.net
+
+=head1 LICENSE
+
+GPLv3 or later
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+EOF
+
+if [ "$1" = "autoconf" ]; then
+    if ! command -v zpool &> /dev/null; then
+        echo "no (zpool could not be found!)"
+    else
+        echo "yes"
+    fi
+    exit 0
+fi
+
+# lese alle pools, sed löscht die erste zeile
+# entferne das %-zeichen
+list=$(zpool list | sed 1d | tr -d %)
+
+
+if [ "$1" = "config" ]; then
+  # https://superuser.com/questions/284187/bash-iterating-over-lines-in-a-variable
+  while read -r line; do
+    # setze label
+    echo "$line" | awk '{print $1".label " $1}'
+    # setze warn-limits
+    echo "$line" | awk '{print $1".warning " 50}'
+    echo "$line" | awk '{print $1".critical " 75}'
+  done <<< "$list"
+  # setze optionen
+  echo 'graph_title ZFS storage pool - fragmentation' # Titelzeile
+  echo 'graph_vlabel fragmentation in %' # Text links, hochkant
+  echo 'graph_category fs' # Kategorie
+  echo 'graph_info This graph shows the ZFS Pool fragmentation.' # Text über Tabelle/Infos
+  echo 'graph_args -l 0 --upper-limit 100' # wertebegrenzer 0-100
+  exit 0
+fi
+
+# lese jede Zeile der Variable $list
+# tue für jede Zeile
+# "echo" die Zeile, wende awk drauf, Spalte $1/$7
+while read -r line; do
+  # gebe wert aus
+  # <name>.value <wert>
+  echo "$line" | awk '{print $1".value " $7}'
+done <<< "$list"
+exit 0

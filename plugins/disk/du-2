@@ -8,6 +8,7 @@
 =head1 AUTHOR AND COPYRIGHT
 
   Copyright 2011-2014 Luc Didry <luc AT didry.org>
+  Copyright 2022 Andreas Perhab, WT-IO-IT GmbH <a.perhab@wtioit.at>
 
 =head1 HOWTO CONFIGURE AND USE :
 
@@ -92,11 +93,12 @@ if( (defined $ARGV[0]) && ($ARGV[0] eq "config") ) {
         if ($bar =~ m/(\d+)\s+(.+)/) {
             my $dir = $2;
             clean_path(\$dir);
-            print "$dir.label $dir\n";
+            my $clean_dir = clean_fieldname($dir);
+            print "$clean_dir.label $dir\n";
             if ($foo++) {
-                print "$dir.draw STACK\n";
+                print "$clean_dir.draw STACK\n";
             } else {
-                print "$dir.draw AREA\n";
+                print "$clean_dir.draw AREA\n";
             }
         }
     }
@@ -106,20 +108,21 @@ if( (defined $ARGV[0]) && ($ARGV[0] eq "config") ) {
 }
 
 ##### fetch
-open (FILE, "<", $CACHEFILE) or munin_exit_fail();
-while(defined (my $foo = <FILE>)) {
-    if ($foo =~ m/(\d+)\s+(.+)/) {
-        my ($field, $value) = ($2, $1);
-        clean_path(\$field);
-        print $field, ".value ", $value, "\n";
+if (open (FILE, "<", $CACHEFILE)) {
+    while(defined (my $foo = <FILE>)) {
+        if ($foo =~ m/(\d+)\s+(.+)/) {
+            my ($field, $value) = ($2, $1);
+            clean_path(\$field);
+            print clean_fieldname($field), ".value ", $value, "\n";
+        }
     }
+    close(FILE);
 }
-close(FILE);
 daemonize();
 
 #
 ##
-### PUBLIC FONCTIONS
+### PUBLIC FUNCTIONS
 ###############################################################################
 ## Used to create the fork
 sub daemonize {
@@ -133,7 +136,7 @@ sub daemonize {
     ## In the child, let's get the du infos if necessary
     if (cache_is_too_old() && du_not_running()) {
         my $dirs = $ENV{dirs};
-        system("touch $LOCKFILE; du -sb $dirs > $TEMPFILE; cat $TEMPFILE > $CACHEFILE; rm $LOCKFILE; date +%s > $TIMEFILE;");
+        system("touch $LOCKFILE; du -sb $dirs | sort -n -r > $TEMPFILE; cat $TEMPFILE > $CACHEFILE; rm $LOCKFILE; date +%s > $TIMEFILE;");
     }
     exit;
 } ## daemonize
@@ -158,15 +161,21 @@ sub cache_is_too_old {
 
 sub du_not_running {
     if (-e $LOCKFILE) {
-        my ($time) = `cat $TIMEFILE`;
-        chomp $time;
-        if ( (time - $time) > ($ENV{interval}*60*60) ) {
-            # The cache is really old (60xinterval) => Maybe the lockfile wasn't properly deleted.
-            # Let's delete it.
-            system("rm $LOCKFILE;");
-            return 1;
+        if (-e $TIMEFILE) {
+            my ($time) = `cat $TIMEFILE`;
+            chomp $time;
+            if ( (time - $time) > ($ENV{interval}*60*60) ) {
+                # The cache is really old (60xinterval) => Maybe the lockfile wasn't properly deleted.
+                # Let's delete it.
+                unlink($LOCKFILE);
+                return 1;
+            } else {
+                return 0;
+            }
         } else {
-	        return 0;
+            # when $TIMEFILE is not yet created (first run is not yet finished), $LOCKFILE is honoured
+            # to prevent spawning multiple resource intensive processes
+            return 0;
         }
     } else {
         return 1;
@@ -183,7 +192,7 @@ sub munin_exit_fail {
 
 #
 ##
-### INTERNALS FONCTIONS
+### INTERNALS FUNCTIONS
 ###############################################################################
 sub __munin_exit {
     my $exitcode = shift;

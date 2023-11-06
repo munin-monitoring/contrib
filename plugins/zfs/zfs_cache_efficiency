@@ -15,8 +15,8 @@ case $1 in
 graph_title ZFS ARC efficiency
 graph_vlabel %
 graph_scale no
-graph_category filesystem 
-graph_args -l 0 
+graph_category fs
+graph_args -l 0
 graph_info FreeBSD ZFS ARC Utilisation - Counters
 graph_period minute
 graph_order hits misses l2_hits l2_misses mfu_hits mru_hits arc_access_total mfu_hits_perc mru_hits_perc arc_misses_perc l2_efficency_tot
@@ -71,6 +71,7 @@ hits.label Cache hits
 l2_abort_lowmem.graph no
 l2_abort_lowmem.min 0
 l2_abort_lowmem.type GAUGE
+l2_abort_lowmem.label l2_abort_lowmem?
 l2_cksum_bad.graph no
 l2_cksum_bad.min 0
 l2_cksum_bad.type DERIVE
@@ -78,15 +79,19 @@ l2_cksum_bad.label ARCL2 Bad checksum errors
 l2_evict_lock_retry.graph no
 l2_evict_lock_retry.min 0
 l2_evict_lock_retry.type DERIVE
+l2_evict_lock_retry.label l2_evict_lock_retry?
 l2_evict_reading.graph no
 l2_evict_reading.min 0
 l2_evict_reading.type DERIVE
+l2_evict_reading.label l2_evict_reading?
 l2_feeds.graph no
 l2_feeds.min 0
 l2_feeds.type DERIVE
+l2_feeds.label l2_feeds?
 l2_free_on_write.graph no
 l2_free_on_write.min 0
 l2_free_on_write.type DERIVE
+l2_free_on_write.label l2_free_on_write?
 l2_hits.graph no
 l2_hits.min 0
 l2_hits.type DERIVE
@@ -102,12 +107,15 @@ l2_misses.label L2ARC cache misses
 l2_rw_clash.graph no
 l2_rw_clash.min 0
 l2_rw_clash.type DERIVE
+l2_rw_clash.label l2_rw_clash?
 l2_writes_done.graph no
 l2_writes_done.min 0
 l2_writes_done.type DERIVE
+l2_writes_done.label l2_writes_done?
 l2_writes_error.graph no
 l2_writes_error.min 0
 l2_writes_error.type DERIVE
+l2_writes_error.label l2_writes_error?
 l2_writes_hdr_miss.graph no
 l2_writes_hdr_miss.min 0
 l2_writes_hdr_miss.type DERIVE
@@ -142,6 +150,7 @@ mru_hits.label Most recently used hits
 mutex_miss.graph no
 mutex_miss.min 0
 mutex_miss.type DERIVE
+mutex_miss.label mutex_miss?
 prefetch_data_hits.graph no
 prefetch_data_hits.min 0
 prefetch_data_hits.type DERIVE
@@ -216,22 +225,18 @@ EOF
     autoconf)
     if [ ! -x ${sysctl} ]; then
         echo "no (${sysctl} is not executable)"
-        exit 1
-    fi
-    if [ ${ostype} = "FreeBSD" ]; then
+    elif [ "${ostype}" = "FreeBSD" ]; then
         echo "yes"
-        exit 0
-    fi
-    if [ ${ostype} = "Linux" ]; then
+    elif [ "${ostype}" = "Linux" ]; then
         if [ -f ${procfile} ]; then
             echo "yes"
-            exit 0
+        else
+            echo "no (The statsfile does not exist: ${procfile})"
         fi
-        echo "no (The statsfile does not exist: ${procfile})"
-        exit 1
+    else
+        echo "no (Your OS is not supported by this plugin)"
     fi
-    echo "no (You're OS is not supported by this plugin)"
-    exit 1
+    exit 0
     ;;
     suggest)
     exit 0

@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to monitor Hetzner Storagebox disk free.
+
+=head1 NAME
+
+storagebox_df - monitor Hetzner Storagebox disk free
+
+=head1 APPLICABLE SYSTEMS
+
+Systems with access to Hetzner Storagebox.
+
+=head1 CONFIGURATION
+
+Command to ssh+df must be specified. Plugin does not have access to munin's
+home directory so ssh-key have to copied and specified.
+
+    [storagebox_df]
+    user root
+    env.command ssh -i /etc/munin/id_ed25519 \
+      -o UserKnownHostsFile=/etc/munin/known_hosts -p 23 \
+      uXXXXXX@uXXXXXX.your-storagebox.de df
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+"""
+
+import os
+import subprocess
+import sys
+
+
+def run_binary(arg):
+    """Run binary and return output."""
+    try:
+        return subprocess.run(arg, check=False, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, encoding='utf-8').stdout
+    except FileNotFoundError:
+        return ''
+
+
+def warning_critical(graph, name, warning=None, critical=None):
+    """Print warning/critical config entries."""
+    warning = os.environ.get(f'{graph}{name}_warning', warning)
+    critical = os.environ.get(f'{graph}{name}_critical', critical)
+    if warning and warning != ':':
+        print(f'{name}.warning {warning}')
+    if critical and critical != ':':
+        print(f'{name}.critical {critical}')
+
+
+def get_df():
+    """Get and parse df status."""
+    command = os.environ.get('command', '').split()
+    if not command:
+        return None
+    for line in run_binary(command).splitlines():
+        if '%' not in line or '/' not in line:
+            continue
+        items = line.split()
+        return items[0], items[4][:-1]
+    return None
+
+
+def config(data):
+    """Print plugin config."""
+    print('graph_title Storagebox usage in percent')
+    print('graph_info Storagebox device usage in percent.')
+    print('graph_category disk')
+    print('graph_vlabel %')
+    print('graph_args --lower-limit 0 --upper-limit 100')
+    print('graph_scale no')
+    print(f'df.label {data[0] if data else "Unknown"}')
+    warning_critical('', 'df', 92, 98)
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch(data)
+
+
+def fetch(data):
+    """Print values."""
+    if data:
+        print(f'df.value {data[1]}')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('no (not an autoconf plugin)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config(get_df())
+    else:
+        fetch(get_df())

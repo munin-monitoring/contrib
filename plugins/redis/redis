@@ -1,0 +1,485 @@
+#!/usr/bin/perl -w
+
+=head CONFIGURATION
+
+    Based on Redis module code v0.08 2009/from http://svn.rot13.org/index.cgi/Redis
+
+    Installation process:
+
+    1. Download the plugin to your plugins directory (e.g. /usr/share/munin/plugins)
+    2. Symlink it to your configuration directory (e.g. ln -s /usr/share/munin/plugins/redis /etc/munin/plugins/redis)
+    3. Edit plugin-conf.d/munin-node with the options to connect to your redis instances (see below for an example)
+    4. Restart munin-node service
+
+    Example config
+    [redis]
+    env.host1 127.0.0.1
+    env.port1 6379
+    env.password1 password
+    env.title_prefix1 redis-1
+    env.host2 /run/redis.sock
+    env.title_prefix2 redis-2
+
+    Each host should be specified with at least a host or unixsocket variable suffixed with
+    a number, the first being 1, the second being 2 etc. They must be in sequence.
+    Other options are:
+    * port - the redis port to connect to
+    * password - the password to use with the AUTH command
+    * title_prefix - a prefix to put before the title of the graph, this is strongly recommended for multiple instances
+
+    Graphs:
+    This generates multigraphs for:
+    * Connected clients
+    * Key Hit vs Miss ratio
+    * Keys per second, hits/misses/expirations/evictions
+    * Replication backlog
+    * Replication lag
+    * Request per second
+    * Total number of keys and keys with expires
+    * Used memory
+
+=head COPYRIGHT
+
+    Copyright (C) 2020 Rowan Wookey <https://www.rwky.net/>
+    Copyright (C) 2009 Gleb Voronich <http://stanly.net.ua/>
+
+=head LICENSE
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; version 2 dated June,
+    1991.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+
+=head MAGIC MARKERS
+
+    #%# family=auto
+    #%# capabilities=autoconf
+
+=cut
+
+use strict;
+use IO::Socket::INET;
+use IO::Socket::UNIX;
+
+my %INSTANCES;
+my $HOST;
+my $PORT;
+my $PASSWORD;
+
+for (my $i = 1; $ENV{"host$i"}; $i++)
+{
+    $HOST = exists $ENV{"host$i"} ? $ENV{"host$i"} : "127.0.0.1";
+    $PORT = exists $ENV{"port$i"} ? $ENV{"port$i"} : 6379;
+    $PASSWORD = exists $ENV{"password$i"} ? $ENV{"password$i"} : undef;
+    my $TITLE_PREFIX = exists $ENV{"title_prefix$i"} ? $ENV{"title_prefix$i"} . ": " : "";
+    my $SOCK = &get_conn();
+    $INSTANCES{"instance$i"} = {
+        HOST => $HOST,
+        PORT => $PORT,
+        PASSWORD => $PASSWORD,
+        TITLE_PREFIX => $TITLE_PREFIX,
+        SOCK => $SOCK
+    };
+}
+
+
+my $config = ( defined $ARGV[0] and $ARGV[0] eq "config" );
+my $autoconf = ( defined $ARGV[0] and $ARGV[0] eq "autoconf" );
+if ( $autoconf ) {
+    if (!%INSTANCES) {
+        print "no (no redis instances configured)\n";
+        exit 0;
+    }
+    my $err = '';
+    for my $INSTANCE (keys %INSTANCES) {
+        if (! defined( $INSTANCES{$INSTANCE}{'SOCK'} ) ) {
+            $err = "no (unable to connect to ".$INSTANCES{$INSTANCE}{'HOST'}."\[:". $INSTANCES{$INSTANCE}{'PORT'}."\])\n";
+        }
+    }
+    if ($err) {
+        print $err;
+    } else {
+        print "yes\n";
+    }
+    exit 0;
+}
+
+my $total = 0;
+
+my $multi_graph_output = '';
+my $instance_graph_output = '';
+
+my $connected_clients = 0;
+my $keyspace_hits = 0;
+my $keyspace_misses = 0;
+my $expired_keys = 0;
+my $evicted_keys = 0;
+my $total_commands_processed = 0;
+my $total_connections_received = 0;
+my $repl_backlog_size = 0;
+my $used_memory = 0;
+my $used_memory_rss = 0;
+my $used_memory_peak = 0;
+my $total_keys = 0;
+my $total_expires = 0;
+foreach my $INSTANCE (keys %INSTANCES) {
+
+    my $sock = $INSTANCES{$INSTANCE}{'SOCK'};
+    my $TITLE_PREFIX = $INSTANCES{$INSTANCE}{'TITLE_PREFIX'};
+    my $hash = get_info($sock);
+
+    my $dbs;
+    foreach my $key (keys %{$hash}) {
+        if ( $key =~ /^db\d+$/ && $hash->{$key} =~ /keys=(\d+),expires=(\d+)/ ) {
+            $total_keys += $1;
+            $total_expires += $2;
+            $dbs->{$key} = [ $1, $2 ];
+        }
+    }
+
+    if ( $config ) {
+        my $ret = get_config("maxclients", $sock);
+        # if the CONFIG command is disabled we don't show the max clients
+        my $maxclients = defined $ret ? $ret->{"maxclients"} : 0;
+        $instance_graph_output .=  "multigraph redis_connected_clients.$INSTANCE\n";
+        $instance_graph_output .=  "graph_title ${TITLE_PREFIX}Connected clients\n";
+        $instance_graph_output .=  "graph_vlabel Connected clients\n";
+        $instance_graph_output .=  "graph_category db\n";
+        $instance_graph_output .=  "graph_args -l 0\n";
+        if ($maxclients) {
+            $instance_graph_output .=  "connected_clients.line $maxclients:ff0000:Limit\n";
+        }
+        $instance_graph_output .=  "connected_clients.label connected clients\n";
+        $instance_graph_output .=  "multigraph keys_per_sec.$INSTANCE\n";
+        $instance_graph_output .=  "graph_title ${TITLE_PREFIX}Keys Per Second\n";
+        $instance_graph_output .=  "graph_vlabel per \${graph_period}\n";
+        $instance_graph_output .=  "graph_category db\n";
+        $instance_graph_output .=  "graph_args -l 0\n";
+        $instance_graph_output .=  "hits.label hits\n";
+        $instance_graph_output .=  "hits.type COUNTER\n";
+        $instance_graph_output .=  "misses.label misses\n";
+        $instance_graph_output .=  "misses.type COUNTER\n";
+        $instance_graph_output .=  "expired.label expirations\n";
+        $instance_graph_output .=  "expired.type COUNTER\n";
+        $instance_graph_output .=  "evicted_keys.label evictions\n";
+        $instance_graph_output .=  "evicted_keys.type COUNTER\n";
+        $instance_graph_output .=  "multigraph redis_key_ratio.$INSTANCE\n";
+        $instance_graph_output .=  "graph_title ${TITLE_PREFIX}Key Hit vs Miss Ratio\n";
+        $instance_graph_output .=  "graph_vlabel per \${graph_period}\n";
+        $instance_graph_output .=  "graph_category db\n";
+        $instance_graph_output .=  "graph_args -u 100 -l 0 -r --base 1000\n";
+        $instance_graph_output .=  "hitratio.label hit ratio\n";
+        $instance_graph_output .=  "hitratio.type GAUGE\n";
+        $instance_graph_output .=  "hitratio.draw AREA\n";
+        $instance_graph_output .=  "missratio.label miss ratio\n";
+        $instance_graph_output .=  "missratio.type GAUGE\n";
+        $instance_graph_output .=  "missratio.draw STACK\n";
+        $instance_graph_output .=  "multigraph redis_per_sec.$INSTANCE\n";
+        $instance_graph_output .=  "graph_title ${TITLE_PREFIX}Requests Per second\n";
+        $instance_graph_output .=  "graph_vlabel per \${graph_period}\n";
+        $instance_graph_output .=  "graph_category db\n";
+        $instance_graph_output .=  "graph_args -l 0\n";
+        $instance_graph_output .=  "requests.label requests\n";
+        $instance_graph_output .=  "requests.type COUNTER\n";
+        $instance_graph_output .=  "connections.label connections\n";
+        $instance_graph_output .=  "connections.type COUNTER\n";
+        $instance_graph_output .=  "multigraph redis_repl_backlog_size.$INSTANCE\n";
+        $instance_graph_output .=  "graph_title ${TITLE_PREFIX}replication backlog\n";
+        $instance_graph_output .=  "graph_vlabel replication backlog\n";
+        $instance_graph_output .=  "graph_category db\n";
+        $instance_graph_output .=  "graph_args -l 0\n";
+        $instance_graph_output .=  "repl_backlog_size.label bytes behind master\n";
+        $instance_graph_output .=  "multigraph redis_repl_lag.$INSTANCE\n";
+        $instance_graph_output .=  "graph_title ${TITLE_PREFIX}replication lag\n";
+        $instance_graph_output .=  "graph_vlabel replication lag\n";
+        $instance_graph_output .=  "graph_category db\n";
+        $instance_graph_output .=  "graph_args -l 0\n";
+        $instance_graph_output .=  "repl_backlog_size.label amount behind master\n";
+        # if the CONFIG command is disabled we don't show maxmemory
+        $ret = get_config("maxmemory", $sock);
+        my $maxmemory = defined $ret ? $ret->{"maxmemory"} : 0;
+        $instance_graph_output .=  "multigraph redis_used_memory.$INSTANCE\n";
+        $instance_graph_output .=  "graph_title ${TITLE_PREFIX}Used memory\n";
+        $instance_graph_output .=  "graph_vlabel Used memory\n";
+        $instance_graph_output .=  "graph_category db\n";
+        $instance_graph_output .=  "graph_args -l 0 --base 1024\n";
+        if ($maxmemory) {
+            $instance_graph_output .=  "used_memory.line $maxmemory:ff0000:Limit\n";
+        }
+        $instance_graph_output .=  "used_memory.label used memory\n";
+        $instance_graph_output .=  "used_memory_peak.label used memory in peak\n";
+        $instance_graph_output .=  "used_memory_rss.label Resident set size memory usage\n";
+        $instance_graph_output .=  "multigraph redis_used_keys.$INSTANCE\n";
+        $instance_graph_output .=  "graph_title ${TITLE_PREFIX}Used keys\n";
+        $instance_graph_output .=  "graph_vlabel Used keys\n";
+        $instance_graph_output .=  "graph_category db\n";
+        $instance_graph_output .=  "graph_args -l 0\n";
+
+        foreach my $db (keys %{$dbs}) {
+            $instance_graph_output .= sprintf "%s_keys.label %s keys\n", $db, $db;
+            $instance_graph_output .= sprintf "%s_expires.label %s expires\n", $db, $db;
+        }
+
+        next;
+    }
+
+    $instance_graph_output .=  "multigraph redis_connected_clients.$INSTANCE\n";
+    $instance_graph_output .=  "connected_clients.value " . $hash->{'connected_clients'} . "\n";
+    $connected_clients += $hash->{'connected_clients'};
+    $instance_graph_output .=  "multigraph keys_per_sec.$INSTANCE\n";
+    $instance_graph_output .=  "hits.value " . $hash->{'keyspace_hits'} . "\n";
+    $keyspace_hits += $hash->{'keyspace_hits'};
+    $instance_graph_output .=  "misses.value " . $hash->{'keyspace_misses'} . "\n";
+    $keyspace_misses += $hash->{'keyspace_misses'};
+    $instance_graph_output .=  "expired.value " . $hash->{'expired_keys'} . "\n";
+    $expired_keys += $hash->{'expired_keys'};
+    $instance_graph_output .=  "evicted_keys.value " . $hash->{'evicted_keys'} . "\n";
+    $evicted_keys += $hash->{'evicted_keys'};
+    $instance_graph_output .=  "multigraph redis_key_ratio.$INSTANCE\n";
+    my $total = $hash->{'keyspace_hits'} + $hash->{'keyspace_misses'};
+    my $hitratio = 0;
+    my $missratio = 0;
+    if ($total > 0) {
+        $hitratio = $hash->{'keyspace_hits'} / $total * 100;
+        $missratio = $hash->{'keyspace_misses'} / $total * 100;
+    }
+    $instance_graph_output .= sprintf("hitratio.value %.2f\n", $hitratio);
+    $instance_graph_output .= sprintf("missratio.value %.2f\n", $missratio);
+    $instance_graph_output .=  "multigraph redis_per_sec.$INSTANCE\n";
+    $instance_graph_output .=  "requests.value ". $hash->{'total_commands_processed'} ."\n";
+    $total_commands_processed += $hash->{'total_commands_processed'};
+    $instance_graph_output .=  "connections.value ". $hash->{'total_connections_received'} ."\n";
+    $total_connections_received += $hash->{'total_connections_received'};
+    $instance_graph_output .=  "multigraph redis_repl_backlog_size.$INSTANCE\n";
+    $instance_graph_output .=  "repl_backlog_size.value " . $hash->{'repl_backlog_size'} . "\n";
+    $repl_backlog_size += $hash->{'repl_backlog_size'};
+
+    $instance_graph_output .=  "multigraph redis_repl_lag.$INSTANCE\n";
+    if (exists $hash->{slave0} && $hash->{slave0} =~ /lag=(\d+)/) {
+        $repl_backlog_size += $1;
+        $instance_graph_output .=  "repl_backlog_size.value " . $1 . "\n";
+    } else {
+        $instance_graph_output .=  "repl_backlog_size.value 0\n";
+    }
+
+
+    $instance_graph_output .=  "multigraph redis_used_memory.$INSTANCE\n";
+    $instance_graph_output .=  "used_memory.value ". $hash->{'used_memory'}  ."\n";
+
+    $used_memory += $hash->{'used_memory'};
+    $instance_graph_output .=  "used_memory_rss.value ". $hash->{'used_memory_rss'}  ."\n";
+    $used_memory_rss += $hash->{'used_memory_rss'};
+    $instance_graph_output .=  "used_memory_peak.value ". $hash->{'used_memory_peak'}  ."\n";
+    $used_memory_peak += $hash->{'used_memory_peak'};
+
+    $instance_graph_output .=  "multigraph redis_used_keys.$INSTANCE\n";
+    foreach my $db (keys %{$dbs}) {
+        $instance_graph_output .= sprintf "%s_keys.value %d\n", $db, $dbs->{$db}[0];
+        $instance_graph_output .= sprintf "%s_expires.value %d\n", $db, $dbs->{$db}[1];
+    }
+    close ($sock);
+}
+
+# multigraph output
+if ($config) {
+    $multi_graph_output .=  "multigraph redis_connected_clients\n";
+    $multi_graph_output .=  "graph_title Connected clients\n";
+    $multi_graph_output .=  "graph_vlabel Connected clients\n";
+    $multi_graph_output .=  "graph_category db\n";
+    $multi_graph_output .=  "graph_args -l 0\n";
+    $multi_graph_output .=  "connected_clients.label connected clients\n";
+    $multi_graph_output .=  "multigraph keys_per_sec\n";
+    $multi_graph_output .=  "graph_title Keys Per Second\n";
+    $multi_graph_output .=  "graph_vlabel per \${graph_period}\n";
+    $multi_graph_output .=  "graph_category db\n";
+    $multi_graph_output .=  "graph_args -l 0\n";
+    $multi_graph_output .=  "hits.label hits\n";
+    $multi_graph_output .=  "hits.type COUNTER\n";
+    $multi_graph_output .=  "misses.label misses\n";
+    $multi_graph_output .=  "misses.type COUNTER\n";
+    $multi_graph_output .=  "expired.label expirations\n";
+    $multi_graph_output .=  "expired.type COUNTER\n";
+    $multi_graph_output .=  "evicted_keys.label evictions\n";
+    $multi_graph_output .=  "evicted_keys.type COUNTER\n";
+    $multi_graph_output .=  "multigraph redis_key_ratio\n";
+    $multi_graph_output .=  "graph_title Key Hit vs Miss Ratio\n";
+    $multi_graph_output .=  "graph_vlabel per \${graph_period}\n";
+    $multi_graph_output .=  "graph_category db\n";
+    $multi_graph_output .=  "graph_args -u 100 -l 0 -r --base 1000\n";
+    $multi_graph_output .=  "hitratio.label hit ratio\n";
+    $multi_graph_output .=  "hitratio.type GAUGE\n";
+    $multi_graph_output .=  "hitratio.draw AREA\n";
+    $multi_graph_output .=  "missratio.label miss ratio\n";
+    $multi_graph_output .=  "missratio.type GAUGE\n";
+    $multi_graph_output .=  "missratio.draw STACK\n";
+    $multi_graph_output .=  "multigraph redis_per_sec\n";
+    $multi_graph_output .=  "graph_title Requests Per second\n";
+    $multi_graph_output .=  "graph_vlabel per \${graph_period}\n";
+    $multi_graph_output .=  "graph_category db\n";
+    $multi_graph_output .=  "graph_args -l 0\n";
+    $multi_graph_output .=  "requests.label requests\n";
+    $multi_graph_output .=  "requests.type COUNTER\n";
+    $multi_graph_output .=  "connections.label connections\n";
+    $multi_graph_output .=  "connections.type COUNTER\n";
+    $multi_graph_output .=  "multigraph redis_repl_backlog_size\n";
+    $multi_graph_output .=  "graph_title replication backlog\n";
+    $multi_graph_output .=  "graph_vlabel replication backlog\n";
+    $multi_graph_output .=  "graph_category db\n";
+    $multi_graph_output .=  "graph_args -l 0\n";
+    $multi_graph_output .=  "repl_backlog_size.label bytes behind master\n";
+    $multi_graph_output .=  "multigraph redis_repl_lag\n";
+    $multi_graph_output .=  "graph_title replication lag\n";
+    $multi_graph_output .=  "graph_vlabel replication lag\n";
+    $multi_graph_output .=  "graph_category db\n";
+    $multi_graph_output .=  "graph_args -l 0\n";
+    $multi_graph_output .=  "repl_backlog_size.label amount behind master\n";
+    $multi_graph_output .=  "multigraph redis_used_memory\n";
+    $multi_graph_output .=  "graph_title Used memory\n";
+    $multi_graph_output .=  "graph_vlabel Used memory\n";
+    $multi_graph_output .=  "graph_category db\n";
+    $multi_graph_output .=  "graph_args -l 0 --base 1024\n";
+    $multi_graph_output .=  "used_memory.label used memory\n";
+    $multi_graph_output .=  "used_memory_peak.label used memory in peak\n";
+    $multi_graph_output .=  "used_memory_rss.label Resident set size memory usage\n";
+    $multi_graph_output .=  "multigraph redis_used_keys\n";
+    $multi_graph_output .=  "graph_title Used keys\n";
+    $multi_graph_output .=  "graph_vlabel Used keys\n";
+    $multi_graph_output .=  "graph_category db\n";
+    $multi_graph_output .=  "graph_args -l 0\n";
+    $multi_graph_output .=  "total_keys.label Total keys\n";
+    $multi_graph_output .=  "total_expires.label Total expires\n";
+} else {
+
+    $multi_graph_output .=  "multigraph redis_connected_clients\n";
+    $multi_graph_output .=  "connected_clients.value " . $connected_clients . "\n";
+    $multi_graph_output .=  "multigraph keys_per_sec\n";
+    $multi_graph_output .=  "hits.value " . $keyspace_hits . "\n";
+    $multi_graph_output .=  "misses.value " . $keyspace_misses . "\n";
+    $multi_graph_output .=  "expired.value " . $expired_keys . "\n";
+    $multi_graph_output .=  "evicted_keys.value " . $evicted_keys . "\n";
+    $multi_graph_output .=  "multigraph redis_key_ratio\n";
+    my $total = $keyspace_hits + $keyspace_misses;
+    my $hitratio = 0;
+    my $missratio = 0;
+    if ($total > 0) {
+        $hitratio = $keyspace_hits / $total * 100;
+        $missratio = $keyspace_misses / $total * 100;
+    }
+    $multi_graph_output .= sprintf("hitratio.value %.2f\n", $hitratio);
+    $multi_graph_output .= sprintf("missratio.value %.2f\n", $missratio);
+    $multi_graph_output .=  "multigraph redis_per_sec\n";
+    $multi_graph_output .=  "requests.value ". $total_commands_processed ."\n";
+    $multi_graph_output .=  "connections.value ". $total_connections_received ."\n";
+    $multi_graph_output .=  "multigraph redis_repl_backlog_size\n";
+    $multi_graph_output .=  "repl_backlog_size.value " . $repl_backlog_size . "\n";
+
+    $multi_graph_output .=  "multigraph redis_repl_lag\n";
+    $multi_graph_output .=  "repl_backlog_size.value " . $repl_backlog_size  . "\n";
+
+
+    $multi_graph_output .=  "multigraph redis_used_memory\n";
+    $multi_graph_output .=  "used_memory.value ". $used_memory  ."\n";
+
+    $multi_graph_output .=  "used_memory_rss.value ". $used_memory_rss  ."\n";
+    $multi_graph_output .=  "used_memory_peak.value ". $used_memory_peak  ."\n";
+
+    $multi_graph_output .=  "multigraph redis_used_keys\n";
+    $multi_graph_output .=  "total_keys.value $total_keys\n";
+    $multi_graph_output .=  "total_expires.value $total_expires\n";
+
+}
+print $multi_graph_output;
+print $instance_graph_output;
+
+sub get_conn {
+
+    my $sock;
+
+    if(-S $HOST ){
+
+        $sock = IO::Socket::UNIX->new(
+            Type => SOCK_STREAM(),
+            Peer => $HOST,
+        );
+    }else{
+
+        $sock = IO::Socket::INET->new(
+            PeerAddr => $HOST,
+            PeerPort => $PORT,
+            Timeout => 10,
+            Proto => 'tcp'
+        );
+    }
+
+	if (! defined($sock)) {
+         die "can't read socket: $!";
+	}
+
+    if ( defined( $PASSWORD )  ) {
+        print $sock "AUTH ", $PASSWORD, "\r\n";
+        my $result = <$sock> || die "can't read socket: $!";
+    }
+
+    return $sock;
+}
+
+sub get_info{
+    my $sock = $_[0];
+    print $sock "INFO\r\n";
+    my $result = <$sock> || die "can't read socket: $!";
+
+    my $rep;
+    # +2 characters for \r\n at end of the data block
+    read($sock, $rep, substr($result,1)+2) || die "can't read from socket: $!";
+
+    my $hash;
+    foreach (split(/\r\n/, substr($rep, 0, -2))) {
+        my ($key,$val) = split(/:/, $_, 2);
+        if (defined($key)) {
+            $hash->{$key} = $val;
+        }
+    }
+    return $hash;
+}
+
+# This subroutine returns configuration matched to supplied as object
+sub get_config{
+    my $sock = $_[1];
+    print $sock "*3\r\n\$6\r\nCONFIG\r\n\$3\r\nGET\r\n\$".length($_[0])."\r\n".$_[0]."\r\n";
+    # Response will look like like
+    # *2\r\n$9\r\nmaxmemory\r\n$10\r\n3221225472\r\n
+
+    my $type = <$sock> || die "can't read socket: $!";
+    my $conf;
+    if( substr($type,0,1) ne "*" ) {
+        return $conf;
+    }
+
+    my $count=substr($type,1);
+
+    my ( $namesize, $name, $valuesize, $value );
+    while ( $count > 1 ){
+        $count=$count-2;
+
+        $namesize=<$sock>;
+        read($sock, $name, substr($namesize,1)+2) || die "can't read from socket: $!";
+
+        $valuesize=<$sock>;
+        read($sock, $value, substr($valuesize,1)+2) || die "can't read from socket: $!";
+
+        $conf->{substr($name, 0, -2)}=substr($value, 0, -2);
+    }
+
+    return $conf;
+}
+
+# vim: ft=perl ai ts=4 sw=4 et:

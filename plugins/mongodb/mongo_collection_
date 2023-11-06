@@ -1,4 +1,4 @@
-#!/usr/bin/env /usr/local/bin/python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # vim: set sts=4 sw=4 encoding=utf-8
 
@@ -29,19 +29,23 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#%# family=auto
-#%# capabilities=suggest autoconf
+# #%# family=auto
+# #%# capabilities=suggest autoconf
 
 
-from pymongo import Connection
+import pymongo
 from operator import itemgetter
+from os import getenv
 
 settings_host = '127.0.0.1'
 settings_port = 27017
-settings_db = 'mydb'
+# mongodb_uri will override host and port
+settings_mongodb_uri = ''
+settings_db = 'admin'
 settings_user = ''
 settings_password = ''
 settings_ignoredb = {}
+settings_graph_category = getenv('graph_category', 'db')
 
 typeIndex = {}
 typeIndex['collcount'] = {}
@@ -50,6 +54,7 @@ typeIndex['collcount']['title'] = 'per collection document count'
 typeIndex['collcount']['yaxis'] = 'documents'
 typeIndex['collcount']['base'] = '1000'
 typeIndex['collcount']['scale'] = '--logarithmic -l1'
+typeIndex['collcount']['category'] = settings_graph_category
 
 typeIndex['collsize'] = {}
 typeIndex['collsize']['index'] = 'size'
@@ -57,6 +62,7 @@ typeIndex['collsize']['title'] = 'per collection data size'
 typeIndex['collsize']['yaxis'] = 'Byte'
 typeIndex['collsize']['base'] = '1024'
 typeIndex['collsize']['scale'] = '--logarithmic -l1 --units=si'
+typeIndex['collsize']['category'] = settings_graph_category
 
 typeIndex['avgsize'] = {}
 typeIndex['avgsize']['index'] = 'avgObjSize'
@@ -64,6 +70,7 @@ typeIndex['avgsize']['title'] = 'average object size'
 typeIndex['avgsize']['yaxis'] = 'Byte'
 typeIndex['avgsize']['base'] = '1024'
 typeIndex['avgsize']['scale'] = '--logarithmic --units=si'
+typeIndex['avgsize']['category'] = settings_graph_category
 
 typeIndex['storage'] = {}
 typeIndex['storage']['index'] = 'storageSize'
@@ -71,6 +78,7 @@ typeIndex['storage']['title'] = 'per collection storage size'
 typeIndex['storage']['yaxis'] = 'Byte'
 typeIndex['storage']['base'] = '1024'
 typeIndex['storage']['scale'] = '--logarithmic -l1 --units=si'
+typeIndex['storage']['category'] = settings_graph_category
 
 typeIndex['indexsize'] = {}
 typeIndex['indexsize']['index'] = 'totalIndexSize'
@@ -78,99 +86,105 @@ typeIndex['indexsize']['title'] = 'per collection index size'
 typeIndex['indexsize']['yaxis'] = 'Byte'
 typeIndex['indexsize']['base'] = '1024'
 typeIndex['indexsize']['scale'] = '--logarithmic -l 1 --units=si'
-
+typeIndex['indexsize']['category'] = settings_graph_category
 
 
 def getCollstats(graphtype):
-        con = Connection(settings_host, int(settings_port), slave_okay=True)
+    if settings_mongodb_uri:
+        con = pymongo.MongoClient(settings_mongodb_uri)
+    else:
+        con = pymongo.MongoClient(settings_host, int(settings_port))
 
-        if settings_user:
-                db = con['admin']
-                db.authenticate(settings_user, settings_password)
+    if settings_user:
+        db = con[settings_db]
+        db.authenticate(settings_user, settings_password)
 
-        stats_tmp = {}
-        for dbname in con.database_names():
-                if dbname in settings_ignoredb:
-                    continue
-                db = con[dbname]
-                for coll in db.collection_names():
-                        if coll.startswith('system.'):
-                                continue
-                        stats = db.command("collstats", coll)
-                        collname = dbname + "_" + coll.replace('.', '_')
-                        if not stats_tmp.has_key(collname):
-                                stats_tmp[collname] = {}
-                                stats_tmp[collname]['value'] = 0
-                                stats_tmp[collname]['dbname'] = dbname
-                        if typeIndex[graphtype]['index'] in stats:
-                            stats_tmp[collname]['value'] += long(stats[typeIndex[graphtype]['index']])
+    stats_tmp = {}
+    for dbname in con.list_database_names():
+        if dbname in settings_ignoredb:
+            continue
+        db = con[dbname]
+        for coll in db.list_collection_names():
+            if coll.startswith('system.'):
+                continue
+            stats = db.command("collstats", coll)
+            collname = dbname + "_" + coll.replace('.', '_')
+            if collname not in stats_tmp:
+                stats_tmp[collname] = {}
+                stats_tmp[collname]['value'] = 0
+                stats_tmp[collname]['dbname'] = dbname
+            if typeIndex[graphtype]['index'] in stats:
+                stats_tmp[collname]['value'] += int(stats[typeIndex[graphtype]['index']])
+
+    con.close()
+
+    for collname, item in sorted(stats_tmp.items()):
+        yield ("%s" % collname, item['value'], item['dbname'])
 
 
-        con.disconnect()
-
-        for collname, item in sorted(stats_tmp.items()):
-                yield ("%s" % collname, item['value'], item['dbname'])
-
-
-def doData(base,graphtype):
+def doData(base, graphtype):
     lastdb = ""
     for coll, stats, db in sorted(getCollstats(graphtype), key=itemgetter(2)):
         if lastdb != db:
-            print "multigraph " + base + "_" + graphtype + "_" + db
+            print("multigraph " + base + "_" + graphtype + "_" + db)
             lastdb = db
-        print "%s_%s.value %s" % (graphtype, coll, stats)
+        print("%s_%s.value %s" % (graphtype, coll, stats))
 
 
-def doConfig(base,graphtype):
+def doConfig(base, graphtype):
 
     lastdb = ""
-    for k,v,d in sorted(getCollstats(graphtype), key=itemgetter(2)):
+    for k, v, d in sorted(getCollstats(graphtype), key=itemgetter(2)):
         if lastdb != d:
-            print "multigraph " + base + "_" + graphtype + "_" + d
+            print("multigraph " + base + "_" + graphtype + "_" + d)
             lastdb = d
-#            print "graph_total total"
-            print "graph_title MongoDB " + typeIndex[graphtype]['title'] + " for database " + d
-            print "graph_args --base " + typeIndex[graphtype]['base'] + " " + typeIndex[graphtype]['scale']
-            print "graph_vlabel " + typeIndex[graphtype]['yaxis']
-            print "graph_category MongoDB"
-        print "%s_%s.label %s" % (graphtype, k, k)
-        print "%s_%s.min 0" % (graphtype, k)
-        print "%s_%s.draw LINE1" % (graphtype, k)
+            print("graph_title MongoDB " + typeIndex[graphtype]['title'] + " for database " + d)
+            print("graph_args --base " + typeIndex[graphtype]['base'] + " " + typeIndex[graphtype]['scale'])
+            print("graph_vlabel " + typeIndex[graphtype]['yaxis'])
+            print("graph_category %s" % settings_graph_category)
+        print("%s_%s.label %s" % (graphtype, k, k))
+        print("%s_%s.min 0" % (graphtype, k))
+        print("%s_%s.draw LINE1" % (graphtype, k))
+
 
 def doSuggest():
-        print "keys"
-        for k in typeIndex.keys():
-                print k
+    print("keys")
+    for k in typeIndex.keys():
+        print(k)
 
 
 if __name__ == "__main__":
-    from sys import argv,exit
-    from os import environ,path
+    from sys import argv, exit
+    from os import environ, path
     import re
 
     # Could be done by a for loop
     # but i think if's are faster
-    if 'HOST' in environ:
-        settings_host = environ['HOST']
-    if 'PORT' in environ:
-        settings_port = environ['PORT']
-    if 'DB' in environ:
-        settings_db = environ['DB']
-    if 'MONGO_USER' in environ:
-        settings_user = environ['MONGO_USER']
-    if 'PASSWORD' in environ:
-        settings_password = environ['PASSWORD']
-    if 'IGNOREDB' in environ:
-        settings_ignoredb = environ['IGNOREDB'].split(',')
+    if 'host' in environ:
+        settings_host = environ['host']
+    if 'port' in environ:
+        settings_port = environ['port']
+    if 'db' in environ:
+        settings_db = environ['db']
+    if 'username' in environ:
+        settings_user = environ['username']
+    if 'password' in environ:
+        settings_password = environ['password']
+    if 'ignoredb' in environ:
+        settings_ignoredb = environ['ignoredb'].split(',')
+    if 'mongodb_uri' in environ:
+        settings_mongodb_uri = environ['mongodb_uri']
+    if 'MONGO_DB_URI' in environ:
+        settings_mongodb_uri = environ['MONGO_DB_URI']
     m = re.search('^(.*)_([a-zA-Z0-9]*)$', path.basename(argv[0]))
     if len(argv) < 2:
-        doData(m.group(1),m.group(2))
+        doData(m.group(1), m.group(2))
     elif argv[1] == "config":
-        doConfig(m.group(1),m.group(2))
+        doConfig(m.group(1), m.group(2))
     elif argv[1] == "autoconf":
-        print "yes"
+        print("yes")
     elif argv[1] == "suggest":
         doSuggest()
     else:
-        print "invalid argument"
+        print("invalid argument")
         exit(1)

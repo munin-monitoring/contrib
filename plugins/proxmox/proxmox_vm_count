@@ -1,0 +1,92 @@
+#!/bin/bash
+#%# family=auto
+
+: << EOF
+=head1 NAME
+
+proxmox_vm_count - Outputs the running, stopped and total counts of ProxMox VMs and LXCs.
+
+=head1 CONFIGURATION
+
+This Plugin has to be run as root:
+
+  [proxmox_vm_count]
+    user root
+    group root
+
+=head1 AUTHOR
+
+Michael Grote - git.mgrote.net
+
+=head1 LICENSE
+
+GPLv3 or later
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+EOF
+
+
+if [ "$1" = "autoconf" ]; then
+    if ! command -v qm &> /dev/null; then
+        echo "[ERROR] qm could not be found!"
+    elif ! command -v pct &> /dev/null; then
+        echo "[ERROR] pct could not be found!"
+    else
+        echo "yes"
+    fi
+    exit 0
+fi
+
+# hole Variablen nur einmal
+wqmlist=$(qm list)
+wpctlist=$(pct list)
+
+# Berechne VMs
+total_vm=$(echo "$wqmlist" | sed 1d | wc -l)
+running_vm=$(echo "$wqmlist" | sed 1d | grep -c running)
+stopped_vm=$(echo "$wqmlist" | sed 1d | grep -c stopped)
+total_lxc=$(echo "$wpctlist" | sed 1d | wc -l)
+running_lxc=$(echo "$wpctlist" | sed 1d | grep -c running)
+stopped_lxc=$(echo "$wpctlist" | sed 1d | grep -c stopped)
+
+# Berechne Gesamtwert
+total=$((total_vm + total_lxc))
+
+if [ "$1" = "config" ]; then
+    # setze label
+    echo total_vm.label total Virtual Machines
+    echo total.label total VMs and LXCs
+
+    echo running_vm.label running Virtual Machines
+    echo running_lxc.label running LXCs
+
+    echo stopped_vm.label stopped Virtual Machines
+    echo stopped_lxc.label stopped LXCs
+
+    echo total_lxc.label total LXCs
+
+    # setze optionen
+    echo 'graph_title ProxMox - Number of VMs and LXCs'
+    echo 'graph_vlabel Count'
+    echo 'graph_category virtualization'
+    echo "graph_printf %6.0lf"
+    echo "graph_args -l 0 --base 1000"
+    exit 0
+fi
+echo total.value "$total"
+
+echo total_vm.value "$total_vm"
+echo total_lxc.value "$total_lxc"
+
+echo running_vm.value "$running_vm"
+echo running_lxc.value "$running_lxc"
+
+echo stopped_vm.value "$stopped_vm"
+echo stopped_lxc.value "$stopped_lxc"
+exit 0

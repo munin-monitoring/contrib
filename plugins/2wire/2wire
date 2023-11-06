@@ -1,0 +1,455 @@
+#!/usr/bin/perl
+# -*- perl -*-
+
+=head1 NAME
+
+2wire - Plugin to monitor 2Wire/Pace residential gateway
+
+=head1 CONFIGURATION
+
+ [2wire]
+   env.gatewayaddr http://192.168.1.254
+   env.drawline    true
+   env.monthline   250000000000
+   env.weekline    62500000000
+   env.dayline     8333333333
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 AUTHOR
+
+Daniel Lee <Longinus00@gmail.com>
+
+=head1 MAGICK MARKERS
+
+  #%# family=network
+  #%# capabilities=autoconf
+
+=cut
+
+use strict;
+use warnings;
+use POSIX;
+use WWW::Mechanize;
+use WWW::Mechanize::TreeBuilder;
+use Munin::Plugin;
+
+my $gatewayAddr = $ENV{'gatewayaddr'} || 'http://192.168.1.254';
+my $drawLine    = $ENV{'drawline'}  || 'false';
+my $monthLine   = $ENV{'monthline'} || 250000000000;
+my $weekLine    = $ENV{'weekline'}  || 62500000000;
+my $dayLine     = $ENV{'dayline'}   || 8333333333;
+
+my $mech = WWW::Mechanize->new;
+WWW::Mechanize::TreeBuilder->meta->apply($mech);
+
+sub autoconf {
+    my $url = $gatewayAddr."/xslt?PAGE=C_0_0";
+    $mech->get( $url );
+
+    if($mech->success()) {
+        print "yes\n";
+    }
+    else {
+        print "no\n";
+    }
+    exit 0;
+}
+
+sub config {
+    print << "EOF";
+multigraph 2wire_session_count
+graph_title 2wire NAT session count
+graph_args --base 1000 -l 0
+#graph_vlabel number of sessions in (-) / out (+)
+graph_vlabel number of sessions
+graph_scale no
+graph_category network
+graph_total Total
+graph_printf %.0lf
+
+inboundSessions.label Inbound
+inboundSessions.draw AREASTACK
+#inboundSessions.graph no
+outboundSessions.label Outbound
+outboundSessions.draw AREASTACK
+#outboundSessions.negative inboundSessions
+#inboundSessions.line 512:ff0000:Inbound session limit
+outboundSessions.line 1024:ff0000:Session table limit
+
+multigraph 2wire_session_type
+graph_title 2wire NAT session type
+graph_args --base 1000 -l 0
+graph_vlabel number of sessions
+graph_scale no
+graph_category network
+graph_total Total
+graph_printf %.0lf
+
+tcpSessions.label TCP
+tcpSessions.draw AREASTACK
+udpSessions.label UDP
+udpSessions.draw AREASTACK
+udpSessions.line 1024:ff0000:Session table limit
+
+multigraph 2wire_session_uptime
+graph_title 2wire session uptime
+graph_args --base 1000 -l 0
+graph_vlabel Uptime in days
+graph_scale no
+graph_category network
+
+sessionUptime.label Uptime
+sessionUptime.draw AREA
+sessionUptime.cdef sessionUptime,86400,/
+
+###
+
+multigraph 2wire_dsl_power
+graph_title 2wire DSL output power
+graph_args --base 1000
+graph_vlabel dBmV
+graph_scale no
+graph_category network
+
+powerDown.label Down
+#powerDown.graph no
+powerUp.label Up
+#powerUp.negative powerDown
+
+multigraph 2wire_dsl_details
+graph_title 2wire DSL details
+graph_args --base 1000
+graph_vlabel dB
+graph_scale no
+graph_category network
+
+noiseM.label Noise margin
+attenuation.label Attenuation
+attenuation300.label Attenuation @ 300kHz
+gain.label Final Receive Gain
+
+multigraph 2wire_dsl_seconds
+graph_title 2wire Errors Time
+graph_args --base 1000
+graph_vlabel s
+graph_scale no
+graph_category network
+
+cumSecErrors.label Cumulative Seconds w/Errors
+cumSecSevErrors.label Cumulative Seconds w/Severe Errors
+unavailable.label DSL Unavailable Seconds
+
+multigraph 2wire_dsl_blocks
+graph_title 2wire Block Correction
+graph_args --base 1000
+graph_vlabel blocks/s
+graph_scale no
+graph_category network
+
+correctedBlocks.label Corrected Blocks
+correctedBlocks.type DERIVE
+correctedBlocks.min 0
+uncorrectableBlocks.label Uncorrectable Blocks
+uncorrectableBlocks.type DERIVE
+uncorrectableBlocks.min 0
+
+multigraph 2wire_dsl_traffic
+graph_title 2wire DSL traffic
+graph_args --base 1024 -l 0
+graph_vlabel Bytes in (-) / out (+) per second
+graph_category network
+receive.label Bps
+receive.type DERIVE
+receive.min 0
+receive.graph no
+transmit.label Bps
+transmit.type DERIVE
+transmit.min 0
+transmit.negative receive
+
+####
+
+multigraph 2wire_dsl_bandwidth_monthly
+graph_title 2wire DSL bandwidth usage (monthly)
+graph_args --base 1024 -l 0 -M
+graph_vlabel Bytes
+graph_category network
+
+down.label Down
+up.label Up
+total.label Total
+EOF
+    if($drawLine eq 'true') {
+        print "total.line ".$monthLine.":ff0000\n"
+    }
+
+    print << "EOF";
+
+multigraph 2wire_dsl_bandwidth_weekly
+graph_title 2wire DSL bandwidth usage (weekly)
+graph_args --base 1024 -l 0 -M
+graph_vlabel Bytes
+graph_category network
+
+down.label Down
+up.label Up
+total.label Total
+EOF
+    if($drawLine eq 'true') {
+        print "total.line ".$weekLine.":ff0000\n"
+    }
+
+    print << "EOF";
+
+multigraph 2wire_dsl_bandwidth_daily
+graph_title 2wire DSL bandwidth usage (daily)
+graph_args --base 1024 -l 0 -M
+graph_vlabel Bytes
+graph_category network
+
+down.label Down
+up.label Up
+total.label Total
+EOF
+    if($drawLine eq 'true') {
+        print "total.line ".$dayLine.":ff0000\n"
+    }
+    exit 0;
+}
+
+sub bandwidth_acc {
+    my $date = shift;
+    my $bandwidth = shift;
+    my $str = shift;
+    my $up = shift;
+    my $down = shift;
+    unless(exists $bandwidth->{$str}) {
+        $bandwidth->{$str} = $date;
+        $bandwidth->{$str.'_u_c'} = 0;
+        $bandwidth->{$str.'_d_c'} = 0;
+        $bandwidth->{$str.'_u_t'} = $up;
+        $bandwidth->{$str.'_d_t'} = $down;
+    }
+    if($date != $bandwidth->{$str}) {
+        $bandwidth->{$str} = $date;
+        if($bandwidth->{$str.'_u_t'} <= $up || $bandwidth->{$str.'_d_t'} <= $down) {
+            $bandwidth->{$str.'_u_c'} = $up - $bandwidth->{$str.'_u_t'};
+            $bandwidth->{$str.'_d_c'} = $down - $bandwidth->{$str.'_d_t'};
+        }
+        else {
+            $bandwidth->{$str.'_u_c'} = 0;
+            $bandwidth->{$str.'_d_c'} = 0;
+        }
+    }
+    elsif($bandwidth->{$str.'_u_t'} > $up || $bandwidth->{$str.'_d_t'} > $down) {
+        $bandwidth->{$str.'_u_c'} += $up;
+        $bandwidth->{$str.'_d_c'} += $down;
+    }
+    else {
+        $bandwidth->{$str.'_u_c'} += $up - $bandwidth->{$str.'_u_t'};
+        $bandwidth->{$str.'_d_c'} += $down - $bandwidth->{$str.'_d_t'};
+    }
+    $bandwidth->{$str.'_u_t'} = $up;
+    $bandwidth->{$str.'_d_t'} = $down;
+}
+
+sub process_bandwidth {
+    my $values = shift;
+    my ($up,$down) = ($values->{'transmit'}, $values->{'receive'});
+
+    my ($day, $week, $month) = map(int, split(/ /, POSIX::strftime("%j %U %m", localtime)));
+    $month = int(($week-1) / 4);
+
+    my %bandwidth = restore_state();
+    my %bandwidth = ();
+
+    bandwidth_acc($month,\%bandwidth,'month',$up,$down);
+    bandwidth_acc($week,\%bandwidth,'week',$up,$down);
+    bandwidth_acc($day,\%bandwidth,'day',$up,$down);
+
+    save_state(%bandwidth);
+
+    print "multigraph 2wire_dsl_bandwidth_monthly\n";
+    print "up.value ", $bandwidth{'month_u_c'},"\n";
+    print "down.value ", $bandwidth{'month_d_c'},"\n";
+    print "total.value ", $bandwidth{'month_u_c'}+$bandwidth{'month_d_c'},"\n";
+    print "\n";
+
+    print "multigraph 2wire_dsl_bandwidth_weekly\n";
+    print "up.value ", $bandwidth{'week_u_c'},"\n";
+    print "down.value ", $bandwidth{'week_d_c'},"\n";
+    print "total.value ", $bandwidth{'week_u_c'}+$bandwidth{'week_d_c'},"\n";
+    print "\n";
+
+    print "multigraph 2wire_dsl_bandwidth_daily\n";
+    print "up.value ", $bandwidth{'day_u_c'},"\n";
+    print "down.value ", $bandwidth{'day_d_c'},"\n";
+    print "total.value ", $bandwidth{'day_u_c'}+$bandwidth{'day_d_c'},"\n";
+    print "\n";
+}
+
+sub process_values {
+    my $values = shift;
+
+    print << "EOF";
+multigraph 2wire_dsl_power
+powerDown.value $values->{'power-down'}
+powerUp.value $values->{'power-up'}
+
+multigraph 2wire_dsl_details
+noiseM.value $values->{'noise-margin'}
+attenuation.value $values->{'attenuation'}
+attenuation300.value $values->{'attenuation300'}
+gain.value $values->{'gain'}
+
+multigraph 2wire_dsl_seconds
+cumSecErrors.value $values->{'cum-sec-errors'}
+cumSecSevErrors.value $values->{'cum-sec-sev-errors'}
+unavailable.value $values->{'sec-unavailable'}
+
+multigraph 2wire_dsl_blocks
+correctedBlocks.value $values->{'corrected-blocks'}
+uncorrectableBlocks.value $values->{'uncorrectable-blocks'}
+
+multigraph 2wire_dsl_traffic
+transmit.value $values->{'transmit'}
+receive.value $values->{'receive'}
+
+EOF
+}
+
+sub broadband_page {
+    my $url = $gatewayAddr."/xslt?PAGE=C_1_0";
+
+    $mech->get( $url );
+    die unless $mech->success();
+
+    my (%values, $m);
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Noise Margin'});
+    $m->right()->as_text =~ /(\S+) dB/;
+    $values{'noise-margin'} = $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Attenuation'});
+    $m->right()->as_text =~ /(\S+) dB/;
+    $values{'attenuation'} = $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Output Power'});
+    $m->right()->as_text =~ /(\S+) dB/;
+    $values{'power-down'} = $1;
+    $m = $m->right();
+    $m->right()->as_text =~ /(\S+) dB/;
+    $values{'power-up'} = $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Attenuation @ 300kHz'});
+    $m->right()->as_text =~ /(\S+) dB/;
+    $values{'attenuation300'} = $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Final Receive Gain'});
+    $m->right()->as_text =~ /(\S+) dB/;
+    $values{'gain'} = $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Transmit'});
+    $m->right()->as_text =~ /(\d+)/;
+    $values{'transmit'} = int $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Receive'});
+    $m->right()->as_text =~ /(\d+)/;
+    $values{'receive'} = int $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Receive'});
+    $m->right()->as_text =~ /(\d+)/;
+    $values{'receive'} = int $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Link Retrains'});
+    $m->right()->as_text =~ /(\d+)/;
+    $values{'link-retrains'} = int $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'DSL Training Errors'});
+    $m->right()->as_text =~ /(\d+)/;
+    $values{'dsl-training-errors'} = int $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Training Timeouts'});
+    $m->right()->as_text =~ /(\d+)/;
+    $values{'training-timeouts'} = int $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Cum. Seconds w/Errors'});
+    $m->right()->as_text =~ /(\d+)/;
+    $values{'cum-sec-errors'} = int $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Cum. Sec. w/Severe Errors'});
+    $m->right()->as_text =~ /(\d+)/;
+    $values{'cum-sec-sev-errors'} = int $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Corrected Blocks'});
+    $m->right()->as_text =~ /(\d+)/;
+    $values{'corrected-blocks'} = int $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'Uncorrectable Blocks'});
+    $m->right()->as_text =~ /(\d+)/;
+    $values{'uncorrectable-blocks'} = int $1;
+
+    $m = $mech->look_down(_tag => 'td', sub { $_[0]->as_text eq 'DSL Unavailable Seconds'});
+    $m->right()->as_text =~ /(\d+)/;
+    $values{'sec-unavailable'} = int $1;
+
+    process_values(\%values);
+    process_bandwidth(\%values);
+}
+
+sub nat_page {
+    my $url = $gatewayAddr."/xslt?PAGE=C_5_5";
+
+    $mech->get( $url );
+    die unless $mech->success();
+
+    my (%sessions, $uptime);
+    my ($m, $raw, @stext);
+
+    $m = $mech->look_down(_tag => 'h2', sub { $_[0]->as_text eq 'Current NAT Sessions'});
+    $raw = $m->right()->as_text;
+    $raw =~ s/^\n//;
+    @stext = split("\n", $raw);
+
+    $stext[0] =~ /boot: (\d+)/;
+    $uptime = int $1;
+
+    $stext[1] =~ /session table (\d+)\/(\d+) available, (\d+)\/\d+ used/;
+    ($sessions{'used'}, $sessions{'inbound'}) = ($2 - $1, $3);
+    $sessions{'outbound'} = $sessions{'used'} - $sessions{'inbound'};
+
+    my $i = 0;
+    foreach (@stext) {
+        $i += 1 if /proto: 6/;
+    }
+    ($sessions{'tcp'}, $sessions{'udp'}) = ($i, $sessions{'used'} - $i);
+
+    print << "EOF";
+multigraph 2wire_session_count
+inboundSessions.value $sessions{'inbound'}
+outboundSessions.value $sessions{'outbound'}
+
+multigraph 2wire_session_type
+tcpSessions.value $sessions{'tcp'}
+udpSessions.value $sessions{'udp'}
+
+multigraph 2wire_session_uptime
+sessionUptime.value $uptime
+
+EOF
+}
+
+if($ARGV[0] and $ARGV[0] eq "autoconf") {
+    autoconf
+}
+elsif($ARGV[0] and $ARGV[0] eq "config") {
+    config
+}
+else {
+    broadband_page;
+    nat_page;
+}
+

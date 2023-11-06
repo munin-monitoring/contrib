@@ -1,0 +1,78 @@
+#!/bin/sh
+#
+# Plugin to monitor the power state of hard disk drives on FreeBSD.
+#
+# Configure the plugin to run as root by adding the following to
+# /usr/local/etc/munin/plugin-conf.d/plugins.conf:
+#
+# [freebsd_hdd_power_state]
+# user root
+#
+# You can also specify the monitored devices using the 'env.devices'
+# environment variable, if autoconfiguration doesn't work for you:
+#
+# env.devices ada0 ada1 ada2 ada3 ada4 ada5 ada6 ada7
+#
+# Copyright (c) 2014, Petteri Valkonen <petteri.valkonen@iki.fi>
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the copyright holder nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+#%# family=auto contrib
+#%# capabilities=autoconf
+
+DEVICES=${devices:-$(iostat -x | tail -n +3 | egrep -o '^a?da[0-9]+')}
+
+case $1 in
+    config)
+        cat <<EOM
+multigraph $(basename $0)
+graph_title HDD power state
+graph_vlabel Power state
+graph_args --upper-limit 1 -l 0
+graph_scale no
+graph_category sensors
+graph_info The power state of the hard disk drives on the system (1 is spun up, 0 is idle/standby).
+EOM
+        echo $DEVICES | awk 'BEGIN{OFS=""} { for (i = 0; i++ < NF;) print "power", i, ".label ", $i }'
+        exit 0;;
+    autoconf)
+        if [ -z "$DEVICES" ] ; then
+            echo "no (no devices found)"
+        else
+            echo yes
+        fi
+        exit 0;;
+esac
+
+INDEX=1
+set -- $DEVICES
+for DEVICE in $@ ; do
+    STATE=$(camcontrol cmd $DEVICE -a "E5 00 00 00 00 00 00 00 00 00 00 00" -r - 2>/dev/null | awk '{print $10}')
+    if [ -z "$STATE" ] ; then
+        VALUE="-1"
+    else
+        VALUE=$(echo "$(echo "ibase=16; $STATE" | bc) / 255" | bc)
+    fi
+    printf "power%d.value %d\n" $INDEX $VALUE
+    INDEX=$(expr $INDEX + 1)
+done

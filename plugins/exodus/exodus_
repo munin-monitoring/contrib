@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""
+=head1 NAME
+
+exodus_ - Exodus wildcard-plugin to monitor an L<Exodus|https://github.com/Exodus-Privacy/exodus/>
+instance.
+
+This wildcard plugin provides the suffixes C<applications>, C<reports> and C<trackers>.
+
+=head1 INSTALLATION
+
+- Copy this plugin in your munin plugins directory
+
+=over 2
+
+    ln -s /usr/share/munin/plugins/exodus_ /etc/munin/plugins/exodus_applications
+    ln -s /usr/share/munin/plugins/exodus_ /etc/munin/plugins/exodus_reports
+    ln -s /usr/share/munin/plugins/exodus_ /etc/munin/plugins/exodus_trackers
+
+=back
+
+After the installation you need to restart your munin-node service.
+
+=head1 CONFIGURATION
+
+You need to create a file named exodus placed in the directory
+/etc/munin/plugin-conf.d/ with the following config:
+
+=over 2
+
+    [exodus_*]
+    env.exodus_url https://reports.exodus-privacy.eu.org
+    env.exodus_token your-api-token
+
+    # Warning an critical values for suffixes
+    [exodus_applications]
+    env.warning 500
+    env.critical 5000
+
+=back
+
+=head1 AUTHORS
+
+Codimp <contact@lithio.fr>
+
+=head1 LICENSE
+
+GPLv3
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=suggest
+
+=cut
+"""
+
+import os
+import sys
+import json
+import urllib.request
+
+
+def print_count(element):
+    endpoint = os.getenv("exodus_url") + "/api/" + element + "/count"
+    headers = {"Authorization": "Token " + os.getenv("exodus_token")}
+    request = urllib.request.Request(endpoint, method="POST", headers=headers)
+    with urllib.request.urlopen(request) as connection:
+        if connection.getcode() == 200:
+            count = json.loads(connection.read())["count"]
+            print(element + ".value", count)
+
+
+def main():
+    try:
+        mode = sys.argv[1]
+    except IndexError:
+        mode = ""
+    wildcard = sys.argv[0].split("exodus_")[1]
+
+    if mode == "suggest":
+        print("applications")
+        print("reports")
+        print("trackers")
+        exit(0)
+
+    if wildcard == "applications":
+        if mode == "config":
+            print("graph_title Exodus applications")
+            print("graph_vlabel applications")
+            print("graph_category exodus")
+            print("applications.label Applications")
+            if os.getenv("warning") is not None:
+                print("applications.warning " + os.getenv("warning"))
+            if os.getenv("critical") is not None:
+                print("applications.critical " + os.getenv("critical"))
+        else:
+            print_count("applications")
+    elif wildcard == "reports":
+        if mode == "config":
+            print("graph_title Exodus reports")
+            print("graph_vlabel reports")
+            print("graph_category exodus")
+            print("reports.label Reports")
+            if os.getenv("warning") is not None:
+                print("reports.warning " + os.getenv("warning"))
+            if os.getenv("critical") is not None:
+                print("reports.critical " + os.getenv("critical"))
+        else:
+            print_count("reports")
+    elif wildcard == "trackers":
+        if mode == "config":
+            print("graph_title Exodus trackers")
+            print("graph_vlabel trackers")
+            print("graph_category exodus")
+            print("trackers.label Trackers")
+            if os.getenv("warning") is not None:
+                print("trackers.warning " + os.getenv("warning"))
+            if os.getenv("critical") is not None:
+                print("trackers.critical " + os.getenv("critical"))
+        else:
+            print_count("trackers")
+
+
+if __name__ == "__main__":
+    main()

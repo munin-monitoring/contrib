@@ -1,0 +1,103 @@
+#!/bin/bash
+# -*- sh -*-
+set -o pipefail
+
+: << =cut
+
+=head1 NAME
+
+dd-wrt-wifi-devices_ - How many Wifi devices are connected to a DD-WRT router?
+
+Tested with DD-WRT v3.0-r44715
+
+=head1 CONFIGURATION
+
+Configure the hostname by adding the IP address to the symlink name:
+Symlink "dd-wrt-wifi-devices_" to "dd-wrt-wifi-devices_192.168.1.1"
+
+=head2 ENVIRONMENT VARIABLES
+
+ host      - Hostname of router
+ user      - Web interface username
+ password  - Web interface password
+ host_name - To put the graph onto a different host
+
+=head2 CONFIGURATION EXAMPLE
+
+  [dd-wrt-*]
+  env.user tpli
+  env.password thisismypassword
+
+=head2 HOST MANAGEMENT
+
+You can display the graph on another host (e.g., the actual router) than the
+one running dd-wrt-wifi-devices.
+To do so, first configure the plugin to use a different hostname.
+
+  env.host_name router
+
+Then configure munin (in /etc/munin/munin-conf or /etc/munin/munin-conf.d)
+to support a new host.
+
+  [example.net;router]
+    address 127.0.0.1
+    use_node_name no
+
+
+=head1 REQUIREMENTS
+
+"bash" and "curl" are required.
+
+=head1 SEE ALSO
+
+https://github.com/Tafkas/fritzbox-munin
+
+=head1 AUTHOR
+Christian Weiske <cweiske@cweiske.de>
+
+=head1 LICENSE
+
+AGPL-3.0-only https://spdx.org/licenses/AGPL-3.0-only.html
+
+=head1 MAGIC MARKERS
+
+#%# family=manual
+
+=cut
+
+if [ -z "$host" ]; then
+    host=$(basename "$0" | sed 's/dd-wrt-wifi-devices_//g')
+fi
+user=${user:-root}
+pass=${password:-admin}
+
+case $1 in
+   config)
+       echo "graph_title DD-WRT $host connected Wifi devices"
+       echo "graph_vlabel Number of devices"
+       echo "graph_args --base 1000"
+       echo "graph_category network"
+       echo "graph_order wifi"
+       echo "wifi.label Wifi Connections"
+       echo "wifi.type GAUGE"
+       echo "wifi.graph LINE1"
+       if [ -n "$host_name" ]; then
+           echo "host_name $host_name"
+       fi
+       exit 0;;
+esac
+
+url="http://$host/Status_Wireless.live.asp"
+
+count=$(
+    curl --silent --show-error --fail --user "$user:$pass" --max-time 3 "$url"\
+        | grep -o 'assoc_count::[0-9]*'\
+        | cut -d':' -f 3
+)
+#without "-o pipefail" we would not get curl's exit code here
+exitcode=$?
+if [ "$exitcode" -gt 0 ]; then
+    count="U"
+fi
+
+echo "wifi.value $count"

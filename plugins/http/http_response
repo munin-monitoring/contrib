@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# vim: expandtab:ts=4:sw=4
+
+: << =cut
+
+=head1 NAME
+
+http_response - Monitor HTTP response statistics
+
+=head1 CONFIGURATION
+
+The following environment variables are used
+
+ sites           - Sites to check
+                     - separated by spaces
+                     - can contain basic auth credentials
+                     - defaults to "http://localhost/"
+ max_time        - Timeout for each site check in seconds
+                     - defaults to 5 seconds
+ short_label     - Switch for shortening the label below the graph
+                     - defaults to false
+ follow_redirect - Follow http redirects
+                     - defaults to false
+
+=head2 CONFIGURATION EXAMPLE
+
+ [http_response]
+  env.sites http://example.com/ https://user:secret@example2.de
+  env.max_time 20
+  env.short_label true
+  env.follow_redirect true
+
+=head1 PREREQUISITES
+
+This plugin needs at least bash version 4 to run
+
+=head1 NOTES
+
+This plugin unifies the functionalities of the following plugins into one
+multigraph plugin
+
+ http_loadtime     - https://gallery.munin-monitoring.org/plugins/munin/http_loadtime/
+ http_responsecode - https://gallery.munin-monitoring.org/plugins/munin-contrib/http_responsecode/
+
+In contrast to using these two plugins with the same configuration, this plugin
+performs only one request per site and munin run to gather its statistics.
+
+=head1 AUTHOR
+
+Copyright (C) 2020 Klaus Sperner
+
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; version 2 dated June,
+1991.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+readonly uri_regex='^(https?://)([^:]*):(.*)@(.*)$'
+
+strip_credentials_from_url() {
+    if [[ "$1" =~ $uri_regex ]]; then
+        echo "${BASH_REMATCH[1]}${BASH_REMATCH[4]}"
+    else
+        echo "$1"
+    fi
+}
+
+extract_username_from_url() {
+    if [[ "$1" =~ $uri_regex ]]; then
+        echo "${BASH_REMATCH[2]}"
+    else
+        echo ""
+    fi
+}
+
+extract_password_from_url() {
+    if [[ "$1" =~ $uri_regex ]]; then
+        echo "${BASH_REMATCH[3]}"
+    else
+        echo ""
+    fi
+}
+
+compute_label() {
+    if [[ "${short_label,,}" == "true" || "${short_label,,}" == "yes" ]]; then
+        if [[ ${#1} -gt 33 ]]; then
+            echo "${1:0:30}..."
+        else
+            echo "$1"
+        fi
+    else
+        echo "$1"
+    fi
+}
+
+if [[ "${BASH_VERSINFO:-0}" -lt 4 ]]; then
+    >&2 echo "The plugin http_response needs at least bash version 4"
+    exit 1
+fi
+
+sites=${sites:-"http://localhost/"}
+max_time=${max_time:-5}
+short_label=${short_label:-"false"}
+follow_redirect=${follow_redirect:-"false"}
+
+if [[ "$1" == "config" ]]; then
+    echo 'multigraph http_response_code'
+    echo 'graph_args --base 1000 -l 0 -u 511'
+    echo 'graph_title HTTP Response Codes'
+    echo 'graph_vlabel Response Code'
+    echo 'graph_category network'
+    echo 'graph_info This graph shows HTTP response code statistics'
+    echo 'graph_printf %3.0lf'
+    for site in $sites; do
+        site_without_credentials=$( strip_credentials_from_url "$site" )
+        siteid="$( clean_fieldname "$site_without_credentials" )"
+        echo "$siteid.label $( compute_label "$site_without_credentials" )"
+        echo "$siteid.info HTTP response code statistics for $site_without_credentials"
+        echo "$siteid.critical 99:399";
+    done
+    echo 'multigraph http_response_time'
+    echo 'graph_args --base 1000 -l 0'
+    echo 'graph_title HTTP Response Times'
+    echo 'graph_vlabel Response Time in seconds'
+    echo 'graph_category network'
+    echo 'graph_info This graph shows HTTP response time statistics'
+    for site in $sites; do
+        site_without_credentials=$( strip_credentials_from_url "$site" )
+        siteid="$( clean_fieldname "$site_without_credentials" )"
+        echo "$siteid.label $( compute_label "$site_without_credentials" )"
+        echo "$siteid.info HTTP response time statistics for $site_without_credentials"
+    done
+    exit 0
+fi
+
+declare -A response_codes
+declare -A response_times
+
+for site in $sites; do
+    site_without_credentials=$( strip_credentials_from_url "$site" )
+    username=$( extract_username_from_url "$site" )
+    password=$( extract_password_from_url "$site" )
+
+    curl_config_file=""
+    curl_auth_opt=()
+    if [ -n "$username" ]; then
+        if [ -z "$password" ]; then
+            >&2 echo "Invalid configuration: username specified without password"
+            exit 1
+        fi
+        curl_config_file=$(mktemp) || exit 1
+        trap 'rm -f "$curl_config_file"' EXIT
+        echo "user=${username}:${password}" >> "$curl_config_file"
+        curl_auth_opt=(--config "$curl_config_file")
+    fi
+
+    curl_arg=""
+    if $follow_redirect; then
+        curl_arg="--location"
+    fi
+
+    siteid="$( clean_fieldname "$site_without_credentials" )"
+    statuscode=
+    loadtime=
+    start=$(date +%s.%N)
+    statuscode=$( curl "${curl_auth_opt[@]}" --write-out '%{http_code}' --max-time "$max_time" $curl_arg --silent --output /dev/null "$site_without_credentials" )
+    returncode=$?
+    loadtime=$( echo "$start" "$(date +%s.%N)" | awk '{ print($2 - $1); }' )
+    if [[ $returncode -ne 0 ]]; then
+        loadtime="U"
+        statuscode="U"
+    fi
+    response_codes+=(["$siteid"]="$statuscode")
+    response_times+=(["$siteid"]="$loadtime")
+
+    if [ -n "$curl_config_file" ]; then
+        rm -f "$curl_config_file"
+    fi
+done
+
+echo 'multigraph http_response_code'
+for siteid in "${!response_codes[@]}"; do
+    echo "${siteid}.value ${response_codes[${siteid}]}"
+done
+
+echo 'multigraph http_response_time'
+for siteid in "${!response_times[@]}"; do
+    echo "${siteid}.value ${response_times[${siteid}]}"
+done
+

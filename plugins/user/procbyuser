@@ -1,0 +1,91 @@
+#!/bin/sh
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+procbyuser - Plugin to monitor the amount of processes owned by a user
+
+=head1 INSTALLATION
+
+Place in /etc/munin/plugins/ (or link it there using ln -s)
+
+=head1 CONFIGURATION
+
+Add this to your /etc/munin/plugin-conf.d/munin-node:
+
+ [procbyuser]
+ user root               # required if /proc can't be read from by any user!
+ env.USERS root yann     # defaults to ALL, i.e. display all users. 'root' is counted as one of the 'others'
+ env.OTHER_FIELD others  # enable 'others'-list, set the label/field name
+
+=head1 AUTHORS
+
+Copyright (C) 2019 pcy <pcy@ulyssis.org>
+
+Based on the plugin "cpubyuser".
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+[ -z "$USERS" ] && USERS=ALL
+if [ "$USERS" = "ALL" ]; then
+	USERS="$(ps ax --format uname | tail +2 | sort -u | grep -v -e '^root$')"
+fi
+
+if [ "$1" = "autoconf" ]; then
+	echo "yes"
+fi
+
+if [ "$1" = "config" ]; then
+	echo "graph_args -r --lower-limit 0"
+	echo "graph_title Processes per user"
+	echo "graph_category processes"
+	echo "graph_info This graph shows the amount of processes owned by a user."
+	echo "graph_vlabel processes"
+	echo "graph_scale no"
+	echo "graph_period second"
+	user_fields="$(for user in $USERS; do clean_fieldname "$user" | tr '\n' ' '; done)"
+	echo "graph_order $user_fields $(clean_fieldname "$OTHER_FIELD")"
+	for user in $USERS "$OTHER_FIELD"; do
+		if [ -n "$user" ]; then
+			user_field="$(clean_fieldname "$user")"
+			echo "${user_field}.label $user"
+			echo "${user_field}.info processes of user $user"
+			echo "${user_field}.type GAUGE"
+			echo "${user_field}.draw AREASTACK"
+		fi
+	done
+	exit
+fi
+
+OTHER_PRINT=""
+[ -z "$OTHER_FIELD" ] || OTHER_PRINT="print \"$(clean_fieldname "$OTHER_FIELD")\", others_sum;"
+
+ps ax -o user:42= -o cmd= | \
+	awk -v USERS="$USERS" '
+		!($2 ~ /^\[/) { NUSER[$1]=NUSER[$1]+1 } # filter away kernel threads
+		END {
+			others_sum = 0
+			split(USERS, user_array)
+			for (user in NUSER) {
+				m = match(USERS,user)
+				if (m != 0) {
+					_user=user
+					gsub(/[-.]/,"_",_user);
+					print _user, (NUSER[user])
+				} else
+					others_sum += NUSER[user]
+			}
+			'"$OTHER_PRINT"'
+		}' | while read -r user count; do
+			# apply fieldname cleanup
+			echo "$(clean_fieldname "$user").value $count"
+		done

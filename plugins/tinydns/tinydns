@@ -1,0 +1,106 @@
+#!/bin/sh
+#
+# Shows DNS query statistics as gathered by tinystats by Luca Morettoni.
+#
+# Parameters:
+#
+# 	config   (required)
+# 	autoconf (optional - used by munin-config)
+#
+#%# family=auto
+#%# capabilities=autoconf
+
+
+if [ "$1" = "autoconf" ]; then
+	if [ -f "/var/service/tinydns/log/main/tinystats.out" ]; then
+		echo yes;
+	else
+		echo no;
+	fi
+	exit 0;
+fi
+
+if [ "$1" = "config" ]; then
+
+	cat - <<EOF
+graph_title tinydns queries
+graph_args --base 1000 -l 0
+graph_vlabel queries/sec
+graph_category dns
+graph_info This graph shows the number of queries that tinydns processed.
+graph_total Total
+a.label A
+a.info The number of A queries.
+a.type DERIVE
+a.min 0
+a.draw AREA
+ns.label NS
+ns.info The number of NS queries.
+ns.type DERIVE
+ns.min 0
+ns.draw STACK
+cname.label CNAME
+cname.info The number of CNAME queries.
+cname.type DERIVE
+cname.min 0
+cname.draw STACK
+soa.label SOA
+soa.info The number of SOA queries.
+soa.type DERIVE
+soa.min 0
+soa.draw STACK
+ptr.label PTR
+ptr.info The number of PTR queries.
+ptr.type DERIVE
+ptr.min 0
+ptr.draw STACK
+hinfo.label HINFO
+hinfo.info The number of HINFO queries.
+hinfo.type DERIVE
+hinfo.min 0
+hinfo.draw STACK
+mx.label MX
+mx.info The number of MX queries.
+mx.type DERIVE
+mx.min 0
+mx.draw STACK
+txt.label TXT
+txt.info The number of TXT queries.
+txt.type DERIVE
+txt.min 0
+txt.draw STACK
+rp.label RP
+rp.info The number of RP queries.
+rp.type DERIVE
+rp.min 0
+rp.draw STACK
+sig.label SIG
+sig.info The number of SIG queries.
+sig.type DERIVE
+sig.min 0
+sig.draw STACK
+key.label KEY
+key.info The number of KEY queries.
+key.type DERIVE
+key.min 0
+key.draw STACK
+aaaa.label AAAA
+aaaa.info The number of AAAA queries.
+aaaa.type DERIVE
+aaaa.min 0
+aaaa.draw STACK
+axfr.label AXFR
+axfr.info The number of AXFR queries.
+axfr.type DERIVE
+axfr.min 0
+axfr.draw STACK
+any.label ANY
+any.info The number of ANY queries.
+any.type DERIVE
+any.min 0
+any.draw STACK
+EOF
+	exit 0
+fi
+
+cat /var/service/tinydns/log/main/tinystats.out | head -n 1 | awk -F: '{ printf "a.value %d\nns.value %d\ncname.value %d\nsoa.value %d\nptr.value %d\nhinfo.value %d\nmx.value %d\ntxt.value %d\nrp.value %d\nsig.value %d\nkey.value %d\naaaa.value %d\naxfr.value %d\nany.value %d\n", $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14 }'

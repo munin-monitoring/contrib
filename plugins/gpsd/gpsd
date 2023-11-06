@@ -1,0 +1,108 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# See documentation at the end of this file.
+
+require 'json'
+
+# Munin uses "U" to mean "no value".
+def replace_null(value)
+  return 'U' if value.nil?
+
+  value
+end
+
+if ARGV.length != 1 || ARGV.first != 'config'
+  raise 'Error: plugin designed for the dirtyconfig protocol, must be run with the config argument'
+end
+
+sky = JSON.parse(`gpspipe --json --seconds 10 2> /dev/null | sed --quiet '/SKY/{p;q}'`)
+
+puts <<~MUNIN
+  multigraph gpsd_dop
+  graph_title GPS dop
+  graph_category gps
+  xdop.label xdop
+  ydop.label ydop
+  vdop.label vdop
+  tdop.label tdop
+  hdop.label hdop
+  gdop.label gdop
+  pdop.label pdop
+  xdop.info Longitudinal dilution of precision
+  ydop.info Latitudinal dilution of precision
+  vdop.info Vertical (altitude) dilution of precision
+  tdop.info Time dilution of precision
+  hdop.info Horizontal dilution of precision
+  gdop.info Geometric (hyperspherical) dilution of precision, a combination of PDOP and TDOP
+  pdop.info Position (spherical/3D) dilution of precision
+  xdop.type GAUGE
+  ydop.type GAUGE
+  vdop.type GAUGE
+  tdop.type GAUGE
+  hdop.type GAUGE
+  gdop.type GAUGE
+  pdop.type GAUGE
+  xdop.value #{replace_null(sky['xdop'])}
+  ydop.value #{replace_null(sky['ydop'])}
+  vdop.value #{replace_null(sky['vdop'])}
+  tdop.value #{replace_null(sky['tdop'])}
+  hdop.value #{replace_null(sky['hdop'])}
+  gdop.value #{replace_null(sky['gdop'])}
+  pdop.value #{replace_null(sky['pdop'])}
+
+  multigraph gpsd_satellites
+  graph_title GPS satellites
+  graph_category gps
+  nSat.min 0
+  uSat.min 0
+  nSat.label nSat
+  uSat.label uSat
+  nSat.info Number of satellites seen
+  uSat.info Number of satellites used
+  nSat.type GAUGE
+  uSat.type GAUGE
+  nSat.value #{replace_null(sky['nSat'])}
+  uSat.value #{replace_null(sky['uSat'])}
+MUNIN
+
+__END__
+
+=pod
+
+=encoding utf8
+
+=head1 NAME
+
+gpsd - Munin plugin for graphing data from gpsd.
+
+=head1 CONFIGURATION
+
+No configuration needed.
+
+=head1 NOTES
+
+Requires the multigraph and dirtyconfig capabilities available in munin 2.0
+and newer.
+
+Developed and tested with gpsd 3.22.
+
+=head1 AUTHOR
+
+Copyright © 2022 Kenyon Ralph <kenyon@kenyonralph.com>
+
+=head1 LICENSE
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program.  If not, see L<https://www.gnu.org/licenses/>.
+
+=cut

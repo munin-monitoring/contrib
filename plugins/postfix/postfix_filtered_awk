@@ -1,0 +1,109 @@
+#!/bin/bash
+#
+# Plugin to monitor incoming Postfix mail.
+#
+# Parameters understood:
+#
+# 	config   (required)
+# 	autoconf (optional)
+#
+
+# requires logtail
+
+# If you are using a postfix policy daemon (such as policyd) to track certain block conditions, place a line
+# in your /etc/munin/plugin-conf.d/munin-node like:
+#
+# [postfix_filtered]
+# env.policy my policy string
+#
+# When env.policy is set, this plugin will match the string you supply as env.policy and return the number of instances
+# of that string as an output called "policy.value".
+#
+# If you are NOT using a postfix policy daemon, as above, use the line
+#
+# [postfix_filtered]
+# env.policy none
+#
+# and this plugin will suppress output of policy.value
+
+POLICY=''
+[ "${policy}" = 'none' ] || POLICY="${policy}"
+export POLICY
+
+
+
+LOGDIR=${logdir:-/var/log/mail}
+MAIL_LOG=$LOGDIR/${logfile:-info}
+LOGTAIL=${logtail:-`which logtail`}
+STATEFILE=$MUNIN_PLUGSTATE/postfix_mailfiltered_test.offset
+
+if [ "$1" = "autoconf" ]; then
+        if [ -f "${MAIL_LOG}" -a -n "${LOGTAIL}" -a -x "${LOGTAIL}" ] ; then
+		echo yes
+	else
+		echo no
+	fi
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+	echo 'graph_title Postfix message filtering'
+
+	echo 'graph_category mail'
+	echo 'graph_vlabel Mails per second'
+#	echo 'graph_args --base 1000 --logarithmic'
+	echo 'graph_args --base 1000 -l 0'
+
+	if [ -z "$POLICY" ]
+		then
+			echo 'graph_order rbl helo client sender recipient relay allowed'
+
+		else
+			echo 'graph_order rbl policy helo client sender recipient relay allowed'
+			echo 'policy.label policy blocked'
+			echo 'policy.min 0'
+			echo 'policy.draw LINE1'
+			echo 'policy.type ABSOLUTE'
+	fi
+
+
+	echo 'allowed.draw LINE2'
+	echo 'allowed.type ABSOLUTE'
+	echo 'allowed.colour 00ff00'
+	echo 'rbl.draw LINE2'
+	echo 'rbl.type ABSOLUTE'
+	echo 'rbl.colour 1010ff'
+
+	for i in helo client sender recipient relay;
+	do
+		echo "$i.min 0"
+		echo "$i.type ABSOLUTE"
+		echo "$i.draw LINE1";
+	done
+
+	echo 'allowed.label allowed'
+	echo 'rbl.label RBL blocked'
+	echo 'helo.label HELO rejected'
+	echo 'client.label Client rejected'
+	echo 'sender.label Sender rejected'
+	echo 'recipient.label recipient unknown'
+	echo 'relay.label relay denied'
+
+        exit 0
+
+fi
+
+
+$LOGTAIL ${MAIL_LOG} $STATEFILE | \
+awk 'BEGIN { allowed_count=0; relay_denied_count=0; rbl_count=0; helo_rejected_count=0; client_rejected_count=0; sender_rejected_count=0; reciepient_rejected_count=0; policy_count=0 ; st=ENVIRON["POLICY"] }
+        {
+               if (index($0, "queued as")) { allowed_count++ }
+               else if (index($0, "Relay access denied")) { relay_denied_count++ }
+               else if (index($0, "blocked using")) { rbl_count++ }
+               else if (index($0, "Helo command rejected")) { helo_rejected_count++ }
+               else if (index($0, "Client host rejected")) { client_rejected_count++ }
+               else if (index($0, "Sender address rejected")) { sender_rejected_count++ }
+               else if (index($0, "Recipient address rejected")) { reciepient_rejected_count++ }
+               else if (st && index($0, st)) { policy_count++ }
+        }
+        END { print "allowed.value " allowed_count"\nrelay.value " relay_denied_count"\nrbl.value " rbl_count"\nhelo.value " helo_rejected_count"\nclient.value " client_rejected_count"\nsender.value " sender_rejected_count"\nrecipient.value " reciepient_rejected_count ; if (st) print "policy.value " policy_count }'

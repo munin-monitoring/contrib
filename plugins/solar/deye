@@ -1,0 +1,147 @@
+#!/bin/bash
+#%# family=auto
+#%# capabilities=autoconf
+
+: << EOF
+=head1 NAME
+
+Outputs the current power, total yield, daily yield from a deye inverter.
+
+=head1 CONFIGURATION
+
+Tested with a "Deye SUN600G3-EU-230 600W" inverter.
+
+Dependencies:
+ - wget
+ - awk
+ - sed
+ - bc
+
+plugin config:
+
+  [deye]
+  env.user <User>
+  env.password <SECRET_PASS>
+  env.ip <ip/fqdn>
+  env.serial_number 2XXXXXXXXX6-1
+
+
+=head1 AUTHOR
+
+Michael Grote
+
+=head1 LICENSE
+
+GPLv3 or later
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+
+=cut
+
+EOF
+
+
+
+# Values in HTML
+# sn = serial number
+# msvn = Firmware version (main)
+# ssvn = Firmware version (slave)
+# pv_type = inverter _model
+# rate_p = rated power
+# now_p = current power
+# today_e = yield today
+# total_e = total yield
+# alarm = alarm
+# utime = last updated
+
+# check if inverter is reachable
+# inverter is off when there is not enough light to power it
+if ping "${ip}" -c1 -W 3 2>&1 > /dev/null ; then
+    # get data
+    data=$(wget --quiet --user "${user}" --password "${password}" -O - "${ip}"/status.html)
+    truncate -s 0  "$MUNIN_STATEFILE"
+    current_power=$(echo "$data" | grep "var webdata_now_p"   | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9]*//g' )
+    daily_yield=$(echo "$data"   | grep "var webdata_today_e" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9\.]*//g')
+    total_yield=$(echo "$data"   | grep "var webdata_total_e" | awk 'BEGIN {FS="="}{print $2}' | sed 's/[^0-9\.]*//g')
+    reachable="1"
+    echo "$daily_yield" >> "$MUNIN_STATEFILE"
+    echo "$total_yield" >> "$MUNIN_STATEFILE"
+else
+    current_power="0"
+    reachable="0"
+    daily_yield=$(cat $MUNIN_STATEFILE | head -n1)
+    total_yield=$(cat $MUNIN_STATEFILE | tail -n1)
+fi
+
+# wenn parameter = ...
+if [ "$1" = "autoconf" ]; then
+    if [ ! -x "$(command -v wget)" ]; then
+        echo "no (wget not found)"
+    elif [ ! -x "$(command -v awk)" ]; then
+        echo "no (awk not found)"
+    elif [ ! -x "$(command -v sed)" ]; then
+        echo "no (sed not found)"
+    elif [ ! -x "$(command -v bc)" ]; then
+        echo "no (bc not found)"
+    fi
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    # setze optionen
+    echo "multigraph current_power"
+    echo "graph_title Current Power - Local - SN: ${serial_number}"
+    echo "graph_vlabel watt"
+    echo "graph_category sensors"
+    echo "graph_args -l 0"
+    echo "graph_info Current generated power in Watt."
+    echo "current_power.label watt"
+
+    echo "multigraph daily_yield"
+    echo "graph_title Daily Yield - Local - SN: ${serial_number}"
+    echo "graph_vlabel kWh"
+    echo "graph_category sensors"
+    echo "graph_args -l 0"
+    echo "graph_info Power generated today."
+    echo "daily_yield.label kWh"
+    echo "daily_yield.draw AREA"
+
+    echo "multigraph total_yield"
+    echo "graph_title Total Yield - Local - SN: ${serial_number}"
+    echo "graph_vlabel kWh"
+    echo "graph_category sensors"
+    echo "graph_args -l 0"
+    echo "graph_info Total generated power."
+    echo "total_yield.label kWh"
+    echo "total_yield.draw AREA"
+
+    echo "multigraph reachable"
+    echo "graph_printf %6.0lf"
+    echo "graph_title Inverter reachable - Local - SN: ${serial_number}"
+    echo "graph_vlabel on/off"
+    echo "graph_category sensors"
+    echo "graph_args -l 0"
+    echo "graph_info Is the Inverter is reachable? 1 is On, 0 is Off"
+    echo "reachable.label on/off"
+    echo "reachable.draw AREA"
+
+    exit 0
+fi
+
+echo "multigraph current_power"
+echo "current_power.value $current_power"
+
+echo "multigraph daily_yield"
+echo "daily_yield.value $daily_yield"
+
+echo "multigraph total_yield"
+echo "total_yield.value $total_yield"
+
+echo "multigraph reachable"
+echo "reachable.value $reachable"
+
+exit 0

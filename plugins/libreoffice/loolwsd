@@ -1,0 +1,101 @@
+#!/bin/sh
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+loolwsd - Monitor usage (open documents and active views) and memory
+usage of libreoffice online
+
+=head1 APPLICABLE SYSTEMS
+
+LibreOffice Online or Collabora Online or Collabora Online Development 
+Edition
+
+=head1 CONFIGURATION
+
+Requires installed curl.
+
+Set username, password of admin user and if required an url in your 
+munin-node configuration. Default url is 
+http://127.0.0.1:9980/lool/getMetrics
+
+ [loolwsd]
+ env.username <lool_admin>
+ env.password <lool_password>
+ env.url <lool_getmetrics_url>
+
+You can set an administative user for loolwsd by invoking
+
+loolconfig set-admin-password
+
+=head1 AUTHOR
+
+Copyright (C) 2020 Sebastian L. (https://momou.ch)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+STATS_URL=${url:-"http://127.0.0.1:9980/lool/getMetrics"}
+USERNAME="${username:-}"
+PASSWORD="${password:-}"
+
+case $1 in
+    autoconf)
+        if [ -x /usr/bin/loolwsd ]; then
+		if [ -x /usr/bin/curl ]; then
+			curl -s -f -m 2 -I -u "$USERNAME:$PASSWORD" "$STATS_URL" | grep -iq "Content-Type: text/plain" && echo "yes" && exit 0 || echo "no (invalid or empty response from loolwsd ($STATS_URL)" && exit 0
+		else
+			echo "no (/usr/bin/curl not found)" && exit 0
+		fi
+        else
+		echo "no (/usr/bin/loolwsd not found)"
+		exit 0
+        fi
+        ;;
+
+   config)
+	echo "multigraph loolwsd_usage"
+	echo "graph_title Libreoffice Online Usage"
+	echo "graph_category appserver"
+	echo "graph_vlabel open documents / active views"
+	echo "graph_info This graph shows currently open documents and active views."
+	echo "graph_args --base 1000 --lower-limit 0"
+	echo "documents.label open documents"
+	echo "documents.info Current number of open documents"
+	echo "documents.min 0"
+	echo "active_views.label active views"
+	echo "active_views.info Current number of active views"
+	echo "active_views.min 0"
+	echo "multigraph loolwsd_memory"
+	echo "graph_title Libreoffice Online Memory Usage"
+	echo "graph_category appserver"
+	echo "graph_vlabel memory usage of libreoffice online"
+	echo "graph_info This graph shows currently used memory of libreoffice online."
+	echo "graph_args --base 1000 --lower-limit 0"
+	echo "memory.label used memory"
+	echo "memory.info Currently used memory of libreoffice online"
+	echo "memory.min 0"
+	exit 0
+        ;;
+
+esac
+
+STATS=$(curl -s -f -u "$USERNAME:$PASSWORD" "$STATS_URL")
+echo "multigraph loolwsd_usage"
+echo "documents.value $(echo "$STATS" | grep kit_assigned_count | cut -d " " -f 2)"
+echo "active_views.value $(echo "$STATS" | grep document_active_views_active_count_total | cut -d " " -f 2)"
+echo "multigraph loolwsd_memory"
+echo "memory.value $(echo "$STATS" | grep global_memory_used_bytes | cut -d " " -f 2)"

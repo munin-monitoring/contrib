@@ -1,0 +1,123 @@
+#!/usr/bin/perl
+# -*- perl -*-
+
+=head1 NAME
+
+sickbeard - Munin multigraph plugin for Sick-Beard and forks (e.g.,
+SickChill)
+
+=head1 DESCRIPTION
+
+This plugin uses the Sick-Beard API (also implemented by forks such as
+SickChill) to collect and report on the numbers of shows (total and
+active), and episodes (downloaded, snatched, and all) currently tracked
+by the app.
+
+It is a drop-in replacement for sickbeard_shows and sickbeard_episodes,
+reusing the vast majority of the code, and providing the same graphs and
+data series.
+
+Sick-Beard       : http://sickbeard.com/
+
+SickChill        : https://sickchill.github.io/
+
+=head1 REQUIREMENTS
+
+JSON::Any, LWP::UserAgent
+
+=head1 CONFIGURATION
+
+You need to specify the host/port of the Sick-Beard as well as API key
+to use.
+
+	[sickbeard*]
+	 env.host http://host:port/
+	 env.api apikey
+
+=head1 AUTHORS
+
+Copyright (C) 2012 - Blauwbek
+
+Copyright (C) 2012 - Thiago
+
+Copyright (C) 2019 - Olivier Mehani <shtrom+munin@ssji.net>, for the
+multigraph support and better error handling
+
+=head1 LICENSE
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=cut
+
+use strict;
+use JSON::Any;
+use LWP::UserAgent;
+
+#defines
+my $HOST = exists $ENV{'host'} ? $ENV{'host'} : "http://localhost:8081/";
+my $API = exists $ENV{'api'} ? $ENV{'api'} : "";
+my $URL = $HOST."/api/".$API."/?cmd=shows.stats";
+my $sURL = sprintf $URL;
+
+#config output
+if(defined $ARGV[0] && $ARGV[0] eq 'config')
+{
+    print <<EOC
+multigraph sickbeard_episodes
+graph_title Episodes
+graph_vlabel Episodes
+graph_category tv
+total.label Total
+total.draw AREA
+down.label Downloaded
+down.draw AREA
+snatched.label Snatched
+snatched.draw STACK
+
+multigraph sickbeard_shows
+graph_title Shows
+graph_vlabel Shows
+graph_category tv
+total.label Total
+total.draw AREA
+active.label Active
+active.draw AREA
+EOC
+;
+
+exit 0;
+}
+
+my $get = LWP::UserAgent->new;
+my $req = $get->get($sURL);
+if (!$req->is_success) {
+	die $req->status_line;
+}
+my $json = JSON::Any->jsonToObj($req->content());
+
+if ($json->{result} eq 'success') {
+	print "multigraph sickbeard_episodes\n";
+	print "total.value $json->{data}->{ep_total}\n";
+	print "down.value $json->{data}->{ep_downloaded}\n";
+	print "snatched.value $json->{data}->{ep_snatched}\n";
+
+	print "multigraph sickbeard_shows\n";
+	print "total.value $json->{data}->{shows_total}\n";
+	print "active.value $json->{data}->{shows_active}\n";
+	exit 0;
+} else {
+	die "$json->{message}";
+}

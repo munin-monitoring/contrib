@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to monitor software and hardware RAID and scrub status.
+
+=head1 NAME
+
+raid2 - monitor software and hardware RAID and scrub status
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems with mdraid, btrfs, cciss, mpt3sas or megasasctl RAID.
+
+=head1 CONFIGURATION
+
+Following config is needed:
+
+    [raid2]
+    user root
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import glob
+import os
+import re
+import subprocess
+import sys
+
+
+def safename(name):
+    """Return safe variable name."""
+    if name == '/':
+        return 'root'
+    return ''.join(char.lower() if char.isalnum() else '_' for char in name)
+
+
+def run_binary(arg):
+    """Run binary and return output."""
+    try:
+        cmd = subprocess.Popen(
+            arg, shell=False, close_fds=True, bufsize=-1,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        outdata, dummy_errdata = cmd.communicate()
+    except OSError:
+        return None
+    return outdata.decode('utf-8', 'ignore').strip()
+
+
+def find_cciss():
+    """Parse /usr/bin/cciss_vol_status."""
+    statexe = '/usr/bin/cciss_vol_status'
+
+    # Find device files and binary
+    devfiles = sorted(glob.glob('/dev/sg*') + glob.glob('/dev/cciss/c*d0'))
+    if not devfiles or not os.path.exists(statexe):
+        return []
+
+    # Run binary
+    data = run_binary([statexe] + devfiles)
+    if not data:
+        return []
+
+    # Parse result
+    data = data.splitlines()
+    devices = []
+    for index, device in enumerate(devfiles):
+        if index == len(data):
+            break
+        if ' status: OK' in data[index]:
+            status = 1
+        elif ' status: ' not in data[index]:
+            continue
+        else:
+            status = 0
+        desc = 'Hardware RAID device {}'.format(device)
+        devices.append((device, status, desc))
+    return devices
+
+
+def find_megasasctl():
+    """Parse /usr/sbin/megasasctl."""
+    statexe = '/usr/sbin/megasasctl'
+
+    # Find binary
+    if not os.path.exists(statexe):
+        return []
+
+    # Run binary
+    data = run_binary([statexe, '-HB'])
+    if data:
+        status = 0
+    else:
+        status = 1
+    return [('lsi', status, 'Hardware RAID device LSI')]
+
+
+def find_mdstat():
+    """Parse /proc/mdstat."""
+    # Read file
+    try:
+        with open('/proc/mdstat', encoding='utf-8') as fhn:
+            lines = fhn.readlines()
+    except OSError:
+        return []
+
+    # Parse it
+    devices = []
+    device = None
+    for line in lines:
+        if re.match(r'^md\d+ : ', line):
+            device = line.split()[0]
+        elif device:
+            if '_' in line:
+                status = 0
+            else:
+                status = 1
+            desc = 'Software RAID device {}'.format(device)
+            devices.append((device, status, desc))
+            device = None
+    return devices
+
+
+def find_btrfs():
+    """Parse /proc/mounts and btrfs scrub status. Ignore csum errors."""
+    # Read file
+    try:
+        with open('/proc/mounts', encoding='utf-8') as fhn:
+            lines = fhn.readlines()
+    except OSError:
+        return []
+
+    # Parse it
+    devmap = {}
+    for line in lines:
+        line = line.split()
+        if len(line) > 2 and line[2] == 'btrfs' and line[0] not in devmap:
+            devmap[line[0]] = line[1]
+
+    # Iterate devices
+    devices = []
+    for mount in devmap.values():
+        data = run_binary(['/sbin/btrfs', 'scrub', 'status', '-R', mount])
+        if not data or 'data_extents_scrubbed:' not in data:
+            continue
+        desc = 'BTRFS in {}'.format(mount)
+        if (    # pylint: disable=too-many-boolean-expressions
+                'read_errors: 0' in data and
+                'verify_errors: 0' in data and
+                'super_errors: 0' in data and
+                'malloc_errors: 0' in data and
+                'uncorrectable_errors: 0' in data and
+                'unverified_errors: 0' in data
+        ):
+            devices.append((mount, 1, desc))
+        else:
+            devices.append((mount, 0, desc))
+    return devices
+
+
+def find_mpt3sas():
+    """Read LSI MPT Fusion RAID status from /sys files."""
+    statefiles = sorted(glob.glob('/sys/class/raid_devices/*/state'))
+    if not statefiles:
+        return []
+    status = 1
+    for statefile in statefiles:
+        with open(statefile, encoding='utf-8') as fhn:
+            if 'active' not in fhn.read():
+                status = 0
+                break
+    return [('mpt3sas', status, 'LSI MPT Fusion SAS 3.0')]
+
+
+def find_devices():
+    """Return list of found device tuples."""
+    return (find_mdstat() + find_btrfs() + find_cciss() + find_mpt3sas() +
+            find_megasasctl())
+
+
+def config(devices):
+    """Print plugin config."""
+    print('graph_title RAID and Scrub Status')
+    print('graph_vlabel Status')
+    print('graph_category disk')
+    print('graph_info Health status: 0 = Error, 1 = OK')
+    print('graph_args --base 1000 --lower-limit 0 --upper-limit 1')
+    for device in devices:
+        print('{}.label {}'.format(safename(device[0]), device[2]))
+        print('{}.warning 1:'.format(safename(device[0])))
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch(devices)
+
+
+def fetch(devices):
+    """Print values."""
+    for device in devices:
+        print('{}.value {}'.format(safename(device[0]), device[1]))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if find_devices() else 'no (no RAID devices found)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config(find_devices())
+    else:
+        fetch(find_devices())

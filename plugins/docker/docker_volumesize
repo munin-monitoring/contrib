@@ -1,0 +1,79 @@
+#!/bin/bash
+#%# family=auto
+
+: << EOF
+=head1 NAME
+docker_volumesize - Plugin to monitor the sizes of docker volumes.
+
+=head1 AUTHOR
+
+Michael Grote (michael.grote@posteo.de)
+
+=head1 MAGIC MARKERS
+
+#%# family=auto
+
+=head1 LICENSE
+
+GPLv3 or later
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=cut
+
+EOF
+
+
+if [ "$1" = "autoconf" ]; then
+  if ! command -v jq &> /dev/null; then
+    echo "no (jq could not be found)"
+  elif ! command -v docker &> /dev/null; then
+    echo "no (docker could not be found)"
+  elif ! command -v bc &> /dev/null; then
+    echo "no (bc could not be found)"
+  else
+    echo "yes"
+  fi
+  exit 0
+fi
+
+volume_info=$(docker system df -v --format '{{json .Volumes}}' | jq -r '.[] | "\(.Name):\(.Size):\(.Labels)"')
+
+
+
+if [ "$1" = "config" ]; then
+  echo "multigraph volumesize"
+  echo "graph_title Docker volume size"
+  echo "graph_vlabel Bytes"
+  echo "graph_category virtualization"
+  echo "graph_args -l 0 --base 1024"
+  echo "graph_info This graph shows the size per volume."
+  while IFS= read -r line; do
+    echo "$line" | awk 'BEGIN { FS = ":" } { label = substr($1, 1, 30); print $1 ".label " label }'
+    # display info only when labels are set
+    if [ -n "$(echo "$line" | awk 'BEGIN { FS = ":" } { print $3 }')" ]; then
+      echo "$line" | awk 'BEGIN { FS = ":" } { print $1".info "$3 }'
+    fi
+    echo "$line" | awk 'BEGIN { FS = ":" } { print $1".draw AREASTACK" }'
+  done <<< "$volume_info"
+exit 0
+fi
+
+echo "multigraph volumesize"
+while IFS= read -r line; do
+  name=$(echo "$line" | awk 'BEGIN { FS = ":" } { print $1 }')
+  value=$(echo "$line" | awk 'BEGIN { FS = ":" } { print $2 }')
+
+  if [[ $value =~ ([0-9.]+)TB$ ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024 * 1024 * 1024 * 1024" | bc)
+  elif [[ $value =~ ([0-9.]+)GB$ ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024 * 1024 * 1024" | bc)
+  elif [[ $value =~ ([0-9.]+)MB$ ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024 * 1024" | bc)
+  elif [[ $value =~ ([0-9.]+)kB$ ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g') * 1024" | bc)
+  elif [[ $value =~ ([0-9.]+)B$ ]]; then
+    bytes=$(echo "$(echo $value | sed 's/[^0-9.]//g')")
+  fi
+  echo "$name.value" "$bytes"
+done <<< "$volume_info"

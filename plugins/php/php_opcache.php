@@ -3,9 +3,9 @@
  * Part of Munin PHP OPcache plugin - Refer to php_opcache for installation instructions.
  */
 
-if (function_exists('opcache_get_status')) 
+if (function_exists('opcache_get_status'))
 {
-	$data = opcache_get_status();
+	$data = opcache_get_status(false);
 	$output = array(
 		'mem_used.value' => $data['memory_usage']['used_memory'],
 		'mem_free.value' => $data['memory_usage']['free_memory'],

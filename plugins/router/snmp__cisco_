@@ -1,0 +1,241 @@
+#!/usr/bin/perl -w
+# -*- perl -*-
+# vim: ft=perl
+
+=head1 NAME
+
+snmp__cisco_ - Munin plugin to monitor arbitrary SNMP MIBs on Cisco Switches.
+
+This currently only supports the CISCO-ENVMON-MIB (definitions found in
+ftp://ftp.cisco.com/pub/mibs/v2/v2.tar.gz).
+
+=head2 EXTENDING THE PLUGIN
+
+This plugin is designed to be extensible, by adding descriptors to the %params
+hash.
+
+The assumption is that each monitored instance will have at least a Descr and a
+Value (or a State, as a fallback), and potentially either one Threshold or a
+range (ThresholdLow:ThresholdHigh).
+
+Each sub-hash in the %params hash must list all those bojects, and the matching
+OID (or 0 if irrelevant). It should also include the Munin graph details (title,
+category, info, ...), an optional cdef, and an instancePrefix used when naming
+the values (by prepending them to the entry OID).
+
+=head1 APPLICABLE SYSTEMS
+
+Cisco Switches with SNMP support; maybe other SNMP devices too, if the %params
+get extended.
+
+=head1 CONFIGURATION
+
+As a rule SNMP plugins need site specific configuration.  The default
+configuration (shown here) will only work on insecure sites/devices.
+
+   [snmp_*]
+        env.version 2
+        env.community public
+
+In general SNMP is not very secure at all unless you use SNMP version
+3 which supports authentication and privacy (encryption).  But in any
+case the community string for your devices should not be "public".
+
+Please see 'perldoc Munin::Plugin::SNMP' for further configuration
+information
+
+=head1 MAGIC MARKERS
+
+  #%# family=snmpauto
+  #%# capabilities=snmpconf suggest
+
+=head1 BUGS
+
+EnvMonVoltage hasn't been tested.
+
+snmpconf doesn't actually work, as this wildard plugin targets classe of MIBs,
+rather than single instances of an object.
+
+=head1 AUTHOR
+
+Copyright (C) 2015 James DeVincentis (snmp__cisco_sbs_cpu)
+Copyright (C) 2020 Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+SPDX-License-Identifier: GPL-3.0
+
+=cut
+
+use strict;
+use Munin::Plugin::SNMP;
+use Data::Dumper;
+
+my $entPhysicalIndexMib = '1.3.6.1.2.1.47.1.1.1.1.1';
+my $entPhysicalDescrMib = '1.3.6.1.2.1.47.1.1.1.1.2';
+my $ciscoEnvMonObjectsMib = '1.3.6.1.4.1.9.9.13.1';
+
+my %params = (
+	'EnvMonVoltage' => {
+		'title' => 'Voltages',
+		'category' => 'sensors',
+		'vlabel' => 'volts',
+		'info' => "The table of voltage status maintained by the environmental monitor.",
+		'cdef' => '1000,*',
+
+		'baseMib' => "$ciscoEnvMonObjectsMib.2.1",
+		'descrOid' => 2,
+		'valueOid' => 3,
+		'thresholdLowOid' => 4,
+		'thresholdHighOid' => 5,
+		'thresholdOid' => 0, # n/a
+		'stateOid' => 6,
+
+		'instancePrefix' => 'voltage',
+	},
+	'EnvMonTemperature' => {
+		'title' => 'Temperatures',
+		'category' => 'sensors',
+		'vlabel' => 'Degrees Celsius',
+		'info' => "The table of ambient temperature status maintained by the environmental monitor.",
+
+		'baseMib' => "$ciscoEnvMonObjectsMib.3.1",
+		'descrOid' => 2,
+		'valueOid' => 3,
+		'thresholdLowOid' => 0, # n/a
+		'thresholdHighOid' => 0, # n/a
+		'thresholdOid' => 4,
+		'stateOid' => 6,
+
+		'instancePrefix' => 'temp',
+	},
+	'EnvMonFanStatus' => {
+		'title' => 'Fans',
+		'category' => 'sensors',
+		'vlabel' => 'state',
+		'info' => "The table of fan status maintained by the environmental monitor (1=normal, 2=warning, 3=critical, 4=shutdown, 5=notPresent, 6=notFunctioning).\n", # CiscoEnvMonState
+
+		'baseMib' => "$ciscoEnvMonObjectsMib.4.1",
+		'descrOid' => 2,
+		'valueOid' => 0, # n/a
+		'thresholdLowOid' => 0, # n/a
+		'thresholdHighOid' => 0, # n/a
+		'thresholdOid' => 0, # n/a
+		'stateOid' => 3,
+
+		'instancePrefix' => 'fan',
+	},
+	'EnvMonSupplyStatus' => {
+		'title' => 'Power supplies',
+		'category' => 'sensors',
+		'vlabel' => 'state',
+		'info' => "The table of power supply status maintained by the environmental monitor card (1=normal, 2=warning, 3=critical, 4=shutdown, 5=notPresent, 6=notFunctioning).\n", # CiscoEnvMonState
+
+		'baseMib' => "$ciscoEnvMonObjectsMib.5.1",
+		'descrOid' => 2,
+		'valueOid' => 0, # n/a
+		'thresholdLowOid' => 0, # n/a
+		'thresholdHighOid' => 0, # n/a
+		'thresholdOid' => 0, # n/a
+		'stateOid' => 3,
+
+		'instancePrefix' => 'supply',
+	},
+);
+
+
+my ($object) = $0 =~ m/([^_]+)$/;
+$object ||= 'EnvMonTemperature';
+
+if (defined $ARGV[0] and $ARGV[0] eq 'suggest') {
+	print join(' ', keys (%params)) . "\n";
+        exit 0;
+}
+
+if (defined $ARGV[0] and $ARGV[0] eq 'snmpconf') {
+        print "index $entPhysicalIndexMib.\n";
+        print "require $params{$object}{baseMib}.$params{$object}{valueOid}. [0-9]\n";
+        exit 0;
+}
+
+my $session = Munin::Plugin::SNMP->session();
+
+my $values = $session->get_hash(
+	-baseoid => "$params{$object}{baseMib}",
+	-cols => {
+		$params{$object}{descrOid} => 'Descr',
+		$params{$object}{valueOid} => 'Value',
+		$params{$object}{thresholdHighOid} => 'ThresholdHigh',
+		$params{$object}{thresholdLowOid} => 'ThresholdLow',
+		$params{$object}{thresholdOid} => 'Threshold',
+		$params{$object}{stateOid} => 'State',
+	}
+);
+
+# For some reason, some instanceIds are returned with trailing spaces,
+# sometimes. Flatten them.
+foreach my $instanceId (keys %{$values}) {
+	my $instanceIdTrim = $instanceId;
+	$instanceIdTrim =~ s/\s+$//;
+	if (!($instanceIdTrim eq $instanceId)) {
+		foreach my $data (keys %{$values->{$instanceId}}) {
+			$values->{$instanceIdTrim}->{$data} = $values->{$instanceId}->{$data}
+		}
+		delete $values->{$instanceId};
+	}
+}
+
+if (defined $ARGV[0] and $ARGV[0] eq "config") {
+        my ($host) = Munin::Plugin::SNMP->config_session();
+
+        print "host_name $host\n" unless $host eq 'localhost';
+        print <<"EOF";
+graph_title $params{$object}{title}
+graph_args --base 1000
+graph_vlabel $params{$object}{vlabel}
+graph_category $params{$object}{category}
+graph_info $params{$object}{info}
+EOF
+	foreach my $instanceId (keys %{$values}) {
+		print "$params{$object}{instancePrefix}$instanceId.draw LINE1\n";
+		print "$params{$object}{instancePrefix}$instanceId.label "
+			. $session->get_single("$entPhysicalDescrMib.$instanceId") . "\n";
+
+		my $descr = $values->{$instanceId}->{'Descr'};
+		print "$params{$object}{instancePrefix}$instanceId.info $descr\n";
+
+		my $value = $values->{$instanceId}->{'Value'};
+		if ($value) {
+
+			my $cdef = $params{$object}{'cdef'};
+			if ($cdef) {
+				print "$params{$object}{instancePrefix}$instanceId.cdef "
+				. "$params{$object}{instancePrefix}$instanceId,$cdef\n";
+			}
+
+			my $threshold = $values->{$instanceId}->{'Threshold'};
+			my $thresholdHigh = $values->{$instanceId}->{'ThresholdHigh'};
+			my $thresholdLow = $values->{$instanceId}->{'ThresholdLow'};
+			if ($thresholdHigh || $thresholdLow) {
+				print "$params{$object}{instancePrefix}$instanceId.critical $thresholdLow:$thresholdHigh\n";
+			} elsif ($threshold) {
+				print "$params{$object}{instancePrefix}$instanceId.critical $threshold\n";
+			}
+
+		} else {
+			# assume state rather than value, add limits
+			print "$params{$object}{instancePrefix}$instanceId.warning 2\n";
+			print "$params{$object}{instancePrefix}$instanceId.critical 3\n";
+		}
+	}
+
+        exit 0;
+}
+
+foreach my $instanceId (keys %{$values}) {
+	my $value = $values->{$instanceId}->{'Value'} || 'U';
+	if ($value eq 'U') {
+		$value = $values->{$instanceId}->{'State'} || 'U';
+	}
+	print "$params{$object}{instancePrefix}$instanceId.value $value\n";
+}

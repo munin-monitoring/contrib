@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+# -*- python -*-
+
+"""
+=head1 INTRODUCTION
+
+Plugin to monitor MySQL database disk usage per prefix. A prefix can be eg.
+'user' for the databases 'user_testdb' and 'user_db2', as can be seen in
+certain shared hosting setups.
+
+=head1 APPLICABLE SYSTEMS
+
+Local access to the database files is required (which are stored in
+/var/lib/mysql by default).
+
+=head1 INSTALLATION
+
+Place in /etc/munin/plugins/ (or link it there using ln -s)
+
+=head1 CONFIGURATION
+
+Add this to your /etc/munin/plugin-conf.d/munin-node:
+
+=over 2
+
+    [mysql_disk_by_prefix]
+    user mysql
+    env.prefixes_with_underscores foo_bar d_ritchie # prefixes that include an underscore
+    env.db_minsize 1024000 # minimum db size in order to report a specific prefix,
+                           # in bytes (defaults to 50M). "0" for none.
+    env.mysql_db_dir /var/lib/mysql # default value
+
+=back
+
+=head1 AUTHORS
+
+Copyright (C) 2019 pcy <pcy.ulyssis.org>
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+
+import os
+import re
+import sys
+
+
+def weakbool(x):
+    return x.lower().strip() in {'true', 'yes', 'y', 1}
+
+
+LIMIT = os.getenv('db_minsize', str(50000 * 1024))
+try:
+    LIMIT = int(LIMIT)
+except ValueError:
+    LIMIT = 0
+
+exceptions = os.getenv('prefix_with_underscores', '').split(' ')
+if exceptions == ['']:
+    exceptions = []
+
+mysqldir = os.getenv('mysql_db_dir', '/var/lib/mysql')
+
+
+def name_from_path(path):
+    filename = os.path.basename(path)
+    for name in exceptions:
+        if filename.startswith(name):
+            return name
+    name = filename.split('_')[0]
+
+    def decode_byte(m):
+        return bytes.fromhex(m.group(1)).decode('utf-8')
+
+    # Decode MySQL's encoding of non-ascii characters in the table names
+    return re.sub('@00([0-9a-z]{2})', decode_byte, name)
+
+
+def calc_dir_size(directory):
+    total = 0
+
+    for filename in os.listdir(directory):
+        filedir = os.path.join(directory, filename)
+
+        if os.path.islink(filedir):
+            continue
+        if os.path.isfile(filedir):
+            total += os.path.getsize(filedir)
+
+    return total
+
+
+def size_per_subdir(parentdir):
+    for subdir in os.listdir(parentdir):
+        dirpath = os.path.join(parentdir, subdir)
+
+        if os.path.islink(dirpath):
+            continue
+        if os.path.isdir(dirpath):
+            yield calc_dir_size(dirpath), name_from_path(os.path.split(dirpath)[1])
+
+
+def sizes_by_name(limit=None):
+    sizes = {}
+    for size, name in size_per_subdir(mysqldir):
+        sizes[name] = sizes.get(name, 0) + size
+    for name, total_size in sizes.items():
+        if limit <= 0 or limit <= total_size:
+            yield name, total_size
+
+
+def fetch():
+    for name, total_size in sorted(sizes_by_name(limit=LIMIT), key=lambda x: x[0]):
+        print('{}.value {}'.format(name, total_size))
+
+
+def main():
+    if len(sys.argv) == 1:
+        fetch()
+    elif sys.argv[1] == 'config':
+        print('graph_title MySQL disk usage by prefix')
+        print('graph_vlabel bytes')
+        print('graph_category db')
+
+        names = sorted(name for name, _ in sizes_by_name(limit=LIMIT))
+        for name in names:
+            print('{0}.label {0}'.format(name))
+            print('{}.type GAUGE'.format(name))
+            print('{}.draw AREASTACK'.format(name))
+    elif sys.argv[1] == 'autoconf':
+        print('yes' if os.path.isdir(mysqldir)
+              else "no (can't find MySQL's data directory)")
+    else:
+        fetch()
+
+
+if __name__ == "__main__":
+    main()

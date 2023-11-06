@@ -1,0 +1,136 @@
+#!/bin/sh
+# shellcheck shell=dash
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+nextcloud_groupfolders - Monitor usage of nextcloud groupfolders
+
+=head1 APPLICABLE SYSTEMS
+
+Nexcloud instances with enabled groupfolders app
+
+=head1 CONFIGURATION
+
+Requires installed curl and jq, a command-line json processor.
+
+This is a wildcard plugin. To monitor a groupfolders of a nextcloud 
+instance, link nextcloud_groupfolders_<nextcloud-domain> to this file.
+You can even append a port (:8443) to the file if needed. For example,
+
+  ln -s /usr/share/munin/plugins/nextcloud_groupfolders_ \
+        /etc/munin/plugins/nextcloud_groupfolders_cloud.domain.tld
+
+Set username and password in your munin-node configuration
+
+	[nextcloud_groupfolders_cloud.domain.tld]
+	env.username <nexcloud_user>
+	env.password <nextcloud_password>
+	env.path <default: apps/groupfolders/folders>
+	env.scheme <default: https>
+	env.timeout <default: 2s>
+
+It's advised to set an app password (for this plugin) in your nextcloud 
+instance and not to use the "real" password of your nextcloud user.
+
+=head1 AUTHOR
+
+Copyright (C) 2020 Sebastian L. (https://momou.ch),
+		   Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=autoconf
+
+=cut
+
+# shellcheck disable=SC1090
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+
+API_PATH="${api_path:-/apps/groupfolders/folders}?format=json"
+DOMAIN="${0##*nextcloud_groupfolders_}"
+SCHEME="${scheme:-https}://"
+TIMEOUT="${timeout:-2}"
+CLEANDOMAIN="$(clean_fieldname "${DOMAIN}")"
+USERNAME="${username:-}"
+PASSWORD="${password:-}"
+
+fetch_url () {
+    curl -s -f -m "${TIMEOUT}" "$@" -H "OCS-APIRequest: true"
+}
+
+case $1 in
+
+    autoconf)
+	    if [ ! -x "$(command -v curl)" ]; then
+		    echo "no (curl not found)"
+	    elif [ ! -x "$(command -v jq)" ]; then
+		    echo "no (jq not found)"
+	    else
+		    fetch_url -I -u "${USERNAME}:${PASSWORD}" -I "${SCHEME}${DOMAIN}${API_PATH}" \
+			    | grep -iq "Content-Type: application/json" \
+			    && echo "yes" \
+			    || echo "no (invalid or empty response from nextcloud groupfolder rest api)"
+	    fi
+	    exit 0
+	    ;;
+   config)
+   
+  	DATA=$(fetch_url -u "${USERNAME}:${PASSWORD}" "${SCHEME}${DOMAIN}${API_PATH}" | sed 's/\\/\\\\/g' | jq -r '.ocs.data' )
+  	
+cat << EOM
+multigraph nextcloud_groupfolders_${CLEANDOMAIN}
+graph_title Nextcloud groupfolders on ${DOMAIN}
+graph_args --base 1000 -l 0
+graph_printf %.0lf
+graph_vlabel Groupfolders
+graph_info Number of groupfolders
+graph_category cloud
+number.label Number of groupfolders
+number.info number of groupfolders
+number.min 0
+multigraph nextcloud_groupfolders_usage_${CLEANDOMAIN}
+graph_title Nextcloud groupfolders usage on ${DOMAIN}
+graph_args --base 1000 -l 0
+graph_printf %.0lf
+graph_vlabel Groupfolders usage
+graph_info Sizes of groupfolders
+graph_category cloud
+EOM
+
+	for FOLDER in $(echo "$DATA" | jq -c 'keys | .[]')
+	do
+		MOUNTPOINT=$(echo "$DATA" | jq -r ".$FOLDER.mount_point")
+		ID=$(echo "$DATA" | jq -r ".$FOLDER.id")
+		echo size"$ID".label "$MOUNTPOINT" folder size
+		echo size"$ID".info size of groupfolder "$MOUNTPOINT"
+		echo size"$ID".draw AREA
+		echo size"$ID".min 0
+	done
+
+	exit 0
+        ;;
+
+esac
+
+DATA=$(fetch_url -u "${USERNAME}:${PASSWORD}" "${SCHEME}${DOMAIN}${API_PATH}" | sed 's/\\/\\\\/g' | jq -r '.ocs.data' )
+echo multigraph nextcloud_groupfolders_"${CLEANDOMAIN}"
+echo number.value "$(echo "$DATA" | jq length)"
+echo multigraph nextcloud_groupfolders_usage_"${CLEANDOMAIN}"
+for FOLDER in $(echo "$DATA" | jq -c 'keys | .[]')
+do
+	ID=$(echo "$DATA" | jq -r ".$FOLDER.id")
+	echo size"$ID".value "$(echo "$DATA" | jq -r ".$FOLDER.size" | sed 's/ null$/ U/')"
+done

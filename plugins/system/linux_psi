@@ -1,0 +1,360 @@
+#!/bin/bash
+
+
+: << =cut
+
+=head1 NAME
+
+linux_psi - Plugin to monitor the pressure stall information for CPU, Memory and
+IO as reported by the Linux kernel.
+
+This plugin monitors the pressure stall information (psi) as reported by the
+Linux Kernel. By default it reports all average intervals (10 seconds,
+60 seconds and 300 seconds) as well as the total values as a rate of change
+(DERIVE) for all resources (cpu, memory, io). The average intervals can be
+configured if you only deem some of them useful. See CONFIGURATION for
+explanations on that.
+
+This is a multigraph plugin that, by default, will create six detail graphs and
+one summary graph (so seven in total). The summary graph will contain the 300
+seconds average percentages of all resources. The detail graphs are split in two
+graphs per resource. One combining all average intervals and one for the
+"totals" (rate of change) for the given resource.
+
+There are no defaults for warnings and criticals, because this highly depends on
+the system, so you need to configure them yourself (if you want any). It is
+recommended that you first lookup the meaning of the different values.
+
+For more information on psi see:
+https://www.kernel.org/doc/html/latest/accounting/psi.html
+
+=head1 CONFIGURATION
+
+Simply create a symlink in your plugins directory like with any other plugin.
+No additional configuration needed, no specific user required (typically).
+
+If you want to configure alerts, just add "warn_" or "crit_" in front of the
+internal name.
+
+Optional configuration examples:
+
+[linux_psi]
+env.resources cpu io memory       - Specify the resources to monitor. Leave one
+                                    out if you don't want this one to be
+                                    monitored.
+env.intervals avg10 avg60 avg300  - Sepcify the average intervals to monitor.
+                                    Leave one out if you don't want this one to
+                                    be monitored
+env.scopes some full              - Specify the scopes to monitor. Leave one out
+                                    If you don't want it to be monitored.
+env.summary_interval avg300       - Specify the interval to be used for the
+                                    summary-graph.
+env.warn_psi_cpu_avg300_some 5    - Set a warning-level of 5 for
+                                    "psi_cpu_avg300_some"
+env.crit_psi_io_total_full 2000   - Set a critical-level of 2000 for
+                                    "psi_io_total_full"
+
+=head1 AUTHOR
+
+2022, HaseHarald
+
+=head1 LICENSE
+
+LGPLv3
+
+=head1 BUGS
+
+=head1 TODO
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+
+# This file contains a munin-plugin to graph the psi (pressure) for CPU, Memory
+# and IO, as reported by the Linux kernel.
+#
+# This is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this plugin.  If not, see <http://www.gnu.org/licenses/>.
+
+
+resource_defaults=('cpu' 'io' 'memory')
+interval_defaults=('avg10' 'avg60' 'avg300')
+scope_defaults=('some' 'full')
+pressure_dir=${pressure_dir:-'/proc/pressure/'}
+pressure_resources=( "${resources[@]:-${resource_defaults[@]}}" )
+pressure_intervals=( "${intervals[@]:-${interval_defaults[@]}}" )
+pressure_scopes=( "${scopes[@]:-${scope_defaults[@]}}" )
+summary_interval="${summary_interval:-avg300}"
+
+check_autoconf() {
+  if [ -d "${pressure_dir}" ]; then
+    printf "yes\n"
+  else
+    printf "no (%s not found)\n" "${pressure_dir}"
+  fi
+}
+
+get_pressure_value() {
+  local resource
+  local interval
+  local scope
+  
+  resource="$1"
+  interval="$2"
+  scope="${3:-some}"
+  
+  grep "$scope" "${pressure_dir}/${resource}" | grep -o -E "${interval}=[0-9]{1,}(\.[0-9]{1,}){0,1}" | cut -d '=' -f 2
+}
+
+get_printable_name() {
+  local kind
+  local value
+  local printable_name
+  kind="$1"
+  value="$2"
+  printable_name=""
+  
+  case "$kind" in
+    
+    interval)
+      case "$interval" in
+        avg10)
+          printable_name="10sec"
+          ;;
+        avg60)
+          printable_name="60sec"
+          ;;
+        avg300)
+          printable_name="5min"
+          ;;
+        total)
+          printable_name="Total"
+          ;;
+        *)
+          printf "ERROR: Could not determine interval %s ! Must be one of 'avg10' 'avg60' 'avg300' 'total'\n" "$value" >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    
+    scope)
+      case "$value" in
+        some)
+          printable_name="Some"
+          ;;
+        full)
+          printable_name="Full"
+          ;;
+        *)
+          printf "ERROR: Could not determine scope %s ! Must be one of 'full' 'some'.\n" "$value" >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    
+    resource)
+      case "$value" in
+        cpu)
+          printable_name="CPU"
+          ;;
+        io)
+          printable_name="IO"
+          ;;
+        memory)
+          printable_name="Memory"
+          ;;
+        *)
+          printf "ERROR: Could not determine resource-type %s ! Must be one of 'cpu' 'io' 'memory'.\n" "$value" >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    
+    *)
+      printf "ERROR: Could not determine kind %s ! Must be one of 'interval' 'scope' 'resource'\n" "$kind" >&2
+      exit 2
+      ;;
+  esac
+  
+  printf "%s" "$printable_name"
+}
+
+iterate_config() {
+  for resource in "${pressure_resources[@]}"; do
+    local printable_resource
+    printable_resource=$( get_printable_name resource "$resource" )
+    printf "multigraph linux_psi.%s_avg\n" "$resource"
+    printf "graph_title %s Pressure Stall Information - Average\n" "$printable_resource"
+    printf "graph_category system\n"
+    printf "graph_info Average PSI based latency caused by lack of %s resources.\n" "$printable_resource"
+    printf "graph_vlabel %%\n"
+    printf "graph_scale no\n"
+    for interval in "${pressure_intervals[@]}"; do
+      local printable_interval
+      printable_interval=$( get_printable_name interval "$interval" )
+      output_config "$resource" "$interval"
+    done
+    echo ""
+  done
+  
+  for resource in "${pressure_resources[@]}"; do
+    local interval
+    local printable_resource
+    interval="total"
+    printable_resource=$( get_printable_name resource "$resource" )
+    
+    printf "multigraph linux_psi.%s_total\n" "$resource"
+    printf "graph_title %s Pressure Stall Information - Rate\n" "$printable_resource"
+    printf "graph_category system\n"
+    printf "graph_info Total PSI based latency rate caused by lack of %s resources.\n" "$printable_resource"
+    printf "graph_vlabel rate\n"
+    output_config "$resource" "$interval"
+    echo ""
+  done
+  
+  printf "multigraph linux_psi\n"
+  printf "graph_title Pressure Stall Information - Average\n"
+  printf "graph_vlabel %%\n"
+  printf "graph_scale no\n"
+  printf "graph_category system\n"
+  printf "graph_info Average PSI based latency caused by lack of resources.\n"
+  for resource in "${pressure_resources[@]}"; do
+    output_config "$resource" "$summary_interval"
+  done
+  echo ""
+}
+
+iterate_values() {
+  for resource in "${pressure_resources[@]}"; do
+    printf "multigraph linux_psi.%s_avg\n" "$resource"
+    for interval in "${pressure_intervals[@]}"; do
+      output_values "$resource" "$interval"
+    done
+    echo ""
+  done
+  
+  for resource in "${pressure_resources[@]}"; do
+    local interval
+    interval="total"
+    printf "multigraph linux_psi.%s_total\n" "$resource"
+    output_values "$resource" "$interval"
+    echo ""
+  done
+  
+  printf "multigraph linux_psi\n"
+  for resource in "${pressure_resources[@]}"; do
+    output_values "$resource" "$summary_interval"
+  done
+  echo ""
+}
+
+output_config() {
+  local resource
+  local interval
+  local printable_resource
+  local printable_interval
+
+  resource="$1"
+  interval="$2"
+  printable_resource=$( get_printable_name resource "$resource" )
+  printable_interval=$( get_printable_name interval "$interval" )
+  
+  for scope in "${pressure_scopes[@]}"; do
+    if [ "${resource}" == "cpu" ] && [ "${scope}" != "some" ]; then
+      continue
+    else
+      local printable_scope
+      local this_warn_var
+      local this_crit_var
+      
+      printable_scope=$( get_printable_name scope "$scope" )
+      this_warn_var=$( echo "warn_psi_${resource}_${interval}_${scope}" | sed 's/[^A-Za-z0-9_]/_/g' )
+      this_crit_var=$( echo "crit_psi_${resource}_${interval}_${scope}" | sed 's/[^A-Za-z0-9_]/_/g' )
+      
+      printf "psi_%s_%s_%s.min 0\n" "$resource" "$interval" "$scope"
+      printf "psi_%s_%s_%s.label %s %s %s\n" "$resource" "$interval" "$scope" "$printable_resource" "$printable_interval" "$printable_scope"
+      if [ -n "${!this_warn_var}" ]; then
+        printf "psi_%s_%s_%s.warning %s\n" "$resource" "$interval" "$scope" "${!this_warn_var}"
+      fi
+      if [ -n "${!this_crit_var}" ]; then
+        printf "psi_%s_%s_%s.critical %s\n" "$resource" "$interval" "$scope" "${!this_crit_var}"
+      fi
+      if [ "$interval" == "total" ]; then
+        printf "psi_%s_%s_%s.type DERIVE\n" "$resource" "$interval" "$scope"
+      fi
+    fi
+  done
+}
+
+output_values() {
+  local resource
+  local interval
+  resource="$1"
+  interval="$2"
+  
+  for scope in "${pressure_scopes[@]}"; do
+    if [ "${resource}" == "cpu" ] && [ "${scope}" != "some" ]; then
+      continue
+    else
+      printf "psi_%s_%s_%s.value %s\n" "$resource" "$interval" "$scope" "$(get_pressure_value "$resource" "$interval" "$scope")"
+    fi
+  done
+}
+
+output_usage() {
+  printf >&2 "%s - munin plugin to graph pressure stall information for CPU, Memory and IO as reported by the Linux kernel.\n" "${0##*/}"
+  printf >&2 "Usage: %s [config]\n" "${0##*/}"
+  printf >&2 "You may use environment settings in a plugin-config file, used by munin (for example /etc/munin/plugin-conf.d/munin-node) to further adjust settings.\n"
+  printf >&2 "You can use these settings to configure which resources, intervals or scopes are monitored or to configure warning and critical levels.\n"
+  printf >&2 "To do so use a syntax like this:\n"
+  printf >&2 "[linux_psi]\n"
+  printf >&2 "env.resources cpu io memory\n"
+  printf >&2 "env.intervals avg10 avg60 avg300\n"
+  printf >&2 "env.scopes some full\n"
+  printf >&2 "env.summary_interval avg300\n"
+  printf >&2 "env.warn_psi_cpu_avg300_some 5\n"
+  printf >&2 "env.crit_psi_io_total_full 2000\n"
+}
+
+case "$#" in
+  0)
+    iterate_values
+    ;;
+  
+  1)
+    case "$1" in
+      autoconf)
+        check_autoconf
+        ;;
+      config)
+        iterate_config
+        ;;
+      fetch)
+        iterate_values
+        ;;
+      *)
+        output_usage
+        exit 1
+        ;;
+    esac
+    ;;
+  
+  *)
+    output_usage
+    exit 1
+    ;;
+esac

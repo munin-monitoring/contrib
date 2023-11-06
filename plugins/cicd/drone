@@ -1,0 +1,122 @@
+#!/bin/bash
+#%# family=auto
+
+: << EOF
+=head1 NAME
+gitea_commit_time_diff - Plugin to monitor the time since the last commit for a gitea repository.
+
+=head1 CONFIGURATION
+
+  [drone]
+  env.url http://docker10.grote.lan:81/api/user/repos?latest=true
+  env.token WXXXXXXXXXXXXXX
+
+=head1 AUTHOR
+
+Michael Grote (michael.grote@posteo.de)
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+
+ =head1 LICENSE
+
+ GPLv3 or later
+
+ SPDX-License-Identifier: GPL-3.0-or-later
+
+=cut
+
+EOF
+
+
+
+if [ "$1" = "autoconf" ]; then
+    if ! command -v jq &> /dev/null; then
+        echo "no (jq could not be found)"
+    elif ! command -v curl &> /dev/null; then
+        echo "no (curl could not be found)"
+    elif ! command -v sed &> /dev/null; then
+        echo "no (sed could not be found)"
+    elif ! command -v cut &> /dev/null; then
+        echo "no (cut could not be found)"
+    elif ! command -v tr &> /dev/null; then
+        echo "no (tr could not be found)"
+    else
+        echo "yes"
+    fi
+    exit 0
+fi
+
+# get data
+data=$(curl --silent -X GET "$url" -H "Authorization: Bearer $token")
+
+
+
+if [ "$1" = "config" ]; then
+    # setze optionen
+    echo "multigraph drone_build_status"
+    echo "graph_title Drone CI/CD build Status per project"
+    echo "graph_vlabel Error"
+    echo "graph_category devel"
+    echo "graph_printf %6.0lf"
+    echo "graph_args -l 0 --base 1000"
+    echo "graph_info This graph displays the actual state per project."
+
+    echo "$data" | jq -r '.[] | select(.active == true) | "\(.slug) \(.namespace) \(.name) \(.link)"'  | while read -r line
+    do
+      slug=$(echo "$line" | cut -f1 -d" " | sed 's/[\/-]/_/g' | tr '[:upper:]' '[:lower:]')
+      namespace=$(echo "$line" | cut -f2 -d" ")
+      name=$(echo "$line" | cut -f3 -d" ")
+      link=$(echo "$line" | cut -f4 -d" ")
+
+      echo "$slug".label "$namespace"/"$name"
+      echo "$slug".warning 1
+      echo "$slug".critical 2
+      echo "$slug".info "$link"
+    done
+
+    echo "multigraph drone_build_count"
+    echo "graph_title Drone CI/CD build count per project"
+    echo "graph_vlabel Count"
+    echo "graph_category devel"
+    echo "graph_printf %6.0lf"
+    echo "graph_args -l 0 --base 1000"
+    echo "graph_info This graph displays the build count per project."
+
+    echo "$data" | jq -r '.[] | select(.active == true) | "\(.slug) \(.namespace) \(.name) \(.link)"'  | while read -r line
+    do
+      slug=$(echo "$line" | cut -f1 -d" " | sed 's/[\/-]/_/g' | tr '[:upper:]' '[:lower:]')
+      namespace=$(echo "$line" | cut -f2 -d" ")
+      name=$(echo "$line" | cut -f3 -d" ")
+      link=$(echo "$line" | cut -f4 -d" ")
+
+      echo "$slug".label "$namespace"/"$name"
+      echo "$slug".info "$link"
+      echo "$slug".draw AREASTACK
+    done
+
+
+    exit 0
+fi
+
+echo "multigraph drone_build_status"
+echo "$data" | jq -r '.[] | select(.active == true) | "\(.slug) \(.build.status)"' | while read -r line
+do
+  slug=$(echo "$line" | cut -f1 -d" " | sed 's/[\/-]/_/g' | tr '[:upper:]' '[:lower:]')
+  if [ "$(echo "$line" | cut -f2 -d" ")" = "success" ] ; then
+    rc=0
+  else
+    rc=1
+  fi
+  echo "$slug".value "$rc"
+done
+
+echo "multigraph drone_build_count"
+echo "$data" | jq -r '.[] | select(.active == true) | "\(.slug) \(.counter)"' | while read -r line
+do
+  slug=$(echo "$line" | cut -f1 -d" " | sed 's/[\/-]/_/g' | tr '[:upper:]' '[:lower:]')
+  count=$(echo "$line" | cut -f2 -d" " )
+  # wenn $2 != success, dann gebe 1 zurück
+  echo "$slug".value "$count"
+done

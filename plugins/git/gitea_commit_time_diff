@@ -1,0 +1,91 @@
+#!/bin/bash
+#%# family=auto
+
+: << EOF
+=head1 NAME
+gitea_commit_time_diff - Plugin to monitor the time since the last commit for a gitea repository.
+
+
+=head1 CONFIGURATION
+  [gitea_commit_time_diff]
+  env.url git.mgrote.net
+  env.repo homeserver
+  env.user mg
+  env.git_ref HEAD
+  # optional
+  env.warn 300 # in min
+  env.critical 1440 # in min
+  # if the repository is private
+  # add a application token for your user
+  # scopes: repo
+  env.token 1GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGb4
+
+=head1 AUTHOR
+
+Michael Grote (michael.grote@posteo.de)
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+
+ =head1 LICENSE
+
+ GPLv3 or later
+
+ SPDX-License-Identifier: GPL-3.0-or-later
+
+=cut
+
+EOF
+
+if [ "$1" = "autoconf" ]; then
+    if ! command -v date &> /dev/null; then
+        echo "no (date could not be found)"
+    elif ! command -v jq &> /dev/null; then
+        echo "no (jq could not be found)"
+    else
+        echo "yes"
+    fi
+    exit 0
+fi
+
+
+
+if [ "$1" = "config" ]; then
+    # setze optionen
+    echo "multigraph gitea_diff_repo"
+    echo "graph_title $repo time difference"
+    echo "graph_vlabel minutes"
+    echo "graph_category webserver"
+    echo "graph_args -l 0"
+    echo "graph_info Current time difference in minutes between the last plugin execution and the last commit to \$ref"
+    echo "diff_min.label minutes"
+    echo "diff_min.info Repository: $url/$user/$repo/$git_ref"
+    if [ ! -z "${warning}" ]; then
+          echo "diff_min.warning $warning"
+    fi
+    if [ ! -z "${critical}" ]; then
+          echo "diff_min.critical $critical"
+    fi
+    exit 0
+fi
+
+# get data
+
+now=$(date +%Y-%m-%dT%H:%M:%S%:z)
+
+if [ ! -z "${token}" ]; then
+    # when repo is private
+    commit=$(curl --silent -X 'GET' "https://$url/api/v1/repos/$user/$repo/git/commits/$git_ref?access_token=$token" -H 'accept: application/json' | jq .created  | tr -d \")
+else
+    commit=$(curl --silent -X 'GET' "https://$url/api/v1/repos/$user/$repo/git/commits/$git_ref" -H 'accept: application/json' | jq .created  | tr -d \")
+fi
+
+
+now_sec=$(date -d "$now" +%s)
+commit_sec=$(date -d "$commit" +%s)
+
+echo "multigraph gitea_diff_repo"
+echo "diff_min.value $(( ($now_sec - $commit_sec ) / 60 ))"
+
+exit 0

@@ -2,7 +2,7 @@
 #################################################################
 #
 # Script to monitor apc usage
-# 
+#
 #################################################################
 #
 # Parameters understood: config, autoconf and suggest
@@ -10,9 +10,9 @@
 #################################################################
 #
 # Configuration section
-# 
+#
 # Configuration example
-# 
+#
 # [php_apc_*]
 # user root
 # env.URL http://localhost/php_apc.php # URL to fetch APC status
@@ -26,11 +26,11 @@
 #
 #################################################################
 #################################################################
-# Settigs required for autoconf
+# Settings required for autoconf
 #%# family=auto
 #%# capabilities=autoconf suggest
 
-# URL to the script to check APC status (defaults to 
+# URL to the script to check APC status (defaults to
 # 'http://localhost/php_apc.php' if not configured)
 URL=${URL:-'http://localhost/php_apc.php'}
 
@@ -39,8 +39,12 @@ WGET_FLAGS="-Yoff"; # refer to wget manual, you may set extra parameters like di
 act=`basename $0 | sed 's/^php_apc_//g'`
 
 if [ "$1" = "autoconf" ]; then
-	[ -z "$URL" ] && echo "no (edit URL config in header file !)" && exit 1
-	[ -n "$URL" ] && echo "yes" && exit 0
+	if [ -z "$URL" ]; then
+		echo "no (missing URL config in header file)"
+	else
+		echo "yes"
+	fi
+	exit 0
 fi
 
 if [ "$1" = "suggest" ]; then
@@ -56,7 +60,7 @@ cat <<'EOM'
 graph_title APC Memory usage
 graph_args -l 0 --base 1024
 graph_vlabel Memory usage
-graph_category php-apc
+graph_category memory
 graph_order mem_used mem_avail
 graph_total Total
 mem_avail.label Memory available
@@ -76,7 +80,7 @@ cat <<'EOM'
 graph_title APC Hits
 graph_args -l 0
 graph_vlabel Cache hits
-graph_category php-apc
+graph_category memory
 graph_total Total
 num_misses.label Misses
 num_misses.draw AREA
@@ -96,7 +100,7 @@ graph_title APC Percents
 graph_args -l 0 --upper-limit 100
 graph_scale no
 graph_vlabel Cache Percents %
-graph_category php-apc
+graph_category memory
 hits.label Hits
 hits.draw AREA
 hits.min 0
@@ -114,7 +118,7 @@ exit 0
 fi
 
 #################################################################
-# run the sript
+# run the script
 
 [ -x $WGET ] &&	$WGET -q $WGET_FLAGS "$URL?act=$act" -O - && exit 0
 

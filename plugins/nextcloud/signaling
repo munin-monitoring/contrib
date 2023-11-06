@@ -1,0 +1,105 @@
+#!/bin/sh
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+signaling - Monitor a spreed standalone signaling server
+
+=head1 APPLICABLE SYSTEMS
+
+Signaling server used for Nextcloud Talk
+(https://github.com/strukturag/nextcloud-spreed-signaling)
+
+=head1 CONFIGURATION
+
+Requires an installed jq, a command-line json processor.
+
+You may specify the URL where to get the statistics.
+
+ url      - URL of signalign stats endpoint
+ max_time - Timeout curl - defaults to 3 seconds
+
+ [signaling]
+ env.url http://127.0.0.1:8080/api/v1/stats
+ env.max_time 3
+
+=head1 AUTHOR
+
+Copyright (C) 2021 Sebastian L. (https://momou.ch)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+STATS_URL=${url:-"http://127.0.0.1:8080/api/v1/stats"}
+max_time=${max_time:-3}
+
+case $1 in
+
+    autoconf)
+        if [ -x /usr/bin/curl ]; then
+            if [ -x /usr/bin/jq ]; then
+	        curl -s -f -m "${max_time:-3}" -I "$STATS_URL" | grep -iq "Content-Type: application/json" && echo "yes" && exit 0 || echo "no (invalid or empty response from stats endpoint ($STATS_URL))" && exit 0
+            else
+                echo "no (jq not found)" && exit 0
+            fi
+        else
+            echo "no (/usr/bin/curl not found)" && exit 0
+        fi
+        ;;
+
+   config)
+        echo "multigraph signaling_mcu"
+        echo "graph_title Signaling (Multipoint Conferencing Unit)"
+        echo "graph_info Statistics from MCU of signaling server"
+        echo "graph_vlabel mcu statistics"
+        echo "graph_args --base 1000 -l 0"
+        echo "mcu_publishers.label publishers"
+        echo "mcu_publishers.info current number of publishers"
+        echo "mcu_publishers.min 0"
+        echo "mcu_clients.label clients"
+        echo "mcu_clients.info current number of clients"
+        echo "mcu_clients.min 0"
+        echo "multigraph signaling_stats"
+        echo "graph_title Signaling (rooms and sessions)"
+        echo "graph_info Room and session statistics of signaling server"
+        echo "graph_vlabel rooms and sessions"
+        echo "graph_args --base 1000 -l 0"
+        echo "signaling_rooms.label current rooms"
+        echo "signaling_rooms.info current number of rooms"
+        echo "signaling_rooms.min 0"
+        echo "signaling_rooms.draw AREASTACK"
+        echo "signaling_sessions.label current sessions"
+        echo "signaling_sessions.info current number of sessions"
+        echo "signaling_sessions.min 0"
+        echo "signaling_sessions.draw AREASTACK"
+	exit 0
+        ;;
+
+esac
+
+JSONSTATS=$(curl -s -f -m "$max_time" "$STATS_URL")
+
+echo "multigraph signaling_mcu"
+for KEY in publishers clients; do
+    VALUE=$(echo "$JSONSTATS" | jq -r ".mcu.$KEY // \"U\"")
+    echo "mcu_${KEY}.value $VALUE"
+done
+
+echo "multigraph signaling_stats"
+for KEY in rooms sessions; do
+    VALUE=$(echo "$JSONSTATS" | jq -r ".$KEY // \"U\"")
+    echo "signaling_${KEY}.value $VALUE"
+done

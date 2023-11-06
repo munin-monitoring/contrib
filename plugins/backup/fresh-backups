@@ -1,0 +1,121 @@
+#!/bin/bash -u
+
+: << =cut
+
+=head1 NAME
+
+fresh-backups - Plugin to monitor the freshness of backup files
+
+=head1 APPLICABLE SYSTEMS
+
+Any system with some automated backup creating or updating archive files.
+
+This works well with backup-manager.
+
+=head1 CONFIGURATION
+
+The following example checks all tar.bz2 files in /path/to/your/backups/, and
+counts all those that are less than 2 days old, and there should be 4 separate
+daily archives.
+
+	[fresh-backups]
+	user root
+	env.backup_dir /path/to/your/backups/
+	env.lifetime 2
+	env.archive_pattern *.tar.bz2
+	env.backup_number 4
+
+This will also set the warning and critical values for this plugin to 2*4 and
+4, respectively, meaning that if the number of fresh files goes below those
+limits, the relevant notifications will be triggered.
+
+An example configuration snippet for backup-manager [0] follows.
+
+	export BM_REPOSITORY_ROOT="/path/to/your/backups"
+	export BM_TARBALL_FILETYPE="tar.bz2"
+	export BM_TARBALL_DIRECTORIES="/etc /home /srv /data"
+
+[0] https://github.com/sukria/Backup-Manager
+
+=head1 AUTHOR
+
+Copyright (C) 2016,2019 Olivier Mehani <shtrom+munin@ssji.net>
+
+=head1 LICENSE
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+
+# Bash is needed for this array to work
+COLOUR=(00FF00 24DA00 48B600 6D9100 916D00 B64800 DA2400 FF0000)  # green to red
+
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+# Configuration directives, edit before first use.
+BACKUP_DIR=${backup_dir:-/data/backup}
+ARCHIVE_PATTERN="${archive_pattern:-*.tar.bz2}"
+# How old backups should be considered as non-young anymore in [days].
+LIFETIME=${lifetime:-2}
+# Critical states will be issued when the number of fresh backups archives is below `backup_number`,
+# and warnings below `backup_number*lifetime - 1`
+CRIT=${backup_number:-1}
+# We should have at least LIFETIME-1 complete backups when the new one is in progress
+WARN=$((CRIT*(LIFETIME-1)))
+
+# The situation is critical if there are no young files, the backup is down.
+case ${1:-} in
+   config)
+        cat << EOF
+graph_title Fresh backups
+graph_info Number of fresh (<=${LIFETIME}d) backups archives in ${BACKUP_DIR}
+graph_args -l 0
+graph_category backup
+EOF
+for AGE in $(seq "${LIFETIME}" -1 0); do
+	if [ "${AGE}" = 0 ]; then
+		echo "age${AGE}.label today"
+	else
+		echo "age${AGE}.label older than $((AGE*24))h"
+	fi
+	cat << EOF
+age${AGE}.draw AREASTACK
+age${AGE}.colour ${COLOUR[$AGE]}
+age${AGE}.warning 
+age${AGE}.critical 
+EOF
+done
+cat << EOF
+freshcount.label ${ARCHIVE_PATTERN} files fresher than ${LIFETIME}d
+freshcount.critical ${CRIT}:
+freshcount.warning ${WARN}:
+freshcount.colour 0080FF
+EOF
+        exit 0;;
+esac
+
+for AGE in $(seq "${LIFETIME}" -1 0); do
+	FILES=$(find "${BACKUP_DIR}" \
+		-name "${ARCHIVE_PATTERN}" \
+		-mmin "-$(((AGE+1)*60*24))" \
+		-not -mmin "-$(((AGE)*60*24))" \
+		)
+	COUNT="$(echo "${FILES}" \
+		 | wc -l)"
+	echo "age${AGE}.value $((COUNT))"
+	# shellcheck disable=SC2086
+	echo "age${AGE}.extinfo $(echo ${FILES}  | sort | sed "s^${BACKUP_DIR}^^g")"
+done
+
+COUNT=$(find "${BACKUP_DIR}" \
+	-name "${ARCHIVE_PATTERN}" \
+	-mmin "-$(((LIFETIME+1)*60*24))" \
+	| wc -l)
+# The last count is also our total count
+echo "freshcount.value ${COUNT}"
+echo "freshcount.extinfo $(du -sh "${BACKUP_DIR}")"

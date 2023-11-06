@@ -1,0 +1,525 @@
+#!/bin/bash
+#%# family=auto
+
+: << EOF
+=head1 NAME
+
+mikrotik_system - This plugin fetches multiple values from a mikrotik device.
+
+=head1 NOTES
+
+Tested with a RB493G, RB750GR3, RB5009, CRS305 and CRS309 on Router OS >6.49.* and >7.0.4. sshpass is a dependency for this Plugin.
+
+=head1 CONFIGURATION
+
+
+A User on the Target-Device is needed for this plugin to work:
+
+  /user add name=munin group=read password=hallowelt address=<munin-server-ip>
+
+  plugin config:
+    [mt_system_<name>]
+    user root
+    env.ssh_user munin
+    env.ssh_password hallowelt
+    env.ssh_host 192.168.2.1
+
+=head1 AUTHOR
+
+Michael Grote - git.mgrote.net
+
+=head1 LICENSE
+
+GPLv3 or later
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+EOF
+
+# set variables with default values
+ssh_user=${ssh_user:-user}
+ssh_password=${ssh_password:-password}
+ssh_host=${ssh_host:-192.168.2.1}
+c=0 # counter, it is used in a few loops
+
+# Function to get stderr from command
+# USAGE: catch STDOUT STDERR cmd args..
+# Source: https://stackoverflow.com/a/41069638
+catch()
+{
+eval "$({
+__2="$(
+  { __1="$("${@:3}")"; } 2>&1;
+  ret=$?;
+  printf '%q=%q\n' "$1" "$__1" >&2;
+  exit $ret
+  )";
+ret="$?";
+printf '%s=%q\n' "$2" "$__2" >&2;
+printf '( exit %q )' "$ret" >&2;
+} 2>&1 )";
+}
+
+# functions
+function get_name {
+  local fname
+  IFS=$'\n'; for line in $data; do
+    if echo "$line" | grep -q 'name:'; then
+      fname="$(echo "$line" | cut -d: -f2 | xargs | sed 's/[\s\n\r]*$//g' | sed 's/[^A-Za-z0-9]/_/g')"
+      if [ -n "$fname" ]; then
+        name="$fname"
+      fi
+    fi
+  done
+}
+function get_ros_version {
+  while read -r line; do
+    if echo "$line" | grep -q 'version: '; then
+      if echo "$line" | awk '/version:/{print $2}' | grep -q  "^[0-6]\."; then
+        ros_version="6"
+      else
+        ros_version="7"
+      fi
+    fi
+  done <<< "$data"
+}
+function get_cpu_count {
+  while read -r line; do
+    if echo "$line" | grep -q 'cpu-count'; then
+      anzahl_cpu=$(echo "$line" | grep cpu-count: | sed -r 's/(cpu-count: )([0-9]+)/\2/g' | tr -dc '0-9')
+    fi
+  done <<< "$data"
+}
+function get_data {
+  # fetch data per ssh
+  catch data stderr sshpass -p  "$ssh_password" ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$ssh_user"@"$ssh_host" ':delay 6s; /system health print; /system resource print; /system resource cpu print; /system identity print'
+  data_ret=$?
+}
+function validate_data {
+  if [ $data_ret -ne 0 ]; then
+    echo "SSH returned errorcode = $data_ret:"
+    echo "$stderr"
+    exit $data_ret
+  fi
+}
+function get_mem_total {
+  mem_total=$(
+    while read -r line; do
+      echo "$line" | awk '/total-memory:/{ gsub(/MiB/,"",$2); print $2 }' | tr -dc '0-9.'
+    done <<< "$data")
+}
+function get_mem_free {
+  mem_free=$(
+    while read -r line; do
+      echo "$line" | awk '/free-memory:/{ gsub(/MiB/,"",$2); print $2 }' | tr -dc '0-9.'
+    done <<< "$data")
+}
+
+function get_voltage_label {
+  while read -r line; do # for every line
+    # output line
+    # search with awk for "voltage:"
+    # if found
+    # print line
+    # external/bash-variables with "'"<var>"'"
+    echo "$line" | awk '/voltage/{
+      print "multigraph voltage_graph_""'"$name"'";
+      print "graph_title voltage " "'"$name"'";
+      print "graph_vlabel volt";
+      print "graph_category mikrotik";
+      print "graph_args -l 0";
+      print "voltage.label voltage";
+      print "graph_info Input Voltage."
+      }'
+  done <<< "$data" # der variable data
+}
+function get_voltage_value {
+  get_ros_version
+  while read -r line; do
+    # like the label functions
+    # print title if dirtyconfig is not set
+    # because the call does not come in "config"
+    if [ "$MUNIN_CAP_DIRTYCONFIG" = "0" ] || [ -z "$MUNIN_CAP_DIRTYCONFIG" ]; then
+      echo "$line" | awk '/voltage/{
+        print "multigraph voltage_graph_""'"$name"'";
+        }'
+    fi
+    if [ "$ros_version" == "6" ]; then
+      # remove with gsub the char % in argument $2
+      # print $2
+      echo "$line" | awk '/voltage/{
+        gsub(/V/,"",$2);
+        print "voltage.value " $2
+        }'
+    fi
+    if [ "$ros_version" == "7" ]; then
+      echo "$line" | awk '/voltage/{
+        print "voltage.value " $3
+        }'
+    fi
+  done <<< "$data"
+}
+
+function get_bad_blocks_label {
+  while read -r line; do
+    echo "$line" | awk '/bad-blocks:/{
+      print "multigraph bad_blocks_graph_""'"$name"'";
+      print "graph_title bad blocks " "'"$name"'";
+      print "graph_vlabel %";
+      print "graph_category mikrotik";
+      print "graph_args -l 0 --upper-limit 5";
+      print "bad_blocks.label bad_blocks";
+      print "bad_blocks.warning 3";
+      print "bad_blocks.critical 4";
+      print "graph_info Percentage of Bad Blocks."
+      }'
+  done <<< "$data"
+}
+function get_bad_blocks_value {
+  while read -r line; do
+    if [ "$MUNIN_CAP_DIRTYCONFIG" = "0" ] || [ -z "$MUNIN_CAP_DIRTYCONFIG" ]; then
+    echo "$line" | awk '/bad-blocks:/{
+      print "multigraph bad_blocks_graph_""'"$name"'";
+      }'
+    fi
+    echo "$line" | awk '/bad-blocks:/{
+      gsub(/%/,"",$2);
+      print "bad_blocks.value " $2
+      }'
+  done <<< "$data"
+}
+
+function get_write_sect_total_label {
+  while read -r line; do
+    echo "$line" | awk '/write-sect-total:/{
+      print "multigraph write_sect_total_graph_""'"$name"'";
+      print "graph_title Total sector writes " "'"$name"'";
+      print "graph_vlabel count";
+      print "graph_category mikrotik";
+      print "graph_args -l 0";
+      print "write_sect_total.label write_sect_total";
+      print "graph_info Total sector writes."
+      }'
+  done <<< "$data"
+}
+function get_write_sect_total_value {
+  while read -r line; do
+    if [ "$MUNIN_CAP_DIRTYCONFIG" = "0" ] || [ -z "$MUNIN_CAP_DIRTYCONFIG" ]; then
+      echo "$line" | awk '/write-sect-total:/{
+        print "multigraph write_sect_total_graph_'"$name"'";
+        }'
+    fi
+    echo "$line" | awk '/write-sect-total:/{
+      print "write_sect_total.value " $2
+      }'
+  done <<< "$data"
+}
+
+function get_write_sect_since_reboot_label {
+  while read -r line; do
+    echo "$line" | awk '/write-sect-since-reboot:/{
+      print "multigraph write_sect_since_reboot_graph_'"$name"'";
+      print "graph_title Sector writes since reboot " "'"$name"'";
+      print "graph_vlabel count";
+      print "graph_category mikrotik";
+      print "graph_args -l 0";
+      print "write_sect_since_reboot.label write_sect_since_reboot";
+      print "graph_info Total Sector writes since last reboot."
+      }'
+  done <<< "$data"
+}
+function get_write_sect_since_reboot_value {
+  while read -r line; do
+    if [ "$MUNIN_CAP_DIRTYCONFIG" = "0" ] || [ -z "$MUNIN_CAP_DIRTYCONFIG" ]; then
+      echo "$line" | awk '/write-sect-since-reboot:/{
+        print "multigraph write_sect_since_reboot_graph_""'"$name"'";
+      }'
+    fi
+    echo "$line" | awk '/write-sect-since-reboot:/{
+      print "write_sect_since_reboot.value " $2
+      }'
+  done <<< "$data"
+}
+
+function get_temperature_label {
+  while read -r line; do
+    echo "$line" | awk '/temperature/{
+      print "multigraph temperature_graph_""'"$name"'";
+      print "graph_title temperature " "'"$name"'";
+      print "graph_vlabel °C";
+      print "graph_category mikrotik";
+      print "graph_args -l 0";
+      print "temperature.label cpu temperature";
+      print "temperature.warning 75";
+      print "temperature.critical 90"
+      }'
+  done <<< "$data"
+}
+function get_temperature_value {
+  get_ros_version
+  while read -r line; do
+    if [ "$MUNIN_CAP_DIRTYCONFIG" = "0" ] || [ -z "$MUNIN_CAP_DIRTYCONFIG" ]; then
+      echo "$line" | awk '/temperature/{
+        print "multigraph temperature_graph_""'"$name"'";
+        }'
+    fi
+    if [ "$ros_version" == "6" ]; then
+      echo "$line" | awk '/temperature:/{
+        gsub(/C/,"",$2);
+        print "temperature.value " $2
+        }'
+    fi
+    if [ "$ros_version" == "7" ]; then
+      echo "$line" | awk '/temperature/{
+        print "temperature.value " $3
+        }'
+    fi
+  done <<< "$data"
+}
+
+function get_cpu_label {
+  echo multigraph cpu_load_graph_"$name"
+  echo graph_title cpu load "$name"
+  echo graph_vlabel %
+  echo graph_category mikrotik
+  echo graph_args -l 0 --upper-limit 100
+  echo cpu_total.label total load
+  echo cpu_total.warning 75
+  echo cpu_total.critical 90
+  echo graph_info Total CPU Load and Load, IRQ and Disk per Core.
+
+  while [ "$c" -lt "$anzahl_cpu" ]; do
+    while read -r line; do
+      echo "$line" | grep cpu$c | awk '{
+        print "cpu"'"$c"'"_load.label " "cpu" "'"$c"'" " load"
+        print "cpu"'"$c"'"_irq.label " "cpu" "'"$c"'" " irq"
+        print "cpu"'"$c"'"_disk.label " "cpu" "'"$c"'" " disk"
+        }'
+    done <<< "$data"
+    c=$(( c + 1 ))
+  done
+}
+function get_cpu_value {
+  if [ "$MUNIN_CAP_DIRTYCONFIG" = "0" ] || [ -z "$MUNIN_CAP_DIRTYCONFIG" ]; then
+    echo multigraph cpu_load_graph_"$name"
+  fi
+  while read -r line; do
+    echo "$line" | awk '/cpu-load:/{
+      gsub(/%/,"",$2);
+      print "cpu_total.value " $2
+      }'
+  done <<< "$data"
+  c=0
+  while [ "$c" -lt "$anzahl_cpu" ]; do
+    while read -r line; do
+      echo "$line" | grep cpu$c | awk '{
+        gsub(/%/,"",$3);
+        gsub(/%/,"",$4);
+        gsub(/%/,"",$5);
+        print "cpu"'"$c"'"_load.value " $3
+        print "cpu"'"$c"'"_irq.value " $4
+        print "cpu"'"$c"'"_disk.value " $5
+        }'
+    done <<< "$data"
+    c=$(( c + 1 ))
+  done
+}
+
+function get_memory_label {
+  get_mem_total
+  get_mem_free
+  while read -r line; do
+    echo "$line" | awk -v name=$name '/free-memory:/{
+      printf "multigraph memory_graph_%s\n", name;
+      printf "graph_title memory %s\n", name;
+      print "graph_vlabel MiB";
+      print "graph_category mikrotik";
+      print "graph_args -l 0";
+      print "total_memory.label total memory";
+      print "used_memory.label used memory";
+      print "free_memory.label free memory";
+      print "graph_info Total, Used & free RAM.";
+      gsub(/MiB/,"",$2);
+      printf "used_memory.critical %.0f\n", $2*0.9;
+      printf "used_memory.warning %.0f\n", $2*0.7 }'
+  done <<< "$data"
+}
+function get_memory_value {
+  get_mem_total
+  get_mem_free
+  if [ "$MUNIN_CAP_DIRTYCONFIG" = "0" ] || [ -z "$MUNIN_CAP_DIRTYCONFIG" ]; then
+    echo multigraph memory_graph_"$name"
+  fi
+  while read -r line; do
+    echo "$line" | awk '/total-memory:/{
+        gsub(/MiB/,"",$2);
+        printf "total_memory.value %.0f\n", $2
+      }'
+  done <<< "$data"
+  while read -r line; do
+    echo "$line" | awk '/free-memory:/{
+        gsub(/MiB/,"",$2);
+        printf "free_memory.value %.0f\n", $2
+      }'
+  done <<< "$data"
+  # calculate used-memory
+  # total - free = used
+  printf "used_memory.value %.0f\n" "$(echo $mem_total $mem_free | awk '{print ($1 - $2)}')"
+}
+
+function get_disk_label {
+  while read -r line; do
+    echo "$line" | awk -v name=$name '/free-hdd-space:/{
+      printf "multigraph disk_graph_%s\n", name;
+      printf "graph_title disk %s\n", name;
+      print "graph_vlabel Bytes";
+      print "graph_category mikrotik";
+      print "graph_args -l 0";
+      print "total_disk.label total disk space";
+      print "free_disk.label free disk space";
+      print "graph_info Total & free disk space."}'
+  done <<< "$data"
+}
+function get_disk_value {
+  if [ "$MUNIN_CAP_DIRTYCONFIG" = "0" ] || [ -z "$MUNIN_CAP_DIRTYCONFIG" ]; then
+    echo multigraph disk_graph_"$name"
+  fi
+  while read -r line; do
+    echo "$line" | grep KiB | awk '/free-hdd-space:/ {
+      gsub(/KiB/,"",$2)
+      printf "free_disk.value %d\n", $2*1024 }'
+    echo "$line" |  grep MiB | awk '/free-hdd-space:/ {
+      gsub(/MiB/,"",$2)
+      printf "free_disk.value %d\n", $2*1048576}'
+    echo "$line" | grep KiB | awk '/total-hdd-space:/ {
+      gsub(/KiB/,"",$2)
+      printf "total_disk.value %d\n", $2*1024 }'
+    echo "$line" |  grep MiB | awk '/total-hdd-space:/ {
+      gsub(/MiB/,"",$2)
+      printf "total_disk.value %d\n", $2*1048576 }'
+  done <<< "$data"
+}
+
+# call functions, the order is important
+get_data
+validate_data
+get_name
+get_cpu_count
+# munin-Logic
+# id $1 = X; then
+if [ "$1" = "autoconf" ]; then
+    if ! command -v sshpass &> /dev/null; then
+        echo "[ERROR] sshpass could not be found!"
+    else
+        echo "yes"
+    fi
+    exit 0
+fi
+if [ "$1" = "config" ]; then
+  # print label
+  # if dirtyconfig is set print the value
+  get_voltage_label
+  if [ "$MUNIN_CAP_DIRTYCONFIG" = "1" ]; then
+    get_voltage_value
+  fi
+  get_bad_blocks_label
+  if [ "$MUNIN_CAP_DIRTYCONFIG" = "1" ]; then
+    get_bad_blocks_value
+  fi
+  get_write_sect_total_label
+  if [ "$MUNIN_CAP_DIRTYCONFIG" = "1" ]; then
+    get_write_sect_total_value
+  fi
+  get_write_sect_since_reboot_label
+  if [ "$MUNIN_CAP_DIRTYCONFIG" = "1" ]; then
+    get_write_sect_since_reboot_value
+  fi
+  get_temperature_label
+  if [ "$MUNIN_CAP_DIRTYCONFIG" = "1" ]; then
+    get_temperature_value
+  fi
+  get_cpu_label
+  if [ "$MUNIN_CAP_DIRTYCONFIG" = "1" ]; then
+    get_cpu_value
+  fi
+  get_memory_label
+  if [ "$MUNIN_CAP_DIRTYCONFIG" = "1" ]; then
+    get_memory_value
+  fi
+  get_disk_label
+  if [ "$MUNIN_CAP_DIRTYCONFIG" = "1" ]; then
+    get_disk_value
+  fi
+  exit 0
+fi
+# does not get called if dirtyconfig is set
+get_voltage_value
+get_bad_blocks_value
+get_write_sect_total_value
+get_write_sect_since_reboot_value
+get_temperature_value
+get_cpu_value
+get_memory_value
+get_disk_value
+exit 0
+
+# Example Output ROS 6.4*
+#  voltage: 24.5V
+#   cpu-temperature: 31C
+#                    uptime: 4w3d21h28m58s
+#                   version: 6.48.4 (stable)
+#                build-time: Aug/18/2021 06:43:27
+#          factory-software: 6.44.6
+#               free-memory: 475.8MiB
+#              total-memory: 512.0MiB
+#                       cpu: ARMv7
+#                 cpu-count: 2
+#             cpu-frequency: 800MHz
+#                  cpu-load: 9%
+#            free-hdd-space: 2124.0KiB
+#           total-hdd-space: 15.9MiB
+#   write-sect-since-reboot: 339810
+#          write-sect-total: 350544
+#                bad-blocks: 0%
+#         architecture-name: arm
+#                board-name: CRS309-1G-8S+
+#                  platform: MikroTik
+#  # CPU                                                                                                                                         LOAD         IRQ        DISK
+#  0 cpu0                                                                                                                                          0%          0%          0%
+#  1 cpu1                                                                                                                                         19%          0%          0%
+#   name: crs309
+
+# Example Output ROS 7*
+# Columns: NAME, VALUE, TYPE
+#   #  NAME             VA  T
+#   0  cpu-temperature  44  C
+#                    uptime: 3d1h30m
+#                   version: 7.0.5 (stable)
+#                build-time: Aug/06/2021 11:33:39
+#          factory-software: 7.0.4
+#               free-memory: 818.8MiB
+#              total-memory: 1024.0MiB
+#                 cpu-count: 4
+#             cpu-frequency: 1400MHz
+#                  cpu-load: 0%
+#            free-hdd-space: 993.8MiB
+#           total-hdd-space: 1025.0MiB
+#   write-sect-since-reboot: 4802
+#          write-sect-total: 4802
+#                bad-blocks: 0%
+#         architecture-name: arm64
+#                board-name: RB5009UG+S+
+#                  platform: MikroTik
+# Columns: CPU, LOAD, IRQ, DISK
+#   #  CPU   LO  IR  DI
+#   0  cpu0  0%  0%  0%
+#   1  cpu1  0%  0%  0%
+#   2  cpu2  0%  0%  0%
+#   3  cpu3  0%  0%  0%
+#   name: rb5009
+#

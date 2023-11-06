@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to monitor stratis pools and filesystems.
+
+=head1 NAME
+
+stratis - monitor stratis pools and filesystems
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems with stratis filesystems.
+
+=head1 CONFIGURATION
+
+No configuration is required for this plugin.
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+"""
+
+import os
+import subprocess
+import sys
+import unicodedata
+
+
+def safename(name):
+    """Return safe variable name."""
+    # Convert ä->a as isalpha('ä') is true
+    value = unicodedata.normalize('NFKD', name)
+    value = value.encode('ASCII', 'ignore').decode('utf-8')
+
+    # Remove non-alphanumeric chars
+    return ''.join(char.lower() if char.isalnum() else '_' for char in value)
+
+
+def run_binary(arg):
+    """Run binary and return output."""
+    try:
+        return subprocess.run(arg, stdout=subprocess.PIPE, check=False,
+                              encoding='utf-8', errors='ignore').stdout
+    except FileNotFoundError:
+        return ''
+
+
+def parse_unit(number, unit):
+    """Parse "1.60 TiB" to bytes."""
+    number = float(number)
+    if unit == 'TiB':
+        return number * 1024 * 1024 * 1024 * 1024
+    if unit == 'GiB':
+        return number * 1024 * 1024 * 1024
+    if unit == 'MiB':
+        return number * 1024 * 1024
+    if unit == 'KiB':
+        return number * 1024
+    return number
+
+
+def find_pools():
+    """Return list of found pools and filesystems."""
+    pool = []
+    for line in run_binary(['stratis', 'pool']).splitlines():
+        if line.startswith('Name  '):
+            continue
+        line = line.split()
+        total = parse_unit(line[1], line[2])
+        used = parse_unit(line[4], line[5])
+        free = parse_unit(line[7], line[8])
+        pool.append((line[0], total, used, free))
+
+    files = []
+    dflist = run_binary(['df']).splitlines()
+    used_offset = 0
+    for line in run_binary(['stratis', 'filesystem']).splitlines():
+        if line.startswith('Pool Name  ') and used_offset == 0:
+            used_offset = 2  # Stratis v2
+            continue
+        if line.startswith('Pool  ') and used_offset == 0:
+            used_offset = 5  # Stratis v3
+            continue
+        if '-snap-' in line:
+            continue
+        tokens = line.split()
+        df_used = used = parse_unit(tokens[used_offset],
+                                    tokens[used_offset + 1])
+        for dfline in dflist:
+            if tokens[-1] not in dfline:  # match by uuid
+                continue
+            df_used = int(dfline.split()[2]) * 1024
+        files.append((tokens[0], tokens[1], used, df_used))
+    return sorted(pool), sorted(files)
+
+
+def config(pools, files):
+    """Print plugin config."""
+    print('multigraph stratis_pool')
+    print('graph_title Stratis pools usage')
+    print('graph_info Stratis pools usage in percent.')
+    print('graph_category disk')
+    print('graph_vlabel %')
+    print('graph_args --lower-limit 0 --upper-limit 100')
+    print('graph_scale no')
+    for item in pools:
+        name = safename(item[0])
+        print('{}.label Pool {} usage'.format(name, item[0]))
+        print('{}.warning 92'.format(name))
+        print('{}.critical 98'.format(name))
+
+    print('multigraph stratis_fs')
+    print('graph_title Stratis filesystems usage')
+    print('graph_info Stratis filesystems pool usage.')
+    print('graph_category disk')
+    print('graph_vlabel Pool usage')
+    print('graph_args --base 1024 --lower-limit 0')
+    first = True
+    for item in files:
+        name = safename(item[0] + '_' + item[1])
+        print('{}.label Filesystem {}/{}'.format(name, item[0], item[1]))
+        if first:
+            print('{}.draw AREA'.format(name))
+            first = False
+        else:
+            print('{}.draw STACK'.format(name))
+
+    print('multigraph stratis_thin')
+    print('graph_title Stratis thin filesystems usage vs df')
+    print('graph_info Stratis thin filesystems usage divided by df, in '
+          'percents.')
+    print('graph_category disk')
+    print('graph_vlabel %')
+    print('graph_args --base 1000')
+    for item in files:
+        name = safename(item[0] + '_' + item[1])
+        print('{}.label {}/{} usage vs df'.format(name, item[0], item[1]))
+        print('{}.warning 150'.format(name))
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch(pools, files)
+
+
+def fetch(pools, files):
+    """Print values."""
+    print('multigraph stratis_pool')
+    for item in pools:
+        name = safename(item[0])
+        print('{}.value {}'.format(name, item[2] * 100 / item[1]))
+
+    print('multigraph stratis_fs')
+    for item in files:
+        name = safename(item[0] + '_' + item[1])
+        print('{}.value {}'.format(name, item[2]))
+
+    print('multigraph stratis_thin')
+    for item in files:
+        name = safename(item[0] + '_' + item[1])
+        print('{}.value {}'.format(name, item[2] * 100 / item[3]))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if find_pools()[0] else 'no (no stratis pools found)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config(*find_pools())
+    else:
+        fetch(*find_pools())

@@ -1,25 +1,34 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
 =head1 NAME
+
 znc_logs
 
 =head1 DESCRIPTION
+
 Shows lines/minute in today's znc-logs
 
 =head2 CONFIGURATION
-[znc_logs]
-user znc # or any other user/group that can read the znclog-folder
-group znc
-env.logdir /var/lib/znc/moddata/log/ # path to the GLOBAL log-folder with a "/" at the end
-env.expire 0    # Keep channel names forever  - OR -
-env.expire 1    # Forget channel names from last run
+
+ [znc_logs]
+ user znc                              # or any other user/group that can read the znclog-folder
+ group znc
+ env.logdir /var/lib/znc/moddata/log/  # path to the GLOBAL log-folder with a "/" at the end
+ env.expire 0                          # Keep channel names forever  - OR -
+ env.expire 1                          # Forget channel names from last run
 
 =head1 COPYRIGHT
-GPL VERSION 3
+
+GNU General Public License v3.0 only
+
+SPDX-License-Identifier: GPL-3.0-only
 
 =head1 AUTHOR
+
 Thor77 <thor77[at]thor77.org>
+
+=cut
 '''
 import json
 import os, sys, time
@@ -152,14 +161,14 @@ def read_data(savestate=True):
 
 def emit_config():
     print('graph_title Lines in the ZNC-log')
-    print('graph_category znc')
+    print('graph_category chat')
     print('graph_vlabel lines / ${graph_period}')
     print('graph_scale no')
     print('graph_args --base 1000 --lower-limit 0')
     print('graph_period minute')
     graph_order = []
 
-    if 'MUNIN_CAP_DIRTYCONFIG' in os.environ and os.environ['MUNIN_CAP_DIRTYCONFIG'] == 1:
+    if os.getenv('MUNIN_CAP_DIRTYCONFIG') == "1":
         read_data(1)
     else:
         read_data(0)

@@ -1,0 +1,71 @@
+#!/usr/bin/env ruby
+#
+# Plugin author: Gunnar Wolf <gwolf@gwolf.org>
+#
+# You are hereby granted authorization to copy, use, modify, distribute,
+# and in general do anything you please with this plugin. It is too simple
+# even to GPL-protect it.
+#
+# This plugin expects to receive via environment variables:
+#
+# icecast_host - Which host to monitor (default: 127.0.0.1)
+# icecast_username - Username to connect with (default: admin)
+# icecast_password - Password to connect with (default: hackme)
+# icecast_realm - Realm to connect with (default: 'Icecast2 server')
+#
+require 'hpricot'
+require 'open-uri'
+
+def get_conf
+  # Default values
+  conf = { host: '127.0.0.1', port: 8000,
+           username: 'admin', password: 'hackme' }
+  conf.keys.each do |key|
+    env_key = format('icecast_%s', key)
+    conf[key] = ENV[env_key] if ENV.has_key?(env_key)
+  end
+  conf
+end
+
+def get_data(conf)
+  begin
+    data = Hpricot(open(format('http://%s:%s/admin/stats',
+                               conf[:host], conf[:port]),
+                        http_basic_authentication: [conf[:username],
+                                                    conf[:password]]))
+  rescue OpenURI::HTTPError
+    puts 'Cannot connect: HTTP connection error'
+    exit 1
+  end
+  data
+end
+
+def get_values(data)
+  vals = {}
+  %i[sources clients].each do |key|
+    elem = data / key
+    vals[key] = if elem.nil?
+                  0
+                else
+                  elem.innerHTML
+                end
+  end
+  vals
+end
+
+data = get_data(get_conf)
+vals = get_values(data)
+
+case ARGV[0]
+when 'autoconf'
+  puts 'yes'
+when 'config'
+  puts 'graph_title Total sources and clients for Icecast'
+  puts 'graph_vlabel listeners'
+  puts 'graph_category streaming'
+  puts 'sources.label Total number of sources'
+  puts 'clients.label Total number of clients'
+else
+  puts 'sources.value ' + vals[:sources]
+  puts 'clients.value ' + vals[:clients]
+end

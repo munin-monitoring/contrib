@@ -1,0 +1,66 @@
+#!/bin/sh
+#
+# Patched version of ip_ plugin to support IPv6 and ip6tables.
+# Most of plugin done by munin core developers. Modified for IPv6 support
+# by Lasse Karstensen <lasse.karstensen@gmail.com> February 2009.
+#
+# Wildcard-plugin to monitor IP addresses through ip6tables. To monitor an
+# IP, link ip6_<ipaddress> to this file with : replaced with _. E.g.
+#
+#    ln -s /usr/share/node/node/plugins-auto/ip6_ /etc/munin/plugins/ip_2001_db8_1__100
+#
+# ...will monitor the IP 2001:db8:1::10.
+#
+# Additionally, you need these ip6tables rules as the first rules (they don't do anything, just make packet counts)
+#
+#    ip6tables -A INPUT  -d 2001:db8:1::10
+#    ip6tables -A OUTPUT -s 2001:db8:1::10
+#
+# Furthermore, this plugin needs to be run as root for ip6tables to work.
+#
+#
+# Magic markers (optional - used by munin-config and some installation
+# scripts):
+#%# family=auto
+#%# capabilities=autoconf suggest
+
+IP=`basename $0 | sed 's/^ip6_//g' | tr '_' ':' `
+
+if [ "$1" = "autoconf" ]; then
+	if [ -r /proc/net/dev ]; then
+		ip6tables -L INPUT -v -n -x -w >/dev/null 2>/dev/null
+		if [ $? -gt 0 ]; then
+			echo "no (could not run ip6tables as user `whoami`)"
+		else
+			echo yes
+		fi
+	else
+		echo "no (/proc/net/dev not found)"
+	fi
+	exit 0
+fi
+
+if [ "$1" = "suggest" ]; then
+	ip6tables -L INPUT -v -n -x -w 2>/dev/null | awk --posix '$8 ~ /^([0-9a-f]{1,4}(\:|\:\:)){1,7}([0-9a-f]{1,4})\/([0-9]{1,3})$/ { if (done[$8]!=1) {print $8; done[$8]=1;}}'|sed "s#/[0-9]\{1,3\}##"
+	exit 0
+fi
+
+if [ "$1" = "config" ]; then
+	echo "graph_order out in"
+	echo "graph_title $IP IPv6 traffic"
+	echo 'graph_args --base 1000'
+	echo 'graph_vlabel bits per ${graph_period}'
+	echo 'graph_category network'
+	echo 'out.label sent'
+	echo 'out.type DERIVE'
+	echo 'out.min 0'
+	echo 'out.cdef out,8,*'
+	echo 'in.label received'
+	echo 'in.type DERIVE'
+	echo 'in.min 0'
+	echo 'in.cdef in,8,*'
+	exit 0
+fi;
+
+ip6tables -L INPUT -v -n -x -w | grep -m1 $IP | awk "{ print \"in.value \" \$2 }"
+ip6tables -L OUTPUT -v -n -x -w | grep -m1 $IP | awk "{ print \"out.value \" \$2 }"

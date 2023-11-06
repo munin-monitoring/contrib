@@ -1,0 +1,71 @@
+#!/bin/bash
+#%# family=auto
+
+: << EOF
+=head1 NAME
+
+kernel_same_page_merging - Outputs various metrics about kernel same page merging.
+
+=head1 AUTHOR
+
+Michael Grote - git.mgrote.net
+
+=head1 LICENSE
+
+GPLv3 or later
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+EOF
+
+# Variablen
+ksm_dir_run="/sys/kernel/mm/ksm/run"
+
+function print_labels {
+cat << EOF
+graph_title kernel same page merging
+graph_category system
+graph_order pages_unshared pages_volatile pages_shared pages_sharing
+pages_shared.info how many shared pages are being used
+pages_sharing.info how many more sites are sharing them i.e. how much saved
+pages_unshared.info how many pages unique but repeatedly checked for merging
+pages_volatile.info how many pages changing too fast to be placed in a tree
+pages_shared.label pages shared
+pages_sharing.label pages sharing
+pages_unshared.label pages unshared
+pages_volatile.label pages volatile
+pages_shared.draw AREASTACK
+pages_sharing.draw AREASTACK
+pages_unshared.draw AREASTACK
+pages_volatile.draw AREASTACK
+EOF
+}
+
+
+
+# wenn parameter = ...
+if [ "$1" = "autoconf" ]; then
+  # prüfe ob ksm aktiviert ist
+  if [ ! -f "$ksm_dir_run" ]; then
+    echo "no ($ksm_dir_run not found)"
+    exit 0
+  fi
+  echo yes
+  exit 0
+fi
+
+if [ "$1" = "config" ]; then
+  # setze label
+  print_labels
+  exit 0
+fi
+
+echo pages_shared.value $(cat "/sys/kernel/mm/ksm/pages_shared")
+echo pages_sharing.value $(cat "/sys/kernel/mm/ksm/pages_sharing")
+echo pages_unshared.value $(cat "/sys/kernel/mm/ksm/pages_unshared")
+echo pages_volatile.value $(cat "/sys/kernel/mm/ksm/pages_volatile")

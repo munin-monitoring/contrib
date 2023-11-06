@@ -1,0 +1,313 @@
+#!/bin/sh
+
+: <<=cut
+
+=head1 NAME
+
+sshd_log - Munin plugin to monitor auth.log or journald for sshd
+           server events.
+
+=head1 CONFIGURATION
+
+This plugin requires read permission for the logfile or journald.
+
+On busy servers you can change value type to COUNTER and set min to 0
+to avoid minus peaks at logrotate.
+
+The following environment variables are used by this plugin:
+
+ logfile  - path to the auth log file, or "journald" to use journald.
+            default: /var/log/secure
+
+ journalctlargs - space separated list of arguments to pass to
+                  journalctl to get the sshd logs.
+                  default: _COMM=sshd
+
+ type - "GAUGE" or "DERIVE"
+         default: GAUGE
+
+ warning  - defines a general warning level
+            default: UNSET (meaning not configured -> no warnings)
+
+ critical - defines a general critical level
+            default: UNSET (meaning not configured -> no criticals)
+
+ logpass_warning  - defines a warning level for successful password logins
+                    default: same value as "warning", so effectively UNSET (not
+                    configured) if "warning" also is not configured
+
+ logpass_critical - defines a critical level for successful password logins
+                    default: same value as "critical", so effectively UNSET (not
+                    configured) if "critical" also is not configured
+
+ logpasspam_warning   - same as "logpass_warning" but for successful PAM logins
+
+ logpasspam_critical  - same as "logpass_critical" but for successful PAM logins
+
+ logkey_warning   - same as "logpass_warning" but for successful PublicKey
+                    logins
+
+ logkey_critical  - same as "logpass_critical" but for successful PublicKey
+                    logins
+
+ noid_warning   - same as "logpass_warning" but for attempts with no user
+                  identification
+
+ noid_critical  - same as "logpass_critical" but for attempts with no user
+                  identification
+
+ rootattempt_warning  - same as "logpass_warning" but for root login attempts
+
+ rootattempt_critical - same as "logpass_critical" but for root login attempts
+
+ invusr_warning   - same as "logpass_warning" but for invalid user login
+                    attempts
+
+ invusr_critical  - same as "logpass_critical" but for invalid user login
+                    attempts
+
+ nordns_warning - same as "logpass_warning" but for connections with reverse
+                  DNS for peer
+
+ nordns_critical  - same as "logpass_critical" but for connections with reverse
+                    DNS for peer
+
+ breakin_warning  - same as "logpass_warning" but for potential breakin
+                    attempts
+
+ breakin_critical - same as "logpass_critical" but for potential breakin
+                    attempts
+
+If the "logfile" environment variable is set to "journald" the sshd
+logs are read from journald, filtering on program "sshd". The filtering
+may be changed using "journalctlargs".
+
+
+Config examples for /etc/munin/plugin-conf.d/munin-node:
+
+  [sshd_log]
+      user root
+      group root
+      env.logfile /var/log/messages
+
+Config example with journald:
+
+  [sshd_log]
+      group systemd-journal
+      env.logfile journald
+
+Config example with journald on the sshd.service unit only:
+
+  [sshd_log]
+      group systemd-journal
+      env.logfile journald
+      env.journalctlargs --unit=sshd.service
+
+Config example with journald and type DERIVE:
+
+  [sshd_log]
+      group systemd-journal
+      env.logfile journald
+      env.type DERIVE
+
+Config example setting general warning and critical values and specific ones for
+root login attempts:
+
+  [sshd_log]
+      env.warning 100
+      env.critical 500
+      env.rootattempt_warning 1
+      env.rootattempt_critical 100
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 AUTHOR
+
+Copyright (C) 2009 zlati
+
+Copyright (C) 2009 ckujau
+
+Copyright (C) 2010 pmoranga
+
+Copyright (C) 2016 Thomas Riccardi
+
+=cut
+
+
+# Script parameters:
+#
+#       config   (required)
+#       autoconf (optional - used by munin-config)
+
+
+LOG=${logfile:-/var/log/secure}
+JOURNALCTL_ARGS=${journalctlargs:-_COMM=sshd}
+TYPE=${type:-GAUGE}
+
+WARNING=${warning:-UNSET}
+CRITICAL=${critical:-UNSET}
+LOGPASS_WARNING=${logpass_warning:-$WARNING}
+LOGPASS_CRITICAL=${logpass_critical:-$CRITICAL}
+LOGPASSPAM_WARNING=${logpasspam_warning:-$WARNING}
+LOGPASSPAM_CRITICAL=${logpasspam_critical:-$CRITICAL}
+LOGKEY_WARNING=${logkey_warning:-$WARNING}
+LOGKEY_CRITICAL=${logkey_critical:-$CRITICAL}
+NOID_WARNING=${noid_warning:-$WARNING}
+NOID_CRITICAL=${noid_critical:-$CRITICAL}
+ROOTATTEMPT_WARNING=${rootattempt_warning:-$WARNING}
+ROOTATTEMPT_CRITICAL=${rootattempt_critical:-$CRITICAL}
+INVUSR_WARNING=${invusr_warning:-$WARNING}
+INVUSR_CRITICAL=${invusr_critical:-$CRITICAL}
+NORDNS_WARNING=${nordns_warning:-$WARNING}
+NORDNS_CRITICAL=${nordns_critical:-$CRITICAL}
+BREAKIN_WARNING=${breakin_warning:-$WARNING}
+BREAKIN_CRITICAL=${breakin_critical:-$CRITICAL}
+
+if [ "$LOG" = "journald" -a "$TYPE" = "DERIVE" ]; then
+        TYPE=ABSOLUTE
+fi
+
+
+if [ "$1" = "autoconf" ]; then
+        if [ "$LOG" = "journald" ]; then
+                # shellcheck disable=SC2086,SC2034
+                if journalctl --no-pager --quiet --lines=1 $JOURNALCTL_ARGS | read -r DUMMY; then
+                        echo "yes"
+                else
+                        echo "no (journald empty log for '$JOURNALCTL_ARGS' not found)"
+                fi
+        else
+                if [ -r "$LOG" ]; then
+                        echo "yes"
+                else
+                        echo "no (logfile '$LOG' not readable)"
+                fi
+        fi
+        exit 0
+fi
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title SSHD login stats'
+        echo 'graph_info SSHD login stats from' "$LOG"
+        echo 'graph_args --base 1000 -l 0'
+        echo 'graph_vlabel logins'
+        echo 'graph_category' security
+
+        echo 'LogPass.label Successful password logins'
+        echo 'LogPass.min 0'
+        echo 'LogPass.type' "$TYPE"
+        if [ "$LOGPASS_WARNING" != "UNSET" ]; then
+                echo 'LogPass.warning' "$LOGPASS_WARNING"
+        fi
+        if [ "$LOGPASS_CRITICAL" != "UNSET" ]; then
+                echo 'LogPass.critical' "$LOGPASS_CRITICAL"
+        fi
+
+        echo 'LogPassPAM.label Successful login via PAM'
+        echo 'LogPassPAM.min 0'
+        echo 'LogPassPAM.type' "$TYPE"
+        if [ "$LOGPASSPAM_WARNING" != "UNSET" ]; then
+                echo 'LogPassPAM.warning' "$LOGPASSPAM_WARNING"
+        fi
+        if [ "$LOGPASSPAM_CRITICAL" != "UNSET" ]; then
+                echo 'LogPassPAM.critical' "$LOGPASSPAM_CRITICAL"
+        fi
+
+        echo 'LogKey.label Successful PublicKey logins'
+        echo 'LogKey.min 0'
+        echo 'LogKey.type' "$TYPE"
+        if [ "$LOGKEY_WARNING" != "UNSET" ]; then
+                echo 'LogKey.warning' "$LOGKEY_WARNING"
+        fi
+        if [ "$LOGKEY_CRITICAL" != "UNSET" ]; then
+                echo 'LogKey.critical' "$LOGKEY_CRITICAL"
+        fi
+
+        echo 'NoID.label No identification from user'
+        echo 'NoID.min 0'
+        echo 'NoID.type' "$TYPE"
+        if [ "$NOID_WARNING" != "UNSET" ]; then
+                echo 'NoID.warning' "$NOID_WARNING"
+        fi
+        if [ "$NOID_CRITICAL" != "UNSET" ]; then
+                echo 'NoID.critical' "$NOID_CRITICAL"
+        fi
+
+        echo 'rootAttempt.label Root login attempts'
+        echo 'rootAttempt.min 0'
+        echo 'rootAttempt.type' "$TYPE"
+        if [ "$ROOTATTEMPT_WARNING" != "UNSET" ]; then
+                echo 'rootAttempt.warning' "$ROOTATTEMPT_WARNING"
+        fi
+        if [ "$ROOTATTEMPT_CRITICAL" != "UNSET" ]; then
+                echo 'rootAttempt.critical' "$ROOTATTEMPT_CRITICAL"
+        fi
+
+        echo 'InvUsr.label Invalid user login attempts'
+        echo 'InvUsr.min 0'
+        echo 'InvUsr.type' "$TYPE"
+        if [ "$INVUSR_WARNING" != "UNSET" ]; then
+                echo 'InvUsr.warning' "$INVUSR_WARNING"
+        fi
+        if [ "$INVUSR_CRITICAL" != "UNSET" ]; then
+                echo 'InvUsr.critical' "$INVUSR_CRITICAL"
+        fi
+
+        echo 'NoRDNS.label No reverse DNS for peer'
+        echo 'NoRDNS.min 0'
+        echo 'NoRDNS.type' "$TYPE"
+        if [ "$NORDNS_WARNING" != "UNSET" ]; then
+                echo 'NoRDNS.warning' "$NORDNS_WARNING"
+        fi
+        if [ "$NORDNS_CRITICAL" != "UNSET" ]; then
+                echo 'NoRDNS.critical' "$NORDNS_CRITICAL"
+        fi
+
+        echo 'Breakin.label Potential Breakin Attempts'
+        echo 'Breakin.min 0'
+        echo 'Breakin.type' "$TYPE"
+        if [ "$BREAKIN_WARNING" != "UNSET" ]; then
+                echo 'Breakin.warning' "$BREAKIN_WARNING"
+        fi
+        if [ "$BREAKIN_CRITICAL" != "UNSET" ]; then
+                echo 'Breakin.critical' "$BREAKIN_CRITICAL"
+        fi
+
+        exit 0
+fi
+
+if [ "$LOG" = "journald" -a "$TYPE" = "ABSOLUTE" ]; then
+        CURSOR_FILE="$MUNIN_STATEFILE"
+        # read cursor
+        # format: "journald-cursor <cursor>"
+        CURSOR=
+        if [ -f "$CURSOR_FILE" ]; then
+                CURSOR=$(awk '/^journald-cursor / {print $2}' "$CURSOR_FILE")
+        fi
+else
+        CURSOR_FILE=
+fi
+
+if [ "$LOG" = "journald" ]; then
+        # shellcheck disable=SC2086
+        if [ "$TYPE" = "ABSOLUTE" ]; then
+                journalctl --no-pager --quiet --show-cursor ${CURSOR:+"--after-cursor=$CURSOR"} $JOURNALCTL_ARGS
+        else
+                journalctl --no-pager --quiet --since=$(date -dlast-sunday +%Y-%m-%d) $JOURNALCTL_ARGS
+        fi
+else
+        cat "$LOG"
+fi | \
+    awk -v cursor_file="$CURSOR_FILE" 'BEGIN{c["LogPass"]=0;c["LogKey"]=0;c["NoID"]=0;c["rootAttempt"]=0;c["InvUsr"]=0;c["LogPassPAM"]=0;c["Breakin"]=0;c["NoRDNS"]=0; }
+     /sshd\[.*Accepted password for/{c["LogPass"]++}
+     /sshd\[.*Accepted publickey for/{c["LogKey"]++}
+     /sshd\[.*Did not receive identification string/{c["NoID"]++}
+     /sshd\[.*Failed password for root/{c["rootAttempt"]++}
+     /sshd\[.*Invalid user/{c["InvUsr"]++}
+     /sshd\[.*POSSIBLE BREAK-IN ATTEMPT!/{c["Breakin"]++}
+     /sshd\[.*keyboard-interactive\/pam/{c["LogPassPAM"]++}
+     /sshd\[.*reverse mapping checking getaddrinfo/{c["NoRDNS"]++}a
+     END{if (cursor_file != "") { print "journald-cursor " $3 > cursor_file };for(i in c){print i".value " c[i]} }'

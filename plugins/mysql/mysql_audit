@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+# -*- python -*-
+
+"""
+=head1 NAME
+
+mysql_audit - Plugin to monitor the MySQL audit log connection count
+
+=head1 APPLICABLE SYSTEMS
+
+MySQL needs to be configured manually in order to enable the audit log. This
+can be done as follows:
+
+=over 2
+
+      plugin-load = server_audit=server_audit.so
+      server_audit_events = connect
+      server_audit_output_type=file
+      server_audit_file_path = /var/log/mysql/audit.log
+      server_audit_file_rotate_size = 512M
+      server_audit_logging = ON
+      server_audit_file_rotations = 5
+
+=back
+
+=head1 INSTALLATION
+
+Place in /etc/munin/plugins/ (or link it there using ln -s)
+
+=head1 CONFIGURATION
+
+Add this to your /etc/munin/plugin-conf.d/munin-node:
+
+=over 2
+
+      [mysql_audit]
+      user mysql
+      env.logfile /var/log/mysql/audit.log
+      env.sorted 1 # sort output (if not: unsorted)
+      env.toplist 10 # only the top 10 (if unset: all of them). implies sorted
+
+=back
+
+=head1 AUTHORS
+
+Copyright (C) 2017 Bert Van de Poel <bert@bhack.net>
+
+Copyright (C) 2019 pcy <pcy@ulyssis.org>
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+
+from datetime import datetime, timedelta, timezone
+import operator
+import os
+import struct
+import sys
+
+
+def weakbool(x):
+    return x.lower().strip() in {'true', 'yes', 'y', '1'}
+
+
+logfile = os.getenv('logfile', '/var/log/mysql/audit.log')
+toplist = int(os.getenv('toplist', '0'))
+sortlist = weakbool(os.getenv('sorted', 'N')) or toplist > 0
+
+STATEFILE = os.getenv('MUNIN_STATEFILE')
+
+
+def loadstate():
+    if not os.path.isfile(STATEFILE):
+        return None
+
+    with open(STATEFILE, 'rb') as f:
+        tstamp = struct.unpack('d', f.read())[0]
+        return datetime.fromtimestamp(tstamp, tz=timezone.utc)
+
+
+def savestate(state):
+    with open(STATEFILE, 'wb') as f:
+        f.write(struct.pack('d', state.timestamp()))
+
+
+def reverse_lines(filename, BUFSIZE=4096):
+    with open(filename, "r") as f:
+        f.seek(0, 2)
+        p = f.tell()
+        remainder = ""
+        while True:
+            sz = min(BUFSIZE, p)
+            p -= sz
+            f.seek(p)
+            buf = f.read(sz) + remainder
+            if '\n' not in buf:
+                remainder = buf
+            else:
+                i = buf.index('\n')
+                for L in buf[i + 1:].split("\n")[::-1]:
+                    yield L
+                remainder = buf[:i]
+            if p == 0:
+                break
+        yield remainder
+
+
+def get_data(do_save=True):
+    occurrences = {}
+    begin = datetime.now(timezone.utc)
+    begin_local = datetime.now()
+
+    state = loadstate()
+    if state is None:
+        # need to do something here to prevent reading indefinitely
+        state = begin - timedelta(minutes=5)
+
+    for line in reverse_lines(logfile):
+        if ',CONNECT,' not in line:
+            continue
+
+        split = line.split(',')
+        key = split[2]
+        date = datetime.strptime(split[0], '%Y%m%d %H:%M:%S')
+        # hack to add timezone data to the datetime
+        date = begin + (date - begin_local)
+
+        if date < state:
+            break
+
+        occurrences[key] = occurrences.get(key, 0) + 1
+
+    if do_save:
+        savestate(begin)
+
+    return occurrences
+
+
+def autoconf():
+    print("no (logfile not found)" if os.path.isfile(logfile) else "yes")
+
+
+def configure():
+    print('graph_title MySQL Audit connect count')
+    print('graph_vlabel Connections')
+    print('graph_category mysql')
+
+    occurrences = get_data(False)
+    occitems = occurrences.items()
+    occitems = sorted(occitems, key=operator.itemgetter(1 if sortlist else 0),
+                      reverse=sortlist)
+    if toplist > 0:
+        occitems = occitems[:toplist]
+
+    for key, value in occitems:
+        print('{}.label {}'.format(key.lower(), key))
+        print('{}.type GAUGE'.format(key.lower()))
+        print('{}.draw AREASTACK'.format(key.lower()))
+
+
+def fetch():
+    occurrences = get_data()
+    occitems = occurrences.items()
+    occitems = sorted(occitems, key=operator.itemgetter(1 if sortlist else 0),
+                      reverse=sortlist)
+    if toplist > 0:
+        occitems = occitems[:toplist]
+
+    for key, value in occitems:
+        print('{}.value {}'.format(key, value))
+
+
+if len(sys.argv) == 2 and sys.argv[1] == "autoconf":
+    autoconf()
+elif len(sys.argv) == 2 and sys.argv[1] == "config":
+    configure()
+else:
+    fetch()

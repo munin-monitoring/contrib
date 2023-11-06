@@ -55,7 +55,7 @@ if (count($argv) === 2 && $argv[1] === 'config') {
   echo "graph_title Drupal Node Distribution Count\n";
   echo "graph_args --base 1000 --lower-limit 0\n";
   echo "graph_vlabel Node Distribution Count / ${graph_period}\n";
-  echo "graph_category Drupal\n";
+  echo "graph_category cms\n";
   echo "graph_scale nol\n";
   echo "graph_info Displays the nodes content type distribution count in your Drupal site\n";
 

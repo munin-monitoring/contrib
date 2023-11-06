@@ -1,74 +1,104 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 """
-Munin plugin to monitor various items of data from an Apple Airport
-Express/Extreme or a Time Capsule.
 
-v1.0 by Chris Jones <cmsj@tenshu.net>
-Copyright (C) 2011 Chris Jones
-This script is released under the GNU GPL v2 license.
+=head1 NAME
+
+Monitor various items of data from an Apple Airport Express/Extreme or a Time Capsule.
+
+
+=head1 INSTALLATION
 
 To use this plugin, use specially named symlinks:
 
-cd /etc/munin/plugins
-ln -s /path/to/snmp__airport snmp_myairport_airport_clients
-ln -s /path/to/snmp__airport snmp_myairport_airport_dhcpclients
-ln -s /path/to/snmp__airport snmp_myairport_airport_rate
-ln -s /path/to/snmp__airport snmp_myairport_airport_signal
-ln -s /path/to/snmp__airport snmp_myairport_airport_noise
+ cd /etc/munin/plugins
+ ln -s /path/to/snmp__airport snmp_myairport_airport_clients
+ ln -s /path/to/snmp__airport snmp_myairport_airport_dhcpclients
+ ln -s /path/to/snmp__airport snmp_myairport_airport_rate
+ ln -s /path/to/snmp__airport snmp_myairport_airport_signal
+ ln -s /path/to/snmp__airport snmp_myairport_airport_noise
 
 NOTE: the name 'myairport' should be a valid hostname or IP address for your
       Airport. It can be any value, but it must not include the character '_'.
 
 Now add a virtual host entry to your munin server's munin.conf:
 
-[myairport]
-    address 123.123.123.123
-    user_node_name no
+ [myairport]
+ address 123.123.123.123
+ user_node_name no
 
 (with the correct IP address, obviously)
 
 this will create a virtual host in munin for the airport named 'myairport' and
 produce graphs for:
-    * number of connected wireless clients
-    * number of active DHCP leases
-    * rate at which clients are connected (in Mb/s)
-    * signal quality of connected clients (in dB)
-    * noise level of connected clients (in dB)
 
-# Magic markers
-#%# capabilities=
-#%# family=contrib manual
+=over 4
+
+=item number of connected wireless clients
+
+=item number of active DHCP leases
+
+=item rate at which clients are connected (in Mb/s)
+
+=item signal quality of connected clients (in dB)
+
+=item noise level of connected clients (in dB)
+
+=back
+
+
+=head1 AUTHORS
+
+Copyright (C) 2011 Chris Jones <cmsj@tenshu.net>
+
+
+=head1 LICENSE
+
+This script is released under the GNU GPL v2 license.
+
+SPDX-License-Identifier: GPL-2.0-only
+
+
+=head1 MAGIC MARKERS
+
+ #%# capabilities=
+ #%# family=contrib manual
+
+
+=cut
 """
 import sys
 import os
 try:
     import netsnmp
 except ImportError:
-    print """ERROR: Unable to import netsnmp.
+    print("""ERROR: Unable to import netsnmp.
 Please install the Python bindings for libsnmp.
-On Debian/Ubuntu machines this package is named 'libsnmp-python'"""
+On Debian/Ubuntu machines this package is named 'libsnmp-python'""", file=sys.stderr)
     sys.exit(-3)
 
-DEBUG=None
-CMDS=['type', 'rates', 'time', 'lastrefresh', 'signal', 'noise', 'rate', 'rx',
-      'tx', 'rxerr', 'txerr']
-CMD=None
-DESTHOST=None
-NUMCLIENTS=None
-NUMDHCPCLIENTS=None
-WANIFINDEX=None
+DEBUG = None
+CMDS = ['type', 'rates', 'time', 'lastrefresh', 'signal', 'noise', 'rate', 'rx', 'tx', 'rxerr',
+        'txerr']
+CMD = None
+DESTHOST = None
+NUMCLIENTS = None
+NUMDHCPCLIENTS = None
+WANIFINDEX = None
+
 
 def dbg(text):
     """Print some debugging text if DEBUG=1 is in our environment"""
     if DEBUG is not None:
-        print "DEBUG: %s" % text
+        print("DEBUG: %s" % text)
+
 
 def usage():
     """Print some usage information about ourselves"""
-    print __doc__
+    print(__doc__)
+
 
 def parseName(name):
-    """Examing argv[0] (i.e. the name of this script) for the hostname we should
+    """Examining argv[0] (i.e. the name of this script) for the hostname we should
     be talking to and the type of check we want to run. The hostname should be
     a valid, resolvable hostname, or an IP address. The command can be any of:
         * clients - number of connected wireless clients
@@ -87,6 +117,7 @@ def parseName(name):
     else:
         dbg("parseName found an inconsistent name: '%s'" % name)
         return None
+
 
 def tableToDict(table, num):
     """The netsnmp library returns a tuple with all of the data, it is not in any
@@ -129,6 +160,7 @@ def tableToDict(table, num):
 
     return clientTable
 
+
 def getNumClients():
     """Returns the number of wireless clients connected to the Airport we are
     examining. This will only ever be polled via SNMP once per invocation. If
@@ -147,6 +179,7 @@ def getNumClients():
 
     dbg("getNumClients: found %d clients" % NUMCLIENTS)
     return NUMCLIENTS
+
 
 def getNumDHCPClients():
     """Returns the number of DHCP clients with currently active leases. This
@@ -167,6 +200,7 @@ def getNumDHCPClients():
     dbg("getNumDHCPClients: found %d clients" % NUMDHCPCLIENTS)
     return NUMDHCPCLIENTS
 
+
 def getExternalInterface():
     """Returns the index of the WAN interface of the Airport. This will only
     ever be polled via SNMP once per invocation, per getNum*Clients(). See
@@ -176,26 +210,29 @@ def getExternalInterface():
 
     if WANIFINDEX is None:
         interfaces = list(netsnmp.snmpwalk(netsnmp.Varbind(iFaceNames),
-                                          Version=2, DestHost=DESTHOST,
-                                          Community='public'))
+                                           Version=2, DestHost=DESTHOST,
+                                           Community='public'))
         dbg("getExternalInterface: found interfaces: %s" % interfaces)
         try:
             WANIFINDEX = interfaces.index('mgi1') + 1
         except ValueError:
-            print "ERROR: Unable to find WAN interface mgi1"
-            print interfaces
+            print("ERROR: Unable to find WAN interface mgi1")
+            print(interfaces)
             sys.exit(-3)
 
     dbg("getExternalInterface: found mgi1 at index: %d" % WANIFINDEX)
     return WANIFINDEX
 
+
 def getExternalInOctets():
     """Returns the number of octets of inbound traffic on the WAN interface"""
     return getOctets('In')
 
+
 def getExternalOutOctets():
     """Returns the number of octets of outbound traffic on the WAN interface"""
     return getOctets('Out')
+
 
 def getOctets(direction):
     """Returns the number of octets of traffic on the WAN interface in the
@@ -211,6 +248,7 @@ def getOctets(direction):
                                Version=2, DestHost=DESTHOST,
                                Community='public')[0])
 
+
 def getWanSpeed():
     """Returns the speed of the WAN interface"""
     ifSpeed = "1.3.6.1.2.1.2.2.1.5.%s" % getExternalInterface()
@@ -219,11 +257,12 @@ def getWanSpeed():
         wanSpeed = int(netsnmp.snmpget(netsnmp.Varbind(ifSpeed),
                                        Version=2, DestHost=DESTHOST,
                                        Community='public')[0])
-    except:
+    except:  # noqa: E722 (TODO: specify the expected exceptions)
         dbg("getWanSpeed: Unable to probe for data, defaultint to 10000000")
         wanSpeed = 10000000
 
     return wanSpeed
+
 
 def getData():
     """Returns a dictionary populated with all of the wireless clients and their
@@ -246,6 +285,7 @@ def getData():
 
     return clients
 
+
 def main(clients=None):
     """This function fetches metadata about wireless clients if needed, then
     displays whatever values have been requested"""
@@ -253,15 +293,16 @@ def main(clients=None):
         clients = getData()
 
     if CMD == 'clients':
-        print "clients.value %s" % getNumClients()
+        print("clients.value %s" % getNumClients())
     elif CMD == 'dhcpclients':
-        print "dhcpclients.value %s" % getNumDHCPClients()
+        print("dhcpclients.value %s" % getNumDHCPClients())
     elif CMD == 'wanTraffic':
-        print "recv.value %s" % getExternalInOctets()
-        print "send.value %s" % getExternalOutOctets()
+        print("recv.value %s" % getExternalInOctets())
+        print("send.value %s" % getExternalOutOctets())
     else:
         for client in clients:
-            print "MAC_%s.value %s" % (client, clients[client][CMD])
+            print("MAC_%s.value %s" % (client, clients[client][CMD]))
+
 
 if __name__ == '__main__':
     clients = None
@@ -281,44 +322,44 @@ if __name__ == '__main__':
 
     if len(sys.argv) > 1:
         if sys.argv[1] == 'config':
-            print """
+            print("""
 graph_category network
-host_name %s""" % DESTHOST
+host_name %s""" % DESTHOST)
 
             if CMD == 'signal':
-                print """graph_args -l 0 --lower-limit -100 --upper-limit 0
+                print("""graph_args -l 0 --lower-limit -100 --upper-limit 0
 graph_title Wireless client signal
 graph_scale no
-graph_vlabel dBm Signal"""
+graph_vlabel dBm Signal""")
             elif CMD == 'noise':
-                print """graph_args -l 0 --lower-limit -100 --upper-limit 0
+                print("""graph_args -l 0 --lower-limit -100 --upper-limit 0
 graph_title Wireless client noise
 graph_scale no
-graph_vlabel dBm Noise"""
+graph_vlabel dBm Noise""")
             elif CMD == 'rate':
-                print """graph_args -l 0 --lower-limit 0 --upper-limit 500
+                print("""graph_args -l 0 --lower-limit 0 --upper-limit 500
 graph_title Wireless client WiFi rate
 graph_scale no
-graph_vlabel WiFi Rate"""
+graph_vlabel WiFi Rate""")
             elif CMD == 'clients':
-                print """graph_title Number of connected clients
+                print("""graph_title Number of connected clients
 graph_args --base 1000 -l 0
 graph_vlabel number of wireless clients
 graph_info This graph shows the number of wireless clients connected
 clients.label clients
 clients.draw LINE2
-clients.info The number of clients."""
+clients.info The number of clients.""")
             elif CMD == 'dhcpclients':
-                print """graph_title Number of active DHCP leases
+                print("""graph_title Number of active DHCP leases
 graph_args --base 1000 -l 0
 graph_vlabel number of DHCP clients
 graph_info This graph shows the number of active DHCP leases
 dhcpclients.label leases
 dhcpclients.draw LINE2
-dhcpclients.info The number of leases."""
+dhcpclients.info The number of leases.""")
             elif CMD == 'wanTraffic':
                 speed = getWanSpeed()
-                print """graph_title WAN interface traffic
+                print("""graph_title WAN interface traffic
 graph_order recv send
 graph_args --base 1000
 graph_vlabel bits in (-) / out (+) per ${graph_period}
@@ -336,9 +377,9 @@ send.type DERIVE
 send.negative recv
 send.cdef send,8,*
 send.max %s
-send.min 0""" % (speed, speed)
+send.min 0""" % (speed, speed))
             else:
-                print "Unknown command: %s" % CMD
+                print("Unknown command: %s" % CMD, file=sys.stderr)
                 sys.exit(-2)
 
             if CMD in ['clients', 'dhcpclients', 'wanTraffic']:
@@ -347,9 +388,8 @@ send.min 0""" % (speed, speed)
             else:
                 clients = getData()
                 for client in clients:
-                    print "MAC_%s.label %s" % (client, client)
+                    print("MAC_%s.label %s" % (client, client))
 
             sys.exit(0)
     else:
         main(clients)
-

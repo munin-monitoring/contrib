@@ -1,0 +1,127 @@
+#!/bin/sh
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+jitsi_videobridge - Monitor sessions and conferences on a jitsi-videobridge
+
+=head1 APPLICABLE SYSTEMS
+
+Jitsi-Videobridge instances
+
+=head1 CONFIGURATION
+
+Requires enabled colibri statistics on jitsi-videobridge and an 
+installed jq, a command-line json processor.
+
+You may specify the URL where to get the statistics.
+
+ url      - URL of colibri stats
+ max_time - Timeout curl - defaults to 3 seconds
+
+ [jitsi_videobridge]
+ env.url http://127.0.0.1:8080/colibri/stats
+ env.max_time 3
+
+... and you may disable the audiochannel when you don't use an
+audio gateway.
+
+=head1 AUTHOR
+
+Copyright (C) 2020 Sebastian L. (https://momou.ch)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+COLIBRI_URL=${url:-"http://127.0.0.1:8080/colibri/stats"}
+max_time=${max_time:-3}
+
+case $1 in
+
+    autoconf)
+        if [ -x /usr/bin/curl ]; then
+            if [ -x /usr/bin/jq ]; then
+	        curl -s -f -m "${max_time:-3}" -I "$COLIBRI_URL" | grep -iq "Content-Type: application/json" && echo "yes" && exit 0 || echo "no (invalid or empty response from colibri API ($COLIBRI_URL))" && exit 0
+            else
+                echo "no (jq not found)" && exit 0
+            fi
+        else
+            echo "no (/usr/bin/curl not found)" && exit 0
+        fi
+        ;;
+
+   config)
+        echo "multigraph jitsi_videobridge_sessions"
+        echo "graph_title Current jitsi-videobridge sessions"
+        echo "graph_info Current jitsi-videobridge sessions"
+        echo "graph_vlabel current sessions"
+        echo "graph_args --base 1000 -l 0"
+        echo "jitsi_videochannels.label videochannels"
+        echo "jitsi_videochannels.info current number of videochannels"
+        echo "jitsi_videochannels.min 0"
+        echo "jitsi_videochannels.draw AREASTACK"
+        echo "jitsi_audiochannels.label audiochannels"
+        echo "jitsi_audiochannels.info current number of audiochannels"
+        echo "jitsi_audiochannels.min 0"
+        echo "jitsi_audiochannels.draw AREASTACK"
+        echo "jitsi_conferences.label conferences"
+        echo "jitsi_conferences.info current number of conferences"
+        echo "jitsi_conferences.min 0"
+        echo "jitsi_conferences.draw LINE2"
+        echo "jitsi_participants.label participants"
+        echo "jitsi_participants.info current number of participants"
+        echo "jitsi_participants.min 0"
+        echo "jitsi_participants.draw LINE2"
+        echo "multigraph jitsi_videobridge_conferences"
+        echo "graph_title Total of jitsi-videobridge conferences"
+        echo "graph_info Total of jitsi-videobridge conferences"
+        echo "graph_vlabel conferences"
+        echo "graph_args --base 1000 -l 0"
+        echo "jitsi_total_conferences_created.label created conferences"
+        echo "jitsi_total_conferences_created.info total of created conferences"
+        echo "jitsi_total_conferences_created.min 0"
+        echo "jitsi_total_conferences_created.draw AREA"
+        echo "jitsi_total_conferences_completed.label completed conferences"
+        echo "jitsi_total_conferences_completed.info total of completed conferences"
+        echo "jitsi_total_conferences_completed.min 0"
+        echo "jitsi_total_conferences_completed.draw AREASTACK"
+        echo "jitsi_total_partially_failed_conferences.label partially failed conferences"
+        echo "jitsi_total_partially_failed_conferences.info total of partially failed conferences"
+        echo "jitsi_total_partially_failed_conferences.min 0"
+        echo "jitsi_total_partially_failed_conferences.draw AREASTACK"
+        echo "jitsi_total_failed_conferences.label failed conferences"
+        echo "jitsi_total_failed_conferences.info total of failed conferences"
+        echo "jitsi_total_failed_conferences.min 0"
+        echo "jitsi_total_failed_conferences.draw AREASTACK"
+
+	exit 0
+        ;;
+
+esac
+
+JSONSTATS=$(curl -s -f -m "$max_time" "$COLIBRI_URL")
+
+echo "multigraph jitsi_videobridge_sessions"
+for KEY in videochannels audiochannels conferences participants; do
+    VALUE=$(echo "$JSONSTATS" | jq -r ".$KEY // \"U\"")
+    echo "jitsi_${KEY}.value $VALUE"
+done
+
+echo "multigraph jitsi_videobridge_conferences"
+for KEY in total_conferences_created total_failed_conferences total_partially_failed_conferences total_conferences_completed; do
+    VALUE=$(echo "$JSONSTATS" | jq -r ".$KEY // \"U\"")
+    echo "jitsi_${KEY}.value $VALUE"
+done

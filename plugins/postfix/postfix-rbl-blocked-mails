@@ -1,0 +1,48 @@
+#!/bin/sh
+#
+# Made by Stefan Bühler, Switzerland
+# Monitor blocked Mails during Postfix RBL Scan, included Spamhaus, Spamcop, Manitu, MSRBL, NJABL
+
+
+# Allow user to specify logfile through env.logfile
+LOGFILE=${logfile:-/var/log/mail.log}
+DATE=$(date '+%b %e %H')
+RBLS=${rbls:-spamhaus.org spamcop.net manitu.net msrbl.net njabl.org}
+
+
+get_blocked_by_domain_count() {
+    local escaped_domain
+    # escape dots - for a proper regular expression
+    escaped_domain=$(echo "$1" | sed 's/\./\\./g')
+    grep -c "$DATE.*blocked using [^ ]*${escaped_domain}" "$LOGFILE"
+}
+
+
+if [ "$1" = "autoconf" ]; then
+    if [ -r "$LOGFILE" ]; then
+        echo yes
+    else
+        echo "no (log file not found: $LOGFILE)"
+    fi
+    exit 0
+fi
+
+if [ "$1" = "config" ]; then
+    echo 'graph_title RBL Counter'
+    echo 'graph_category mail'
+    echo 'graph_args --base 1000 -l 0'
+    echo 'graph_vlabel block during RBL'
+
+    for RBL in $RBLS
+    do
+      echo "${RBL%%.*}.label Blocked by $RBL"
+    done
+
+    exit 0
+fi
+
+
+for RBL in $RBLS
+do
+  printf '%s.value %s\n' "${RBL%%.*}" "$(get_blocked_by_domain_count $RBL)"
+done

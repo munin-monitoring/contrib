@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+
+
+"""
+=pod
+
+=head1 NAME
+
+btrfs_device_usage - Script to monitor usage of btrfs devices
+
+=head1 CONFIGURATION
+
+Simply create a symlink in your plugins directory like with any other plugin.
+Must be run as root.
+
+[btrfs_device_usage]
+user root
+
+You can optionaly configure the warning and critical limits for byte and
+percentage graphs. By default percent_warning is set to 95 and percent_critical
+is 98. For the byte-graphs there are no default limits set. You can set the
+limits either for the entire graph (byte_ percent_) or per individual filesystem
+using it's UUID (replace minus with underscore). The individual values take
+precedence over the general ones. See the following example:
+
+btrfs_device_usage]
+user root
+env.byte_warning 400300200100
+env.percent_critical 97
+env.percent_10164f3f_6670_4982_a941_bffb50d27f29_warning 23
+env.byte_10164f3f_6670_4982_a941_bffb50d27f29_critical 5000000000
+
+=head2 DEFAULT CONFIGURATION
+
+=head1 BUGS
+
+=head1 AUTHOR
+
+2019-2021, HaseHarald
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=head1 LICENSE
+
+LGPLv3
+
+=cut
+"""
+
+
+# This file contains a munin-plugin to gather btrfs statistics per device.
+#
+# This is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this plugin.  If not, see <http://www.gnu.org/licenses/>.
+
+
+import btrfs
+import os
+import sys
+
+
+def munin_config(fs):
+    fsid = str(fs.fsid).replace('-', '_')
+
+    byte_warning = os.getenv('byte_warning', default=False)
+    byte_critical = os.getenv('byte_critical', default=False)
+    byte_warning = os.getenv('byte_' + fsid + '_warning',
+                             default=byte_warning)
+    byte_critical = os.getenv('byte_' + fsid + '_critical',
+                              default=byte_critical)
+
+    percent_warning = os.getenv('percent_warning', default=95)
+    percent_critical = os.getenv('percent_critical', default=98)
+    percent_warning = os.getenv('percent_' + fsid + '_warning',
+                                default=percent_warning)
+    percent_critical = os.getenv('percent_' + fsid + '_critical',
+                                 default=percent_critical)
+
+    print("multigraph btrfs_device_usage_byte_" + fsid)
+    print("graph_title btrfs usage by device in bytes on " + fs.path)
+    print("graph_args --base 1024 -l 0")
+    print("graph_scale yes")
+    print("graph_vlabel bytes")
+    print("graph_category disk")
+    print("graph_info This graph shows bytes used by btrfs on every device")
+
+    devices = fs.devices()
+    for this_device in devices:
+        this_dev_info = fs.dev_info(this_device.devid)
+        this_dev_name = this_dev_info.path.replace('/dev/', '')
+        print("btrfs_bytes_" + fsid + "_" + str(this_device.devid) +
+              ".label " + this_dev_name)
+        if byte_warning:
+            print("btrfs_bytes_" + fsid + "_" + str(this_device.devid) +
+                  ".warning " + str(byte_warning))
+        if byte_critical:
+            print("btrfs_bytes_" + fsid + "_" + str(this_device.devid) +
+                  ".critical " + str(byte_critical))
+
+    print("")
+
+    print("multigraph btrfs_device_usage_percent_" + fsid)
+    print("graph_title btrfs usage by device in percent on " + fs.path)
+    print("graph_args --base 1000 -l 0")
+    print("graph_scale no")
+    print("graph_vlabel %")
+    print("graph_category disk")
+    print("graph_info This graph shows percentage used by btrfs on every \
+          device. Maesured in percentage of device capacity.")
+
+    devices = fs.devices()
+    for this_device in devices:
+        this_dev_info = fs.dev_info(this_device.devid)
+        this_dev_name = this_dev_info.path.replace('/dev/', '')
+        print("btrfs_percent_" + fsid + "_" + str(this_device.devid) +
+              ".label " + this_dev_name)
+        print("btrfs_percent_" + fsid + "_" + str(this_device.devid) +
+              ".warning " + str(percent_warning))
+        print("btrfs_percent_" + fsid + "_" + str(this_device.devid) +
+              ".critical " + str(percent_critical))
+
+    print("")
+
+
+def munin_values(fs):
+    fsid = str(fs.fsid).replace('-', '_')
+    devices = fs.devices()
+
+    print("multigraph btrfs_device_usage_byte_" + fsid)
+
+    for this_device in devices:
+        this_dev_info = fs.dev_info(this_device.devid)
+        print("btrfs_bytes_" + fsid + "_" + str(this_device.devid) +
+              ".value " + str(this_dev_info.bytes_used))
+
+    print("")
+
+    # Reset device iterator
+    devices = fs.devices()
+
+    print("multigraph btrfs_device_usage_percent_" + fsid)
+
+    for this_device in devices:
+        this_dev_info = fs.dev_info(this_device.devid)
+        if this_dev_info.total_bytes > 0:
+            usage = 100.0 * this_dev_info.bytes_used / this_dev_info.total_bytes
+            print("btrfs_percent_" + fsid + "_" + str(this_device.devid) +
+                  ".value " + str(round(usage, 2)))
+        else:
+            print("btrfs_percent_" + fsid + "_" + str(this_device.devid) +
+                  ".value U")
+          
+
+    print("")
+
+
+def main():
+    for path in btrfs.utils.mounted_filesystem_paths():
+        with btrfs.FileSystem(path) as fs:
+            if len(sys.argv) > 1 and sys.argv[1] == "config":
+                munin_config(fs)
+            else:
+                munin_values(fs)
+
+
+if __name__ == "__main__":
+    main()
+
+exit(0)

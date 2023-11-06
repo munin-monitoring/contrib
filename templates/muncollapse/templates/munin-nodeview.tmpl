@@ -1,0 +1,164 @@
+<TMPL_INCLUDE NAME="partial/head.tmpl" />
+<!--
+	File: munin-nodeview.tmpl
+
+	Used: Individual Host View top level template / Multigraph also hits here.
+-->
+
+<div class="btn-group w-100 mt-2">
+	<a href="#" class="graph-click btn btn-outline-success w-25" data-gset="day">Day <span class='gset-state'>Shown</span></a>
+	<a href="#" class="graph-click btn btn-outline-success w-25" data-gset="week">Week <span class='gset-state'>Shown</span></a>
+	<a href="#" class="graph-click btn btn-outline-secondary w-25" data-gset="month">Month <span class='gset-state'>Hidden</span></a>
+	<a href="#" class="graph-click btn btn-outline-secondary w-25" data-gset="year">Year <span class='gset-state'>Hidden</span></a>
+</div>
+
+<script>
+	$( document ).ready( function () {
+		// Should we auto-scroll when a service category is opened?
+		window.doScroll = false;
+		// Store display status of graph periods
+		window.gsets    = {
+			"day"   : true,
+			"week"  : true,
+			"month" : false,
+			"year"  : false
+		};
+
+		$( ".graph-click" ).on( "click", function() {
+			// This shows / hides graph periods.
+			var gset      = $( this ).data( "gset" ),
+				newState  = ! gsets[ gset ];
+
+			gsets[ gset ] = newState;
+
+			$(this)
+				.toggleClass( "btn-outline-success btn-outline-secondary" )
+				.find( ".gset-state" )
+				.text( ( newState ? "Shown" : "Hidden" ) );
+
+			$( ".graph-" + gset ).toggleClass( "d-none" );
+
+			return false;
+		} );
+
+		$( ".tab-click" ).on( "click", function() {
+			var theCollapse = $( "#" + $( this ).data( "target" ) + "_coll" );
+
+			window.doScroll = true; // Do scroll when we click a tab header
+
+			if ( theCollapse.hasClass( "show" ) ) {
+				// Already open, lets just trigger the event.
+				theCollapse.trigger( "shown.bs.collapse" );
+			} else {
+				// Close all and open the one we want
+				$( ".card-collapse.collapse" ).collapse( "hide" );
+				theCollapse.collapse( "show" );
+			}
+			// Do nothing with the click otherwise.
+			return false;
+		} );
+
+		// Actual scroll function
+		$( ".collapse" ).on( "shown.bs.collapse", function( e ) {
+			if ( window.doScroll ) {
+				$( document ).scrollTop( $( this ).closest( ".card" ).offset().top );
+				window.doScroll = false;
+			}
+		} );
+		
+		// If we came here with a hash, open that category and scroll to it.
+		if ( location.hash != "" ) {
+			window.doScroll = true;
+			$( location.hash + "_coll" + ".collapse" ).collapse( "show" );
+		}
+
+		// Alternatively, if something changed the hash (looking at you search feature), we should
+		// pretend that the user clicked on the link for that category.
+		$( window ).on( "hashchange", function( e ) {
+			var newPlace = window.location.hash.substr(1);;
+			$( ".tab-click[data-target='" + newPlace + "']" ).trigger( "click" );
+		} );
+
+		// If there is only one service group, show it by default.
+		if ( $( ".card-collapse.collapse" ).length < 2 ) { $( ".card-collapse.collapse" ).collapse( "show" ); }
+
+		$( ".close-all-tabs" ).on( "click", function() { $( ".card-collapse.collapse" ).collapse( "hide" ); return false; } );
+		$( ".open-all-tabs"  ).on( "click", function() { $( ".card-collapse.collapse" ).collapse( "show" ); return false; } );
+	});
+</script>
+
+<nav>
+	<ol class="breadcrumb mt-2 justify-content-center">
+		<li class="breadcrumb-item-svc">
+			<a class="open-all-tabs" href="#">Open All</a>
+		</li>
+		<TMPL_LOOP NAME="CATEGORIES">
+			<li class="breadcrumb-item-svc">
+				<a class="tab-click" data-target="<TMPL_VAR ESCAPE="HTML" NAME="NAME" />" href="#<TMPL_VAR ESCAPE="HTML" NAME="NAME">" data-toggle="tab">
+					<TMPL_VAR ESCAPE="HTML" NAME="NAME" />
+				</a>
+			</li>
+		</TMPL_LOOP>
+		<li class="breadcrumb-item-svc">
+			<a class="close-all-tabs" href="#">Close All</a>
+		</li>
+	</ol>
+</nav>
+
+<TMPL_LOOP NAME="CATEGORIES">
+	<div class="card mt-2">
+		<div class="dropdown-toggle card-header" id="<TMPL_VAR ESCAPE="HTML" NAME="NAME" />" data-toggle="collapse" data-target="#<TMPL_VAR ESCAPE="HTML" NAME="NAME" />_coll">
+			Category :: <TMPL_VAR ESCAPE="HTML" NAME="NAME" />
+		</div>
+		<div class="card-collapse collapse" id="<TMPL_VAR ESCAPE="HTML" NAME="NAME" />_coll">
+			<div class="card-body">
+				<TMPL_LOOP NAME="SERVICES">
+					<div class="row">
+						<div class="graph-day col-md-6">
+							<a href="<TMPL_VAR NAME="URLX" />">
+								<img class="lazyload img-fluid i<TMPL_IF NAME="STATE_WARNING"> warn</TMPL_IF><TMPL_IF NAME="STATE_CRITICAL"> crit</TMPL_IF>"
+								 data-src="<TMPL_VAR NAME="IMGDAY" />"
+								 alt="<TMPL_VAR ESCAPE="HTML" NAME="NAME" />" 
+								 <TMPL_IF NAME="IMGDAYWIDTH">width="<TMPL_VAR NAME="IMGDAYWIDTH" />" </TMPL_IF>
+								 <TMPL_IF NAME="IMGDAYHEIGHT">height="<TMPL_VAR NAME="IMGDAYHEIGHT" />"</TMPL_IF>/>
+							</a>
+						</div>
+						<div class="graph-week col-md-6">
+							<a href="<TMPL_VAR NAME="URLX" />">
+								<img class="lazyload img-fluid i<TMPL_IF NAME="STATE_WARNING"> warn</TMPL_IF><TMPL_IF NAME="STATE_CRITICAL"> crit</TMPL_IF>"
+								 data-src="<TMPL_VAR NAME="IMGWEEK" />"
+								 alt="<TMPL_VAR ESCAPE="HTML" NAME="NAME" />" 
+								 <TMPL_IF NAME="IMGWEEKWIDTH" />width="<TMPL_VAR NAME="IMGWEEKWIDTH" />" </TMPL_IF> 
+								 <TMPL_IF NAME="IMGWEEKHEIGHT" />height="<TMPL_VAR NAME="IMGWEEKHEIGHT" />"</TMPL_IF>/>
+							</a>
+						</div>
+						<div class="graph-month col-md-6 d-none">
+							<a href="<TMPL_VAR NAME="URLX" />">
+								<img class="lazyload img-fluid i<TMPL_IF NAME="STATE_WARNING"> warn</TMPL_IF><TMPL_IF NAME="STATE_CRITICAL"> crit</TMPL_IF>"
+								 data-src="<TMPL_VAR NAME="IMGMONTH" />"
+								 alt="<TMPL_VAR ESCAPE="HTML" NAME="NAME" />" 
+								 <TMPL_IF NAME="IMGMONTHWIDTH" />width="<TMPL_VAR NAME="IMGMONTHWIDTH" />" </TMPL_IF> 
+								 <TMPL_IF NAME="IMGMONTHHEIGHT" />height="<TMPL_VAR NAME="IMGMONTHHEIGHT" />"</TMPL_IF>/>
+							</a>
+						</div>
+						<div class="graph-year col-md-6 d-none">
+							<a href="<TMPL_VAR NAME="URLX" />">
+								<img class="lazyload img-fluid i<TMPL_IF NAME="STATE_WARNING"> warn</TMPL_IF><TMPL_IF NAME="STATE_CRITICAL"> crit</TMPL_IF>"
+								 data-src="<TMPL_VAR NAME="IMGYEAR" />"
+								 alt="<TMPL_VAR ESCAPE="HTML" NAME="NAME" />" 
+								 <TMPL_IF NAME="IMGYEARWIDTH" />width="<TMPL_VAR NAME="IMGYEARWIDTH" />" </TMPL_IF> 
+								 <TMPL_IF NAME="IMGYEARHEIGHT" />height="<TMPL_VAR NAME="IMGYEARHEIGHT" />"</TMPL_IF>/>
+							</a>
+						</div>
+					</div>
+				</TMPL_LOOP>
+			</div>
+		</div>
+	</div>
+
+</TMPL_LOOP>
+
+
+
+<TMPL_INCLUDE NAME="partial/footer_pre.tmpl" />
+<TMPL_INCLUDE NAME="partial/footer.tmpl" />

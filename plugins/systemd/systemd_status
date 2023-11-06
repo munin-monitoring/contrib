@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+# pylint: disable=invalid-name
+# pylint: enable=invalid-name
+# pylint: disable=consider-using-f-string
+
+"""Munin plugin to monitor systemd service status.
+
+=head1 NAME
+
+systemd_status - monitor systemd service status, including normal services,
+mounts, hotplugs and socket activations
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems with systemd installed.
+
+=head1 CONFIGURATION
+
+No configuration is required for this plugin.
+
+Warning level for systemd "failed" state is set to 0:0. If any of the services
+enters "failed" state, Munin will emit warning.
+
+Single service can be ignored by configuring it's value to "0":
+
+  [systemd_status]
+  env.fwupd_refresh_service 0
+
+Normally this plugin monitors global system services. User services can be
+monitored by manually adding softlink and config:
+
+  ln -s /usr/share/munin/plugins/systemd_status \
+    /etc/munin/plugins/systemd_status_b
+
+  [systemd_status_b]
+  user b
+  env.monitor_user yes
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+"""
+
+import os
+import pwd
+import re
+import subprocess
+import sys
+import unicodedata
+
+
+STATES = (
+    'failed',
+    'dead',
+    'running',
+    'exited',
+    'active',
+    'listening',
+    'waiting',
+    'plugged',
+    'mounted',
+)
+
+USER = os.environ.get('monitor_user') in ('yes', '1')
+
+
+def safename(name):
+    """Return safe variable name."""
+    # Convert ä->a as isalpha('ä') is true
+    value = unicodedata.normalize('NFKD', name)
+    value = value.encode('ASCII', 'ignore').decode('utf-8')
+
+    # Remove non-alphanumeric chars
+    return ''.join(char.lower() if char.isalnum() else '_' for char in value)
+
+
+def config():
+    """Autoconfig values."""
+    if USER:
+        print('graph_title systemd services for {}'.format(
+            pwd.getpwuid(os.geteuid())[0]))
+    else:
+        print('graph_title systemd services')
+    print('graph_vlabel Services')
+    print('graph_category processes')
+    print('graph_args --base 1000 --lower-limit 0')
+    print('graph_scale no')
+    print('graph_info Number of services in given activation state.')
+    for state in STATES:
+        print('{state}.label Services in {state} state'.format(state=state))
+    print('failed.warning 0:0')
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch()
+
+
+def fetch():
+    """Print runtime values."""
+    # Get data
+    try:
+        output = subprocess.check_output(['systemctl', 'list-units'] +
+                                         (['--user'] if USER else []),
+                                         encoding='utf-8')
+    except (OSError, subprocess.CalledProcessError):
+        return
+
+    # Parse data
+    states = {state: 0 for state in STATES}
+    for line in output.splitlines():
+        token = line.split()
+        if token and len(token[0]) < 3:  # Skip failed-bullet
+            token = token[1:]
+        if len(token) < 4:
+            continue
+        service = token[0]
+        state = token[3]
+        if service.endswith('.scope'):
+            continue  # Ignore scopes
+        if re.match(r'user.*@\d+\.service', service):
+            continue  # These fail randomly in older systemd
+        if state in states:
+            value = 1
+            if state == 'failed':
+                value = int(os.environ.get(safename(service), 1))
+            states[state] += value
+
+    # Output
+    for state in STATES:
+        print('{}.value {}'.format(state, states[state]))
+
+
+def fix_dbus():
+    """Fix DBus address for user service."""
+    if not USER:
+        return
+    euid = '/{}/'.format(os.geteuid())
+    if euid in os.environ.get('DBUS_SESSION_BUS_ADDRESS', ''):
+        return
+    os.putenv('DBUS_SESSION_BUS_ADDRESS',
+              'unix:path=/run/user{}bus'.format(euid))
+
+
+if __name__ == '__main__':
+    fix_dbus()
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if os.path.exists('/run/systemd/system') else
+              'no (systemd is not running)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config()
+    else:
+        fetch()

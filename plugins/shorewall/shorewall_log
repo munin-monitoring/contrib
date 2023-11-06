@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+# -*- python -*-
+
+"""
+
+=head1 NAME
+
+Plugin to monitor iptables logs configured by shorewall
+
+=head1 CONFIGURATION
+
+  logfile: Path to the iptables log file, or "journald" to use journald.
+           When journalctl exists, the default is "journald", otherwise
+           "/var/log/kern.log".
+  journalctlargs: Arguments passed to journalctl to select the right logs.
+                  The default is "SYSLOG_IDENTIFIER=kernel".
+  taggroups: Space separated list of groups. A group contains a tag if the
+             group is substring of the tag. Tags belonging to the same group
+             will be combined in one graph.
+  tagfilter: Space separated list of filters. When a tag is matched by a
+             filter (i.e. if the filter is a substring of the tag) it is
+             ignored.
+  prefixformat: The format of the prefix configured in iptables, this is the
+                LOGFORMAT option in shorewall.conf. When not set the entire
+                prefix is used.
+  include_ungrouped: when a tag is found that does not belong to a group,
+                     make it it's own group
+
+Example:
+
+Using /var/log/kern.log as logfile:
+
+=over 2
+
+  [shorewall_log]
+  group adm
+  env.logfile /var/log/kern.log
+
+=back
+
+Using journald:
+
+=over 2
+
+  [shorewall_log]
+  group systemd-journal
+
+=back
+
+=head1 HISTORY
+
+2017-11-03: v1.0 Bert Van de Poel <bert@bhack.net>: created
+2020-07-16: v2.0 Vincent Vanlaer <vincenttc@ulyssis.org>: rewrite
+                 - read all tags from iptables config, instead of the last 24h
+                   of logs
+                 - add support for journald
+                 - use cursors for accuracy
+                 - convert to multigraph to reduce load
+
+=head1 USAGE
+
+Parameters understood:
+
+  config   (required)
+  autoconf (optional - used by munin-config)
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+
+import sys
+import os
+
+
+def autoconf() -> str:
+    if sys.version_info < (3, 5):
+        return 'no (This plugin requires python 3.5 or higher)'
+
+    if os.getenv('MUNIN_CAP_MULTIGRAPH', '0') != '1':
+        return 'no (No multigraph support)'
+
+    import shutil
+
+    if not shutil.which('shorewall'):
+        return 'no (No shorewall executable found)'
+
+    if not shutil.which('iptables-save'):
+        return 'no (No iptables-save executable found, required for tag enumeration)'
+
+    return 'yes'
+
+
+if len(sys.argv) == 2 and sys.argv[1] == "autoconf":
+    print(autoconf())
+    sys.exit()
+
+
+from collections import defaultdict, namedtuple
+from typing import Set, Iterator, TextIO, Dict, Tuple
+from itertools import takewhile
+from subprocess import run, PIPE
+import shlex
+import shutil
+import pickle
+import re
+
+
+logfile = os.getenv('logfile', 'journald' if shutil.which('journalctl') else '/var/log/kern.log')
+journalctl_args = list(shlex.split(os.getenv('journalctlargs',
+                                             'SYSLOG_IDENTIFIER=kernel')))
+taggroups = os.getenv('taggroups')
+taggroups = taggroups.split() if taggroups else []
+tagfilter = os.getenv('tagfilter')
+tagfilter = tagfilter.split() if tagfilter else []
+include_ungrouped = (os.getenv('includeungrouped', 'true').lower() == 'true')
+prefix_format = os.getenv('prefixformat')
+if prefix_format:
+    if sys.version_info < (3, 7):
+        prefix_format = re.escape(prefix_format).replace('\\%s', '(.+)').replace('\\%d', '\\d+')
+    else:  # % is no longer escaped
+        prefix_format = re.escape(prefix_format).replace('%s', '(.+)').replace('%d', '\\d+')
+    prefix_format = re.compile(prefix_format)
+
+
+def get_logtags() -> Tuple[Dict[str, Set[str]], Dict[str, Set[str]]]:
+    rules = (run(['iptables-save'], stdout=PIPE, universal_newlines=True).
+             stdout.splitlines())
+    tags = defaultdict(set)
+    groups = defaultdict(set)
+
+    # every line is an iptables rule, in the iptables command/args syntax
+    # (without the 'iptables' command listed), eg.
+    #                                    "-A INPUT -p tcp -s 10.3.3.7 -j DROP"
+    for line in rules:
+        args = iter(shlex.split(line))
+        for arg in args:
+            # we only want rules that log packets, not that accept/drop/...
+            if arg == '-j' and next(args) != 'LOG':
+                break
+            # and we only need to know the logging tag, and add it to the list
+            if arg == '--log-prefix':
+                prefix = next(args)
+
+                if prefix_format:
+                    tag = prefix_format.match(prefix)[1]
+                else:
+                    tag = prefix.rstrip()
+
+                if any(ignored in tag for ignored in tagfilter):
+                    continue
+                tags[tag].add(prefix)
+
+                for group in taggroups:
+                    if group in tag:
+                        groups[group].add(tag)
+                        break
+                else:
+                    if include_ungrouped:
+                        groups[tag].add(tag)
+
+                break
+
+    return groups, tags
+
+
+State = namedtuple('State', ['journal', 'file'])
+
+
+def load_state() -> State:
+    try:
+        with open(os.getenv('MUNIN_STATEFILE'), 'rb') as f:
+            return pickle.load(f)
+    except OSError:
+        return State(None, None)
+
+
+def save_state(state: State):
+    with open(os.getenv('MUNIN_STATEFILE'), 'wb') as f:
+        return pickle.dump(state, f)
+
+
+def get_lines_journalctl(state: State) -> Iterator[str]:
+    cursor = state.journal
+
+    def catch_cursor(line: str):
+        cursor_id = '-- cursor: '
+        if line.startswith(cursor_id):
+            save_state(State(line[len(cursor_id):], None))
+            return False
+        else:
+            return True
+
+    if not cursor:  # prevent reading the entire journal on first run
+        journal = run(['journalctl', '--no-pager', '--quiet', '--lines=0',
+                       '--show-cursor', *journalctl_args],
+                      stdout=PIPE, universal_newlines=True)
+    else:
+        journal = run(['journalctl', '--no-pager', '--quiet', '--show-cursor',
+                       '--after-cursor', cursor, *journalctl_args],
+                      stdout=PIPE, universal_newlines=True)
+
+    yield from filter(catch_cursor, journal.stdout.splitlines())
+
+
+def reverse_read(f: TextIO) -> Iterator[str]:
+    BUFSIZE = 4096
+    f.seek(0, 2)
+    position = f.tell()
+    remainder = ''
+    while position > 0:
+        position = max(position - BUFSIZE, 0)
+        f.seek(position)
+        lines = f.read(BUFSIZE).splitlines()
+        lines[-1] += remainder
+        remainder = lines.pop(0)
+        yield from reversed(lines)
+    yield remainder
+
+
+def get_lines_logfile(path: str, state: State) -> Iterator[str]:
+    with open(path, 'r') as f:
+        cursor = state.file
+
+        reader = reverse_read(f)
+
+        if not cursor:
+            save_state(State(None, next(reader)))
+            return
+        else:
+            new_cursor = next(reader)
+            save_state(State(None, new_cursor))
+            yield new_cursor
+        yield from takewhile(lambda x: x != cursor, reader)
+
+
+def get_tagcount(tags: Dict[str, Set[str]]) -> Dict[str, int]:
+    count = defaultdict(int)
+    state = load_state()
+
+    if logfile == 'journald':
+        lines = get_lines_journalctl(state)
+        offset = 5
+    else:
+        lines = get_lines_logfile(logfile, state)
+        offset = 6
+
+    for line in lines:
+        if 'IN=' not in line:
+            continue
+        line = line.replace('  ', ' ').split(' ', maxsplit=offset)[-1]
+
+        for tag, prefixes in tags.items():
+            for prefix in prefixes:
+                if line.startswith(prefix):
+                    count[tag] += 1
+                    break
+            else:
+                continue
+            break
+
+    return count
+
+
+def fetch():
+    groups, logtags = get_logtags()
+    tagcount = get_tagcount(logtags)
+
+    for group, tags in groups.items():
+        print('multigraph shorewall_{}'.format(group))
+        for tag in tags:
+            print('{}.value {}'.format(tag.lower(), tagcount[tag]))
+
+
+def config():
+
+    for group, tags in get_logtags()[0].items():
+        print('multigraph shorewall_{}'.format(group))
+        print('graph_title Shorewall Logs for {}'.format(group))
+        print('graph_vlabel entries per ${graph_period}')
+        print('graph_category shorewall')
+
+        for tag in sorted(tags):
+            print('{}.label {}'.format(tag.lower(), tag))
+            print('{}.type ABSOLUTE'.format(tag.lower()))
+            print('{}.draw AREASTACK'.format(tag.lower()))
+
+
+if len(sys.argv) == 2 and sys.argv[1] == "config":
+    config()
+else:
+    fetch()
+
+# flake8: noqa: E265,E402
