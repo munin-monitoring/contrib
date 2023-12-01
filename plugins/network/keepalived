@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to monitor keepalived state and status.
+
+=head1 NAME
+
+keepalived - monitor keepalived state and status
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems with keepalived running.
+
+=head1 CONFIGURATION
+
+Pidfile and datafile locations must be configured if following default
+values are not correct:
+
+    [keepalived]
+    user root
+    env.pidfile /run/keepalived.pid
+    env.datafile /run/keepalived/keepalived.data
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import os
+import pathlib
+import sys
+import time
+import unicodedata
+
+
+PIDFILE = pathlib.Path(os.getenv('pidfile', '/run/keepalived.pid'))
+DATAFILE = pathlib.Path(os.getenv('datafile',
+                                  '/run/keepalived/keepalived.data'))
+
+
+def safename(name):
+    """Return safe variable name."""
+    # Convert ä->a as isalpha('ä') is true
+    value = unicodedata.normalize('NFKD', name)
+    value = value.encode('ASCII', 'ignore').decode('utf-8')
+
+    # Remove non-alphanumeric chars
+    return ''.join(char.lower() if char.isalnum() else '_' for char in value)
+
+
+def datafile_fresh(fresh_time):
+    """Check if datafile exists and is fresh."""
+    try:
+        stat = DATAFILE.stat()
+        if stat.st_mtime > fresh_time and stat.st_size > 1024:
+            return True
+    except FileNotFoundError:
+        pass
+    return False
+
+
+def update_datafile():
+    """Signal keepalived to write data file."""
+    # Find keepalived's pid
+    try:
+        pid = int(PIDFILE.read_text('utf-8'))
+    except (FileNotFoundError, ValueError):
+        return False
+
+    # Check if current file is fresh
+    fresh = time.time() - 30
+    if datafile_fresh(fresh):
+        return True
+
+    # Signal keepalived to update file
+    try:
+        os.kill(pid, 10)  # keepalived --signum=DATA
+    except OSError:
+        return False
+
+    # Wait for datafile to be updated
+    for _dummy_wait in range(15):
+        if datafile_fresh(fresh):
+            time.sleep(1)  # One extra second to make it sure it's complete
+            return True
+        time.sleep(1)
+    return False
+
+
+def read_datafile():
+    """Update, read and parse datafile."""
+    if not update_datafile():
+        return None
+    data = {
+        'vrrp_instance': {},
+        'vrrp_sync_group': {},
+    }
+    section = None
+    vrrp_instance = None
+    for line in DATAFILE.read_text('utf-8').splitlines():
+        if line.startswith('------<'):
+            section = line.split('< ', 1)[1].split(' >')[0]
+        elif ' = ' in line:
+            key, value = line.split(' = ', 1)
+            # Global
+            if section == 'Global definitions' and key == ' Router ID':
+                data['router_id'] = value
+
+            # Instance
+            elif section == 'VRRP Topology' and key == ' VRRP Instance':
+                vrrp_instance = value
+            elif section == 'VRRP Topology' and key == '   State':
+                data['vrrp_instance'][vrrp_instance] = value
+
+            # Sync group
+            elif section == 'VRRP Sync groups' and key == ' VRRP Sync Group':
+                name, state = value.split(', ', 1)
+                data['vrrp_sync_group'][name] = state
+
+    return data if 'router_id' in data else None
+
+
+def state_as_number(value):
+    """Return state as number."""
+    if value == 'MASTER':
+        return 1
+    if value == 'BACKUP':
+        return 0
+    return -1  # FAILED
+
+
+def config():
+    """Print plugin config."""
+    data = read_datafile()
+    if not data:
+        return
+
+    print('multigraph keepalived_state')
+    print('graph_title Keepalived VRRP state')
+    print('graph_info VRRP states: 1 = master, 0 = backup, -1 = failed')
+    print('graph_category network')
+    print('graph_vlabel state')
+    print('graph_args --lower-limit -1 --upper-limit 1')
+    print('graph_scale no')
+    for key in data['vrrp_sync_group']:
+        print(f'sg_{safename(key)}.label Sync group {key} state')
+        print(f'sg_{safename(key)}.warning 0:1')
+    for key in data['vrrp_instance']:
+        print(f'i_{safename(key)}.label Instance {key} state')
+        print(f'i_{safename(key)}.warning 0:1')
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch(data)
+
+
+def fetch(data=None):
+    """Print values."""
+    if not data:
+        data = read_datafile()
+        if not data:
+            return
+
+    print('multigraph keepalived_state')
+    for key, value in data['vrrp_sync_group'].items():
+        print(f'sg_{safename(key)}.value {state_as_number(value)}')
+    for key, value in data['vrrp_instance'].items():
+        print(f'i_{safename(key)}.value {state_as_number(value)}')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if read_datafile() else 'no (no keepalived running)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config()
+    else:
+        fetch()
