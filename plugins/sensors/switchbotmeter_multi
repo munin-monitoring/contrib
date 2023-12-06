@@ -1,0 +1,190 @@
+#!/bin/bash
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+  switchbotmeter_multi - Munin plugin to monitor temperature and humidity with SwitchBot Meter
+
+=head1 CONFIGURATION
+
+  Obtain a token, secret and deviceid for SwitchBot API. See the following website.
+  https://github.com/OpenWonderLabs/SwitchBotAPI
+
+=head1 ENVIRONMENT VARIABLES
+
+  env.token    : Token to access SwitchBot API. (Required)
+  env.secret   : Secret to access SwitchBot API. (Required)
+  env.deviceid : Device ID(s) of SwitchBot Meter separated by white space. (Required)
+  env.interval : Interval in seconds for API access. (Optional, default is 0)
+
+=head1 NOTES
+
+  The amount of SwitchBot API calls per day is limited to 10000 times.
+  If munin-node executes this plugin every 5 minutes, the API will be called 288 times a day.
+  You can use env.interval parameter to prevent frequent API access. For example, if you set
+  env.interval 900, the API response will be cached to local file for 900 seconds(15 minutes).
+
+=head1 AUTHOR
+
+  K.Cima https://github.com/shakemid
+
+=head1 LICENSE
+
+  GPLv2
+  SPDX-License-Identifier: GPL-2.0-only
+
+=head1 Magic markers
+
+  #%# family=contrib
+  #%# capabilities=
+
+=cut
+
+. "${MUNIN_LIBDIR}/plugins/plugin.sh"
+
+set -o nounset
+set -o pipefail
+
+# Token to access SwitchBot API
+token=${token:?}
+
+# Secret to access SwitchBot API
+secret=${secret:?}
+
+# Device ID of SwitchBot Meter
+deviceids=${deviceid:?}
+
+# Interval for API access (second)
+interval=${interval:-0}
+
+# Plugin Name
+pluginname=$( basename "$0" )
+
+config() {
+    local deviceid
+
+    cat <<EOF
+multigraph ${pluginname}_temperature
+graph_title SwitchBot Meter Temperature
+graph_category sensors
+graph_scale no
+graph_vlabel Temperature C
+graph_args --base 1000
+EOF
+    for deviceid in ${deviceids}
+    do
+        echo ${deviceid}.label ${deviceid}
+    done
+
+    cat <<EOF
+multigraph ${pluginname}_humidity
+graph_title SwitchBot Meter Humidity
+graph_category sensors
+graph_scale no
+graph_vlabel Humidity %
+graph_args --base 1000
+EOF
+    for deviceid in ${deviceids}
+    do
+        echo ${deviceid}.label ${deviceid}
+    done
+
+    cat <<EOF
+multigraph ${pluginname}_battery
+graph_title SwitchBot Meter Battery
+graph_category sensors
+graph_scale no
+graph_vlabel Battery %
+graph_args --base 1000
+EOF
+    for deviceid in ${deviceids}
+    do
+        echo ${deviceid}.label ${deviceid}
+    done
+}
+
+fetch() {
+    local deviceid func val
+
+    for deviceid in ${deviceids}
+    do
+        declare $( do_fetch ${deviceid} )
+    done
+
+    for func in temperature humidity battery
+    do
+        echo multigraph ${pluginname}_${func}
+
+        for deviceid in ${deviceids}
+        do
+           val=${func}_${deviceid}
+           echo ${deviceid}.value ${!val}
+        done
+    done
+}
+
+do_fetch() {
+    local deviceid time_now time_modified
+    deviceid=$1
+
+    if [ "${interval}" -gt 0 ]; then
+        time_now=$( date +%s )
+
+        if [ -f "${MUNIN_STATEFILE}_${deviceid}" ]; then
+            time_modified=$( stat --format=%Y "${MUNIN_STATEFILE}_${deviceid}" )
+        else
+            # initial run
+            time_modified=0
+        fi
+
+        if [ $(( time_now - time_modified )) -le "${interval}" ]; then
+            # read from cache
+            cat "${MUNIN_STATEFILE}_${deviceid}"
+        else
+            # update cache
+            fetch_api ${deviceid} | tee "${MUNIN_STATEFILE}_${deviceid}"
+        fi
+    else
+        fetch_api ${deviceid}
+    fi
+}
+
+fetch_api() {
+    local deviceid temperature humidity battery t sign nonce response statusCode
+    deviceid=$1
+
+    t=$( date +'%s000' )
+    nonce=$( openssl rand -base64 32 ) 
+    sign=$( echo -n ${token}${t}${nonce} | openssl dgst -sha256 -hmac ${secret} -binary | base64 )
+
+    response=$( curl -s -H "Content-Type:application/json;charset=utf8" -H "Authorization:${token}" -H "t:${t}" -H "nonce:${nonce}" -H "sign:${sign}" "https://api.switch-bot.com/v1.1/devices/${deviceid}/status" )
+
+    statusCode=$( echo "${response}" | jq '.statusCode' )
+    if [ "${statusCode}" -ne 100 ]; then
+        echo Error with statusCode = "${statusCode}" 1>&2
+        exit 1
+    fi
+
+    temperature=$( echo "${response}" | jq '.body.temperature' )
+    humidity=$( echo "${response}" | jq '.body.humidity' )
+    battery=$( echo "${response}" | jq '.body.battery' )
+
+    echo temperature_${deviceid}=${temperature} humidity_${deviceid}=${humidity} battery_${deviceid}=${battery}
+}
+
+# Main
+case ${1:-} in
+config)
+    config
+    if [ "${MUNIN_CAP_DIRTYCONFIG:-}" = "1" ]; then
+        fetch
+    fi
+    ;;
+*)
+    fetch
+    ;;
+esac
+
+exit 0
