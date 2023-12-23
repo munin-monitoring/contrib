@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 : << =cut
 
@@ -54,7 +54,7 @@ get_status() {
             cached_curl='{}'
         fi
     fi
-    res=$( echo "$cached_curl" | jq -c "$2" )
+    res=$( echo "$cached_curl" | jq -c -r "$2" )
     if [ "$res" = null ] ; then
         res=U
     fi
@@ -101,6 +101,16 @@ if [ "$1" = "suggest" ]; then
     done
     nodeattr -n '(tasmota || beken) && millivolts' | while read -r device ; do
         for i in millivolts ; do
+            echo "${device}_${i}"
+        done
+    done
+    nodeattr -n '(tasmota || beken) && switch' | while read -r device ; do
+        for i in switch ; do
+            echo "${device}_${i}"
+        done
+    done
+    nodeattr -n '(tasmota || beken) && dimmer' | while read -r device ; do
+        for i in dimmer ; do
             echo "${device}_${i}"
         done
     done
@@ -269,8 +279,101 @@ millivolts() {
     fi
 }
 
+switch() {
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Switch: $DEVICE"
+        echo "graph_args --base 1000 -l 0"
+
+        for v in POWER POWER{1,2,3,4,5,6,7,8,9} ; do
+            axis=$( echo "$v" | cut -d= -f 1 )
+            lab=$( echo "$v" | cut -d= -f 2 )
+            get_status 11 ".StatusSTS.$v"
+            if [ "$res" != U ] || [ -e $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen ] ; then
+                # if we've ever seen an axis, then we want to keep
+                # telling munin we are capable of reading that axis,
+                # even if the device is currently unpowered
+                mkdir -p $MUNIN_PLUGSTATE/tasmota
+                touch $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen
+
+                echo "$axis.label $lab"
+                echo "$axis.type GAUGE"
+                echo "$axis.min 0"
+            fi
+        done
+    else
+        for v in POWER POWER{1,2,3,4,5,6,7,8,9} ; do
+            axis=$( echo "$v" | cut -d= -f 1 )
+            lab=$( echo "$v" | cut -d= -f 2 )
+            get_status 11 ".StatusSTS.$v"
+            if [ "$res" != U ] || [ -e $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen ] ; then
+                # if we've ever seen an axis, then we want to keep
+                # telling munin we are capable of reading that axis,
+                # even if the device is currently unpowered
+                mkdir -p $MUNIN_PLUGSTATE/tasmota
+                touch $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen
+
+                case "$res" in
+                    ON)
+                        res=1
+                        ;;
+                    OFF)
+                        res=0
+                        ;;
+                    U) # assume off, since if it doesn't have power to get wifi, then it's not going to have power output
+                        res=0
+                        ;;
+                esac
+
+                echo "$axis.value $res"
+            fi
+        done
+    fi
+}
+
+dimmer() {
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Dimmer: $DEVICE"
+        echo "graph_args --base 1000 -l 0"
+
+        for v in Channel{1,2,3,4} ; do
+            axis=$( echo "$v" | cut -d= -f 1 )
+            lab=$( echo "$v" | cut -d= -f 2 )
+            get_status 11 ".StatusSTS.$v"
+            if [ "$res" != U ] || [ -e $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen ] ; then
+                # if we've ever seen an axis, then we want to keep
+                # telling munin we are capable of reading that axis,
+                # even if the device is currently unpowered
+                mkdir -p $MUNIN_PLUGSTATE/tasmota
+                touch $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen
+
+                echo "$axis.label $lab"
+                echo "$axis.type GAUGE"
+                echo "$axis.min 0"
+            fi
+        done
+    else
+        for v in Channel{1,2,3,4} ; do
+            axis=$( echo "$v" | cut -d= -f 1 )
+            lab=$( echo "$v" | cut -d= -f 2 )
+            get_status 11 ".StatusSTS.$v"
+            if [ "$res" != U ] || [ -e $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen ] ; then
+                # if we've ever seen an axis, then we want to keep
+                # telling munin we are capable of reading that axis,
+                # even if the device is currently unpowered
+                mkdir -p $MUNIN_PLUGSTATE/tasmota
+                touch $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen
+
+                if [ "$res" = U ] ; then
+                    res=0 # assume 0 power, since if it doesn't have power to get wifi, then it's not going to have power output
+                fi
+                echo "$axis.value $res"
+            fi
+        done
+    fi
+}
+
 case "$FUNCTION" in
-    voltage|power|powerfactor|current|energy|DS18B20|SCD40|PMS5003|millivolts)
+    voltage|power|powerfactor|current|energy|DS18B20|SCD40|PMS5003|millivolts|switch|dimmer)
         $FUNCTION "$1"
         ;;
     *)
