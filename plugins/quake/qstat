@@ -10,6 +10,7 @@
 # Variable :							#
 #---------------------------------------------------------------#
 qstat_exe="${qstat_exe:-/usr/local/bin/qstat}"
+bot_prefix="${bot_prefix:-}"
 
 #---------------------------------------------------------------#
 # End of config
@@ -24,6 +25,7 @@ usage() {
 	echo ' - GameType : q3s, q4s ... run qstat for seeing available gametype'
 	echo 'For munin you must ln -s /usr/share/munin/plugins/qstat_ /etc/munin/plugins/qstat_GameType_IP2test_Port'
 	echo 'Perhaps you must have to set qstat_exe path, actually on' "${qstat_exe}";
+	echo 'For some GameTypes you have to specify bot_prefix';
 	echo 'Have Fun'
 }
 
@@ -43,8 +45,10 @@ graph_vlabel players
 graph_args --base 1000 -r --lower-limit 0
 graph_category games
 maxplayer.label max players
+player.label players
+player.draw AREASTACK
 bot.label bots
-player.label players"
+bot.draw AREASTACK"
 }
 
 #################################################################
@@ -61,14 +65,20 @@ qstat_run() {
 		port=$3
 	fi
 
-	if [ -n "$gametype" ] && [ -n "$gametype" ] && [ -n "$gametype" ]; then
+	if [ -n "$gametype" ] && [ -n "$ip" ] && [ -n "$port" ]; then
 		rawstats=$("$qstat_exe" -raw ";" -nh "-$gametype" "${ip}:${port}")
 
 		playervalue=$(echo "$rawstats" | cut -d\; -f6)
 		maxplayervalue=$(echo "$rawstats" | cut -d\; -f5)
 		
-		# Assume that bots have a ping time of 0 miliseconds
-		botvalue=$("$qstat_exe" -P -pa -sort P "-$gametype" "${ip}:${port}" | grep -c 0ms)
+		if [ -n "$bot_prefix" ]; then
+			botvalue=$("$qstat_exe" -P -pa -sort P "-$gametype" "${ip}:${port}" | grep frags | grep -c "$bot_prefix")
+		else
+			# Assume that bots have a ping time of 0 miliseconds
+			botvalue=$("$qstat_exe" -P -pa -sort P "-$gametype" "${ip}:${port}" | grep -c 0ms)
+		fi
+
+		playervalue=$((playervalue-botvalue))
 
 		if [ -z "${playervalue}" ]; then
 			playervalue=0
@@ -83,13 +93,13 @@ qstat_run() {
 		fi
 
 
-		echo "maxplayer.value "${maxplayervalue};
-		echo "bot.value "${botvalue};
-		echo "player.value "${playervalue};
+		echo "maxplayer.value ${maxplayervalue}";
+		echo "player.value ${playervalue}";
+		echo "bot.value ${botvalue}";
 	else
 		echo "maxplayer.value U"
-		echo "bot.value U"
 		echo "player.value U"
+		echo "bot.value U"
 	fi
 }
 
