@@ -116,6 +116,9 @@ total_registered.min 0
 active_users.label active users
 active_users.info active users
 active_users.min 0
+bots.label active bots
+bots.info active bots
+bots.min 0
 online_users.label online users
 online_users.info online users
 online_users.min 0
@@ -165,25 +168,34 @@ EOM
 
 esac
 
-USERS=$(fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}/v2/users?deactivated=true&not_user_type=bot&limit=${QUERY_LIMIT}")
+USERS=$(fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}/v2/users?deactivated=true&limit=${QUERY_LIMIT}")
 ROOMS=$(fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}/v1/rooms?limit=${QUERY_LIMIT}")
 REPORTS=$(fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}/v1/event_reports" | jq .total)
 
 echo multigraph synapse_users_"${CLEANHOMESERVER}"
 if USERS="$(echo "$USERS" | jq -r)"; then
-	echo total_registered.value "$(echo "$USERS"  | jq -r .total)"
-	echo active_users.value "$(echo "$USERS"  | grep -c '"deactivated": 0')"
+	total="$(echo "$USERS"  | jq -r .total)"
+	bots="$(echo "$USERS"  | grep -c '"user_type": "bot"')"
+	total_registered=$(( total - bots ))
+	echo total_registered.value "$total_registered"
+	active="$(echo "$USERS"  | grep -c '"deactivated": 0')"
+	active_users=$(( active - bots ))
+	echo active_users.value "$active_users"
+	echo bots.value "$bots"
 	# Convert to miliseconds
 	time_ms=$(($(date +%s) * 1000))
 	interval_ms=$((INTERVAL * 1000))
 	time_interval_ago=$(( time_ms - interval_ms ))
 	last_seen_times_ms=$(echo "$USERS" | grep -E "\"last_seen_ts\": [0-9]+")
-	echo online_users.value "$(echo "$last_seen_times_ms" | awk -v "count=0" -F": " '$2 > "'$time_interval_ago'" {count++} END {print count}')"
+	online="$(echo "$last_seen_times_ms" | awk -v "count=0" -F": " '$2 > "'$time_interval_ago'" {count++} END {print count}')"
+	online_users=$(( online - bots ))
+	echo online_users.value "$bots"
 	echo deactivated_users.value "$(echo "$USERS" | grep -c '"deactivated": 1')"
 	echo erased_users.value "$(echo "$USERS" | grep -c '"erased": true')"
 else
 	echo "total_registered.value U"
 	echo "active_users.value U"
+	echo "bots.value U"
 	echo "online_users.value U"
 	echo "deactivated_users.value U"
 	echo "erased_users.value U"
