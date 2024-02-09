@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
 set -e
 
@@ -45,7 +45,7 @@ GPLv2
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
 RECORDS="A AAAA ANY CNAME MX NS NXDOMAIN PTR SIG SOA SRV TXT"
-CLIENTS="dns doh dot"
+CLIENTS="dns doh dot doq"
 
 case $1 in
 
@@ -125,12 +125,46 @@ case $1 in
 esac
 
 INTERVAL=$(date -d "${interval:-5} minutes ago" +%FT%H:%M)
-LOGDATA=$(sed -ne "s/^\\(.*\\)\\($INTERVAL\\)/\\1\\2/p" "${log:-"/opt/AdGuardHome/data/querylog.json"}")
+
+if [ ! -f "${log:-"/opt/AdGuardHome/data/querylog.json"}" ]; then
+
+	for VALUE in queries blocked safesearch safebrowsing parental "$RECORDS" "$CLIENTS" avgproc; do
+		export $VALUE="U"
+	done
+	for KEY in $RECORDS; do
+		export $KEY="U"
+	done
+
+	for KEY in $CLIENTS; do
+		if [ $KEY = "dns" ]; then
+			export $KEY="U"
+		else
+			export $KEY="U"
+		fi
+	done
+
+else
+
+	LOGDATA=$(sed -ne "s/^\\(.*\\)\\($INTERVAL\\)/\\1\\2/p" "${log:-"/opt/AdGuardHome/data/querylog.json"}")
+
+fi
 
 if [ -z "$LOGDATA" ]; then
 
 	for VALUE in queries blocked safesearch safebrowsing parental "$RECORDS" "$CLIENTS" avgproc; do
-		export $VALUE="U"
+		export $VALUE="0"
+	done
+
+	for KEY in $RECORDS; do
+		export $KEY="0"
+	done
+
+	for KEY in $CLIENTS; do
+		if [ $KEY = "dns" ]; then
+			export $KEY="0"
+		else
+			export $KEY="0"
+		fi
 	done
 
 else
@@ -163,7 +197,7 @@ else
 		fi
 	done
 
-	avgproc=$(echo "$LOGDATA" | grep -Po '\"Elapsed\":[0-9]+' | sed "s/\"Elapsed\"://g" | awk '{ total += $0/1000000; count++ } END { print total/count }')
+	avgproc=$(echo "$LOGDATA" | grep -Po '\"Elapsed\":[0-9]+' | sed "s/\"Elapsed\"://g" | awk -v "count=0" '{ total += $0/1000000; count++ } END { print total/count }')
 
 fi
 
