@@ -124,6 +124,9 @@ EOF
 pc_on_$iface.label $iface
 pc_on_$iface.info Interface $iface
 pc_on_$iface.min 0
+pc_on_active_$iface.label Active on $iface
+pc_on_active_$iface.info Active on $iface
+pc_on_active_$iface.min 0
 EOF
         done
         echo ""
@@ -165,7 +168,17 @@ EOF
         # Collect & print current monitoring values
         echo "multigraph wireguard_peercount"
         for iface in $(wg_interfaces); do
+	    threshold=$(date --date="10 min ago" +%s)
+	    isactive=0
+	    for line in $(wg_peers "$iface"); do
+	        handshake=$(echo "$line" | tr ';' ' ' | awk '{print $5}')
+		if [[ "handshake" -gt "threshold" ]]; then
+		    isactive=$((isactive + 1))
+		fi
+	    done
+
             echo "pc_on_$iface.value $(wg show "$iface" peers | wc -l)"
+            echo "pc_on_active_$iface.value $isactive"
         done
         echo ""
 
