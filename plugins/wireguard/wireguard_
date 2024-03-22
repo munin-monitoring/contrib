@@ -11,7 +11,9 @@ wireguard_ - Wildcard-plugin to monitor wireguard peer count and traffic
 
 =head1 CONFIGURATION
 
-This plugin does not normally require configuration.
+The following environment variables are used by this plugin
+
+ active_threshold_m       - threshold to count the connection as inactive (default 3 minutes)
 
 The plugin needs to run as root to be able to call the wg show
 command.  This is configured like this:
@@ -124,6 +126,9 @@ EOF
 pc_on_$iface.label $iface
 pc_on_$iface.info Interface $iface
 pc_on_$iface.min 0
+apc_on_$iface.label Active on $iface
+apc_on_$iface.info Active on $iface
+apc_on_$iface.min 0
 EOF
         done
         echo ""
@@ -164,8 +169,16 @@ EOF
     *)
         # Collect & print current monitoring values
         echo "multigraph wireguard_peercount"
+	active_threshold=$(date --date="${active_threshold_m:-3} min ago" +%s)
+
         for iface in $(wg_interfaces); do
-            echo "pc_on_$iface.value $(wg show "$iface" peers | wc -l)"
+            iface_peers=$(wg_peers "$iface")
+
+            peer_count=$(wc -l <<< "$iface_peers")
+            active_peer_count=$(awk -F";" -v threshold=$active_threshold '$5 > threshold' <<< "$iface_peers" | wc -l)
+
+            echo "pc_on_$iface.value $peer_count"
+            echo "apc_on_$iface.value $active_peer_count"
         done
         echo ""
 
