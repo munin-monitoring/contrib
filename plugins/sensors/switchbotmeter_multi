@@ -75,7 +75,7 @@ graph_args --base 1000
 EOF
     for deviceid in ${deviceids}
     do
-        echo ${deviceid}.label ${deviceid}
+        echo "${deviceid}.label" "${deviceid}"
     done
 
     cat <<EOF
@@ -88,7 +88,7 @@ graph_args --base 1000 --lower-limit 0 --upper-limit 100
 EOF
     for deviceid in ${deviceids}
     do
-        echo ${deviceid}.label ${deviceid}
+        echo "${deviceid}.label" "${deviceid}"
     done
 
     cat <<EOF
@@ -101,7 +101,7 @@ graph_args --base 1000 --lower-limit 0 --upper-limit 100
 EOF
     for deviceid in ${deviceids}
     do
-        echo ${deviceid}.label ${deviceid}
+        echo "${deviceid}.label" "${deviceid}"
     done
 }
 
@@ -110,17 +110,17 @@ fetch() {
 
     for deviceid in ${deviceids}
     do
-        declare $( do_fetch ${deviceid} )
+        local $( do_fetch "${deviceid}" )
     done
 
     for func in temperature humidity battery
     do
-        echo multigraph ${pluginname}_${func}
+        echo multigraph "${pluginname}_${func}"
 
         for deviceid in ${deviceids}
         do
            val=${func}_${deviceid}
-           echo ${deviceid}.value ${!val}
+           echo "${deviceid}.value" "${!val}"
         done
     done
 }
@@ -139,39 +139,50 @@ do_fetch() {
             time_modified=0
         fi
 
-        if [ $(( time_now - time_modified )) -le "${interval}" ]; then
+        if [ $(( time_now - time_modified )) -lt "${interval}" ]; then
             # read from cache
             cat "${MUNIN_STATEFILE}_${deviceid}"
         else
             # update cache
-            fetch_api ${deviceid} | tee "${MUNIN_STATEFILE}_${deviceid}"
+            fetch_api "${deviceid}" | tee "${MUNIN_STATEFILE}_${deviceid}"
         fi
     else
-        fetch_api ${deviceid}
+        fetch_api "${deviceid}"
     fi
 }
 
 fetch_api() {
-    local deviceid temperature humidity battery t sign nonce response statusCode
+    local deviceid temperature humidity battery t sign nonce http_response http_status api_response api_status
     deviceid=$1
 
-    t=$( date +'%s000' )
+    t=$( date +'%s%3N' )
     nonce=$( openssl rand -base64 32 ) 
-    sign=$( echo -n ${token}${t}${nonce} | openssl dgst -sha256 -hmac ${secret} -binary | base64 )
+    sign=$( echo -n "${token}${t}${nonce}" | openssl dgst -sha256 -hmac "${secret}" -binary | openssl base64 )
 
-    response=$( curl -s -H "Content-Type:application/json;charset=utf8" -H "Authorization:${token}" -H "t:${t}" -H "nonce:${nonce}" -H "sign:${sign}" "https://api.switch-bot.com/v1.1/devices/${deviceid}/status" )
+    http_response=$( curl -s --fail --retry 3 \
+        -w '\n%{http_code}\n' \
+        -H "Content-Type:application/json;charset=utf8" \
+        -H "Authorization:${token}" -H "t:${t}" -H "nonce:${nonce}" -H "sign:${sign}" \
+        "https://api.switch-bot.com/v1.1/devices/${deviceid}/status" )
 
-    statusCode=$( echo "${response}" | jq '.statusCode' )
-    if [ "${statusCode}" -ne 100 ]; then
-        echo Error with statusCode = "${statusCode}" 1>&2
-        exit 1
+    http_status=$( echo "${http_response}" | tail -n 1 )
+    if [ "${http_status}" != "200" ]; then
+        echo Error with HTTP status = "${http_status}" 1>&2
+        return 1
     fi
 
-    temperature=$( echo "${response}" | jq '.body.temperature' )
-    humidity=$( echo "${response}" | jq '.body.humidity' )
-    battery=$( echo "${response}" | jq '.body.battery' )
+    api_response=$( echo "${http_response}" | sed '$d' )
+    api_status=$( echo "${api_response}" | jq '.statusCode' )
+    if [ "${api_status}" != "100" ]; then
+        echo Error with API status = "${api_status}" 1>&2
+        return 1
+    fi
 
-    echo temperature_${deviceid}=${temperature} humidity_${deviceid}=${humidity} battery_${deviceid}=${battery}
+    temperature=$( echo "${api_response}" | jq '.body.temperature' )
+    humidity=$( echo "${api_response}" | jq '.body.humidity' )
+    battery=$( echo "${api_response}" | jq '.body.battery' )
+
+    echo "temperature_${deviceid}=${temperature}" "humidity_${deviceid}=${humidity}" "battery_${deviceid}=${battery}"
 }
 
 # Main
