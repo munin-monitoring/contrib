@@ -106,11 +106,17 @@ EOF
 }
 
 fetch() {
-    local deviceid func val
+    local deviceid func ref
 
     for deviceid in ${deviceids}
     do
-        local $( do_fetch "${deviceid}" )
+        do_fetch "${deviceid}" &
+    done
+    wait
+
+    for deviceid in ${deviceids}
+    do
+        local padding=1 $( cat "${MUNIN_STATEFILE}_${deviceid}" )
     done
 
     for func in temperature humidity battery
@@ -119,8 +125,8 @@ fetch() {
 
         for deviceid in ${deviceids}
         do
-           val=${func}_${deviceid}
-           echo "${deviceid}.value" "${!val}"
+           ref=${func}_${deviceid}
+           echo "${deviceid}.value" "${!ref:-U}"
         done
     done
 }
@@ -140,15 +146,12 @@ do_fetch() {
         fi
 
         if [ $(( time_now - time_modified )) -lt "${interval}" ]; then
-            # read from cache
-            cat "${MUNIN_STATEFILE}_${deviceid}"
-        else
-            # update cache
-            fetch_api "${deviceid}" | tee "${MUNIN_STATEFILE}_${deviceid}"
+            # do nothing
+            return
         fi
-    else
-        fetch_api "${deviceid}"
     fi
+
+    fetch_api "${deviceid}" > "${MUNIN_STATEFILE}_${deviceid}"
 }
 
 fetch_api() {
@@ -156,7 +159,7 @@ fetch_api() {
     deviceid=$1
 
     t=$( date +'%s%3N' )
-    nonce=$( openssl rand -base64 32 ) 
+    nonce=$( openssl rand -base64 32 )
     sign=$( echo -n "${token}${t}${nonce}" | openssl dgst -sha256 -hmac "${secret}" -binary | openssl base64 )
 
     http_response=$( curl -s --fail --retry 3 \
