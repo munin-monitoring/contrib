@@ -1,0 +1,255 @@
+#!/bin/sh
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+arcconf - Monitor RAID adapters, logical devices and physical disks with arcconf
+
+=head1 APPLICABLE SYSTEMS
+
+Raid adapters managed with arcconf
+
+=head1 CONFIGURATION
+
+ With "arcconf list" you find available controllers. Link arcconf_ with 
+ specified controller id.
+ 
+ ln -s /usr/share/munin/plugins/arcconf_ /etc/munin/plugins/arcconf_1
+
+ arcconf_bin   - Path to arcconf binary
+
+ [arcconf_*]
+ user root
+ env.arcconf_bin /usr/local/sbin/arcconf
+ 
+ [arcconf_1]
+ env.min_online_disks 12 # Miniaml online disks
+ env.max_adapter_temp 50 # Adapter temperature threshold
+ 
+=head1 AUTHOR
+
+Copyright (C) 2020 Sebastian L. (https://momou.ch)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+
+arcconf_bin="${arcconf_bin:-/usr/local/sbin/arcconf}"
+adapter_id="${0##*arcconf_}"
+
+ARCCONF=$($arcconf_bin getconfig "$adapter_id")
+ARCCONF_DISKS=$(echo "$ARCCONF" | grep -Pzo 'Device\ #(.|\n)*Service Hours.*[0-9]{1,6}' | tr '\0' '\n')
+ARCCONF_LOGICALDISKS=$(echo "$ARCCONF" | grep -Pzo 'Logical Device number (.|\n)*Parity Initialization Status' | tr '\0' '\n')
+ARCCONF_SMARTSTATS=$($arcconf_bin getsmartstats "$adapter_id")
+
+logicaldisks=$(echo "$ARCCONF_LOGICALDISKS" | grep -oE 'Logical Device number [0-9]+' | sed 's/Logical Device number //g')
+disks=$(echo "$ARCCONF_DISKS" | grep -oE 'Device #[0-9]+' | sed 's/Device #//g')
+
+case $1 in
+
+    autoconf)
+        if [ -x "$arcconf_bin" ]; then
+            if [ -z "$(command -v arcconf)" ]; then
+                echo "no (arcconf not found)"
+                exit 0
+            else
+                echo "yes"
+                exit 0
+            fi
+        else
+            echo "no (/usr/local/sbin/arcconf not found)"
+            exit 0
+        fi
+        ;;
+
+   config)
+        adaptername=$(echo "$ARCCONF" | grep "Controller Model" | cut -d ":" -f 2 | xargs)
+
+        echo "multigraph arcconf_${adapter_id}_logicaldisks"
+        echo "graph_title arcconf_${adapter_id} - Status of logical disks"
+		echo "graph_info arcconf_${adapter_id} - Status of logical disks on $adaptername adapter"
+        echo "graph_args -u 1 -l 0"
+        echo "graph_category disk"
+        echo "graph_vlabel Online status"
+        for logicaldisk in $logicaldisks; do
+        	raid_level=$(echo "$ARCCONF_LOGICALDISKS" | grep 'RAID level' | cut -d ":" -f 2 | xargs)
+			echo "status_logicaldisk_$logicaldisk.label Logical disk $logicaldisk (raid $raid_level) status is optimal"
+			echo "status_logicaldisk_$logicaldisk.info Status of logical disk $logicaldisk (raid $raid_level) is optimal"
+			echo "status_logicaldisk_$logicaldisk.min 0"
+			echo "status_logicaldisk_$logicaldisk.warning 1:"
+		done
+		
+        echo "multigraph arcconf_${adapter_id}_online_disks"
+        echo "graph_title arcconf_${adapter_id} - Online disks"
+        echo "graph_info arcconf_${adapter_id} - Online disks on $adaptername adapter"
+        echo "graph_args -A -l 0"
+        echo "graph_category disk"
+        echo "graph_vlabel Number of disks"
+        echo "online_disks.label Online disks"
+        echo "online_disks.info Current number of online disks on $adaptername adapter"
+        echo "online_disks.min 0"
+		if [ -n "${min_online_disks}" ]; then
+			echo "online_disks.warning $min_online_disks:"
+		fi
+		
+        echo "multigraph arcconf_${adapter_id}_temp"
+        echo "graph_title arcconf_${adapter_id} - Temperature of adapter"
+        echo "graph_info arcconf_${adapter_id} - Temperature of $adaptername adapter"
+        echo "graph_args -Y -A -l 0"
+        echo "graph_category disk"
+        echo "graph_vlabel C"
+        echo "adapter_temp.label Adapter temperature"
+        echo "adapter_temp.info Current $adaptername adapter temperature"
+        echo "adapter_temp.min 0"
+		if [ -n "${max_adapter_temp}" ]; then
+			echo "adapter_temp.warning $max_adapter_temp"
+		fi
+		
+        echo "multigraph arcconf_${adapter_id}_disks_temp"
+        echo "graph_title arcconf_${adapter_id} - Temperature of disks on adapter"
+        echo "graph_info arcconf_${adapter_id} - Temperature of disks on adapter $adaptername"
+        echo "graph_args -Y -A -l 0"
+        echo "graph_category disk"
+        echo "graph_vlabel C"
+        for disk in $disks; do
+			echo "temp_disk_$disk.label Temperature of disk $disk"
+			echo "temp_disk_$disk.info Temperature of disk $disk"
+			echo "temp_disk_$disk.min 0"
+		done
+		
+        echo "multigraph arcconf_${adapter_id}_disks_usage"
+        echo "graph_title arcconf_${adapter_id} - Remaining usage of disks"
+        echo "graph_info arcconf_${adapter_id} - Remaining usage of disks in percent on adapter $adaptername"
+        echo "graph_args -u 100 -l 0"
+        echo "graph_category disk"
+        echo "graph_vlabel %"
+        for disk in $disks; do
+			echo "remaining_usage_disk_$disk.label Remaining usage on disk $disk"
+			echo "remaining_usage_disk_$disk.info Remaining usage on disk $disk"
+			echo "remaining_usage_disk_$disk.min 0"
+			echo "remaining_usage_disk_$disk.warning 80:"
+		done
+		
+        for disk in $disks; do
+            echo "multigraph arcconf_${adapter_id}_disk_${disk}"
+            echo "graph_title arcconf_${adapter_id} - Disk $disk"
+			echo "graph_info arcconf_${adapter_id} - Error counters of disk $disk on adapter $adaptername"
+		    echo "graph_args -Y -A -l 0"
+		    echo "graph_category disk"
+		    echo "graph_vlabel Errors"
+		    error_counters=$(echo "$ARCCONF" | sed -n "/Device #$disk/,/Device #/ p" | grep -Pzo 'Aborted(.|\n)*Scsi Bus Faults.*[0-9]{1,6}' | tr '\0' '\n')
+			echo "$error_counters" | while read -r error_counter; do
+				name=$(echo "$error_counter" | sed -n 's/\([[:alpha:] ]*\).*/\1/p' | sed 's/ *$//g')
+				if [ -n "$name" ]; then
+					name=$(clean_fieldname "$name")
+					key="${name}_${disk}"
+					echo "$key.label $name" && echo "$key.info $name" && echo "$key.min 0"
+					# Sparse disks are "not ready", so don't warn
+					echo "$name" | grep -q "Not_Ready_Error" || echo "$key.critical 1" 
+				fi
+			done
+		done
+		
+		for disk in $disks; do
+			echo "multigraph arcconf_${adapter_id}_smartstats_${disk}"
+			echo "graph_title arcconf_${adapter_id} - S.M.A.R.T values disk $disk"
+			echo "graph_vlabel Attribute S.M.A.R.T value"
+			echo "graph_args -u 100 -l 0"
+			echo "graph_category disk"
+			echo "graph_info This graph shows the value of all S.M.A.R.T attributes of disk $disk."
+			smartstats=$(echo "$ARCCONF_SMARTSTATS" | sed -n "/\<PhysicalDriveSmartStats channel=\"[[:digit:]]\" id=\"$disk\"/,/\/PhysicalDriveSmartStats\>/ p")
+			echo "$smartstats" | while read -r attribute; do
+				name=$(echo "$attribute" | sed -n 's/.*name="\([[:alnum:] ()-/]*\)\".*/\1/p')
+				if [ -n "$name" ]; then
+					name=$(clean_fieldname "$name") 
+					key="${name}_${disk}"
+					echo "$key.label $name" && echo "$key.info $name" && echo "$key.min 0"
+					threshold=$(echo "$attribute" | sed -n 's/.*thresholdValue="\([[:digit:]]*\).*/\1/p')
+					[ "$threshold" ] && echo "$key.critical $threshold:"
+				fi
+			done
+		done
+
+		exit 0
+
+        ;;
+
+esac
+
+echo "multigraph arcconf_${adapter_id}_logicaldisks"
+for logicaldisk in $logicaldisks; do
+	status=$(echo "$ARCCONF" | sed -n "/Logical Device number $logicaldisk/,/Parity Initialization Status/ p" | grep 'Status of Logical Device' | grep -c 'Optimal')
+	[ "$status" ] || status="U"
+	echo "status_logicaldisk_$logicaldisk.value $status"
+done
+
+echo "multigraph arcconf_${adapter_id}_online_disks"
+online_disks=$(echo "$ARCCONF" | grep -cE 'State.*: Online')
+[ "$online_disks" ] || online_disks="U"
+echo "online_disks.value $online_disks"
+
+echo "multigraph arcconf_${adapter_id}_temp"
+adapter_temp=$(echo "$ARCCONF" | grep -oE "Temperature[\ ]+:\ [0-9]{1,3} C\/" | grep -oE '[0-9]+')
+[ "$adapter_temp" ] || adapter_temp="U"
+echo "adapter_temp.value $adapter_temp"
+
+echo "multigraph arcconf_${adapter_id}_disks_temp"
+for disk in $disks; do
+	disk_temp=$(echo "$ARCCONF" | sed -n "/Device #$disk/,/Device #/ p" | grep 'Current Temperature' | grep -oE '[0-9]+')
+	[ "$disk_temp" ] || disk_temp="U"
+	echo "temp_disk_$disk.value $disk_temp"
+done
+
+echo "multigraph arcconf_${adapter_id}_disks_usage"
+for disk in $disks; do
+	usage=$(echo "$ARCCONF" | sed -n "/Device #$disk/,/Device #/ p" | grep 'Usage Remaining' | grep -oE '[0-9]+')
+	[ "$usage" ] || usage="U"
+	echo "remaining_usage_disk_$disk.value $usage"
+done
+
+for disk in $disks; do
+    echo "multigraph arcconf_${adapter_id}_disk_${disk}"
+	error_counters=$(echo "$ARCCONF" | sed -n "/Device #$disk/,/Device #/ p" | grep -Pzo 'Aborted(.|\n)*Scsi Bus Faults.*[0-9]{1,6}' | tr '\0' '\n')
+	echo "$error_counters" | while read -r error_counter; do
+		name=$(echo "$error_counter" | sed -n 's/\([[:alpha:] ]*\).*/\1/p' | sed 's/ *$//g')
+		if [ -n "$name" ]; then
+			name=$(clean_fieldname "$name")
+			key="${name}_${disk}"
+			value=$(echo "$error_counter" | grep -oE '[0-9]+')
+			[ "$value" ] || value="U"
+			echo "$key.value $value"
+		fi
+	done
+done
+
+for disk in $disks; do
+	echo "multigraph arcconf_${adapter_id}_smartstats_${disk}"
+	smartstats=$(echo "$ARCCONF_SMARTSTATS" | sed -n "/\<PhysicalDriveSmartStats channel=\"[[:digit:]]\" id=\"$disk\"/,/\/PhysicalDriveSmartStats\>/ p")
+	echo "$smartstats" | while read -r attribute; do
+		name=$(echo "$attribute" | sed -n 's/.*name="\([[:alnum:] ()-/]*\)\".*/\1/p')
+		if [ -n "$name" ]; then
+			name=$(clean_fieldname "$name") 
+			key="${name}_${disk}"
+			value=$(echo "$attribute" | sed -n 's/.*normalizedCurrent="\([[:digit:]]*\).*/\1/p')
+			[ "$value" ] || value="U"
+			echo "$key.value $value"
+		fi
+	done
+done
+
