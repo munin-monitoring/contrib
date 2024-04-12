@@ -14,7 +14,18 @@ Systems running Varnish cache.
 
 =head1 CONFIGURATION
 
-No configuration is required for this plugin.
+You need to create a file named varnish placed in the directory
+/etc/munin/plugin-conf.d/ with the following config:
+
+=over 2
+
+    [varnish]
+    env.backend_unhealthy_warning :1
+    env.threads_destroyed_warning :1
+    env.threads_failed_warning :1
+    env.threads_warning :1
+
+=back
 
 =head1 NOTES
 
@@ -42,6 +53,7 @@ GPLv2
 import json
 import subprocess
 import sys
+import os
 
 
 def run_binary(arg):
@@ -84,7 +96,8 @@ def config():
     print('backend_retry.type DERIVE')
     print('backend_unhealthy.label Backend conn. not attempted')
     print('backend_unhealthy.min 0')
-    print('backend_unhealthy.warning :1')
+    if os.getenv('backend_unhealthy_warning') is not None:
+        print('backend_unhealthy.warning ' + os.getenv('backend_unhealthy_warning'))
     print('backend_unhealthy.type DERIVE')
     print('backend_recycle.label Backend conn. recycles')
     print('backend_recycle.min 0')
@@ -260,18 +273,21 @@ def config():
     print('threads_created.type DERIVE')
     print('threads_failed.label Thread creation failed')
     print('threads_failed.min 0')
-    print('threads_failed.warning :1')
+    if os.getenv('threads_failed_warning') is not None:
+        print('threads_failed.warning ' + os.getenv('threads_failed_warning'))
     print('threads_failed.type DERIVE')
     print('threads_destroyed.label Threads destroyed')
     print('threads_destroyed.min 0')
-    print('threads_destroyed.warning :1')
+    if os.getenv('threads_destroyed_warning') is not None:
+        print('threads_destroyed.warning ' + os.getenv('threads_destroyed_warning'))
     print('threads_destroyed.type DERIVE')
     print('threads_limited.label Threads hit max')
     print('threads_limited.min 0')
     print('threads_limited.type DERIVE')
     print('threads.label Total number of threads')
     print('threads.min 0')
-    print('threads.warning 1:')
+    if os.getenv('threads_warning') is not None:
+        print('threads.warning ' + os.getenv('threads_warning'))
     print('threads.type GAUGE')
 
     # transfer_rates
