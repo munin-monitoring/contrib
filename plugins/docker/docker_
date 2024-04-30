@@ -26,6 +26,7 @@ Or choose a subset of those you want.
     ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_images
     ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_memory
     ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_network
+    ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_size
     ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_status
     ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_volumes
 
@@ -285,6 +286,14 @@ def parallel_container_stats(client):
     return stats.items()
 
 
+def print_containers_size(client):
+    for container in client.api.df()['Containers']:
+        size = container['SizeRw'] if 'SizeRw' in container else 0
+        # first char of name is always / so we skip it
+        clean_container_name = clean_fieldname(container['Names'][0][1:])
+        print(clean_container_name + '.value', size)
+
+
 def print_containers_cpu(client):
     for container, stats in parallel_container_stats(client):
         cpu_percent = 0.0
@@ -430,6 +439,23 @@ def volumes(client, mode):
         print('volumes_quantity.extinfo', ', '.join(volume_summary(v) for v in client.volumes))
 
 
+def size(client, mode):
+    if mode == "config":
+        print("graph_title Docker containers size")
+        print("graph_args --base 1024 -l 0")
+        print("graph_vlabel Bytes")
+        print("graph_category virtualization")
+        print("graph_info This graph shows docker container size.")
+        print("graph_total Total container size")
+        for container in client.all_containers:
+            fieldname = clean_fieldname(container.name)
+            print("{}.label {}".format(fieldname, container.name))
+            print("{}.draw AREASTACK".format(fieldname))
+            print("{}.info {}".format(fieldname, container_attributes(container)))
+    else:
+        print_containers_size(client)
+
+
 def cpu(client, mode):
     if mode == "config":
         graphlimit = str(os.cpu_count() * 100)
@@ -501,6 +527,7 @@ def main():
         'memory',
         'network',
         'status',
+        'size',
         'volumes',
     ]
 
