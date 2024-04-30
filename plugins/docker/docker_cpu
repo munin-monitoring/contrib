@@ -19,6 +19,22 @@ Root privilege required to execute docker command.
  [docker_cpu]
  user root
 
+To enable warnings / critical for single containers you can define them like this to warn when
+the container starts using 80% of a CPU core and emit a critical when 100% is used:
+
+ [docker_cpu]
+ user root
+ env.my_container_warning :80
+ env.my_container_critical :100
+
+To enable warnings / critical for all containers based on the number of configured cpus you can set
+warning_percent and critical_percent as integers.
+
+ [docker_cpu]
+ user root
+ env.warning_percent 90
+ env.critical_percent 99
+
 =head1 MAGIC MARKERS
 
  #%# family=auto
@@ -26,11 +42,12 @@ Root privilege required to execute docker command.
 
 =head1 VERSION
 
- v.0.1
+ v.0.2
 
 =head1 AUTHOR
 
 Copyright (C) 2015 Samuel Cantero <scanterog at gmail dot com>
+Copyright (C) 2024 Andreas Perhab, WT-IO-IT GmbH <andreas.perhab@wt-io-it.at>
 
 =head1 LICENSE
 
@@ -53,8 +70,39 @@ if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
 
 $docker =~ s/\s+$//;
 
+my $nanoSecondsInSecond=1000000000;
 my @containers = split "\n" , `$docker ps --no-trunc=true`;
 my $result;
+
+sub print_warning {
+   my $name = $_[0];
+   my $ncpu;
+   my $type;
+   if (@_ > 1) {
+      $ncpu = $_[1];
+   }
+   if (@_ > 2) {
+      $type = $_[2];
+   } else {
+      $type = 'warning'
+   }
+   if ($ENV{$_[0].'_'.$type}) {
+      my @defined_warnings = split(/:/, $ENV{$name.'_'.$type});
+      for my $i (0 .. $#defined_warnings) {
+         if ($defined_warnings[$i]) {
+            $defined_warnings[$i] = $defined_warnings[$i] * $nanoSecondsInSecond;
+         }
+      }
+      print "${name}.${type} ".join(":", @defined_warnings)."\n";
+   } elsif ($ENV{$type.'_percent'} && $ncpu) {
+      my $percent_warning = ($ncpu * $ENV{$type.'_percent'} * $nanoSecondsInSecond);
+      print "${name}.${type} :$percent_warning\n";
+   }
+}
+
+sub print_critical {
+   print_warning($_[0], 0, 'critical')
+}
 
 for my $i (1 .. $#containers)
 {
@@ -96,7 +144,23 @@ for my $i (1 .. $#containers)
       $total_cpu_ns =~ s/^usage_usec ([0-9]+).*/$1/;
       $total_cpu_ns *= 1000;
       close $file;
-      if (open($file, '<', "/sys/fs/cgroup/system.slice/docker-$id.scope/cpuset.cpus.effective"))
+      my $ncpu = 0;
+      if (open($file, '<', "/sys/fs/cgroup/system.slice/docker-$id.scope/cpu.max")) {
+         # compute ncpu for docker NanoCpus (docker compose: deploy.resources.limit.cpus: "1.0")
+         # hexdump -C /sys/fs/cgroup/system.slice/docker-f50da4b6c4c6207e875047036a7e56c77c54a8aefa2ea6a0e58bc738852f4514.scope/cpu.max
+         # 00000000  31 30 30 30 30 30 20 31  30 30 30 30 30 0a        |100000 100000.|
+         # 0000000e
+         #
+         # no limit set
+         # 00000000  6d 61 78 20 31 30 30 30  30 30 0a                 |max 100000.|
+         # 0000000b
+         my $cpu_max = <$file>;
+         $cpu_max =~ s/\s.*\n$//;
+         if ($cpu_max ne "max") {
+            $ncpu = $cpu_max / 100000;
+         }
+      }
+      if ($ncpu == 0 && open($file, '<', "/sys/fs/cgroup/system.slice/docker-$id.scope/cpuset.cpus.effective"))
       {
          # hexdump -C /sys/fs/cgroup/system.slice/docker-5915a2718628754f9185a052b96c4ac4249692269ad03c54f9037cd9e530f93c.scope/cpuset.cpus.effective
          # 00000000  30 2d 31 31 0a                                    |0-11.|
@@ -108,7 +172,6 @@ for my $i (1 .. $#containers)
          my $cpus = <$file>;
          $cpus =~ s/\s+$//;
          close $file;
-         my $ncpu = 0;
          for $c (split /,/, $cpus)
          {
             @cpu_range = split /-/, $c;
@@ -121,14 +184,13 @@ for my $i (1 .. $#containers)
                $ncpu += $cpu_range[1] - $cpu_range[0] + 1;
             }
          }
-         push @result, {'name'=>$name, 'label'=>$label, 'total_cpu_ns'=>$total_cpu_ns, 'ncpu'=>$ncpu};
       }
+      push @result, {'name'=>$name, 'label'=>$label, 'total_cpu_ns'=>$total_cpu_ns, 'ncpu'=>$ncpu};
    }
 }
 
 if (defined $ARGV[0] and $ARGV[0] eq "config")
 {
-   my $nanoSecondsInSecond=1000000000;
    my $graphlimit = 1;
    foreach(@result){
       if ($$_{'ncpu'} || 1 > $graphlimit){
@@ -151,6 +213,8 @@ if (defined $ARGV[0] and $ARGV[0] eq "config")
       print "$$_{'name'}.min 0\n";
       print "$$_{'name'}.type DERIVE\n";
       print "$$_{'name'}.cdef $$_{'name'},$nanoSecondsInSecond,/\n";
+      print_warning($$_{'name'}, $$_{'ncpu'});
+      print_critical($$_{'name'});
    }
    exit 0;
 }
