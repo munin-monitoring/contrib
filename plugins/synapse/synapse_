@@ -174,23 +174,22 @@ REPORTS=$(fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESER
 
 echo multigraph synapse_users_"${CLEANHOMESERVER}"
 if USERS="$(echo "$USERS" | jq -r)"; then
-	total="$(echo "$USERS"  | jq -r .total)"
-	puppets="$(echo "$USERS"  | grep -c '"last_seen_ts": null')"
-	bots="$(echo "$USERS"  | grep -c '"user_type": "bot"')"
+	total="$(echo "$USERS" | jq -r .total)"
+	puppets="$(echo "$USERS" | jq -r '.users[] | select(.deactivated!="1") | select(.user_type!="bot")' | grep -c '"last_seen_ts": null')"
+	bots="$(echo "$USERS" | jq -r '.users[] | select(.deactivated!="1")' | grep -c '"user_type": "bot"')"
 	virtual_users=$(( puppets + bots ))
 	total_registered=$(( total - virtual_users ))
-	echo total_registered.value "$total_registered"
-	active="$(echo "$USERS"  | grep -c '"deactivated": 0')"
+	active="$(echo "$USERS" | grep -c '"deactivated": 0')"
 	active_users=$(( active - virtual_users ))
+	echo total_registered.value "$total_registered"
 	echo active_users.value "$active_users"
 	echo bots.value "$bots"
 	# Convert to miliseconds
 	time_ms=$(($(date +%s) * 1000))
 	interval_ms=$((INTERVAL * 1000))
 	time_interval_ago=$(( time_ms - interval_ms ))
-	last_seen_times_ms=$(echo "$USERS" | grep -E "\"last_seen_ts\": [0-9]+")
-	online="$(echo "$last_seen_times_ms" | awk -v "count=0" -F": " '$2 > "'$time_interval_ago'" {count++} END {print count}')"
-	online_users=$(( online - bots ))
+	last_seen_times_ms=$(echo "$USERS" | jq -r '.users[] | select(.user_type!="bot") | select(.deactivated!="1")' | grep -E "\"last_seen_ts\": [0-9]+")
+	online_users="$(echo "$last_seen_times_ms" | awk -v "count=0" -F": " '$2 > "'$time_interval_ago'" {count++} END {print count}')"
 	echo online_users.value "$online_users"
 	echo deactivated_users.value "$(echo "$USERS" | grep -c '"deactivated": 1')"
 	echo erased_users.value "$(echo "$USERS" | grep -c '"erased": true')"
