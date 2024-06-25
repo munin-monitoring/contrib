@@ -1,0 +1,114 @@
+#!/bin/bash
+# -*- bash -*-
+
+: << =cut
+
+=head1 NAME
+
+dnsperftest - Monitor response times of multiple DNS servers
+
+=head1 DESCRIPTION
+
+Query all name servers in /etc/resolv.conf for a list of domains
+and report the average response time.
+
+=head1 CONFIGURATION
+
+DNS servers in /etc/resolv.conf are used automatically
+
+"env.resolvconf" can be used to pass a custom resolv.conf path
+
+A list of default domains is checked
+
+Example configuration:
+
+    [dnsperftest]
+        env.resolvconf /etc/resolv.conf.cweiske
+        env.domains fsf.org fsfe.org munin-monitoring.org
+
+=head1 AUTHORS
+
+L<Christian Weiske|https://cweiske.de/>
+
+based on https://github.com/cleanbrowsing/dnsperftest
+
+=back
+
+=head1 LICENSE
+
+GPLv3
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capatilities=autoconf
+
+=cut
+
+DIG=${dig:-dig}
+
+DOMAINS=${domains:-www.google.com amazon.com facebook.com www.youtube.com www.reddit.com  wikipedia.org twitter.com gmail.com www.google.com whatsapp.com}
+
+RESOLVCONF=${resolvconf:-/etc/resolv.conf}
+
+if [ "$1" == "autoconf" ]; then
+    if ! which "$DIG" >/dev/null; then
+        echo "no (missing 'dig' executable)"
+        exit 0
+    elif ! which "bc" >/dev/null; then
+        echo "no (missing 'bc' executable)"
+        exit 0
+    elif ! test -f "$RESOLVCONF"; then
+        echo "no (resolvconf does not exist at $RESOLVCONF)"
+        exit 0
+    fi
+    echo "yes"
+    exit 0
+fi
+
+if [ -f "$RESOLVCONF" ]; then
+    NAMESERVERS=$(grep ^nameserver "$RESOLVCONF" | cut -d " " -f 2)
+fi
+
+if [ -z "$NAMESERVERS" ]; then
+    echo "No nameservers found"
+    exit 1
+fi
+
+if [ "$1" == "config" ]; then
+    echo "graph_title DNS server resonse times"
+    echo "graph_vlabel seconds"
+    echo "graph_category dns"
+    echo "graph_args --base 1000 -l 0"
+    for nameserverIp in $NAMESERVERS; do
+        fieldname=$(echo "$nameserverIp" | sed 's/[.:]/_/g')
+        echo "ns$fieldname.label $nameserverIp"
+    done
+    exit 0
+fi
+
+for nameserverIp in $NAMESERVERS; do
+    ftime=0
+
+    totaldomains=0
+    for domain in $DOMAINS; do
+        totaldomains=$((totaldomains + 1))
+        ttime=$(
+            "$DIG" +tries=1 +time=2 +stats @"$nameserverIp" "$domain"\
+                | grep "Query time:"\
+                | cut -d : -f 2-\
+                | cut -d " " -f 2
+        )
+        if [ -z "$ttime" ]; then
+            #"time out" is 1s = 1000ms
+            ttime=1000
+        elif [ "$ttime" = "0" ]; then
+            ttime=1
+        fi
+        ftime=$((ftime + ttime))
+    done
+    avg=$(bc -l <<< "scale=5; $ftime/$totaldomains / 1000")
+
+    fieldname=$(echo "$nameserverIp" | sed 's/[.:]/_/g')
+    echo "ns$fieldname.value $avg"
+done
