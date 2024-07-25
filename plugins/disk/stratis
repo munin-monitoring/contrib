@@ -80,7 +80,8 @@ def find_pools():
         total = parse_unit(line[1], line[2])
         used = parse_unit(line[4], line[5])
         free = parse_unit(line[7], line[8])
-        pool.append((line[0], total, used, free))
+        alert = int(len(line[-1]) != 36)  # Last word is not UUID -> alert
+        pool.append((line[0], total, used, free, alert))
 
     files = []
     dflist = run_binary(['df']).splitlines()
@@ -108,8 +109,8 @@ def find_pools():
 def config(pools, files):
     """Print plugin config."""
     print('multigraph stratis_pool')
-    print('graph_title Stratis pools usage')
-    print('graph_info Stratis pools usage in percent.')
+    print('graph_title Stratis pool usage')
+    print('graph_info Stratis pool usage in percent.')
     print('graph_category disk')
     print('graph_vlabel %')
     print('graph_args --lower-limit 0 --upper-limit 100')
@@ -120,9 +121,21 @@ def config(pools, files):
         print('{}.warning 92'.format(name))
         print('{}.critical 98'.format(name))
 
+    print('multigraph stratis_alert')
+    print('graph_title Stratis pool alert')
+    print('graph_info Stratis pool alert status.')
+    print('graph_category disk')
+    print('graph_vlabel alert')
+    print('graph_args --lower-limit 0 --upper-limit 1')
+    print('graph_scale no')
+    for item in pools:
+        name = safename(item[0])
+        print('{}.label Pool {} alert'.format(name, item[0]))
+        print('{}.warning 1'.format(name))
+
     print('multigraph stratis_fs')
-    print('graph_title Stratis filesystems usage')
-    print('graph_info Stratis filesystems pool usage.')
+    print('graph_title Stratis filesystem usage')
+    print('graph_info Stratis filesystem pool usage.')
     print('graph_category disk')
     print('graph_vlabel Pool usage')
     print('graph_args --base 1024 --lower-limit 0')
@@ -137,8 +150,8 @@ def config(pools, files):
             print('{}.draw STACK'.format(name))
 
     print('multigraph stratis_thin')
-    print('graph_title Stratis thin filesystems usage vs df')
-    print('graph_info Stratis thin filesystems usage divided by df, in '
+    print('graph_title Stratis thin filesystem usage vs df')
+    print('graph_info Stratis thin filesystem usage divided by df, in '
           'percents.')
     print('graph_category disk')
     print('graph_vlabel %')
@@ -158,6 +171,11 @@ def fetch(pools, files):
     for item in pools:
         name = safename(item[0])
         print('{}.value {}'.format(name, item[2] * 100 / item[1]))
+
+    print('multigraph stratis_alert')
+    for item in pools:
+        name = safename(item[0])
+        print('{}.value {}'.format(name, item[4]))
 
     print('multigraph stratis_fs')
     for item in files:
