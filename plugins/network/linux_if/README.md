@@ -5,7 +5,7 @@ Linux network monitoring plugin with support for *bonding* and *vlans*.
 
 Plugin will group all bonding slaves into one aggregated graph. It removes clutter
 of having many single-metric graphs for individual interfaces. You still can click
-trough to individual graphs.
+through to individual graphs.
 
 In this example, `p1p1`, `p2p1` are physical interfaces of one bond0. Only p1p1 is active,
 as we are using Active-Backup bonding mode. `Total` (black) is the throughput of parent

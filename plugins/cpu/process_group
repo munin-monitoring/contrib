@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to monitor process group process count, memory, cpu and age.
+
+=head1 NAME
+
+process_group - monitor process group process count, memory, cpu and age
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems.
+
+=head1 CONFIGURATION
+
+List of monitored process groups must be configured as regexps. Example:
+
+  [process_group]
+  env.group1 php-fpm: pool
+  env.group2 nginx
+
+This will monitor two process groups: "php-fpm: pool" PHP application server
+running any pool and "nginx" web server. Regexps must match "ps -eo command"
+output.
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import os
+import re
+import subprocess
+import sys
+import unicodedata
+
+
+def safename(name):
+    """Return safe variable name."""
+    # Convert ä->a as isalpha('ä') is true
+    value = unicodedata.normalize('NFKD', name)
+    value = value.encode('ASCII', 'ignore').decode('utf-8')
+
+    # Remove non-alphanumeric chars
+    return ''.join(char.lower() if char.isalnum() else '_' for char in value)
+
+
+def run_binary(arg):
+    """Run binary and return output."""
+    try:
+        return subprocess.run(arg, stdout=subprocess.PIPE, check=False,
+                              encoding='utf-8', errors='ignore').stdout
+    except FileNotFoundError:
+        return ''
+
+
+def parse_config():
+    """Get groups from environment variables / munin plugin config."""
+    groups = []
+    counter = 1
+    while True:
+        group = os.getenv(f'group{counter}')
+        if not group:
+            break
+        groups.append(group)
+        counter += 1
+    return groups
+
+
+def parse_elapsed(text):
+    """Parse ps's elapsed field to seconds.
+
+    8-23:05:27   day, hour, min, sec
+    21:16:53     hour, min, sec
+    04:29        min, sec
+    """
+    days = hours = minutes = seconds = '0'
+    if '-' in text:
+        days, text = text.split('-', 1)
+    if text.count(':') == 2:
+        hours, text = text.split(':', 1)
+    minutes, seconds = text.split(':')
+    return (int(days) * 86400 +
+            int(hours) * 3600 +
+            int(minutes) * 60 +
+            int(seconds))
+
+
+def collect_data():
+    """Run ps and parse its output."""
+    groups = parse_config()
+    values = {}
+    for group in groups:
+        values[group] = {
+            'count': 0,
+            'cpu': 0,
+            'elapsed': 0,
+            'rss': 0,
+        }
+
+    lines = run_binary(['ps', '-eo', '%cpu,etime,rss,command'])
+    for line in lines.splitlines():
+        cpu, elapsed, rss, command = line.split(None, 3)
+        for group in groups:
+            if re.search(group, command):
+                values[group]['count'] += 1
+                values[group]['cpu'] += float(cpu)
+                values[group]['elapsed'] += parse_elapsed(elapsed)
+                values[group]['rss'] += int(rss) * 1024
+    return values
+
+
+def config():
+    """Print plugin config."""
+    groups = parse_config()
+    if not groups:
+        return
+
+    print('multigraph process_group_age')
+    print('graph_title Process group average age')
+    print('graph_category processes')
+    print('graph_vlabel seconds')
+    print('graph_args --base 1000')
+    print('graph_scale no')
+    for group in groups:
+        print(f'{safename(group)}.label {group}')
+
+    print('multigraph process_group_memory')
+    print('graph_title Process group average memory')
+    print('graph_category processes')
+    print('graph_vlabel bytes')
+    print('graph_args --base 1024')
+    for group in groups:
+        print(f'{safename(group)}.label {group}')
+
+    print('multigraph process_group_cpu')
+    print('graph_title Process group CPU usage')
+    print('graph_category processes')
+    print('graph_vlabel %')
+    print('graph_args --base 1000')
+    print('graph_scale no')
+    for group in groups:
+        print(f'{safename(group)}.label {group}')
+
+    print('multigraph process_group_count')
+    print('graph_title Process group process count')
+    print('graph_category processes')
+    print('graph_vlabel processes')
+    print('graph_args --base 1000')
+    print('graph_scale no')
+    for group in groups:
+        print(f'{safename(group)}.label {group}')
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch()
+
+
+def fetch():
+    """Print values."""
+    data = collect_data()
+    if not data:
+        return
+
+    print('multigraph process_group_age')
+    for group, values in data.items():
+        if not values['count']:
+            value = 0
+        else:
+            value = values['elapsed'] / values['count']
+        print(f'{safename(group)}.value {value}')
+
+    print('multigraph process_group_memory')
+    for group, values in data.items():
+        if not values['count']:
+            value = 0
+        else:
+            value = values['rss'] / values['count']
+        print(f'{safename(group)}.value {value}')
+
+    print('multigraph process_group_cpu')
+    for group, values in data.items():
+        print(f'{safename(group)}.value {values["cpu"]}')
+
+    print('multigraph process_group_count')
+    for group, values in data.items():
+        print(f'{safename(group)}.value {values["count"]}')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if parse_config() else 'no (no groups configured)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config()
+    else:
+        fetch()

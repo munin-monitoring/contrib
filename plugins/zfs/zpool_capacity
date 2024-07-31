@@ -189,20 +189,11 @@ get_stats() {
         "$zpool_cmd" list -H -o name,fragmentation | sed 's/%$//'
         ;;
     allocated)
-        ( "$zpool_cmd" list -H -o name,allocated \
+        ( "$zpool_cmd" list -H -p -o name,allocated \
           | awk '{ print $1"_allocated", $2 }'
-          "$zpool_cmd" list -H -o name,size \
+          "$zpool_cmd" list -H -p -o name,size \
           | awk '{ print $1"_size", $2 }'
-        ) \
-        | perl -ane '
-            @unit{ qw/ K M G T P E / } = ( 1 .. 6 );
-            $name = $F[0];
-            $byteu = $F[1];
-            ( $n, $u ) = $byteu =~ /^([\d.]+)([KMGTPE]?)$/;
-            $byte  = int( $n * 1024 ** ( $u ? $unit{ $u } : 0 ) );
-            print "$name $byte\n";
-        '
-        # Note: ZFS supports up to 16EB.
+        )
         ;;
     dedup)
         "$zpool_cmd" list -H -o name,dedup \

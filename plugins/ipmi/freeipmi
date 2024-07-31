@@ -12,7 +12,8 @@ When used to monitor the local host, plugin config should define user root for d
 =head2 ENVIRONMENT VARIABLES
 
 When used to monitor a foreign host, this plugins use the variables
-IPMI_USERNAME and IPMI_PASSWORD to log in on the remote system.
+IPMI_USERNAME and IPMI_PASSWORD to log in on the remote system
+and optionally IPMI_DRIVER to specify the driver type.
 
 =head2 WILDCARD PLUGIN
 
@@ -67,10 +68,11 @@ my $hostname = $1;
 my $help_output = `$IPMISENSORS --help`;
 
 $IPMISENSORS .= " --output-sensor-thresholds" if $help_output =~ /--output-sensor-thresholds/;
-$IPMISENSORS .= " --quiet-cache --comma-separated-output --no-header-output --ignore-not-available-sensors --sensor-types=Temperature,Fan,Current,Voltage";
+$IPMISENSORS .= " --quiet-cache --comma-separated-output --no-header-output --ignore-not-available-sensors --sensor-types=Temperature,Fan,Current,Other_Units_Based_Sensor,Voltage";
 $IPMISENSORS .= " --hostname=$hostname" if defined($hostname);
 $IPMISENSORS .= " --username=$ENV{IPMI_USERNAME}" if defined($ENV{IPMI_USERNAME});
 $IPMISENSORS .= " --password=$ENV{IPMI_PASSWORD}" if defined($ENV{IPMI_PASSWORD});
+$IPMISENSORS .= " --driver-type=$ENV{IPMI_DRIVER}" if defined($ENV{IPMI_DRIVER});
 
 my $output=`$IPMISENSORS 2>/dev/null`;
 my $retval=$?;
@@ -135,7 +137,12 @@ foreach my $line (@data) {
 		label => $dataline[1]
 	       );
   $sensor{lwarn} = (defined($dataline[7]) and $dataline[7] ne "N/A") ? $dataline[7] : '';
-  $sensor{hwarn} = (defined($dataline[8]) and $dataline[8] ne "N/A") ? $dataline[8] : '';
+  # Ignore zeroes in high warning temperature thresholds since HP iLO2 returns "0.00" instead of "N/A".
+  if ( $dataline[2] eq "Temperature" and defined($dataline[8]) and $dataline[8] eq "0.00" ) {
+    $sensor{hwarn} = ''
+  } else {
+    $sensor{hwarn} = (defined($dataline[8]) and $dataline[8] ne "N/A") ? $dataline[8] : '';
+  }
 
   $sensor{lcrit} = (defined($dataline[6]) and $dataline[6] ne "N/A") ? $dataline[6] : '';
   $sensor{hcrit} = (defined($dataline[9]) and $dataline[9] ne "N/A") ? $dataline[9] : '';
@@ -145,7 +152,9 @@ foreach my $line (@data) {
     $type = "temp";
   } elsif ( $dataline[2] eq "Fan" ) {
     $type = "fan"
-  } elsif ( $dataline[2] eq "Current" and $dataline[4] eq "W" ) {
+  } elsif ( $dataline[2] eq "Current" and $dataline[4] =~ /^[W%]$/ ) {
+    $type = "power";
+  } elsif ( $dataline[2] eq "Other Units Based Sensor" and $dataline[4] eq "W" ) {
     $type = "power";
   } elsif ( $dataline[2] eq "Current" and $dataline[4] eq "A" ) {
     $type = "current";

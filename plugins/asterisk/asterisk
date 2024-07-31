@@ -22,7 +22,7 @@ This plugin will produce multiple graphs showing:
  - the number of active ConfBridge conferences (e.g. non-empty ones) and users
    connected to them
 
- - the number of active channels for a given codec, for both SIP and
+ - the number of active channels for a given codec, for both SIP, PJSIP and
    IAX2 channels (replaces asterisk_sipchannels and asterisk_codecs).
 
 =head1 CONFIGURATION
@@ -48,9 +48,9 @@ defaults.
  [asterisk]
   env.host 127.0.0.1
   env.port 5038
-  env.channels Zap IAX2 SIP
-  env.codecsx 0x2 0x4 0x8
-  env.codecs gsm ulaw alaw
+  env.channels Zap IAX2 SIP PJSIP
+  env.codecsx 0x1 0x2 0x4 0x8 0x100
+  env.codecs g723 gsm ulaw alaw g729
   env.enable_meetme 0
   env.enable_confbridge 1
 
@@ -66,7 +66,7 @@ underscore:
 
 =head1 AUTHOR
 
-Copyright (C) 2005-2006 Rodolphe Quiedeville <rodolphe@quiedeville.org>
+Copyright (C) 2005-2006 Rodolphe Quiédeville <rodolphe@quiedeville.org>
 Copyright (C) 2012 Diego Elio Pettenò <flameeyes@flameeyes.eu>
 
 =head1 LICENSE
@@ -124,9 +124,9 @@ my $peerport = $ENV{'port'} || '5038';
 my $username = $ENV{'username'};
 my $secret   = $ENV{'secret'};
 
-my @CHANNELS = exists $ENV{'channels'} ? split ' ',$ENV{'channels'} : qw(Zap IAX2 SIP);
-my @CODECS = exists $ENV{'codecs'} ? split ' ',$ENV{'codecs'} : qw(gsm ulaw alaw);
-my @CODECSX = exists $ENV{'codecsx'} ? split ' ',$ENV{'codecsx'} : qw(0x2 0x4 0x8);
+my @CHANNELS = exists $ENV{'channels'} ? split ' ',$ENV{'channels'} : qw(Zap IAX2 SIP PJSIP);
+my @CODECS = exists $ENV{'codecs'} ? split ' ',$ENV{'codecs'} : qw(g723 gsm ulaw alaw g729);
+my @CODECSX = exists $ENV{'codecsx'} ? split ' ',$ENV{'codecsx'} : qw(0x1 0x2 0x4 0x8 0x100);
 
 my $meetme_enabled = $ENV{'enable_meetme'} || '0';
 my $confbridge_enabled = $ENV{'enable_confbridge'} || '1';
@@ -285,6 +285,16 @@ my $iaxchannels_response = asterisk_command($socket, "iax2 show channels");
 #IAX2/rodolphe@rodolp  10.8.53.6        rodolphe    00003/01287  00006/00004  00000ms  0148ms  0000ms  gsm     Rx:NEW      Tx:ACK
 #1 active IAX channel(s)
 
+my $pjsipchannels_response = asterisk_command($socket, "pjsip show channelstats");
+#...........Receive......... .........Transmit..........
+#BridgeId ChannelId ........ UpTime.. Codec.   Count    Lost Pct  Jitter   Count    Lost Pct  Jitter RTT....
+#===========================================================================================================
+#
+#2031-000002b8      00:00:49 ulaw     2418       0    0   0.002   2440       1    0   0.003   0.055
+#0471e543 2001-000002c2      00:00:37 ulaw     1815       0    0   0.017   1863       0    0   0.014   0.225
+#
+#Objects found: 2
+
 # After all the data is fetched we can proceed to process it, the
 # connection can be closed as we don't need any more data.
 $socket->close();
@@ -373,7 +383,7 @@ END
 }
 
 print "\nmultigraph asterisk_codecs\n";
-if ( !$sipchannels_response and !$iaxchannels_response ) {
+if ( !$sipchannels_response and !$iaxchannels_response and !$pjsipchannels_response ) {
   foreach my $codec (@CODECS) {
     print "$codec.value U\n";
   }
@@ -394,6 +404,7 @@ END
   pop(@sipchannels); shift(@sipchannels);
   my @iaxchannels = $iaxchannels_response ? split(/\r?\n/, $iaxchannels_response) : ();
   pop(@iaxchannels); shift(@iaxchannels);
+  my @pjsipchannels = $pjsipchannels_response ? split(/\r?\n/, $pjsipchannels_response) : ();
 
   $i = 0;
   foreach my $sipchan (@sipchannels) {
@@ -437,6 +448,46 @@ END
     if (! $found) {
       $other += 1;
       print STDERR "CODEC: IAX2 other format: $fields[8]\n" if $Munin::Plugin::DEBUG;
+    }
+  }
+
+  foreach my $pjsipchan (@pjsipchannels) {
+
+    my $found = 0;
+    my @fields = split /\s+/, $pjsipchan;
+
+    # samples:
+    #2031-000002b8      00:00:49 ulaw     2418       0    0   0.002   2440       1    0   0.003   0.055
+    #0471e543 2001-000002c2      00:00:37 ulaw     1815       0    0   0.017   1863       0    0   0.014   0.225
+	my $codec = "";
+	my $fieldCount = scalar @fields;
+	if($fieldCount eq 13){
+		$codec = $fields[3];
+	}
+	else{
+		if($fieldCount eq 14){
+			$codec = $fields[4];
+		}else{
+			next;
+		}
+	}
+
+    if ($codec eq '0x0') {
+      $unknown += 1;
+      next;
+    }
+    $i = 0;
+    foreach my $c (@CODECS) {
+      if ($codec eq "$c") {
+        $results[$i] = $results[$i] + 1;
+        $found = 1;
+        last;
+      }
+      $i++;
+    }
+    if (! $found) {
+      $other += 1;
+      print STDERR "CODEC: PJSIP other format: $codec / field count: $fieldCount\n" if $Munin::Plugin::DEBUG;
     }
   }
 

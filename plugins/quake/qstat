@@ -1,4 +1,4 @@
-#!/bin/ksh
+#!/bin/sh
 #################################################################
 # Title : Qstat plugin for Munin                                #
 # Author : Benjamin DUPUIS - Poil				#
@@ -9,7 +9,8 @@
 #################################################################
 # Variable :							#
 #---------------------------------------------------------------#
-qstat_exe='/usr/local/bin/qstat'
+qstat_exe="${qstat_exe:-/usr/local/bin/qstat}"
+bot_prefix="${bot_prefix:-}"
 
 #---------------------------------------------------------------#
 # End of config
@@ -23,7 +24,8 @@ usage() {
 	echo 'For testing the script, run qstat_ GameType IP Port'
 	echo ' - GameType : q3s, q4s ... run qstat for seeing available gametype'
 	echo 'For munin you must ln -s /usr/share/munin/plugins/qstat_ /etc/munin/plugins/qstat_GameType_IP2test_Port'
-	echo 'Perhaps you must have to set qstat_exe path, actually on'${qstat_exe};
+	echo 'Perhaps you must have to set qstat_exe path, actually on' "${qstat_exe}";
+	echo 'For some GameTypes you have to specify bot_prefix';
 	echo 'Have Fun'
 }
 
@@ -40,16 +42,19 @@ config() {
 
 echo "graph_title Number of players on ${gametype} - ${ip}:${port}
 graph_vlabel players
-graph_args --base 1000 -r --lower-limit 0 --upper-limit 16
+graph_args --base 1000 -r --lower-limit 0
 graph_category games
 maxplayer.label max players
-player.label players"
+player.label players
+player.draw AREASTACK
+bot.label bots
+bot.draw AREASTACK"
 }
 
 #################################################################
 #       Quake Stat, call qstat	                                #
 #---------------------------------------------------------------#
-quake_stat() {
+qstat_run() {
 	if [ "${script_name}" != "qstat_" ]; then
                 gametype=$(echo "$script_name" | cut -d_ -f2)
                 ip=$(echo "$script_name" | cut -d_ -f3)
@@ -60,14 +65,27 @@ quake_stat() {
 		port=$3
 	fi
 
-	if [ -n "$gametype" ] && [ -n "$gametype" ] && [ -n "$gametype" ]; then
-		dummy=$("$qstat_exe" -raw ";" -nh "-$gametype" "${ip}:${port}")
+	if [ -n "$gametype" ] && [ -n "$ip" ] && [ -n "$port" ]; then
+		rawstats=$("$qstat_exe" -raw ";" -nh "-$gametype" "${ip}:${port}")
 
-		playervalue=$(echo "$dummy" | cut -d\; -f6)
-		maxplayervalue=$(echo "$dummy" | cut -d\; -f5)
+		playervalue=$(echo "$rawstats" | cut -d\; -f6)
+		maxplayervalue=$(echo "$rawstats" | cut -d\; -f5)
+		
+		if [ -n "$bot_prefix" ]; then
+			botvalue=$("$qstat_exe" -P -pa -sort P "-$gametype" "${ip}:${port}" | grep frags | grep -c "$bot_prefix")
+		else
+			# Assume that bots have a ping time of 0 miliseconds
+			botvalue=$("$qstat_exe" -P -pa -sort P "-$gametype" "${ip}:${port}" | grep -c 0ms)
+		fi
+
+		playervalue=$((playervalue-botvalue))
 
 		if [ -z "${playervalue}" ]; then
 			playervalue=0
+		fi
+
+		if [ -z "${botvalue}" ]; then
+			botvalue=0
 		fi
 
 		if [ -z "${maxplayervalue}" ]; then
@@ -75,11 +93,13 @@ quake_stat() {
 		fi
 
 
-		echo "maxplayer.value "${maxplayervalue};
-		echo "player.value "${playervalue};
+		echo "maxplayer.value ${maxplayervalue}";
+		echo "player.value ${playervalue}";
+		echo "bot.value ${botvalue}";
 	else
 		echo "maxplayer.value U"
 		echo "player.value U"
+		echo "bot.value U"
 	fi
 }
 
@@ -99,7 +119,7 @@ case $1 in
 		echo "no (edit the script for set qstat path)"
 	;;
 	*)
-		quake_stat "$@"
+		qstat_run "$@"
 		exit 0
 	;;
 esac

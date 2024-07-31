@@ -1,0 +1,226 @@
+#!/usr/bin/env sh
+# shellcheck shell=dash
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+synapse_ - Monitor synapse matrix homeserver over admin API
+
+=head1 APPLICABLE SYSTEMS
+
+Synapse matrix homeserver
+
+=head1 CONFIGURATION
+
+Requires installed curl and jq, a command-line json processor.
+
+This is a wildcard plugin. It monitors some simple values over the admin API
+of synapse matrix homeserver. Link synapse_<homeserverurl> to this file. The 
+admin endpoint has to be reachable from the plugin.
+
+  ln -s /usr/share/munin/plugins/synapse_ \
+        /etc/munin/plugins/synapse_domain.tld
+
+Set parameters in your munin-node configuration
+
+	[synapse_homeserverurl]
+	env.auth_token <auth_token>
+	env.interval <seconds>
+	env.port <port>
+	env.admin_api_path <default: /_synapse/admin>
+	env.scheme <default: https>
+	env.timeout <default: 2s>
+	env.reports_warning <default: 1>
+
+To monitor a synapse instance on localhost you need following:
+
+  ln -s /usr/share/munin/plugins/synapse_ \
+        /etc/munin/plugins/synapse_localhost
+
+	[synapse_localhost]
+	env.auth_token <auth_token>
+	env.port 8008
+	env.scheme http
+
+It's advised to use a dedicated munin bot account (user_type bot) with admin 
+rights on your matrix synapse server for this plugin.
+
+=head1 AUTHOR
+
+Copyright (C) 2024 Sebastian L. (https://momou.ch),
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=autoconf
+
+=cut
+
+# shellcheck disable=SC1090
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+
+AUTH_TOKEN="${auth_token:-}"
+INTERVAL="${interval:-300}"
+PORT="${port:-443}"
+ADMIN_API_PATH="${admin_api_path:-/_synapse/admin}"
+QUERY_LIMIT="${query_limit:-10000}"
+HOMESERVER="${0##*synapse_}"
+SCHEME="${scheme:-https}://"
+TIMEOUT="${timeout:-2}"
+REPORTS_WARNING="${reports_warning:-1}"
+CLEANHOMESERVER="$(clean_fieldname "${HOMESERVER}")"
+
+fetch_url () {
+    curl -s -f -m "${TIMEOUT}" "$@"
+}
+
+case $1 in
+
+    autoconf)
+	    if [ ! -x "$(command -v curl)" ]; then
+		    echo "no (curl not found)"
+	    elif [ ! -x "$(command -v jq)" ]; then
+		    echo "no (jq not found)"
+	    else
+		    fetch_url -I -H "Authorization: Bearer ${AUTH_TOKEN}" -I "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}" \
+			    | grep -iq "Content-Type: application/json" \
+			    && echo "yes" \
+			    || echo "no (invalid or empty response from synapse admin api)"
+	    fi
+	    exit 0
+	    ;;
+   config)
+
+cat << EOM
+multigraph synapse_users_${CLEANHOMESERVER}
+graph_title Synapse users on ${HOMESERVER}
+graph_args --base 1000 -l 0
+graph_printf %.0lf
+graph_vlabel users
+graph_info users
+graph_category chat
+total_registered.label total registered users
+total_registered.info total registered users
+total_registered.min 0
+active_users.label active users
+active_users.info active users
+active_users.min 0
+bots.label active bots
+bots.info active bots
+bots.min 0
+online_users.label online users
+online_users.info online users
+online_users.min 0
+online_users.draw LINE2
+deactivated_users.label deactivated users
+deactivated_users.info deactivated users
+deactivated_users.min 0
+erased_users.label erased users
+erased_users.info erased users
+erased_users.min 0
+multigraph synapse_rooms_${CLEANHOMESERVER}
+graph_title Synapse spaces and rooms on ${HOMESERVER}
+graph_args --base 1000 -l 0
+graph_printf %.0lf
+graph_vlabel rooms
+graph_info rooms
+graph_category chat
+rooms_local.draw AREASTACK
+rooms_local.label rooms on ${HOMESERVER}
+rooms_local.info rooms on ${HOMESERVER}
+rooms_local.min 0
+rooms_external.draw AREASTACK
+rooms_external.label external rooms
+rooms_external.info external rooms
+rooms_external.min 0
+spaces.label spaces
+spaces.info spaces
+spaces.min 0
+rooms_total.label total rooms
+rooms_total.info total rooms
+rooms_total.min 0
+rooms_total.draw LINE2
+multigraph synapse_reports_${CLEANHOMESERVER}
+graph_title Synapse event reports on ${HOMESERVER}
+graph_args --base 1000 -l 0
+graph_printf %.0lf
+graph_vlabel reports
+graph_info reports
+graph_category chat
+event_reports.label reports
+event_reports.info reports
+event_reports.min 0
+event_reports.warning ${REPORTS_WARNING}
+EOM
+	exit 0
+        ;;
+
+esac
+
+USERS=$(fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}/v2/users?deactivated=true&limit=${QUERY_LIMIT}")
+ROOMS=$(fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}/v1/rooms?limit=${QUERY_LIMIT}")
+REPORTS=$(fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}/v1/event_reports" | jq .total)
+
+echo multigraph synapse_users_"${CLEANHOMESERVER}"
+if USERS="$(echo "$USERS" | jq -r)"; then
+	total="$(echo "$USERS" | jq -r .total)"
+	puppets="$(echo "$USERS" | jq -r '.users[] | select(.deactivated!="1") | select(.user_type!="bot")' | grep -c '"last_seen_ts": null')"
+	bots="$(echo "$USERS" | jq -r '.users[] | select(.deactivated!="1")' | grep -c '"user_type": "bot"')"
+	virtual_users=$(( puppets + bots ))
+	total_registered=$(( total - virtual_users ))
+	active="$(echo "$USERS" | grep -c '"deactivated": 0')"
+	active_users=$(( active - virtual_users ))
+	echo total_registered.value "$total_registered"
+	echo active_users.value "$active_users"
+	echo bots.value "$bots"
+	# Convert to miliseconds
+	time_ms=$(($(date +%s) * 1000))
+	interval_ms=$((INTERVAL * 1000))
+	time_interval_ago=$(( time_ms - interval_ms ))
+	last_seen_times_ms=$(echo "$USERS" | jq -r '.users[] | select(.user_type!="bot") | select(.deactivated!="1")' | grep -E "\"last_seen_ts\": [0-9]+")
+	online_users="$(echo "$last_seen_times_ms" | awk -v "count=0" -F": " '$2 > "'$time_interval_ago'" {count++} END {print count}')"
+	echo online_users.value "$online_users"
+	echo deactivated_users.value "$(echo "$USERS" | grep -c '"deactivated": 1')"
+	echo erased_users.value "$(echo "$USERS" | grep -c '"erased": true')"
+else
+	echo "total_registered.value U"
+	echo "active_users.value U"
+	echo "bots.value U"
+	echo "online_users.value U"
+	echo "deactivated_users.value U"
+	echo "erased_users.value U"
+fi
+
+echo multigraph synapse_rooms_"${CLEANHOMESERVER}"
+if ROOMS="$(echo "$ROOMS" | jq -r)"; then
+	total_rooms="$(echo "$ROOMS" | jq -r .total_rooms)"
+	rooms_local="$(echo "$ROOMS" | grep -cE "\"room_id\": \"\!.+:${HOMESERVER}\"")"
+	rooms_external=$(( total_rooms - rooms_local ))
+	echo rooms_local.value "$rooms_local"
+	echo rooms_external.value "$rooms_external"
+	echo spaces.value "$(echo "$ROOMS" | grep -c '"room_type": "m.space"')"
+	echo rooms_total.value "$total_rooms"
+else
+	echo "rooms_local.value U"
+	echo "rooms_external.value U"
+	echo "spaces.value U"
+	echo "rooms_total.value U"
+fi
+echo multigraph synapse_reports_"${CLEANHOMESERVER}"
+if [ -n "$REPORTS" ] && [ "$REPORTS" -eq "$REPORTS" ]; then
+        echo event_reports.value "$REPORTS"
+else
+    echo "event_reports.value U"
+fi
+

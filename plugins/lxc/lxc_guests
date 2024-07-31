@@ -11,11 +11,18 @@ lxc_guests - collect statistics about containers virtualized via LXC
 
   [lxc_guests]
     user root
+    group root
 
     # The memory usage of containers are by default drawn as stacked area
-    # charts.  Alternatively a non-stacked graph with lines can be configured.
+    # charts. Alternatively a non-stacked graph with lines can be configured.
     # Default: true
     #env.ram_display_stacked true
+    
+    # The cpu usage in percent of containers are by default drawn as stacked 
+    # area charts. Alternatively a non-stacked graph with lines can be 
+    # configured.
+    # Default: true
+    #env.cpu_usage_stacked true
 
     # lxc container path, default below
     #env.lxcpath /var/lib/lxc
@@ -24,39 +31,20 @@ lxc_guests - collect statistics about containers virtualized via LXC
     # (default none excluded)
     #env.exclude container1 container2
 
-    # path where tasks sysfs files are stored,
-    # set this if the various attempts in the
-    # code don't work
-    # (default none)
-    #env.cgrouppath /sys/fs/cgroup/cpuacct/lxc/
-
 =head1 INTERPRETATION
 
-This plugin needs root privilege.
+This version of the plugin replaces the old lxc_guests plugin and works 
+with newer lxc versions, with cgroup version 2 and systemd (systemd-cgtop is 
+used to get cpu usage). Use an older revision of this plugin for systems with 
+cgroup version 1.
 
-This plugin has been tested with lxc 3 and
-lx2 (on Debian buster and Debian jessie,
-respectively).
+This plugin needs root (user and group) privilege.
 
-For the network graphs to work, you need
-to have in every container's config file
-a line defining the virtual network interface
-path (else lxc will use a random name at
-each container's start); see the lxc_netdev()
-function below.
+This plugin has been tested with lxc 4 and lxc 5 (on Debian bullseye and 
+Debian booksworm, respectively).
 
-If using lxc 2, make sure you do not have cruft
-in your container config files, you can test
-it with:
-   lxc-cgroup -o /dev/stdout -l INFO -n 104 cpuacct.usage
--- with 104 a valid lxc instance), if you
-get a warning, fix the config file.
-
-For the logins graph, the "users" command is required in each
-container.
-
-Tested on Debian buster and Debian jessie.
-
+For the logins graph, the "users" command is required in each container and 
+user/group has to be set to root for lxc-attach.
 
 =head1 AUTHOR
 
@@ -64,6 +52,7 @@ vajtsz vajtsz@gmail.com
 mitty  mitty@mitty.jp
 alphanet schaefer@alphanet.ch (many changes and multigraph)
 Lars Kruse <devel@sumpfralle.de>
+Sebastian L. <https://momou.ch>
 
 =head1 LICENSE
 
@@ -87,9 +76,7 @@ lxcpath=${lxcpath:-/var/lib/lxc}
 # containers to be ignored
 exclude=${exclude:-}
 ram_display_stacked=${ram_display_stacked:-true}
-# try to guess the location, if empty
-cgrouppath=${cgrouppath:-}
-
+cpu_usage_display_stacked=${cpu_usage_display_stacked:-true}
 
 # --- FUNCTIONS
 
@@ -111,62 +98,21 @@ get_active_guests() {
 get_lxc_cgroup_info() {
    local guest_name="$1"
    local field="$2"
-   # lxc3 (lxc < 3: may output some warnings if there is cruft in your config dir)
-   lxc-cgroup -o /dev/stdout -l INFO -n "$guest_name" "$field" | sed 's/^.*lxc_cgroup.c:main:[0-9][0-9]* - //'
+   lxc-cgroup -o /dev/stdout -l INFO -n "$guest_name" "$field" | grep -v set_config_idmaps
 }
 
 
-lxc_netdev() {
-   local guest_name="$1"
-
-   if [ -f "$lxcpath/$guest_name/config" ]; then
-      # lxc 3 vs < 3
-      (grep -E '^lxc.net.0.veth.pair' "$lxcpath/$guest_name/config" 2>/dev/null \
-         || grep -E '^lxc.network.veth.pair' "$lxcpath/$guest_name/config"
-      ) | awk '{print $NF;}'
-   fi
-}
-
-
-# find proper sysfs and count it
-# Debian 6.0: /sys/fs/cgroup/<container>/tasks
-# Ubuntu 12.04 with fstab: /sys/fs/cgroup/lxc/<container>/tasks
-# Ubuntu 12.04 with cgroup-lite: /sys/fs/cgroup/cpuacct/lxc/<container>/tasks
-# Ubuntu 12.04 with cgroup-bin: /sys/fs/cgroup/cpuacct/sysdefault/lxc/<container>/tasks
-# Ubuntu 14.04 /sys/fs/cgroup/systemd/lxc/<container>/tasks
-# and with cgmanager on jessie
 lxc_count_processes () {
    local guest_name="$1"
-   local SYSFS
+   local processes
 
    [ -z "$guest_name" ] && return 0
 
-   if [ -n "$cgrouppath" ]; then
-      SYSFS="$cgrouppath/$guest_name/tasks"
-      if [ -e "$SYSFS" ]; then
-         wc -l <"$SYSFS"
-         return
-      fi
+   processes=$(find /sys/fs/cgroup/lxc.payload."$guest_name"/ -name cgroup.procs -exec cat {} \; | wc -l)
+   if [ -n "$processes" ]; then
+       echo "$processes"
    fi
 
-   for SYSFS in \
-      "/sys/fs/cgroup/$guest_name/tasks" \
-      "/sys/fs/cgroup/lxc/$guest_name/tasks" \
-      "/sys/fs/cgroup/cpuacct/lxc/$guest_name/tasks" \
-      "/sys/fs/cgroup/systemd/lxc/$guest_name/tasks" \
-      "/sys/fs/cgroup/cpuacct/sysdefault/lxc/$guest_name/tasks"
-   do
-      if [ -e "$SYSFS" ]; then
-         wc -l <"$SYSFS"
-         return
-      fi
-   done
-
-   if [ -e /usr/bin/cgm ]; then
-      cgm getvalue cpu "lxc/$guest_name" tasks 2>/dev/null | wc -l
-   else
-      get_lxc_cgroup_info "$guest_name" "tasks" | wc -l
-   fi
 }
 
 
@@ -191,7 +137,7 @@ do_autoconf() {
 
 
 do_config() {
-   local active_guests guest_name draw_style
+   local active_guests guest_name draw_style NCPU graphlimit
    active_guests=$(get_active_guests "$exclude")
 
    cat <<EOF
@@ -219,16 +165,46 @@ EOF
 multigraph lxc_cpu_time
 graph_title CPU time
 graph_args -l 0 --base 1000
-graph_vlabel nanosec
+graph_vlabel milisec
 graph_category virtualization
 EOF
 
    for guest_name in $active_guests
    do
       cat <<EOF
-$(clean_fieldname "cpu_time_${guest_name}").label $guest_name: CPU time
+$(clean_fieldname "cpu_time_${guest_name}").label $guest_name
 $(clean_fieldname "cpu_time_${guest_name}").type DERIVE
 $(clean_fieldname "cpu_time_${guest_name}").min 0
+EOF
+   done
+
+
+   NCPU=$(grep -cE '^cpu[0-9]+ ' /proc/stat)
+   graphlimit=$((NCPU * 100))
+
+   cat <<EOF
+   
+multigraph lxc_cpu_usage
+graph_title CPU Usage (%)
+graph_args -l 0 -u $graphlimit -r
+graph_vlabel %
+graph_scale no
+graph_category virtualization
+EOF
+
+   for guest_name in $active_guests
+   do
+   
+      if [ "$cpu_usage_display_stacked" != "true" ]; then
+         draw_style="LINE1"
+      else
+         draw_style="AREASTACK"
+      fi
+   
+      cat <<EOF
+$(clean_fieldname "cpu_usage_${guest_name}").label $guest_name
+$(clean_fieldname "cpu_usage_${guest_name}").min 0
+$(clean_fieldname "cpu_usage_${guest_name}").draw $draw_style
 EOF
    done
 
@@ -236,13 +212,17 @@ EOF
 
 multigraph lxc_logins
 graph_title Logins
+graph_args -l 0 --base 1000
+graph_vlabel logins
 graph_category virtualization
+graph_info This graph shows currently logged in users.
 EOF
 
    for guest_name in $active_guests
    do
       cat <<EOF
-$(clean_fieldname "logins_${guest_name}").label $guest_name: logins
+$(clean_fieldname "logins_${guest_name}").label $guest_name
+$(clean_fieldname "logins_${guest_name}").min 0
 $(clean_fieldname "logins_${guest_name}").type GAUGE
 EOF
    done
@@ -259,7 +239,7 @@ EOF
 
    for guest_name in $active_guests
    do
-      device=$(lxc_netdev "$guest_name")
+      device=$(lxc-info -n "$guest_name" | grep Link | sed 's/Link:\ \+//g')
       if [ -z "$device" ]; then
          continue
       fi
@@ -296,9 +276,26 @@ EOF
    for guest_name in $active_guests
    do
       cat <<EOF
-$(clean_fieldname "lxc_proc_${guest_name}").label $guest_name: processes
+$(clean_fieldname "lxc_proc_${guest_name}").label $guest_name
 $(clean_fieldname "lxc_proc_${guest_name}").type GAUGE
 $(clean_fieldname "lxc_proc_${guest_name}").min 0
+EOF
+   done
+   
+   cat <<EOF
+
+multigraph lxc_task
+graph_title Tasks
+graph_args -l 0 --base 1000
+graph_vlabel Number of tasks
+graph_category virtualization
+EOF
+   for guest_name in $active_guests
+   do
+      cat <<EOF
+$(clean_fieldname "lxc_task_${guest_name}").label $guest_name
+$(clean_fieldname "lxc_task_${guest_name}").type GAUGE
+$(clean_fieldname "lxc_task_${guest_name}").min 0
 EOF
    done
 
@@ -320,37 +317,41 @@ EOF
       fi
 
       cat <<EOF
-$(clean_fieldname "mem_usage_${guest_name}").label ${guest_name}: Mem usage
+$(clean_fieldname "mem_usage_${guest_name}").label $guest_name
 $(clean_fieldname "mem_usage_${guest_name}").type GAUGE
 $(clean_fieldname "mem_usage_${guest_name}").draw $draw_style
-$(clean_fieldname "mem_cache_${guest_name}").label ${guest_name}: Cache
-$(clean_fieldname "mem_cache_${guest_name}").type GAUGE
-$(clean_fieldname "mem_active_${guest_name}").label ${guest_name}: Active
-$(clean_fieldname "mem_active_${guest_name}").type GAUGE
-$(clean_fieldname "mem_inactive_${guest_name}").label ${guest_name}: Inactive
-$(clean_fieldname "mem_inactive_${guest_name}").type GAUGE
 EOF
    done
 }
 
 
 do_fetch() {
-   local active_guests cpu_usage device value_up value_down
+   local active_guests cpu_usage cpu_usage_value device value_up value_down systemd_cgtop
    active_guests=$(get_active_guests "$exclude")
+   # Percentage is shown only shown after multiple iterations of systemd-cgtop
+   systemd_cgtop=$(systemd-cgtop -b -n4 -d 250ms)
 
    echo "multigraph lxc_cpu"
    for guest_name in $active_guests
    do
       for cpu_usage in user system
       do
-         echo "$(clean_fieldname "cpu_${cpu_usage}_${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "cpuacct.stat" | grep "$cpu_usage" | awk '{ print $2; }')"
+         echo "$(clean_fieldname "cpu_${cpu_usage}_${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "cpu.stat" | grep "$cpu_usage" | awk '{ print $2; }')"
       done
    done
 
    echo "multigraph lxc_cpu_time"
    for guest_name in $active_guests
    do
-      echo "$(clean_fieldname "cpu_time_${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "cpuacct.usage")"
+      echo "$(clean_fieldname "cpu_time_${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "cpu.stat" | grep "usage_usec" | awk '{ print $2; }')"
+   done
+
+   echo "multigraph lxc_cpu_usage"
+   for guest_name in $active_guests
+   do
+      cpu_usage_value="U"
+      cpu_usage_value=$(echo "$systemd_cgtop" | grep "lxc.payload.$guest_name " | awk '{ print $3; }' | grep -E '[0-9].' | tail -1)
+      echo "$(clean_fieldname "cpu_usage_${guest_name}").value $cpu_usage_value"
    done
 
    echo "multigraph lxc_logins"
@@ -362,7 +363,7 @@ do_fetch() {
    echo "multigraph lxc_net"
    for guest_name in $active_guests
    do
-      device=$(lxc_netdev "$guest_name")
+      device=$(lxc-info -n "$guest_name" | grep Link | sed 's/Link:\ \+//g')
       if [ -z "$device" ]; then
          value_up="U"
          value_down="U"
@@ -383,14 +384,17 @@ EOF
       echo "$(clean_fieldname "lxc_proc_${guest_name}").value $(lxc_count_processes "$guest_name")"
    done
 
+   echo "multigraph lxc_task"
+   for guest_name in $active_guests
+   do
+      echo "$(clean_fieldname "lxc_task_${guest_name}").value $(cat /sys/fs/cgroup/lxc.payload."$guest_name"/pids.current)"
+   done
+
    echo "multigraph lxc_ram"
    for guest_name in $active_guests
    do
       cat <<EOF
-$(clean_fieldname "mem_usage_${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.usage_in_bytes")
-$(clean_fieldname "mem_cache_${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.stat" | grep total_cache | awk '{print $2;}')
-$(clean_fieldname "mem_active_${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.stat" | grep total_active_anon | awk '{print $2;}')
-$(clean_fieldname "mem_inactive_${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.stat" | grep total_inactive_anon | awk '{print $2;}')
+$(clean_fieldname "mem_usage_${guest_name}").value $(get_lxc_cgroup_info "$guest_name" "memory.current")
 EOF
    done
 }
@@ -414,3 +418,4 @@ case "${1:-}" in
       echo >&2 "Invalid action requested (none of: autoconf / config / '')"
       exit 1
 esac
+

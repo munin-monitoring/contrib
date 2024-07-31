@@ -1,45 +1,67 @@
-#!/usr/bin/env python
-#
-# Plugin to report service status
-#
-# Needs following minimal configuration in plugin-conf.d/nova:
-#   [nova_*]
-#   user nova
-#
-# Magic markers
-#%# capabilities=autoconf
-#%# family=auto
+#!/usr/bin/env python3
+"""
+=head1 NAME
+
+nova_services - report nova service status
+
+
+=head1 CONFIGURATION
+
+Needs following minimal configuration in plugin-conf.d/nova:
+
+ [nova_*]
+ user nova
+
+
+=head1 AUTHORS
+
+Copyright 2012 Mehdi Abaakouk <sileht@sileht.net>
+
+
+=head1 MAGIC MARKERS
+
+ #%# capabilities=autoconf
+ #%# family=auto
+
+=cut
+"""
 
 import sys
 
 try:
-    from nova import context
-    from nova import db
-    from nova import flags
-    from nova import utils
+    from nova import context, db, flags, utils
 except ImportError:
     successful_import = False
 else:
     successful_import = True
 
-services = ['nova-compute', 'nova-volume', 'nova-scheduler', 'nova-vncproxy', 'nova-network', 'nova-cert', 'nova-console', 'nova-consoleauth']
+
+services = [
+    'nova-compute',
+    'nova-volume',
+    'nova-scheduler',
+    'nova-vncproxy',
+    'nova-network',
+    'nova-cert',
+    'nova-console',
+    'nova-consoleauth',
+]
 
 
 def print_config():
-    global services
-    print 'graph_title Nova Services'
-    print 'graph_vlabel qty'
-    print 'graph_args --base 1000 --lower-limit 0'
-    print 'graph_category cloud'
-    print 'graph_scale no'
-    print 'graph_info Nova services - alive and active'
+    print('graph_title Nova Services')
+    print('graph_vlabel qty')
+    print('graph_args --base 1000 --lower-limit 0')
+    print('graph_category cloud')
+    print('graph_scale no')
+    print('graph_info Nova services - alive and active')
     for service in services:
-        print '%s_alive.label %s alive' % (service, service)
-        print '%s_alive.draw LINE2' % service
-        print '%s_alive.info seen in last 30 seconds' % service
-        print '%s_active.label %s active' % (service, service)
-        print '%s_active.draw LINE2' % service
-        print '%s_active.info alive and enabled' % service
+        print('%s_alive.label %s alive' % (service, service))
+        print('%s_alive.draw LINE2' % service)
+        print('%s_alive.info seen in last 30 seconds' % service)
+        print('%s_active.label %s active' % (service, service))
+        print('%s_active.draw LINE2' % service)
+        print('%s_active.info alive and enabled' % service)
 
 
 def get_status():
@@ -49,7 +71,6 @@ def get_status():
     for k in services:
         alive[k] = 0
         active[k] = 0
-
     ctxt = context.get_admin_context()
     now = utils.utcnow()
     services = db.service_get_all(ctxt)
@@ -59,16 +80,15 @@ def get_status():
             alive[svc['binary']] += 1
             if not svc['disabled']:
                 active[svc['binary']] += 1
-
     return {'alive': alive, 'active': active}
 
 
 def print_values():
     status = get_status()
-    for (state, value) in status['alive'].iteritems():
-        print "%s_alive.value %s" % (state, value)
-    for (state, value) in status['active'].iteritems():
-        print "%s_active.value %s" % (state, value)
+    for (state, value) in status['alive'].items():
+        print("%s_alive.value %s" % (state, value))
+    for (state, value) in status['active'].items():
+        print("%s_active.value %s" % (state, value))
 
 
 if __name__ == '__main__':
@@ -77,9 +97,9 @@ if __name__ == '__main__':
             print_config()
         elif sys.argv[1] == "autoconf":
             if not successful_import:
-                print 'no (failed import nova module]'
+                print('no (failed import nova module]')
             else:
-                print 'yes'
+                print('yes')
     elif successful_import:
         utils.default_flagfile()
         flags.FLAGS(sys.argv)

@@ -1,44 +1,129 @@
 #!/usr/bin/env ruby
 
-# This plugin reports the duration of the most recent puppet agent run.
-# It requires read access to the puppet logfile (defaults to /var/log/messages).
-#
-# CONFIGURATION
-#
-# [puppet*]
-# env.puppet_logfile /var/log/message
-# env.puppet_logformat "^%b %d"
-#
-# The logfile is where the puppet agent is expected to log its run time statistics.
-# The format is the format of the date syslog writes to the file, which may vary
-# according to locale and configuration.
+=begin
 
-# reports how long the puppet agent took to apply the catalog
-def get_runtime
-  logfile = ENV['puppet_logfile'] || '/var/log/messages'
-  t = Time.now
-  dateformat = ENV['puppet_logformat'] || '^%b %d'
-  today = t.strftime(dateformat)
-  File.open(logfile).grep(/#{today}/).grep(/Finished catalog run in/).reverse_each do |line|
-    if line =~ /in (.*) seconds/
-      puts "runtime.value #{Regexp.last_match(1)}"
-      exit 0
-    end
+=head1 puppet_runtime
+
+A munin plugin that reports the duration of puppet runs.
+
+=head2 Compatibility
+
+This Plugin is tested with the following configurations:
+
+  ---
+  Linux:
+    Debian:
+    - 11
+    - Puppet:
+      - 5.5.22
+      - 7.14.0
+    Redhat:
+    - 8
+    - Puppet:
+      - 6.4.0
+      - 6.19.1
+      - 7.9.2
+    Fedora:
+    - 35
+    - Puppet:
+      - 7.12.1
+      - 7.14.0
+
+=head2 Configuration
+
+It must be ensured that the plugin is executed by root. For
+this create the follwing file:
+
+  $ cat /etc/munin/plugin-conf.d/puppet.conf
+    [puppet_runtime]
+      user root
+
+Further configurations are not necessary.
+
+=head2 How it works
+
+Puppet generates a YAML file on each run which contains all
+information of the last run, the 'facts'.
+
+Where your puppet-agent stores the file, the plugin finds out
+with the following commansd:
+
+  $ puppet config print lastrunreport
+
+=head3 Run it!
+
+To check the plugins function, perform the following:
+
+  $ munin-run puppet_runtime
+
+An example Output:
+
+  $ munin-run puppet_runtime
+    total.value 9.571794571
+    fact_generation.value 6.210164764896035
+    catalog_application.value 2.0418781149201095
+    plugin_sync.value 0.6617366508580744
+
+=head3 Tips & Tricks
+
+Since you want to integrate the runtime of a puppet run into Munin,
+you will most likely use puppet as well. Here you can find an
+example for your puppet configuration:
+
+  file {'/etc/munin/plugin-conf.d/puppet.conf':
+    source => 'puppet:///modules/munin/puppet.conf',
+    notify => Service['munin-node'],
+  }
+  file {'/etc/munin/plugins/puppet_runtime':
+    ensure => 'link',
+    target => '/usr/share/munin/plugins/puppet_runtime',
+  }
+
+=head3 Known issues
+
+The only known issue that can occur is that puppet cannot be found.
+This is because it is not known to the environment used. This issue
+can occur when using the packages from the puppetlabs repo.
+
+In this case, a simple link is enough to fix this issue:
+
+  file {'/usr/bin/puppet':
+    ensure => 'link',
+    target => '/opt/puppetlabs/bin/puppet',
+  }
+=end
+
+require 'yaml'
+
+def output
+  report = YAML.load(File.read(`puppet config print lastrunfile`.strip))
+  time_report = report["time"]
+
+  if time_report.is_a?(Hash)
+    total, fact_generation, catalog_application, plugin_sync = time_report.values_at(
+    "total", "fact_generation", "catalog_application", "plugin_sync"
+    )
+    puts "total.value #{total}" if total
+    puts "fact_generation.value #{fact_generation}" if fact_generation
+    puts "catalog_application.value #{catalog_application}" if catalog_application
+    puts "plugin_sync.value #{plugin_sync}" if plugin_sync
   end
 end
 
-case ARGV[0]
-when 'config'
-  puts 'graph_category other'
+def config
+  puts 'graph_category system'
   puts 'graph_args --base 1000 -l 0'
   puts 'graph_scale no'
-  puts 'graph_title puppet catalog run time'
+  puts 'graph_title Puppet agent run time'
   puts 'graph_vlabel Seconds'
-  puts 'runtime.label Catalog application time'
-  exit 0
-when 'autoconf'
-  puts 'yes'
-  exit 0
+  puts 'total.label Puppet agent runtime'
+  puts 'fact_generation.label Fact generation runtime'
+  puts 'catalog_application.label Catalog application runtime'
+  puts 'plugin_sync.label Plugin sync runtime'
+end
+
+if (ARGV.length == 1) && (ARGV[0] == 'config')
+  config
 else
-  get_runtime
+  output
 end

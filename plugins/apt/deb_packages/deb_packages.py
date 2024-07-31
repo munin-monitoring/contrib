@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 """
@@ -27,6 +27,9 @@ TODO: check whether cachefile matches the config
 BUG: If a package will be upgraded, and brings in new dependencies,
      these new deps will not be counted. WONTFIX
 """
+
+from __future__ import print_function
+
 import sys
 import argparse
 import apt_pkg
@@ -39,10 +42,11 @@ import re
 from collections  import defaultdict, namedtuple
 from types import StringTypes, TupleType, DictType, ListType, BooleanType
 
+
 class EnvironmentConfigBroken(Exception): pass
 
 # print environmental things
-# for k,v in os.environ.iteritems(): print >> sys.stderr, "%r : %r" % (k,v)
+# for k,v in os.environ.items(): print("%r : %r" % (k,v), file=sys.stderr)
 
 def getEnv(name, default=None, cast=None):
     """
@@ -59,7 +63,7 @@ def getEnv(name, default=None, cast=None):
         var = default
     except:
         # now probably the cast went wrong
-        print >> sys.stderr, "for environment variable %r, %r is no valid value"%(name, var)
+        print("for environment variable %r, %r is no valid value" % (name, var), file=sys.stderr)
         var = default
     return var
 
@@ -217,19 +221,19 @@ class TreeTwig(defaultdict):
         super(TreeTwig, self).__init__(defaultFactory)
 
     def printAsTree(self, indent=0):
-        for k, tree in self.iteritems():
-            print "  " * indent, repr(k)
+        for k, tree in self.items():
+            print("  " * indent, repr(k))
             if isinstance(tree, TreeTwig):
                 printTree(tree, indent+1)
             else:
-                print tree
+                print(tree)
 
     def printAsLine(self):
-        print self.asLine()
+        print(self.asLine())
 
     def asLine(self):
         values = ""
-        for key, residue in self.iteritems():
+        for key, residue in self.items():
             if residue:
                 values += " %r" % key
                 if isinstance(residue, TreeTwig):
@@ -310,7 +314,7 @@ def getOptionsTree(cache, keys=None):
         d = t
         for key in keys:
             if not key:
-                print f
+                print(f)
             dKey = f.__getattribute__(key)
             d = d[dKey]
     return t
@@ -504,14 +508,14 @@ class PackageStat(defaultdict):
                "graph_vlabel packages".format(**d)
 
     def printConfig(self):
-        print self.configHead()
+        print(self.configHead())
         for options, item in self.options_sorted:
             if not self.packetHandler.includeNow and self.optionIsDpkgStatus(details=options):
                  continue
             i = self.configD(options, item)
-            print "{rrdName}.label {options}".format(**i)
-            print "{rrdName}.info {info}".format(**i)
-            print "{rrdName}.draw AREASTACK".format(**i)
+            print("{rrdName}.label {options}".format(**i))
+            print("{rrdName}.info {info}".format(**i))
+            print("{rrdName}.draw AREASTACK".format(**i))
 
     def optionIsDpkgStatus(self, details, options=None):
         """
@@ -530,14 +534,15 @@ class PackageStat(defaultdict):
         return isNow
 
     def printValues(self):
-        print "\nmultigraph packages_{option}_{type}".format(option=self.generate_rrd_name_from(self.option),
-                                                             type=self.packetHandler.type)
+        print("\nmultigraph packages_{option}_{type}"
+              .format(option=self.generate_rrd_name_from(self.option),
+                      type=self.packetHandler.type))
         for options, item in self.options_sorted:
             if not self.packetHandler.includeNow and self.optionIsDpkgStatus(details=options):
                  continue
             i = self.configD(options, item)
             i['value'] = len(self.get(options, []))
-            print "{rrdName}.value {value}".format(**i)
+            print("{rrdName}.value {value}".format(**i))
             self._printExtInfoPackageList(options)
 
     def _printExtInfoPackageList(self, options):
@@ -545,10 +550,9 @@ class PackageStat(defaultdict):
         packageList = self[options]
         packageCount = len( packageList )
         if 0 < packageCount <= MAX_LIST_SIZE_EXT_INFO:
-            print "%s.extinfo " % rrdName,
-            for item in packageList:
-                print self.packetHandler.extInfoItemString.format(i=item),
-            print
+            print("%s.extinfo %s" % (rrdName, " ".join(
+                self.packetHandler.extInfoItemString.format(i=item) for item in packageList)))
+
 
 packetHandlerD = {}
 """ Dictionary for PacketHandlerclasses with its 'type'-key """
@@ -644,7 +648,7 @@ class Munin(object):
         }
         self.envConfig = self._envParser()
         self._envValidater()
-        # print >> sys.stderr, self.envConfig
+        # print(self.envConfig, file=sys.stderr)
         self.statL = []
         if self.envConfig:
             for config in self.envConfig:
@@ -655,7 +659,7 @@ class Munin(object):
                                                     extInfo = config['show_ext'])
                 self.statL.append(packageStat)
         if not self.statL:
-            print "# no munin config found in environment vars"
+            print("# no munin config found in environment vars")
 
     def execute(self):
         self.args = self.argParser.parse_args(self.commandLineArgs)
@@ -715,7 +719,7 @@ class Munin(object):
                 out =  StringIO.StringIO()
                 sys.stdout = out
                 # run writes now to new sys.stdout
-                print "# executed at %r (%r)" %(strftime("%s"), strftime("%c"))
+                print("# executed at %r (%r)" % (strftime("%s"), strftime("%c")))
                 self._run()
                 sys.stdout = stdoutDef
                 # print output to stdout
@@ -729,13 +733,13 @@ class Munin(object):
                     # 'No such file or directory'
                     os.makedirs( os.path.dirname(CACHE_FILE) )
                 else:
-                    print sys.stderr.write("%r : %r" % (e, CACHE_FILE))
+                    sys.stderr.write("%r : %r" % (e, CACHE_FILE))
             finally:
                 # restore stdout
                 sys.stdout = stdoutDef
         else:
             with open(CACHE_FILE,'r') as data:
-                print data.read()
+                print(data.read())
 
     def _run(self):
         # p … package
@@ -760,7 +764,7 @@ class Munin(object):
             stat.printConfig()
 
     def autoconf(self):
-        print 'yes'
+        print('yes')
 
     def _argParser(self):
         parser = argparse.ArgumentParser(description="Show some statistics "\
@@ -815,7 +819,7 @@ class Munin(object):
             elif m.group('res') == 'show_ext':
                 configPart['show_ext'][m.group('optNumber')] = os.getenv(var)
             else:
-                print >> sys.stderr, "configuration option %r was ignored" % (var)
+                print("configuration option %r was ignored" % (var), file=sys.stderr)
         # we have now dicts for 'sort_by' and 'show_ext' keys
         # changing them to lists
         for graphConfig in config.itervalues():
@@ -830,25 +834,21 @@ class Munin(object):
         """
         for graph in self.envConfig:
             if graph['type'] not in ('installed', 'upgradable'):
-                print >> sys.stderr, \
-                      "GraphType must be 'installed' or 'upgradable' but not %r"%(graph.type), \
-                      graph
+                print("GraphType must be 'installed' or 'upgradable' but not %r %s"
+                      % (graph.type, graph), file=sys.stderr)
                 raise EnvironmentConfigBroken("Environment Config broken")
             if not graph['sort_by']:
-                print >> sys.stderr, \
-                      "Graph must be sorted by anything"
+                print("Graph must be sorted by anything", file=sys.stderr)
                 raise EnvironmentConfigBroken("Environment Config broken")
             # check for valid options for sort_by
             unusableOptions = set(graph['sort_by']) - PackageStat.viewSet
             if unusableOptions:
-                print >> sys.stderr, \
-                      "%r are not valid options for 'sort_by'" % (unusableOptions)
+                print("%r are not valid options for 'sort_by'" % unusableOptions, file=sys.stderr)
                 raise EnvironmentConfigBroken("Environment Config broken")
             # check for valid options for sort_by
             unusableOptions = set(graph['show_ext']) - PackageStat.viewSet
             if unusableOptions:
-                print >> sys.stderr, \
-                      "%r are not valid options for 'show_ext'" % (x)
+                print("%r are not valid options for 'show_ext'" % x, file=sys.stderr)
                 raise EnvironmentConfigBroken("Environment Config broken")
 
 if __name__=='__main__':

@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 
 set -e
 
@@ -17,7 +18,7 @@ Nexcloud instances
 Requires installed curl and jq, a command-line json processor.
 
 This is a wildcard plugin. To monitor a nextcloud instance, link
-nextcloud_<nextcloud-domain> to this file. You can even append a port 
+nextcloud_<nextcloud-domain> to this file. You can even append a port
 (:8443) to the file if needed. For example,
 
   ln -s /usr/share/munin/plugins/nextcloud_ \
@@ -25,16 +26,21 @@ nextcloud_<nextcloud-domain> to this file. You can even append a port
 
 Set username and password in your munin-node configuration
 
-[nextcloud_cloud.domain.tld]
-env.username <nexcloud_user>
-env.password <nextcloud_password>
+	[nextcloud_cloud.domain.tld]
+	env.username <nexcloud_user>
+	env.password <nextcloud_password>
+	env.api_path <default: /ocs/v2.php/apps/serverinfo/api/v1/info>
+	env.scheme <default: https>
+	env.timeout <default: 2s>
+	env.updates_warning <default: 1>
 
 It's advised to set an app password (for this plugin) in your nextcloud 
 instance and not to use the "real" password of your nextcloud user.
 
 =head1 AUTHOR
 
-Copyright (C) 2020 Sebastian L. (https://momou.ch)
+Copyright (C) 2020 Sebastian L. (https://momou.ch),
+		   Olivier Mehani <shtrom+munin@ssji.net>
 
 =head1 LICENSE
 
@@ -47,49 +53,46 @@ GPLv2
 
 =cut
 
+# shellcheck disable=SC1090
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
-API_PATH="/ocs/v2.php/apps/serverinfo/api/v1/info?format=json"
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+
+API_PATH="${api_path:-/ocs/v2.php/apps/serverinfo/api/v1/info}?format=json&skipApps=false"
 DOMAIN="${0##*nextcloud_}"
-CLEANDOMAIN="$(clean_fieldname "$DOMAIN")"
+SCHEME="${scheme:-https}://"
+TIMEOUT="${timeout:-2}"
+UPDATES_WARNING="${updates_warning:-1}"
+CLEANDOMAIN="$(clean_fieldname "${DOMAIN}")"
 USERNAME="${username:-}"
 PASSWORD="${password:-}"
 
-print_json_data() {
-    local FIRST="$1"
-    [ -z "$FIRST" ] && exit 0
-    shift 1
-    for KEY in "$@"; do
-        VALUE=$(echo "$FIRST" | jq -cr ".$KEY")
-        echo "$KEY.value $VALUE"
-   done
-}
-
-test_https() {
-    [ -z "$DOMAIN" ] && exit 0
-    curl -s -f -m 2 -I "https://$DOMAIN" > /dev/null && echo true && exit 0
+fetch_url () {
+    curl -s -f -m "${TIMEOUT}" "$@"
 }
 
 case $1 in
 
     autoconf)
-        if [ -x /usr/bin/curl ]; then
-            if [ -x /usr/bin/jq ]; then
-                [ "$(test_https)" ] && DOMAIN="https://$DOMAIN" || DOMAIN="http://$DOMAIN"
-                curl -s -f -m 2 -u "$USERNAME:$PASSWORD" -I "$DOMAIN$API_PATH" | grep -iq "Content-Type: application/json" && echo "yes" && exit 0 || echo "no (invalid or empty response from nextlcoud serverinfo api)" && exit 0
-            else
-                echo "no (jq not found)" && exit 0
-            fi
-        else
-            echo "no (/usr/bin/curl not found)" && exit 0
-        fi
-        ;;
-
+	    if [ ! -x "$(command -v curl)" ]; then
+		    echo "no (curl not found)"
+	    elif [ ! -x "$(command -v jq)" ]; then
+		    echo "no (jq not found)"
+	    else
+		    fetch_url -I -u "${USERNAME}:${PASSWORD}" -I "${SCHEME}${DOMAIN}${API_PATH}" \
+			    | grep -iq "Content-Type: application/json" \
+			    && echo "yes" \
+			    || echo "no (invalid or empty response from nextcloud serverinfo api)"
+	    fi
+	    exit 0
+	    ;;
    config)
 
 cat << EOM
-multigraph nextcloud_users_$CLEANDOMAIN
-graph_title Nextcloud users on $DOMAIN
+multigraph nextcloud_users_${CLEANDOMAIN}
+graph_title Nextcloud users on ${DOMAIN}
 graph_args --base 1000 -l 0
 graph_printf %.0lf
 graph_vlabel connected users
@@ -107,8 +110,8 @@ last24hours.min 0
 num_users.label number of users
 num_users.info total number of users
 num_users.min 0
-multigraph nextcloud_files_$CLEANDOMAIN
-graph_title Nextcloud files on $DOMAIN
+multigraph nextcloud_files_${CLEANDOMAIN}
+graph_title Nextcloud files on ${DOMAIN}
 graph_args --base 1000 -l 0
 graph_printf %.0lf
 graph_vlabel number of files
@@ -117,8 +120,8 @@ graph_category cloud
 num_files.label number of files
 num_files.info current number of files
 num_files.min 0
-multigraph nextcloud_shares_$CLEANDOMAIN
-graph_title Nextcloud shares on $DOMAIN
+multigraph nextcloud_shares_${CLEANDOMAIN}
+graph_title Nextcloud shares on ${DOMAIN}
 graph_args --base 1000 -l 0
 graph_printf %.0lf
 graph_vlabel number of shares
@@ -151,8 +154,8 @@ num_fed_shares_sent.min 0
 num_fed_shares_received.label federated shares received
 num_fed_shares_received.info current total of federated shares received
 num_fed_shares_received.min 0
-multigraph nextcloud_dbsize_$CLEANDOMAIN
-graph_title Nextcloud database size on $DOMAIN
+multigraph nextcloud_dbsize_${CLEANDOMAIN}
+graph_title Nextcloud database size on ${DOMAIN}
 graph_args --base 1024 -l 0
 graph_vlabel size in bytes
 graph_info database database size in bytes
@@ -161,8 +164,8 @@ db_size.label database size in bytes
 db_size.info database size in bytes
 db_size.draw AREA
 db_size.min 0
-multigraph nextcloud_storages_$CLEANDOMAIN
-graph_title Nextcloud storages on $DOMAIN
+multigraph nextcloud_storages_${CLEANDOMAIN}
+graph_title Nextcloud storages on ${DOMAIN}
 graph_args --base 1000 -l 0
 graph_printf %.0lf
 graph_vlabel number
@@ -180,8 +183,8 @@ num_storages_home.min 0
 num_storages_other.label number of other storages
 num_storages_other.info current number of other storages
 num_storages_other.min 0
-multigraph nextcloud_apps_$CLEANDOMAIN
-graph_title Nextcloud apps on $DOMAIN
+multigraph nextcloud_apps_${CLEANDOMAIN}
+graph_title Nextcloud apps on ${DOMAIN}
 graph_args --base 1000 -l 0
 graph_printf %.0lf
 graph_vlabel apps
@@ -190,7 +193,7 @@ graph_category cloud
 num_updates_available.label available app updates
 num_updates_available.info number of available app updates
 num_updates_available.min 0
-num_updates_available.warning 1
+num_updates_available.warning ${UPDATES_WARNING}
 num_installed.label installed apps
 num_installed.info number of installed apps
 num_installed.min 0
@@ -200,36 +203,43 @@ EOM
 
 esac
 
-# Get JSON data
-[ "$(test_https)" ] && DOMAIN="https://$DOMAIN" || DOMAIN="http://$DOMAIN"
-JSONSTATS=$(curl -s -f -m 2 -u "$USERNAME:$PASSWORD" "$DOMAIN$API_PATH" | sed 's/\\/\\\\/g' | jq -cr ".ocs.data")
-USERS=$(echo "$JSONSTATS" | jq -cr ".activeUsers")
-STORAGE=$(echo "$JSONSTATS" | jq -cr ".nextcloud.storage")
-SHARES=$(echo "$JSONSTATS" | jq -cr ".nextcloud.shares")
-DBSIZE=$(echo "$JSONSTATS" | jq -cr ".server.database.size")
-APPS=$(echo "$JSONSTATS" | jq -cr ".nextcloud.system.apps")
 
 # users
-echo "multigraph nextcloud_users_$CLEANDOMAIN"
-print_json_data "$USERS" last5minutes last1hour last24hours
-print_json_data "$STORAGE" num_users
+fetch_url -u "${USERNAME}:${PASSWORD}" "${SCHEME}${DOMAIN}${API_PATH}" \
+	| sed 's/\\/\\\\/g' \
+	| jq -r '.ocs.data
+		| @text "
+multigraph nextcloud_users_'"${CLEANDOMAIN}"'
+last5minutes.value \(.activeUsers.last5minutes)
+last1hour.value \(.activeUsers.last1hour)
+last24hours.value \(.activeUsers.last24hours)
+num_users.value \(.nextcloud.storage.num_users)
 
-# files
-echo "multigraph nextcloud_files_$CLEANDOMAIN"
-print_json_data "$STORAGE" num_files
+multigraph nextcloud_files_'"${CLEANDOMAIN}"'
+num_files.value \(.nextcloud.storage.num_files)
 
-# storages
-echo "multigraph nextcloud_storages_$CLEANDOMAIN"
-print_json_data "$STORAGE" num_storages num_storages_local num_storages_home num_storages_other
+multigraph nextcloud_storages_'"${CLEANDOMAIN}"'
+num_storages.value \(.nextcloud.storage.num_storages)
+num_storages_local.value \(.nextcloud.storage.num_storages_local)
+num_storages_home.value \(.nextcloud.storage.num_storages_home)
+num_storages_other.value \(.nextcloud.storage.num_storages_other)
 
-# shares
-echo "multigraph nextcloud_shares_$CLEANDOMAIN"
-print_json_data "$SHARES" num_shares num_shares_user num_shares_groups num_shares_link num_shares_mail num_shares_room num_shares_link_no_password num_fed_shares_sent num_fed_shares_received
+multigraph nextcloud_shares_'"${CLEANDOMAIN}"'
+num_shares.value \(.nextcloud.shares.num_shares)
+num_shares_user.value \(.nextcloud.shares.num_shares_user)
+num_shares_groups.value \(.nextcloud.shares.num_shares_groups)
+num_shares_link.value \(.nextcloud.shares.num_shares_link)
+num_shares_mail.value \(.nextcloud.shares.num_shares_mail)
+num_shares_room.value \(.nextcloud.shares.num_shares_room)
+num_shares_link_no_password.value \(.nextcloud.shares.num_shares_link_no_password)
+num_fed_shares_sent.value \(.nextcloud.shares.num_fed_shares_sent)
+num_fed_shares_received.value \(.nextcloud.shares.num_fed_shares_received)
 
-# dbsize
-echo "multigraph nextcloud_dbsize_$CLEANDOMAIN"
-echo "db_size.value $DBSIZE"
+multigraph nextcloud_dbsize_'"${CLEANDOMAIN}"'
+db_size.value \(.server.database.size)
 
-# apps
-echo "multigraph nextcloud_apps_$CLEANDOMAIN"
-print_json_data "$APPS" num_installed num_updates_available
+multigraph nextcloud_apps_'"${CLEANDOMAIN}"'
+num_installed.value \(.nextcloud.system.apps.num_installed)
+num_updates_available.value \(.nextcloud.system.apps.num_updates_available)
+"' \
+	| sed 's/ null$/ U/'

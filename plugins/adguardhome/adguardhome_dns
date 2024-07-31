@@ -1,0 +1,219 @@
+#!/usr/bin/env sh
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+adguardhome - Monitor dns queries
+
+=head1 APPLICABLE SYSTEMS
+
+AdGuardHome instances
+
+=head1 CONFIGURATION
+
+On a low traffic AdGuardHome instance you may want to lower 
+querylog_size_memory parameter in AdGuardHome configuration, otherwise 
+there won't be enough data for munin graphs.
+
+ log      - Querylog file of AdGuardHome
+ interval - Interval of munin cronjob in minutes
+ binary   - Path to AdGuardHome binary
+
+ [adguardhome_dns]
+ env.log /opt/AdGuardHome/data/querylog.json
+ env.interval 5
+ env.binary /opt/AdGuardHome/AdGuardHome
+
+=head1 AUTHOR
+
+Copyright (C) 2020 Sebastian L. (https://momou.ch)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+RECORDS="A AAAA ANY CNAME MX NS NXDOMAIN PTR SIG SOA SRV TXT"
+CLIENTS="dns doh dot doq"
+
+case $1 in
+
+    autoconf)
+        if [ -x "${binary:-/opt/AdGuardHome/AdGuardHome}" ]; then
+            if [ -z "$(command -v AdGuardHome)" ]; then
+                echo "no (AdGuardHome not found)"
+                exit 0
+            else
+                echo "yes"
+                exit 0
+            fi
+        else
+            echo "no (/opt/AdGuardHome/AdGuardHome not found)"
+            exit 0
+        fi
+        ;;
+
+   config)
+        echo "multigraph adguardhome_queries"
+        echo "graph_title AdGuardHome - DNS Queries"
+        echo "graph_info DNS Queries made over AdGuardHome"
+        echo "graph_args -Y -A -l 0"
+        echo "graph_category network"
+        echo "graph_vlabel queries"
+        echo "queries.label Queries"
+        echo "queries.info All queries"
+        echo "queries.min 0"
+        echo "blocked.label Blocked"
+        echo "blocked.info Blocked queries by filterlist"
+        echo "blocked.min 0"
+        echo "parental.label Parental"
+        echo "parental.info Blocked by parental filter"
+        echo "parental.min 0"
+        echo "safesearch.label Safe search"
+        echo "safesearch.info Filtered for safe searching"
+        echo "safesearch.min 0"
+        echo "safebrowsing.label Safe browsing"
+        echo "safebrowsing.info Filtered for safe browsing"
+        echo "safebrowsing.min 0"
+        echo "multigraph adguardhome_avgproc"
+        echo "multigraph adguardhome_query_types"
+        echo "graph_title AdGuardHome - Query types"
+        echo "graph_info Query types made by AdGuardHome"
+        echo "graph_vlabel query types"
+        echo "graph_args -Y -A -l 0"
+        echo "graph_category network"
+        for KEY in $RECORDS; do
+                echo "$KEY.label $KEY"
+                echo "$KEY.info $KEY"
+                echo "$KEY.min 0"
+        done
+        echo "multigraph adguardhome_client_protos"
+        echo "graph_title AdGuardHome - Client protocols"
+        echo "graph_info Client protocols used on AdGuardHome"
+        echo "graph_vlabel client protocols"
+        echo "graph_args -A -Y -l 0"
+        echo "graph_category network"
+        for KEY in $CLIENTS; do
+		echo "$KEY.label $KEY"
+		echo "$KEY.info $KEY"
+		echo "$KEY.min 0"
+	done
+        echo "multigraph adguardhome_avgproc"
+        echo "graph_title AdGuardHome - Processing time (ms)"
+        echo "graph_info Average processing time of queries in miliseconds"
+        echo "graph_vlabel average processing (ms)"
+        echo "graph_args -A -Y -l 0"
+        echo "graph_category network"
+        echo "avgproc.label Average processing time (ms)"
+        echo "avgproc.info Average processing time in miliseconds"
+        echo "avgproc.min 0"
+        exit 0
+
+        ;;
+
+esac
+
+INTERVAL=$(date -d "${interval:-5} minutes ago" +%FT%H:%M)
+
+if [ ! -f "${log:-"/opt/AdGuardHome/data/querylog.json"}" ]; then
+
+	for VALUE in queries blocked safesearch safebrowsing parental "$RECORDS" "$CLIENTS" avgproc; do
+		export $VALUE="U"
+	done
+	for KEY in $RECORDS; do
+		export $KEY="U"
+	done
+
+	for KEY in $CLIENTS; do
+		if [ $KEY = "dns" ]; then
+			export $KEY="U"
+		else
+			export $KEY="U"
+		fi
+	done
+
+else
+
+	LOGDATA=$(sed -ne "s/^\\(.*\\)\\($INTERVAL\\)/\\1\\2/p" "${log:-"/opt/AdGuardHome/data/querylog.json"}")
+
+fi
+
+if [ -z "$LOGDATA" ]; then
+
+	for VALUE in queries blocked safesearch safebrowsing parental "$RECORDS" "$CLIENTS" avgproc; do
+		export $VALUE="0"
+	done
+
+	for KEY in $RECORDS; do
+		export $KEY="0"
+	done
+
+	for KEY in $CLIENTS; do
+		if [ $KEY = "dns" ]; then
+			export $KEY="0"
+		else
+			export $KEY="0"
+		fi
+	done
+
+else
+
+	# See internal/filtering.go in AdGuardHome sources
+	# Reason 0 = NotFilteredNotFound
+	# Reason 1 = NotFilteredAllowList
+	# Reason 2 = NotFilteredError
+	# Reason 3 = FilteredBlockList
+	# Reason 4 = FilteredSafeBrowsing
+	# Reason 5 = FilteredParental
+	# Reason 6 = FilteredInvalid
+	# Reason 7 = FilteredSafeSearch
+	# Reason 8 = FilteredBlockedService
+	queries=$(echo "$LOGDATA" | grep -o \"QT\": | wc -l)
+	blocked=$(echo "$LOGDATA" | grep -o '\"Reason\":[3,5,8]' | wc -l)
+	safesearch=$(echo "$LOGDATA" | grep -o \"Reason\":7 | wc -l)
+	safebrowsing=$(echo "$LOGDATA" | grep -o \"Reason\":4 | wc -l)
+	parental=$(echo "$LOGDATA" | grep -o \"Reason\":5 | wc -l)
+
+	for KEY in $RECORDS; do
+		export $KEY="$(echo "$LOGDATA" | grep -o \"QT\":\"$KEY\" | wc -l)"
+	done
+
+	for KEY in $CLIENTS; do
+		if [ $KEY = "dns" ]; then
+			export $KEY="$(echo "$LOGDATA" | grep -o  \"CP\":\"\" | wc -l)"
+		else
+			export $KEY="$(echo "$LOGDATA" | grep -o  \"CP\":\"$KEY\" | wc -l)"
+		fi
+	done
+
+	avgproc=$(echo "$LOGDATA" | grep -Po '\"Elapsed\":[0-9]+' | sed "s/\"Elapsed\"://g" | awk -v "count=0" '{ total += $0/1000000; count++ } END { print total/count }')
+
+fi
+
+echo "multigraph adguardhome_queries"
+echo "queries.value $queries"
+echo "blocked.value $blocked"
+echo "safesearch.value $safesearch"
+echo "safebrowsing.value $safebrowsing"
+echo "parental.value $parental"
+echo "multigraph adguardhome_query_types"
+for KEY in $RECORDS; do
+        echo "$KEY.value $(eval echo \$"$KEY")"
+done
+echo "multigraph adguardhome_client_protos"
+for KEY in $CLIENTS; do
+        echo "$KEY.value $(eval echo \$"$KEY")"
+done
+echo "multigraph adguardhome_avgproc"
+echo "avgproc.value $avgproc"

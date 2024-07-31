@@ -1,0 +1,300 @@
+#!/usr/bin/perl -w
+# -*- mode: cperl; cperl-indent-level: 8; -*-
+
+=head1 NAME
+
+chrony_ - Wildcard plugin to monitor chrony statistics for a
+particular remote NTP source
+
+=head1 CONFIGURATION
+
+This is a wildcard plugin. The wildcard suffix in the symlink is the
+hostname, IPv4, or IPv6 address of the NTP sources that you want to
+monitor. The IP address must be one which appears in C<chronyc sources>
+output. If given a hostname, it must resolve to an IP address which
+appears in C<chronyc -n sources> output; this plugin will try all of the A or
+AAAA records returned. If you use a dynamic association method, such
+as "pool" or one of the broadcast or multicast methods, this plugin
+will probably not work very well for you, as your NTP sources could be
+changing frequently.
+
+Examples:
+
+=over
+
+=item chrony_time.example.com
+
+=item chrony_203.0.113.1
+
+=item chrony_2001:db8::1
+
+=back
+
+Plugin configuration parameters
+
+# path to the crhonyc executable when it is not in the default path
+env.chronycpath /usr/local/bin/chronyc
+
+# graphlimit sets the horizontal axis for seconds and PPM the
+# displayed range is from -graphlimit to +graphlimit
+env.graphlimit 1.0
+
+=head1 AUTHOR
+
+Based on the similar ntp_ wildcard plugin of which the original author
+unknown and which was rewritten by Kenyon Ralph
+<kenyon@kenyonralph.com>.
+
+Adopted for chronyc and modified by Olaf Kolkman. 
+(https://github.com/Kolkman)
+
+=head1 LICENSE
+
+GPL2
+
+=head1 VERSION
+
+ VERSION 0.1.1 - 2 Nov 2020
+
+
+=head1 MAGIC MARKERS
+Used by munin-node-configure.
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+
+=head1 KNOWN ISSUES
+
+The plugin will only work with 'external' sources. It will not recognize the names of internal refclocks.
+
+
+=cut
+
+use English qw( -no_match_vars );
+use strict;
+use warnings;
+
+
+my $retNetIP;
+my $retNetDNS;
+my $retDataVal;
+BEGIN{
+	# Import the namespaces for symbols used globally below
+	if (! eval "require Net::IP;") {
+		$retNetIP = "Net::IP";
+	}else{
+		Net::IP->import();
+	}
+
+	if (! eval "require Net::DNS;") {
+		$retNetDNS = "Net::DNS";
+	}
+
+	if (! eval "require Data::Validate::IP;") {
+		$retDataVal = "Data::Validate::IP";
+	}else{
+		Data::Validate::IP->import();
+	}
+
+
+}
+
+
+
+my $chronyc = $ENV{'chronycpath'} || `which chronyc`;
+my $graphlimit = $ENV{'graphlimit'} || 1.0;
+
+
+if ($ARGV[0] and $ARGV[0] eq "autoconf") {
+        `$chronyc help >/dev/null 2>/dev/null`;
+        if ($CHILD_ERROR eq "0") {
+		if ($retNetIP || $retNetDNS || $retDataVal){
+			print "no (missing perl libraries: ";
+			print $retNetIP . " " if $retNetIP;
+			print $retNetDNS . " " if $retNetDNS;
+			print $retDataVal . " " if $retDataVal;
+			print ")\n";
+		}
+                if (`$chronyc -n sources | wc -l` > 0) {
+                        print "yes\n";
+                        exit 0;
+                } else {
+                        print "no (chronyc sources returned no sources)\n";
+                        exit 0;
+                }
+        } else {
+                print "no (chronyc not found)\n";
+                exit 0;
+        }
+}
+
+if ($ARGV[0] and $ARGV[0] eq "suggest") {
+        foreach my $line (`$chronyc -n sources`) {
+                if ($line =~ m/^??\s+\S+\s+\d+/) {
+                        my (undef, $peer_addr , undef, undef, undef, undef, undef, undef, undef) = split(/\s+/, $line);
+                        unless (( $peer_addr eq "0.0.0.0") ){
+				my $hostname;
+				if (is_ip($peer_addr) and  $hostname = `$chronyc sourcename $peer_addr`){
+					print $hostname;
+				}else{
+					# Bit of a last resort, not sure if this path is ever triggered.
+					my $resolver = Net::DNS::Resolver->new;
+					$resolver->tcp_timeout(5);
+					$resolver->udp_timeout(5);
+					my $query = $resolver->search($peer_addr, "PTR");
+					if ($query) {
+						foreach my $rr ($query->answer) {
+							if ("PTR" eq $rr->type) {
+								print $hostname=$rr->ptrdname."\n";
+							}
+						}
+					}
+				}
+				print $peer_addr."\n" unless $hostname;
+			}
+
+                }
+        }
+        exit 0;
+}
+
+
+$0 =~ /chrony_(.+)*$/;
+my $name = $1;
+
+die "No hostname or IP address provided" unless defined $name;
+
+if ($ARGV[0] and $ARGV[0] eq "config") {
+        print "graph_title CHRONY statistics for source $name\n";
+        print "graph_args --base 1000 --vertical-label (seconds,ppm) --lower-limit -$graphlimit --upper-limit $graphlimit --rigid \n";
+        print "graph_category time\n";
+        print "freq.label Frequency (ppm) \n";
+        print "freq.cdef freq,1,*\n";
+        print "freqsk.label Freq Skew (ppm)\n";
+        print "freqsk.cdef freqsk,1,*\n";
+        print "offset.label Offset (sx10)\n";
+        print "offset.cdef offset,10,*\n";
+        print "stddev.label Std Deviation (sx100)\n";
+        print "stddev.cdef stddev,100,*\n";
+        exit 0;
+}
+
+my $srcadr;
+my $freq;
+my $freqsk;
+my $offset;
+my $stddev;
+my @associations = `$chronyc -n sourcestats`;
+
+foreach my $line (@associations) {
+	if ($line =~ m/^??\s+\S+\s+\d+/) {
+		( $srcadr , undef, undef, undef, $freq, $freqsk, $offset, $stddev) = split(/\s+/, $line);
+                last if lc($srcadr) eq lc($name);
+		next unless is_ip($srcadr);
+		# the sourcename comes with a bonus newline
+		last if (lc($name."\n") eq lc (`$chronyc sourcename $srcadr`)) 
+        }
+}
+
+my $matched = 0;
+my $sourcename="";
+
+if ( is_ip($srcadr) ) {
+	$sourcename=`$chronyc sourcename $srcadr`;
+	chop($sourcename);
+};
+
+
+if (is_ip($srcadr) and (lc($srcadr) ne lc($name)) and (lc($name) ne lc ($sourcename)) ){
+	my @addresses;
+	my $resolver = Net::DNS::Resolver->new;
+	$resolver->tcp_timeout(5);
+	$resolver->udp_timeout(5);
+	my $query = $resolver->search($name, "AAAA");
+
+	if ($query) {
+		foreach my $rr ($query->answer) {
+			if ("AAAA" eq $rr->type) {
+				push(@addresses, new Net::IP($rr->address));
+			}
+		}
+	}
+
+	$query = $resolver->search($name, "A");
+	if ($query) {
+		foreach my $rr ($query->answer) {
+			if ("A" eq $rr->type) {
+				push(@addresses, new Net::IP($rr->address));
+			}
+		}
+	}
+
+      ASSOCS: foreach my $line (@associations) {
+		if ($line =~ m/^??\s+\S+\s+\d+/) {
+			( $srcadr , undef, undef, undef, $freq, $freqsk, $offset, $stddev) = split(/\s+/, $line);
+			next unless is_ip($srcadr);
+			my $srcadr_ip = new Net::IP($srcadr);
+		      ADDRS: foreach my $addr (@addresses) {
+
+				if (defined($srcadr_ip->overlaps($addr)) and $srcadr_ip->overlaps($addr) == $IP_IDENTICAL) {
+					$matched = 1;
+					last ASSOCS;
+				}
+			}
+		}
+	}
+}
+
+
+
+
+
+if (lc($srcadr) ne lc($name) and  lc($name) ne lc ($sourcename) and $matched == 0) {
+	die "$name is not a peer of this chronyd";
+}
+
+if ($offset =~ /(.?\d+)(\S+)/){
+	$offset=$1*1e-3 if $2 eq "ms";
+ 	$offset=$1*1e-6 if $2 eq "us";
+ 	$offset=$1*1e-9 if $2 eq "ns";
+}
+
+if ($stddev =~ /(\d+)(\S+)/){
+	$stddev=$1*1e-3 if $2 eq "ms";
+ 	$stddev=$1*1e-6 if $2 eq "us";
+ 	$stddev=$1*1e-9 if $2 eq "ns";
+}
+
+
+
+
+
+
+print <<"EOT";
+freq.value $freq
+freqsk.value $freqsk
+offset.value $offset
+stddev.value $stddev
+EOT
+
+exit 0;
+
+# vim:syntax=perl
+
+#  (c) 2020 Olaf Kolkman
+#  (c) ???? Kenyon Ralph
+#  (c) ???? ????????????
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; version 2 dated June, 1991.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License along
+#  with this program; if not, write to the Free Software Foundation, Inc.,
+#  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.

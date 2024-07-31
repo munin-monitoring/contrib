@@ -91,8 +91,18 @@ if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" )
 	}
 
 	my $ua = LWP::UserAgent->new(timeout => $timeout);
-
+	my $defaultAgent = $ua->agent;
 	foreach my $url (keys %URLS) {
+		if ($URLS{$url}{agent}) {
+			$ua->agent($URLS{$url}{agent});
+		} else {
+			$ua->agent($defaultAgent);
+		}
+		if ($URLS{$url}{proxy}) {
+			$ua->proxy(['http', 'ftp'], $URLS{$url}{proxy});
+		} else {
+			$ua->proxy(['http', 'ftp'], undef);
+		}
 		my $response = $ua->request(HTTP::Request->new('GET',$URLS{$url}{'url'}));
                 if ($response->is_success) {
                 	next;

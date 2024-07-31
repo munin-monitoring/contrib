@@ -35,6 +35,7 @@
 
 import pymongo
 from operator import itemgetter
+from os import getenv
 
 settings_host = '127.0.0.1'
 settings_port = 27017
@@ -44,6 +45,7 @@ settings_db = 'admin'
 settings_user = ''
 settings_password = ''
 settings_ignoredb = {}
+settings_graph_category = getenv('graph_category', 'db')
 
 typeIndex = {}
 typeIndex['collcount'] = {}
@@ -52,7 +54,7 @@ typeIndex['collcount']['title'] = 'per collection document count'
 typeIndex['collcount']['yaxis'] = 'documents'
 typeIndex['collcount']['base'] = '1000'
 typeIndex['collcount']['scale'] = '--logarithmic -l1'
-typeIndex['collcount']['category'] = 'db'
+typeIndex['collcount']['category'] = settings_graph_category
 
 typeIndex['collsize'] = {}
 typeIndex['collsize']['index'] = 'size'
@@ -60,7 +62,7 @@ typeIndex['collsize']['title'] = 'per collection data size'
 typeIndex['collsize']['yaxis'] = 'Byte'
 typeIndex['collsize']['base'] = '1024'
 typeIndex['collsize']['scale'] = '--logarithmic -l1 --units=si'
-typeIndex['collsize']['category'] = 'db'
+typeIndex['collsize']['category'] = settings_graph_category
 
 typeIndex['avgsize'] = {}
 typeIndex['avgsize']['index'] = 'avgObjSize'
@@ -68,7 +70,7 @@ typeIndex['avgsize']['title'] = 'average object size'
 typeIndex['avgsize']['yaxis'] = 'Byte'
 typeIndex['avgsize']['base'] = '1024'
 typeIndex['avgsize']['scale'] = '--logarithmic --units=si'
-typeIndex['avgsize']['category'] = 'db'
+typeIndex['avgsize']['category'] = settings_graph_category
 
 typeIndex['storage'] = {}
 typeIndex['storage']['index'] = 'storageSize'
@@ -76,7 +78,7 @@ typeIndex['storage']['title'] = 'per collection storage size'
 typeIndex['storage']['yaxis'] = 'Byte'
 typeIndex['storage']['base'] = '1024'
 typeIndex['storage']['scale'] = '--logarithmic -l1 --units=si'
-typeIndex['storage']['category'] = 'db'
+typeIndex['storage']['category'] = settings_graph_category
 
 typeIndex['indexsize'] = {}
 typeIndex['indexsize']['index'] = 'totalIndexSize'
@@ -84,7 +86,7 @@ typeIndex['indexsize']['title'] = 'per collection index size'
 typeIndex['indexsize']['yaxis'] = 'Byte'
 typeIndex['indexsize']['base'] = '1024'
 typeIndex['indexsize']['scale'] = '--logarithmic -l 1 --units=si'
-typeIndex['indexsize']['category'] = 'db'
+typeIndex['indexsize']['category'] = settings_graph_category
 
 
 def getCollstats(graphtype):
@@ -139,7 +141,7 @@ def doConfig(base, graphtype):
             print("graph_title MongoDB " + typeIndex[graphtype]['title'] + " for database " + d)
             print("graph_args --base " + typeIndex[graphtype]['base'] + " " + typeIndex[graphtype]['scale'])
             print("graph_vlabel " + typeIndex[graphtype]['yaxis'])
-            print("graph_category db")
+            print("graph_category %s" % settings_graph_category)
         print("%s_%s.label %s" % (graphtype, k, k))
         print("%s_%s.min 0" % (graphtype, k))
         print("%s_%s.draw LINE1" % (graphtype, k))
@@ -170,6 +172,10 @@ if __name__ == "__main__":
         settings_password = environ['password']
     if 'ignoredb' in environ:
         settings_ignoredb = environ['ignoredb'].split(',')
+    if 'mongodb_uri' in environ:
+        settings_mongodb_uri = environ['mongodb_uri']
+    if 'MONGO_DB_URI' in environ:
+        settings_mongodb_uri = environ['MONGO_DB_URI']
     m = re.search('^(.*)_([a-zA-Z0-9]*)$', path.basename(argv[0]))
     if len(argv) < 2:
         doData(m.group(1), m.group(2))

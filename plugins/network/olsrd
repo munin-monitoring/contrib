@@ -35,14 +35,13 @@ Collect basic information about the neighbours of an OLSR node:
 
 This plugin works with the following python interpreters:
 
-    * Python 2
     * Python 3
     * micropython (e.g. OpenWrt)
 
 
 =head1 VERSION
 
-  0.4
+  0.5
 
 
 =head1 AUTHOR
@@ -84,7 +83,7 @@ MICROPYTHON_BIN=$(which micropython || true)
 if [ -n "$MICROPYTHON_BIN" ]; then
     "$MICROPYTHON_BIN" -X "heapsize=${MICROPYTHON_HEAP:-512k}" "$0" "$@"
 else
-    python "$0" "$@"
+    python3 "$0" "$@"
 fi
 exit $?
 
@@ -93,14 +92,78 @@ exit $?
 true <<EOF
 """
 
-
-import os
-import os.path
-import socket
 import sys
 
+try:
+    from os import linesep
+except ImportError:
+    linesep = "\n"
 
-plugin_version = "0.4"
+# import "os" from standard library or "uos" from micropython
+try:
+    from os import access, getenv, getpid, system, unlink
+except ImportError:
+    from uos import getenv, system, unlink
+    import ffi
+    libc = ffi.open('libc.so')
+    getpid = libc.func("i", "getpid", "")
+    access_raw = libc.func("i", "access", "si")
+
+    def access(path, mode):
+        return access_raw(path, mode) == 0
+
+# import "socket" from standard library or "usocket" from micropython
+try:
+    import socket
+    from socket import socket as socket_cls
+    from socket import create_connection
+except ImportError:
+    import usocket as socket
+    from usocket import socket as orginal_socket_cls
+
+    def _resolve_addr(addr):
+        if isinstance(addr, (bytes, bytearray)):
+            return addr
+        family = socket.AF_INET
+        if len(addr) != 2:
+            family = socket.AF_INET6
+        if addr[0] == "":
+            a = "0.0.0.0" if family == socket.AF_INET else "::"
+        else:
+            a = addr[0]
+        a = socket.getaddrinfo(a, addr[1], family)
+        return a[0][4]
+
+    def create_connection(addr, timeout=None, source_address=None):
+        s = socket_cls()
+        ais = socket.getaddrinfo(addr[0], addr[1])
+        for ai in ais:
+            try:
+                s.connect(ai[4])
+                return s
+            except OSError:
+                pass
+
+    class socket_cls(orginal_socket_cls):
+        def accept(self):
+            s, addr = super().accept()
+            addr = socket.sockaddr(addr)
+            return (s, (socket.inet_ntop(addr[0], addr[1]), addr[2]))
+
+        def bind(self, addr):
+            return super().bind(_resolve_addr(addr))
+
+        def connect(self, addr):
+            return super().connect(_resolve_addr(addr))
+
+        def sendall(self, *args):
+            return self.send(*args)
+
+        def sendto(self, data, addr):
+            return super().sendto(data, _resolve_addr(addr))
+
+
+plugin_version = "0.5"
 
 LQ_GRAPH_CONFIG = """
 graph_title     {title}
@@ -124,7 +187,7 @@ lq{suffix}.min 0
 """
 
 NEIGHBOUR_COUNT_CONFIG = """
-graph_title     Reachable nodes via neighbours
+graph_title     Reachable nodes via OLSR neighbours
 graph_vlabel    Number of Nodes
 graph_category  network
 graph_info      Count the number of locally known routes passing through each direct neighbour. \
@@ -151,9 +214,6 @@ graph_scale     no
 
 NEIGHBOUR_PING_VALUE = """neighbour_{host_fieldname}.label {host}"""
 
-# micropython (as of 2015) does not contain "os.linesep"
-LINESEP = getattr(os, "linesep", "\n")
-
 
 def get_clean_fieldname(name):
     chars = []
@@ -166,9 +226,9 @@ def get_clean_fieldname(name):
 
 
 def query_olsrd_txtservice(section=""):
-    host = os.getenv("OLSRD_HOST", "localhost")
-    port = os.getenv("OLSRD_TXTINFO_PORT", "2006")
-    conn = socket.create_connection((host, port), 1.0)
+    host = getenv("OLSRD_HOST") or "127.0.0.1"
+    port = getenv("OLSRD_TXTINFO_PORT") or "2006"
+    conn = create_connection((host, port), 1.0)
     try:
         # Python3
         request = bytes("/%s" % section, "ascii")
@@ -182,8 +242,12 @@ def query_olsrd_txtservice(section=""):
     for line in fconn.readlines():
         if in_header:
             if not line.strip():
-                # the empty line marks the end of the header
+                # the empty line marks the end of the http-like header
                 in_header = False
+            elif line.startswith("Table:"):
+                # since olsr v0.9.6 there is no http-like header anymore
+                in_header = False
+                in_body_count = 1
             # ignore header lines (nothing to be done)
         else:
             # skip the first two body lines - they are table headers
@@ -258,23 +322,23 @@ def get_olsr_links():
 
 def _read_file(filename):
     try:
-        return open(filename, "r").read().split(LINESEP)
+        return open(filename, "r").read().split(linesep)
     except OSError:
         return []
 
 
 def get_ping_times(hosts):
-    tempfile = "/tmp/munin-olsrd-{pid}.tmp".format(pid=os.getpid())
+    tempfile = "/tmp/munin-olsrd-{pid}.tmp".format(pid=getpid())
     command = ('for host in {hosts}; do echo -n "$host "; '
                'ping -c 1 -w 1 "$host" | grep /avg/ || echo; done >{tempfile}'
                .format(hosts=" ".join(hosts), tempfile=tempfile))
     # micropython supports only "os.system" (as of 2015) - thus we need to stick with it for
     # OpenWrt.
-    returncode = os.system(command)
+    returncode = system(command)
     if returncode != 0:
         return {}
     lines = _read_file(tempfile)
-    os.unlink(tempfile)
+    unlink(tempfile)
     # example output for one host:
     #   192.168.2.41 round-trip min/avg/max = 4.226/4.226/4.226 ms
     result = {}
@@ -293,11 +357,11 @@ def do_config():
     # link quality with regard to neighbours
     print("multigraph olsr_link_quality")
     print(LQ_GRAPH_CONFIG.format(title="OLSR Link Quality"))
-    for link in links:
+    for index, link in enumerate(links):
         print(LQ_VALUES_CONFIG.format(
             label=link["remote"],
             suffix="_{host}".format(host=get_clean_fieldname(link["remote"])),
-            draw_type="AREASTACK"))
+            draw_type=("AREA" if index == 0 else "AREASTACK")))
     for link in links:
         print("multigraph olsr_link_quality.host_{remote}"
               .format(remote=get_clean_fieldname(link["remote"])))
@@ -315,7 +379,7 @@ def do_config():
 
     # neighbour ping
     print("multigraph olsr_neighbour_ping")
-    print(NEIGHBOUR_PING_CONFIG.format(title="Ping time of neighbours"))
+    print(NEIGHBOUR_PING_CONFIG.format(title="Ping time of OLSR neighbours"))
     for link in links:
         print(NEIGHBOUR_PING_VALUE
               .format(host=link["remote"], host_fieldname=get_clean_fieldname(link["remote"])))
@@ -375,11 +439,11 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         if sys.argv[1] == "config":
             do_config()
-            if os.getenv("MUNIN_CAP_DIRTYCONFIG") == "1":
+            if getenv("MUNIN_CAP_DIRTYCONFIG") == "1":
                 do_fetch()
             sys.exit(0)
         elif sys.argv[1] == "autoconf":
-            if os.path.exists(os.getenv('OLSRD_BIN_PATH', '/usr/sbin/olsrd')):
+            if access(getenv('OLSRD_BIN_PATH') or '/usr/sbin/olsrd', 0):
                 print('yes')
             else:
                 print('no')
@@ -392,7 +456,7 @@ if __name__ == "__main__":
             pass
         else:
             # unknown argument
-            sys.stderr.write("Unknown argument{eol}".format(eol=LINESEP))
+            sys.stderr.write("Unknown argument{eol}".format(eol=linesep))
             sys.exit(1)
 
     do_fetch()

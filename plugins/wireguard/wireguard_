@@ -1,0 +1,200 @@
+#!/bin/bash
+# -*- sh -*-
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+wireguard_ - Wildcard-plugin to monitor wireguard peer count and traffic
+
+=head1 CONFIGURATION
+
+The following environment variables are used by this plugin
+
+ active_threshold_m       - threshold to count the connection as inactive (default 3 minutes)
+
+The plugin needs to run as root to be able to call the wg show
+command.  This is configured like this:
+
+  [wireguard_*]
+      user root
+
+This is a wildcard plugin which by default monitors all wireguard
+interfaces. To monitor a single wireguard interface, link
+wireguard_<interface> to this file. For example,
+
+  ln -s /usr/share/munin/plugins/wireguard_ \
+        /etc/munin/plugins/wireguard_wg0
+
+will monitor wg0.
+
+
+=head1 AUTHOR
+
+Original author unknown
+
+Copyright (C) 2024 pimlie
+
+=head1 LICENSE
+
+MIT
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+INTERFACE=${0##*wireguard_}
+
+function wg_exists {
+    command -v wg >/dev/null
+    return $?
+}
+
+function wg_interfaces {
+    show_all=$1
+    for iface in $(wg show interfaces | tr " " "\n"); do
+        # Filter interfaces if needed
+        if [ -z "$show_all" ] \
+            && [ -n "$INTERFACE" ] \
+            && [ "$INTERFACE" != "$iface" ]; then
+            continue
+        fi
+
+        echo "$iface"
+    done
+}
+
+function wg_peers {
+    iface=$1
+
+    # From wg 8 manpage:
+    # If dump is specified, then several lines are printed; the first contains
+    # in order separated by tab: private-key, public-key, listen-port, fwmark.
+    # Subsequent lines are printed for each peer and contain in order separated
+    # by tab: public-key, preshared-key, endpoint, allowed-ips, latest-handshake,
+    # transfer-rx, transfer-tx, persistent-keepalive
+    for line in $(wg show "$iface" dump | tr '\t' ';'); do
+        column_count=$(awk -F';' '{print NF}' <<< "$line")
+        if [ "$column_count" -ne 8 ]; then
+            # First line of dump contains interface info, ignore this line
+            continue
+        fi
+
+        echo "$line"
+    done
+}
+
+function safe_peer_id {
+    unsafe_peer_id=$1
+
+    echo "${unsafe_peer_id//[.:]/_}"
+}
+
+case $1 in
+    autoconf)
+        if wg_exists; then
+            echo "yes"
+        else
+            echo "no (wg command not found)"
+        fi
+        ;;
+    suggest)
+        if wg_exists; then
+            wg_interfaces 1
+        fi
+        ;;
+    config)
+        # Config for peer count per interface graph
+        cat << EOF
+multigraph wireguard_peercount
+graph_title interface peer count
+graph_vlabel Number of peers
+graph_category wireguard
+graph_info This graph shows the number of peers per wireguard interface
+EOF
+
+        for iface in $(wg_interfaces); do
+            # List config for all interfaces
+            cat <<EOF
+pc_on_$iface.label $iface
+pc_on_$iface.info Interface $iface
+pc_on_$iface.min 0
+apc_on_$iface.label Active on $iface
+apc_on_$iface.info Active on $iface
+apc_on_$iface.min 0
+EOF
+        done
+        echo ""
+
+        for iface in $(wg_interfaces); do
+            # Config for peer traffic
+            cat <<EOF
+multigraph wireguard_peertraffic_$iface
+graph_title $iface peer traffic
+graph_args --base 1000
+graph_vlabel bits in (-) / out (+) per ${graph_period}
+graph_category wireguard
+graph_info This graph shows the traffic per peer on the $iface wireguard interface. Traffic is shown in bits per second.
+
+EOF
+
+            for line in $(wg_peers "$iface"); do
+                read -r -a peer <<< "$(echo "$line" | tr ';' ' ')"
+		        peer_id=$(safe_peer_id "${peer[2]}")
+
+                # List config for up/down values for each peer
+                cat <<EOF
+down_${peer_id}.label received
+down_${peer_id}.type DERIVE
+down_${peer_id}.graph no
+down_${peer_id}.cdef down_${peer_id},8,*
+down_${peer_id}.min 0
+up_${peer_id}.label ${peer[2]}
+up_${peer_id}.type DERIVE
+up_${peer_id}.negative down_${peer_id}
+up_${peer_id}.cdef up_${peer_id},8,*
+up_${peer_id}.min 0
+
+EOF
+            done
+        done
+        ;;
+    *)
+        # Collect & print current monitoring values
+        echo "multigraph wireguard_peercount"
+	active_threshold=$(date --date="${active_threshold_m:-3} min ago" +%s)
+
+        for iface in $(wg_interfaces); do
+            iface_peers=$(wg_peers "$iface")
+
+            peer_count=$(wc -l <<< "$iface_peers")
+            active_peer_count=$(awk -F";" -v threshold=$active_threshold '$5 > threshold' <<< "$iface_peers" | wc -l)
+
+            echo "pc_on_$iface.value $peer_count"
+            echo "apc_on_$iface.value $active_peer_count"
+        done
+        echo ""
+
+        for iface in $(wg_interfaces); do
+            echo "multigraph wireguard_peertraffic_$iface"
+
+            for line in $(wg_peers "$iface"); do
+                read -r -a peer <<< "$(echo "$line" | tr ';' ' ')"
+
+                peer_id=$(safe_peer_id "${peer[2]}")
+
+                echo "down_${peer_id}.value ${peer[5]}"
+                echo "up_${peer_id}.value ${peer[6]}"
+            done
+
+            echo ""
+        done
+        ;;
+esac

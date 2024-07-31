@@ -26,6 +26,58 @@ The following environment variables are used by this plugin:
  type - "GAUGE" or "DERIVE"
          default: GAUGE
 
+ warning  - defines a general warning level
+            default: UNSET (meaning not configured -> no warnings)
+
+ critical - defines a general critical level
+            default: UNSET (meaning not configured -> no criticals)
+
+ logpass_warning  - defines a warning level for successful password logins
+                    default: same value as "warning", so effectively UNSET (not
+                    configured) if "warning" also is not configured
+
+ logpass_critical - defines a critical level for successful password logins
+                    default: same value as "critical", so effectively UNSET (not
+                    configured) if "critical" also is not configured
+
+ logpasspam_warning   - same as "logpass_warning" but for successful PAM logins
+
+ logpasspam_critical  - same as "logpass_critical" but for successful PAM logins
+
+ logkey_warning   - same as "logpass_warning" but for successful PublicKey
+                    logins
+
+ logkey_critical  - same as "logpass_critical" but for successful PublicKey
+                    logins
+
+ noid_warning   - same as "logpass_warning" but for attempts with no user
+                  identification
+
+ noid_critical  - same as "logpass_critical" but for attempts with no user
+                  identification
+
+ rootattempt_warning  - same as "logpass_warning" but for root login attempts
+
+ rootattempt_critical - same as "logpass_critical" but for root login attempts
+
+ invusr_warning   - same as "logpass_warning" but for invalid user login
+                    attempts
+
+ invusr_critical  - same as "logpass_critical" but for invalid user login
+                    attempts
+
+ nordns_warning - same as "logpass_warning" but for connections with reverse
+                  DNS for peer
+
+ nordns_critical  - same as "logpass_critical" but for connections with reverse
+                    DNS for peer
+
+ breakin_warning  - same as "logpass_warning" but for potential breakin
+                    attempts
+
+ breakin_critical - same as "logpass_critical" but for potential breakin
+                    attempts
+
 If the "logfile" environment variable is set to "journald" the sshd
 logs are read from journald, filtering on program "sshd". The filtering
 may be changed using "journalctlargs".
@@ -58,6 +110,15 @@ Config example with journald and type DERIVE:
       env.logfile journald
       env.type DERIVE
 
+Config example setting general warning and critical values and specific ones for
+root login attempts:
+
+  [sshd_log]
+      env.warning 100
+      env.critical 500
+      env.rootattempt_warning 1
+      env.rootattempt_critical 100
+
 =head1 MAGIC MARKERS
 
   #%# family=auto
@@ -65,10 +126,13 @@ Config example with journald and type DERIVE:
 
 =head1 AUTHOR
 
-Revision 2.0  2016/11/11 15:42:00  Thomas Riccardi
-Revision 1.2  2010/03/19 15:03:00  pmoranga
-Revision 1.1  2009/04/26 23:28:00  ckujau
-Revision 1.0  2009/04/22 22:00:00  zlati
+Copyright (C) 2009 zlati
+
+Copyright (C) 2009 ckujau
+
+Copyright (C) 2010 pmoranga
+
+Copyright (C) 2016 Thomas Riccardi
 
 =cut
 
@@ -82,6 +146,26 @@ Revision 1.0  2009/04/22 22:00:00  zlati
 LOG=${logfile:-/var/log/secure}
 JOURNALCTL_ARGS=${journalctlargs:-_COMM=sshd}
 TYPE=${type:-GAUGE}
+
+WARNING=${warning:-UNSET}
+CRITICAL=${critical:-UNSET}
+LOGPASS_WARNING=${logpass_warning:-$WARNING}
+LOGPASS_CRITICAL=${logpass_critical:-$CRITICAL}
+LOGPASSPAM_WARNING=${logpasspam_warning:-$WARNING}
+LOGPASSPAM_CRITICAL=${logpasspam_critical:-$CRITICAL}
+LOGKEY_WARNING=${logkey_warning:-$WARNING}
+LOGKEY_CRITICAL=${logkey_critical:-$CRITICAL}
+NOID_WARNING=${noid_warning:-$WARNING}
+NOID_CRITICAL=${noid_critical:-$CRITICAL}
+ROOTATTEMPT_WARNING=${rootattempt_warning:-$WARNING}
+ROOTATTEMPT_CRITICAL=${rootattempt_critical:-$CRITICAL}
+INVUSR_WARNING=${invusr_warning:-$WARNING}
+INVUSR_CRITICAL=${invusr_critical:-$CRITICAL}
+NORDNS_WARNING=${nordns_warning:-$WARNING}
+NORDNS_CRITICAL=${nordns_critical:-$CRITICAL}
+BREAKIN_WARNING=${breakin_warning:-$WARNING}
+BREAKIN_CRITICAL=${breakin_critical:-$CRITICAL}
+
 if [ "$LOG" = "journald" -a "$TYPE" = "DERIVE" ]; then
         TYPE=ABSOLUTE
 fi
@@ -115,34 +199,82 @@ if [ "$1" = "config" ]; then
         echo 'LogPass.label Successful password logins'
         echo 'LogPass.min 0'
         echo 'LogPass.type' "$TYPE"
+        if [ "$LOGPASS_WARNING" != "UNSET" ]; then
+                echo 'LogPass.warning' "$LOGPASS_WARNING"
+        fi
+        if [ "$LOGPASS_CRITICAL" != "UNSET" ]; then
+                echo 'LogPass.critical' "$LOGPASS_CRITICAL"
+        fi
 
         echo 'LogPassPAM.label Successful login via PAM'
         echo 'LogPassPAM.min 0'
         echo 'LogPassPAM.type' "$TYPE"
+        if [ "$LOGPASSPAM_WARNING" != "UNSET" ]; then
+                echo 'LogPassPAM.warning' "$LOGPASSPAM_WARNING"
+        fi
+        if [ "$LOGPASSPAM_CRITICAL" != "UNSET" ]; then
+                echo 'LogPassPAM.critical' "$LOGPASSPAM_CRITICAL"
+        fi
 
         echo 'LogKey.label Successful PublicKey logins'
         echo 'LogKey.min 0'
         echo 'LogKey.type' "$TYPE"
+        if [ "$LOGKEY_WARNING" != "UNSET" ]; then
+                echo 'LogKey.warning' "$LOGKEY_WARNING"
+        fi
+        if [ "$LOGKEY_CRITICAL" != "UNSET" ]; then
+                echo 'LogKey.critical' "$LOGKEY_CRITICAL"
+        fi
 
         echo 'NoID.label No identification from user'
         echo 'NoID.min 0'
         echo 'NoID.type' "$TYPE"
+        if [ "$NOID_WARNING" != "UNSET" ]; then
+                echo 'NoID.warning' "$NOID_WARNING"
+        fi
+        if [ "$NOID_CRITICAL" != "UNSET" ]; then
+                echo 'NoID.critical' "$NOID_CRITICAL"
+        fi
 
         echo 'rootAttempt.label Root login attempts'
         echo 'rootAttempt.min 0'
         echo 'rootAttempt.type' "$TYPE"
+        if [ "$ROOTATTEMPT_WARNING" != "UNSET" ]; then
+                echo 'rootAttempt.warning' "$ROOTATTEMPT_WARNING"
+        fi
+        if [ "$ROOTATTEMPT_CRITICAL" != "UNSET" ]; then
+                echo 'rootAttempt.critical' "$ROOTATTEMPT_CRITICAL"
+        fi
 
         echo 'InvUsr.label Invalid user login attempts'
         echo 'InvUsr.min 0'
         echo 'InvUsr.type' "$TYPE"
+        if [ "$INVUSR_WARNING" != "UNSET" ]; then
+                echo 'InvUsr.warning' "$INVUSR_WARNING"
+        fi
+        if [ "$INVUSR_CRITICAL" != "UNSET" ]; then
+                echo 'InvUsr.critical' "$INVUSR_CRITICAL"
+        fi
 
         echo 'NoRDNS.label No reverse DNS for peer'
         echo 'NoRDNS.min 0'
         echo 'NoRDNS.type' "$TYPE"
+        if [ "$NORDNS_WARNING" != "UNSET" ]; then
+                echo 'NoRDNS.warning' "$NORDNS_WARNING"
+        fi
+        if [ "$NORDNS_CRITICAL" != "UNSET" ]; then
+                echo 'NoRDNS.critical' "$NORDNS_CRITICAL"
+        fi
 
         echo 'Breakin.label Potential Breakin Attempts'
         echo 'Breakin.min 0'
         echo 'Breakin.type' "$TYPE"
+        if [ "$BREAKIN_WARNING" != "UNSET" ]; then
+                echo 'Breakin.warning' "$BREAKIN_WARNING"
+        fi
+        if [ "$BREAKIN_CRITICAL" != "UNSET" ]; then
+                echo 'Breakin.critical' "$BREAKIN_CRITICAL"
+        fi
 
         exit 0
 fi

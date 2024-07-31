@@ -1,20 +1,69 @@
-#!/bin/sh
+#!/bin/bash
 : << =cut
 =head1 NAME
 
 letsencrypt_weekly - monitor the number of CSRs by week for /etc/letsencrypt/csr/
 
+=head1 DESCRIPTION
+
+This plugin monitors the number of certificate signing requests (CSRs) done with letsencrypt's certbot.
+It tries to determine the registered domain and reports the number also per registered domain.
+For people running multiple servers this enables aggregation of those numbers across multiple nodes in the munin.conf
+
 see https://letsencrypt.org/docs/rate-limits/
 
-= head1 CONFIGURATION
+=head1 CONFIGURATION
 
 You can configure the warning and critical limits for this plugin:
 
-[letsencrypt_weekly]
-# warn when more than 40 certificates have been requested in the last week
-env.warning :40
-# critical when more than 50 certificates have been requested in the last week
-env.critical :50
+  [letsencrypt_weekly]
+  # run with a user that is able to read /etc/letsencrypt/csr/ files and at least list directories in
+  # /etc/letsencrypt/archive/
+  user root
+  # warn when more than 40 certificates have been requested in the last week
+  env.warning :40
+  # critical when more than 50 certificates have been requested in the last week
+  env.critical :50
+
+=head1 AGGREGATION CONFIGURATION
+
+When you have multiple servers issuing certficates for the same registered domain you can aggregate the numbers with
+this config:
+
+  [letsencrypt]
+      update no
+      contact no
+      # summarize letsencrypt_weekly from all hosts
+      # see http://guide.munin-monitoring.org/en/latest/example/graph/aggregated-stack.html#extract-from-munin-conf
+      # see http://guide.munin-monitoring.org/en/latest/example/graph/aggregate.html#example-plugin-aggregate
+
+      letsencrypt_weekly_example_com.update no
+      letsencrypt_weekly_example_com.graph_args --base 1000 -l 0
+      letsencrypt_weekly_example_com.graph_category security
+      letsencrypt_weekly_example_com.graph_period week
+      letsencrypt_weekly_example_com.graph_title Letsencrypt example.com certificate requests
+      letsencrypt_weekly_example_com.graph_vlabel requests / week
+      letsencrypt_weekly_example_com.graph_scale no
+      letsencrypt_weekly_example_com.graph_total Total
+      letsencrypt_weekly_example_com.weekly.label Certificates for example.com
+      letsencrypt_weekly_example_com.weekly.draw AREA
+      letsencrypt_weekly_example_com.weekly.stack \
+            line1_name=example.com;line1-host-name.example.com:letsencrypt_weekly.example_com_weekly \
+            line2_name=example.com;line2-host-name.example.com:letsencrypt_weekly.example_com_weekly
+
+      letsencrypt_renewal_weekly_example_com.update no
+      letsencrypt_renewal_weekly_example_com.graph_args --base 1000 -l 0
+      letsencrypt_renewal_weekly_example_com.graph_category security
+      letsencrypt_renewal_weekly_example_com.graph_period week
+      letsencrypt_renewal_weekly_example_com.graph_title Letsencrypt example.com certificate renewal requests
+      letsencrypt_renewal_weekly_example_com.graph_vlabel requests / week
+      letsencrypt_renewal_weekly_example_com.graph_scale no
+      letsencrypt_renewal_weekly_example_com.graph_total Total
+      letsencrypt_renewal_weekly_example_com.weekly.label Certificate renewals for example.com
+      letsencrypt_renewal_weekly_example_com.weekly.draw AREA
+      letsencrypt_renewal_weekly_example_com.weekly.stack \
+            line1_name=example.com;line1-host-name.example.com:letsencrypt_weekly.example_com_renewal_weekly \
+            line2_name=example.com;line2-host-name.example.com:letsencrypt_weekly.example_com_renewal_weekly
 
 =head1 Dependencies
 
@@ -22,8 +71,7 @@ Dependencies: openssl
 
 =head1 AUTHOR
 
-andreas perhab - andreas.perhab@wt-io-it.at
-https://www.wt-io-it.at/
+andreas perhab - andreas.perhab@wt-io-it.at (https://www.wt-io-it.at/)
 
 =head1 LICENSE
 
@@ -42,6 +90,19 @@ warning=${warning:-:40}
 critical=${critical:-:50} #letsencrypt doesn't allow more than 50 certificates per week
 # see https://letsencrypt.org/docs/rate-limits/
 
+
+get_files_and_domains() {
+	find /etc/letsencrypt/csr/ -mtime -7 -type f -print0 2>/dev/null | xargs -0 -I pem bash -c 'echo -n "pem "; openssl req -in pem -text -noout | grep DNS: | sed "s/.*DNS://g"'
+}
+
+get_registered_domains() {
+	local REMOVE_PATH
+	local TRIM_SUBDOMAIN
+	REMOVE_PATH='s,.*/,,;'
+	TRIM_SUBDOMAIN='s/.*\.\([a-z0-9-]\+\.[a-z]\+\)/\1/;'
+	find /etc/letsencrypt/archive/ -mindepth 1 -maxdepth 1 | sed "$REMOVE_PATH $TRIM_SUBDOMAIN" | sort | uniq
+}
+
 if [ "$1" = "autoconf" ] ; then
 	test -d /etc/letsencrypt/csr/ && echo "yes" || echo "no (directory /etc/letsencrypt/csr does not exist)"
 elif [ "$1" = "config" ] ; then
@@ -50,13 +111,42 @@ elif [ "$1" = "config" ] ; then
 	echo "graph_vlabel Number of certificates"
 	echo "graph_category security"
 	echo "letsencrypt_weekly.label Letsencrypt certificates last week"
-	print_warning "letsencrypt_weekly"
-	print_critical "letsencrypt_weekly"
+	for domain in $(get_registered_domains); do
+		key=${domain//[-.]/_}
+		echo "${key}_weekly.label $domain"
+		print_warning "${key}_weekly"
+		print_critical "${key}_weekly"
+		echo "${key}_renewal_weekly.label $domain renewals"
+	done
 elif [ "$1" = "" ] ; then
-	if existing_certs=$(find /etc/letsencrypt/csr/ -mtime -7 -type f 2>/dev/null); then
-		value=$(echo "$existing_certs" | wc -l)
+	if existing_renewal_requests=$(get_files_and_domains); then
+		value=$(echo "$existing_renewal_requests" | grep -v '^$' -c)
 	else
 		value="U"
 	fi
 	echo "letsencrypt_weekly.value $value"
+	values=""
+	for domain in $(get_registered_domains); do
+		key=${domain//[-.]/_}
+		if [ "$values" != "" ] ; then
+			values="$values\n${key}_weekly.value 0\n${key}_renewal_weekly.value 0"
+		else
+			values="${key}_weekly.value 0\n${key}_renewal_weekly.value 0"
+		fi
+	done
+	while read -r file_domain; do
+		file=${file_domain% *}
+		domain=${file_domain#* }
+		registered_domain_key=$(echo "$domain" | sed 's/.*\.\([a-z0-9-]\+\.[a-z]\+\)/\1/;s/[-.]/_/g')
+		previous_certs=$(find "/etc/letsencrypt/archive/$domain" -name 'cert*.pem' -not -cnewer "$file" | wc -l)	
+		if [ "$previous_certs" -gt 0 ] ; then
+			value_key="${registered_domain_key}_renewal_weekly.value "
+		else
+			value_key="${registered_domain_key}_weekly.value "
+		fi
+		old_value=$(echo -e "$values" | grep "$value_key" | sed 's/.* //g')
+		value=$((old_value + 1))
+		values=${values//$value_key$old_value/$value_key$value}
+	done < <(get_files_and_domains)
+	echo -e $"$values"
 fi

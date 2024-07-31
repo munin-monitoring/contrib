@@ -1,0 +1,151 @@
+#!/bin/sh
+: << =cut
+
+=head1 NAME
+
+systemd_mem - Plugin to graph the memory usage of multiple systemd services as reported by systemctl
+
+=head1 CONFIGURATION
+
+The environment variable "services" is used to provide a space separated list of services to graph.
+
+Example:
+   [systemd_mem]
+   env.services apache2 tomcat9 mysql
+
+env.services defaults to "munin-node".
+
+As an alternative you can use all_services to display memory for all running systemd services
+   [systemd_mem]
+   env.all_services true
+
+all_services shows memory for all running units of type service.
+
+=head1 VERSION
+
+1.1
+
+=head1 AUTHORS
+
+Paul Alexandrow <paul@alexandrow.org>
+Andreas Perhab <a.perhab@wtioit.at>
+
+=head1 LICENSE
+
+Copyright 2021 Paul Alexandrow, paul@alexandrow.org
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+and associated documentation files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+=head1 MAGIC MARKERS
+
+#%# family=auto
+#%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+# at least on debian stretch services report this as unlimited / unknown value (2^64)
+# see https://lists.freedesktop.org/archives/systemd-devel/2018-July/041092.html
+SYSTEMD_UNLIMITED="18446744073709551615"
+
+all_services=${all_services:-}
+services=${services:-"munin-node"}
+
+for_services() {
+    if [ "$all_services" != "" ]; then
+        systemctl --type=service --state=running --no-pager --no-legend --output=short-precise \
+          | awk '{sub(".service$", "", $1); print $1}'
+    else
+        echo "$services"
+    fi
+}
+
+output_config() {
+    echo "graph_title Systemd Service Memory Usage"
+    echo "graph_info Memory usage for selected services as reported by systemctl"
+    echo "graph_vlabel bytes"
+    echo "graph_args --base 1024 --lower-limit 0"
+    echo "graph_category memory"
+    for service in $(for_services); do
+        clean_name="$(clean_fieldname "$service")"
+        description=$(systemctl show "$service" --property=Description | cut -d '=' -f 2-)
+        warning=$(systemctl show "$service" --property=MemoryHigh | cut -d '=' -f 2)
+        critical=$(systemctl show "$service" --property=MemoryMax | cut -d '=' -f 2)
+        if [ "$critical" = "infinity" ] || [ "$critical" = "$SYSTEMD_UNLIMITED" ] ; then
+            critical=$(systemctl show "$service" --property=MemoryLimit | cut -d '=' -f 2)
+        fi
+        printf "%s.label %s\n" "$clean_name" "$description"
+        printf "%s.info memory usage\n" "$clean_name"
+        if [ "$warning" != "infinity" ] && [ "$warning" != "$SYSTEMD_UNLIMITED" ] ; then
+          printf "%s.warning %s\n" "$clean_name" "$warning"
+        fi
+        if [ "$critical" != "infinity" ] && [ "$critical" != "$SYSTEMD_UNLIMITED" ] ; then
+          printf "%s.critical %s\n" "$clean_name" "$critical"
+        fi
+    done
+}
+
+output_values() {
+    for service in $(for_services); do
+        clean_name="$(clean_fieldname "$service")"
+        usage=$(systemctl show "$service" --property=MemoryCurrent | cut -d '=' -f 2)
+        if [ "$usage" = "[not set]" ] || [ "$usage" = "$SYSTEMD_UNLIMITED" ]; then
+            usage="U"
+        fi
+        printf  "%s.value %s\n" "$clean_name" "$usage"
+    done
+}
+
+output_usage() {
+    printf >&2 "%s - munin plugin to graph memory usage for systemd services\n" "${0##*/}"
+    printf >&2 "Usage: %s [config]\n" "${0##*/}"
+}
+
+output_autoconf() {
+    if command -v systemctl >/dev/null 2>&1; then
+       echo "yes"
+    else
+        echo "no (systemctl not found)";
+    fi
+}
+
+case $# in
+    0)
+        output_values
+        ;;
+    1)
+        case $1 in
+            autoconf)
+                output_autoconf
+                ;;
+            config)
+                output_config
+                ;;
+            fetch)
+                output_values
+                ;;
+            *)
+                output_usage
+                exit 1
+                ;;
+        esac
+        ;;
+    *)
+        output_usage
+        exit 1
+        ;;
+esac

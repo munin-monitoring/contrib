@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to monitor chrony NTP daemon status.
+
+=head1 NAME
+
+chrony_status - monitor chrony NTP daemon status
+
+=head1 APPLICABLE SYSTEMS
+
+Systems with chrony installed.
+
+=head1 CONFIGURATION
+
+Needs to be run as the user running chronyd (or root) in order to access the
+Unix domain socket which chronyc uses to communicate with chronyd. Example
+/etc/munin/plugin-conf.d/chrony_status.conf:
+
+    [chrony_status]
+    user _chrony
+
+=head1 INTERPRETATION
+
+Monitor Chrony's stratum value (with warning), time offset, network delay,
+clock frequency, packets received, and packets dropped. It would be very easy
+to monitor all of Chrony's values, but IMHO they aren't needed. The most
+important information is stratum, giving "synced" / "not synced" value.
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import os
+import subprocess
+import sys
+
+GRAPHS = [
+    'stratum',
+    'systime',
+    'delay',
+    'frequency',
+    'serverstats',
+]
+
+SERVERSTATS = [
+    'received',
+    'dropped',
+    'command_received',
+    'command_dropped',
+    'client_log_records_dropped',
+    'nts_ke_connections_accepted',
+    'nts_ke_connections_dropped',
+    'authenticated_packets',
+]
+
+FIELDS = {
+    'stratum': 'Stratum',
+    'systime': 'System time',
+    'delay': 'Root delay',
+    'frequency': 'Frequency',
+    'received': 'NTP packets received',
+    'dropped': 'NTP packets dropped',
+    'command_received': 'Command packets received',
+    'command_dropped': 'Command packets dropped',
+    'client_log_records_dropped': 'Client log records dropped',
+    'nts_ke_connections_accepted': 'NTS-KE connections accepted',
+    'nts_ke_connections_dropped': 'NTS-KE connections dropped',
+    'authenticated_packets': 'Authenticated NTP packets',
+}
+
+
+def get_values():
+    """Run `chronyc tracking` and `chronyc serverstats` and parse their output.
+
+    Return: list of (label, value, description)
+    """
+    try:
+        output = subprocess.run(['chronyc', '-m', 'tracking', 'serverstats'],
+                                stdout=subprocess.PIPE, check=False,
+                                encoding='utf-8', errors='ignore')
+    except FileNotFoundError:
+        return {}
+    lines = output.stdout.splitlines()
+    ret = {}
+    for label, prefix in FIELDS.items():
+        for line in lines:
+            if line.startswith(prefix):
+                value = line.split(':', 1)[1].split()[0]
+                if ' slow' in line:
+                    value = -float(value)
+                ret[label] = value
+    return ret
+
+
+def config():
+    """Print plugin config."""
+    # pylint: disable=too-many-statements
+    print('multigraph chrony_stratum')
+    print('graph_title Chrony stratum')
+    print('graph_vlabel stratum')
+    print('graph_category time')
+    print('graph_args --base 1000 --lower-limit 0')
+    print('stratum.label Stratum')
+    print('stratum.warning 1:9')
+    # Use long unknown_limit to allow server reboot without Munin warning.
+    # Clock doesn't drift fast so there's no hurry with warning.
+    print('stratum.unknown_limit 15')
+
+    print('multigraph chrony_systime')
+    print('graph_title Chrony system time offset')
+    print('graph_vlabel seconds')
+    print('graph_category time')
+    print('graph_args --base 1000')
+    print('systime.label System time offset to NTP time')
+
+    print('multigraph chrony_delay')
+    print('graph_title Chrony network delay')
+    print('graph_vlabel seconds')
+    print('graph_category time')
+    print('graph_args --base 1000')
+    print('delay.label Network path delay')
+
+    print('multigraph chrony_frequency')
+    print('graph_title Chrony clock frequency error')
+    print('graph_vlabel ppm')
+    print('graph_category time')
+    print('graph_args --base 1000')
+    print('frequency.label Local clock frequency error')
+
+    print('multigraph chrony_serverstats')
+    print('graph_title Chrony server statistics')
+    print('graph_vlabel Packets/${graph_period}')
+    print('graph_category time')
+    print('graph_args --base 1000')
+    print('received.label Packets received')
+    print('received.type DERIVE')
+    print('received.min 0')
+    print('dropped.label Packets dropped')
+    print('dropped.type DERIVE')
+    print('dropped.min 0')
+    print('command_received.label Command packets received')
+    print('command_received.type DERIVE')
+    print('command_received.min 0')
+    print('command_dropped.label Command packets dropped')
+    print('command_dropped.type DERIVE')
+    print('command_dropped.min 0')
+    print('client_log_records_dropped.label Client log records dropped')
+    print('client_log_records_dropped.type DERIVE')
+    print('client_log_records_dropped.min 0')
+    print('nts_ke_connections_accepted.label NTS-KE connections accepted')
+    print('nts_ke_connections_accepted.type DERIVE')
+    print('nts_ke_connections_accepted.min 0')
+    print('nts_ke_connections_dropped.label NTS-KE connections dropped')
+    print('nts_ke_connections_dropped.type DERIVE')
+    print('nts_ke_connections_dropped.min 0')
+    print('authenticated_packets.label Authenticated NTP packets')
+    print('authenticated_packets.type DERIVE')
+    print('authenticated_packets.min 0')
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch()
+
+
+def fetch():
+    """Print values."""
+    values = get_values()
+    for graph in GRAPHS:
+        print(f'multigraph chrony_{graph}')
+        if graph == 'stratum' and values[graph] == '0':
+            print(f'{graph}.value U')
+        elif graph == 'serverstats':
+            for stat in SERVERSTATS:
+                if stat in values:
+                    print(f'{stat}.value {values[stat]}')
+        else:
+            print(f'{graph}.value {values[graph]}')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if get_values() else 'no (chrony is not running)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config()
+    else:
+        fetch()

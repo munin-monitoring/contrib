@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to monitor NGINX using nginx-module-vts statistics.
+
+=head1 NAME
+
+nginx_vts - monitor NGINX web server
+
+=head1 APPLICABLE SYSTEMS
+
+Systems with NGINX running and nginx-module-vts loaded.
+See https://github.com/vozlt/nginx-module-vts for more information.
+
+=head1 CONFIGURATION
+
+This shows the default configuration of this plugin. You can override
+the status URL.
+
+  [nginx_vts]
+  env.url http://localhost/status/format/json
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import json
+import os
+import pathlib
+import sys
+import time
+import unicodedata
+import requests
+
+
+RESPONSES = ('1xx', '2xx', '3xx', '4xx', '5xx')
+
+
+def safe_label(name):
+    """Return safe label name."""
+    # Convert ä->a as isalpha('ä') is true
+    value = unicodedata.normalize('NFKD', name)
+    value = value.encode('ASCII', 'ignore').decode('utf-8')
+
+    # Remove non-alphanumeric chars
+    value = ''.join(char.lower() if char.isalnum() else '_' for char in value)
+
+    # Add leading "_" if it starts with number
+    if value[:1].isnumeric():
+        return f'_{value}'
+    return value
+
+
+def cleanup_name(name):
+    """Remove "unix:/" etc from name."""
+    if name.startswith('unix:'):
+        name = name[5:]
+    if name.startswith('/'):
+        name = name.split('/')[-1]
+    return name
+
+
+def read_data():
+    """Get vts statistics from NGINX."""
+    try:
+        response = requests.get(os.getenv(
+            'url', 'http://localhost/status/format/json'))
+        data = response.json()
+    except (OSError, ValueError, TypeError):
+        return {}
+
+    # Rename serverZones to vhost, easier to output graphs
+    data['vhost'] = data.get('serverZones', {})
+
+    # Group filters to single
+    data['filter'] = {}
+    for value in data.get('filterZones', {}).values():
+        data['filter'].update(value)
+
+    # Group upstreams to single
+    data['upstream'] = {}
+    for value in data.get('upstreamZones', {}).values():
+        for server in value:
+            data['upstream'][server['server']] = server
+
+    # Merge old seens from state file. Expire them in 30d if not seen
+    # again. NGINX restart will clear response items so keep track of
+    # old seen ones.
+    state = pathlib.Path(os.getenv('MUNIN_PLUGSTATE')) / 'nginx_vts.json'
+    try:
+        previous = json.loads(state.read_text('utf-8'))
+    except (FileNotFoundError, ValueError):
+        previous = {}
+
+    now = int(time.time())
+    for topic in ('vhost', 'filter', 'upstream'):
+        for key in data[topic]:
+            data[topic][key]['_last_seen'] = now
+        for key in previous.get(topic, {}):
+            if (
+                    key not in data[topic] and
+                    previous[topic][key]['_last_seen'] > now - 86400 * 30
+            ):
+                data[topic][key] = previous[topic][key]
+
+    state.write_text(json.dumps(data, sort_keys=True, indent=4), 'utf-8')
+    return data
+
+
+def config_group(data, topic):
+    """Print vhost/filter/upstream config."""
+    if not data[topic]:
+        return
+
+    # Same as nginx_requests plugin, but per vhost + total
+    print(f'multigraph nginx_vts_{topic}_requests')
+    print(f'graph_title NGINX {topic} requests')
+    print('graph_category webserver')
+    print('graph_vlabel Requests per ${graph_period}')
+    print('graph_args --base 1000')
+    for host in sorted(data[topic]):
+        if host == '*':
+            host = 'Total'
+        safe = safe_label(host)
+        print(f'{safe}.type DERIVE')
+        print(f'{safe}.min 0')
+        print(f'{safe}.label {cleanup_name(host)}')
+    print()
+
+    # Similar to if_ plugin
+    print(f'multigraph nginx_vts_{topic}_traffic')
+    print(f'graph_title NGINX {topic} traffic')
+    print('graph_category webserver')
+    print('graph_vlabel bits in (-) / out (+) per ${graph_period}')
+    for host in sorted(data[topic]):
+        if host == '*':
+            host = 'Total'
+        safe = safe_label(host)
+        print(f'{safe}_down.label {host} received')
+        print(f'{safe}_down.type DERIVE')
+        print(f'{safe}_down.graph no')
+        print(f'{safe}_down.cdef {safe}_down,8,*')
+        print(f'{safe}_down.min 0')
+        print(f'{safe}_up.label {cleanup_name(host)[:15]}')
+        print(f'{safe}_up.type DERIVE')
+        print(f'{safe}_up.negative {safe}_down')
+        print(f'{safe}_up.cdef {safe}_up,8,*')
+        print(f'{safe}_up.min 0')
+    print()
+
+
+def config(data):
+    """Print plugin config."""
+    # Same as nginx_status plugin
+    print('multigraph nginx_vts_status')
+    print('graph_title NGINX status')
+    print('graph_category webserver')
+    print('graph_vlabel Connections')
+    print('graph_args --base 1000')
+    print('active.label Active connections')
+    print('reading.label Reading')
+    print('writing.label Writing')
+    print('waiting.label Waiting')
+    print()
+
+    # Response codes
+    print('multigraph nginx_vts_responses')
+    print('graph_title NGINX responses')
+    print('graph_category webserver')
+    print('graph_vlabel Responses per ${graph_period}')
+    print('graph_args --base 1000')
+    for host in data['vhost']:
+        if host != '*':
+            continue
+        for key in RESPONSES:
+            safe = safe_label(key)
+            print(f'{safe}.type DERIVE')
+            print(f'{safe}.min 0')
+            print(f'{safe}.label Response {key}')
+    print()
+
+    config_group(data, 'vhost')
+    config_group(data, 'filter')
+    config_group(data, 'upstream')
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch(data)
+
+
+def fetch_group(data, topic):
+    """Print vhost/filter/upstream values."""
+    if not data[topic]:
+        return
+
+    print(f'multigraph nginx_vts_{topic}_requests')
+    for host, values in data[topic].items():
+        if host == '*':
+            host = 'Total'
+        safe = safe_label(host)
+        print(f'{safe}.value {values["requestCounter"]}')
+
+    print(f'multigraph nginx_vts_{topic}_traffic')
+    for host, values in data[topic].items():
+        if host == '*':
+            host = 'Total'
+        safe = safe_label(host)
+        print(f'{safe}_up.value {values["outBytes"]}')
+        print(f'{safe}_down.value {values["inBytes"]}')
+
+
+def fetch(data):
+    """Print values."""
+    if 'connections' in data:
+        print('multigraph nginx_vts_status')
+        print(f'active.value {data["connections"]["active"]}')
+        print(f'reading.value {data["connections"]["reading"]}')
+        print(f'writing.value {data["connections"]["writing"]}')
+        print(f'waiting.value {data["connections"]["waiting"]}')
+
+    print('multigraph nginx_vts_responses')
+    sums = {key: 0 for key in RESPONSES}
+    for host, values in data['vhost'].items():
+        if host == '*':
+            continue
+        for key in sums:
+            sums[key] += values["responses"][key]
+    for key, value in sums.items():
+        safe = safe_label(key)
+        print(f'{safe}.value {value}')
+
+    fetch_group(data, 'vhost')
+    fetch_group(data, 'filter')
+    fetch_group(data, 'upstream')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if read_data() else 'no (no NGINX vts statistics)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config(read_data())
+    else:
+        fetch(read_data())

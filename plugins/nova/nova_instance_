@@ -1,20 +1,41 @@
-#!/usr/bin/env python
-#
-# Plugin to monitor status of Floating IPs in Nova
-#
-# To monitor instance states, link instance_states to this file.
-# E.g.
-#    ln -s /usr/share/munin/plugins/nova_instance_states /etc/munin/plugins/
-#
-# Needs following minimal configuration in plugin-conf.d/nova:
-#   [nova_*]
-#   user nova
-#
-# Magic markers
-#%# capabilities=autoconf suggest
-#%# family=auto
+#!/usr/bin/env python3
+"""
 
+=head1 NAME
+
+nova_instance_ - monitor status of Floating IPs in Nova
+
+
+=head1 CONFIGURATION
+
+
+To monitor instance states, link instance_states to this file.
+E.g.
+
+ ln -s /usr/share/munin/plugins/nova_instance_states /etc/munin/plugins/
+
+Needs following minimal configuration in plugin-conf.d/nova:
+
+ [nova_*]
+ user nova
+
+
+=head1 AUTHORS
+
+Copyright 2012 Mehdi Abaakouk <sileht@sileht.net>
+
+
+=head1 MAGIC MARKERS
+
+ #%# capabilities=autoconf suggest
+ #%# family=auto
+
+=cut
+"""
+
+import os
 import sys
+
 
 try:
     from nova import context
@@ -28,7 +49,7 @@ else:
     successful_import = True
 
 
-class InstanceState(object):
+class InstanceState:
     instance_counts = None
     states = None
 
@@ -45,9 +66,8 @@ class InstanceState(object):
 
         for instance in instances:
             i = dict(instance)
-            i['instance_type'] = i['type'] = instance_types.get(
-                                                 instance.instance_type_id,
-                                                '(unknown')
+            i['type'] = instance_types.get(instance.instance_type_id, '(unknown')
+            i['instance_type'] = i['type']
             val = cls.instance_counts.get(i[metric], 0)
             cls.instance_counts[i[metric]] = val + 1
         cls.states = cls.instance_counts.keys()
@@ -62,6 +82,7 @@ class InstanceState(object):
         InstanceState.init(metric)
         return cls.instance_counts
 
+
 def get_name(metric, code):
     if metric == "power_state":
         return power_state.name(code)
@@ -70,36 +91,39 @@ def get_name(metric, code):
     else:
         return code
 
+
 def print_config(metric):
     states = InstanceState.get_states(metric)
-    print 'graph_title Nova Instance %s' % metric
-    print 'graph_vlabel instances'
-    print 'graph_args --base 1000 --lower-limit 0'
-    print 'graph_category cloud'
-    print 'graph_scale no'
-    print 'graph_info This graph shows the number of instances by %s' % metric
+    print('graph_title Nova Instance %s' % metric)
+    print('graph_vlabel instances')
+    print('graph_args --base 1000 --lower-limit 0')
+    print('graph_category cloud')
+    print('graph_scale no')
+    print('graph_info This graph shows the number of instances by %s' % metric)
     for state in states:
-        print '%s.label %s' % (state, get_name(metric, state))
-        print '%s.draw LINE2' % state
-        print '%s.info %s IPs' % (state, state)
+        print('%s.label %s' % (state, get_name(metric, state)))
+        print('%s.draw LINE2' % state)
+        print('%s.info %s IPs' % (state, state))
 
 
 def print_values(metric):
     status = InstanceState.get_instance_counts(metric)
-    for (state, value) in status.iteritems():
-        print '%s.value %s' % (state, value)
+    for (state, value) in status.items():
+        print('%s.value %s' % (state, value))
+
 
 def print_suggest():
-    suggest = [ "vm_state",
-                "vcpus",
-                "task_state",
-                "root_gb",
-                "ephemeral_gb",
-                "power_state",
-                "memory_mb",
-                "instance_type_id",
-                ]
-    print "\n".join(suggest)
+    suggest = [
+        "vm_state",
+        "vcpus",
+        "task_state",
+        "root_gb",
+        "ephemeral_gb",
+        "power_state",
+        "memory_mb",
+        "instance_type_id",
+    ]
+    print(os.linesep.join(suggest))
 
 
 if __name__ == '__main__':
@@ -115,9 +139,9 @@ if __name__ == '__main__':
             print_suggest()
         elif argv[1] == 'autoconf':
             if not successful_import:
-                print 'no (failed import nova module)'
-                sys.exit(0)
+                print('no (failed import nova module)')
             else:
-                print 'yes'
+                print('yes')
+            sys.exit(0)
     elif successful_import:
         print_values(metric)

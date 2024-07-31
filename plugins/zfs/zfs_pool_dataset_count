@@ -1,0 +1,68 @@
+#!/bin/bash
+#%# family=auto
+
+: << EOF
+=head1 NAME
+
+zfs_pool_dataset_count - Outputs the count of zfs pools, datasets and snapshots.
+
+=head1 AUTHOR
+
+Michael Grote - git.mgrote.net
+
+=head1 LICENSE
+
+GPLv3 or later
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+EOF
+
+if [ "$1" = "autoconf" ]; then
+    if ! command -v zpool &> /dev/null; then
+        echo "no (zpool could not be found)"
+    else
+        echo "yes"
+    fi
+    exit 0
+fi
+
+
+# lese alle pools, sed löscht die erste zeile
+list_pools=$(zpool list | sed 1d)
+
+
+if [ "$1" = "config" ]; then
+  # https://superuser.com/questions/284187/bash-iterating-over-lines-in-a-variable
+  while read -r line; do
+    # setze label <pool>.label <pool> snapshots
+    echo "$line" | awk '{print $1"_snapshot.label " $1 " snapshots"}'
+    echo "$line" | awk '{print $1"_dataset.label " $1 " datasets"}'
+  done <<< "$list_pools"
+  echo 'pools.label pools'
+  # setze optionen
+  echo 'graph_title zfs -  pool, dataset and snapshot count' # Titelzeile
+  echo 'graph_vlabel count' # Text links, hochkant
+  echo 'graph_category fs' # Kategorie
+  echo "graph_printf %6.0lf"
+  echo "graph_args -l 0 --base 1000"
+  exit 0
+fi
+
+# lese jede Zeile der Variable $list
+# tue für jede Zeile
+# "echo" die Zeile, wende awk drauf, Spalte $1/$7
+while read -r line; do
+  echo pools.value "$(zpool list | sed 1d | wc -l)"
+  # setze poolnamen
+  poolname=$(echo "$line" | awk '{ print $1 }')
+  # zähle snapshots
+  echo "${poolname}_snapshot.value" "$(zfs list -r -t snapshot "$poolname" | sed 1d | wc -l)"
+  echo "$poolname""_dataset.value" "$(zfs list -r "$poolname" | sed 1d | wc -l)"
+done <<< "$list_pools"
+exit 0

@@ -184,8 +184,8 @@ int acquire() {
 			if (nif ++ < 0) { continue; }
 
 			char if_id[64];
-			uint_fast64_t r_bytes, r_packets, r_errs, r_drop, r_fifo, r_frame, r_compressed, r_multicast;
-			uint_fast64_t t_bytes, t_packets, t_errs, t_drop, t_fifo, t_frame, t_compressed, t_multicast;
+			unsigned long long r_bytes, r_packets, r_errs, r_drop, r_fifo, r_frame, r_compressed, r_multicast;
+			unsigned long long t_bytes, t_packets, t_errs, t_drop, t_fifo, t_frame, t_compressed, t_multicast;
 			sscanf(line, "%s"
 				" "
 				"%llu %llu %llu %llu %llu %llu %llu %llu"

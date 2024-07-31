@@ -1,10 +1,7 @@
 #!/bin/bash
 #
-# smtp_hello_ - munin plugin for measuring smtp hello response
 # Copyright (C) 2008 Marek Mahut <mmahut@fedoraproject.org>
-#
-# Usage:
-#       ln -s /usr/share/munin/plugins/smtp_hello_ /etc/munin/plugins/smtp_hello_mysmtpserver.example.com
+# Copyright (C) 2022 Andreas Perhab, WT-IO-IT GmbH <a.perhab@wtioit.at>
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -20,37 +17,227 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #
-#$log$
-#Revision 1.0  2008/12/15 17:21:58 Marek Mahut (mmahut)
-#Initial commit.
-#
-#%# family=auto
-#%# capabilities=autoconf
+
+: <<=cut
+
+=head1 NAME
+
+smtp_hello_ - Plugin for measuring smtp hello response time
+
+=head1 CONFIGURATION
+
+This plugin is intended to be symlinked with the host to monitor appended after the plugin name. e.g.
+   ln -s /usr/share/munin/plugins/smtp_hello_ /etc/munin/plugins/smtp_hello_mysmtpserver.example.com
+
+To use it you need to have the following requirements installed:
+
+   curl (with smtp support) or nc
+   time or bash with keyword time
+
+Only when running with curl this plugin is also able to check if the mailserver is responding properly. With nc just
+the time to connect is measured and no status reported.
+
+Parameters:
+
+=over 2
+
+    SMTP_PORTS      - Space seperated list of ports to check. For example "25 465 587" Default is "25".
+    SMTP_COMMAND    - SMTP command to use to test the connection. Default is "HELO localhost". For some mail servers it
+                      may be required to change this to e.g. "QUIT" or "HELP"
+    TIMEOUT_SECONDS - Timeout for the SMTP connection test. default is 120 (seconds)
+
+=back
+
+Example:
+
+=over 2
+
+    [smtp_hello_*]
+    env.SMTP_PORTS 25 465 587
+    env.SMTP_COMMAND HELO localhost
+    env.TIMEOUT_SECONDS 60
+
+=back
+
+Default warnings and criticals are as following:
+Emit a warning when we take more than half the configured timeout time (60s). Set to critical when we get more than 99%
+ of the timeout time (118s). Those are calculated as an integer, for timeouts with lower numbers also configure individual
+ warnings and criticals. The plugin also emits a warning when curl is not able to communicate properly with the SMTP
+ server.
+
+Different warnings and critical can be specified as following:
+
+=over 2
+
+    [smtp_hello_*]
+    # warn when any port doesn't respond within 20 seconds (note make sure to overwrite this for status)
+    env.warning :10
+    # warn when port 25 doesn't respond within 20 seconds
+    env.host_warning :20
+    # critical when port 25 doesn't respond within 60 seconds
+    env.host_critical :60
+    # any status code that is not zero should be a warning
+    env.status_warning 0:0
+    # warn when port 25 doesn't respond within 40 seconds
+    env.host_465_warning :40
+    # critical when port 465 doesn't respond within 60 seconds
+    env.host_465_critical :60
+    # any status code that is not zero should be a warning
+    env.status_465_warning 0:0
+
+=back
 
 
-host=`basename $0 | sed 's/^smtp_hello_//g'`
+ [postfix_mailqueue]
+    env.spooldir /var/spool/postfix
+
+=head1 AUTHOR
+
+Marek Mahut
+
+Copyright (C) 2008 Marek Mahut <mmahut@fedoraproject.org>
+Copyright (C) 2022 Andreas Perhab, WT-IO-IT GmbH <a.perhab@wtioit.at>
+
+=head1 LICENSE
+
+Gnu GPLv2
+
+SPDX-License-Identifier: GPL-2.0-or-later
+
+
+
+=head1 MAGIC MARKERS
+
+=begin comment
+
+These magic markers are used by munin-node-configure when installing
+munin-node.
+
+=end comment
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+if [ "${MUNIN_DEBUG:-0}" == "1" ]; then
+  set -x
+fi
+
+SMTP_COMMAND=${SMTP_COMMAND:-HELO localhost}
+SMTP_PORTS=${SMTP_PORTS:-25}
+TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-120}
+
+host=$(basename "$0" | sed 's/^smtp_hello_//g')
+
+time_executable=""
+if which time >/dev/null; then
+  # use time executable found in PATH
+  time_executable=$(which time)
+elif [ -x /usr/bin/time ]; then
+  # use time executable found in /usr/bin
+  time_executable="/usr/bin/time"
+fi
+if [ "$time_executable" != "" ]; then
+  function take_the_time() {
+    "$time_executable" -f "%e" "$@" 2>&1 | tail -n 1
+    return "${PIPESTATUS[0]}"
+  }
+elif { time echo; } >/dev/null 2>&1; then
+  # if we cannot find time executable but time keyword is successful we use the keyword
+  function take_the_time() {
+    # we use LC_ALL=C to force . as decimal separator on systems where LC_ is set to a language that uses ,
+    # to limit the effect of LC_ALL=C and TIMEFORMAT, as well as to be able to redirect stderr of the time keyword
+    # we use a subshell here
+    (
+      TIMEFORMAT='%R'
+      LC_ALL=C
+      time "$@" 1>/dev/null
+    ) 2>&1
+    return $?
+  }
+fi
+
+nc_executable=""
+if which nc >/dev/null; then
+  # use nc from PATH
+  nc_executable=$(which nc)
+elif [ -x /usr/bin/nc ]; then
+  # as fallback use /usr/bin/nc if found
+  nc_executable="/usr/bin/nc"
+fi
+
+if which curl >/dev/null && curl_version_info=$(curl --version) && [[ "$curl_version_info" == *" smtp "* ]]; then
+  curl_with_smtp_support=1
+fi
 
 if [ "$1" == "config" ]; then
 
-        echo "graph_title smtp response time"
-        echo "graph_vlabel response in sec"
-        echo "graph_period minute"
-        echo "graph_category Network"
-        echo "graph_args --base 1000 --lower-limit 0"
-        echo "host.label $host"
+  echo "graph_title $host smtp response time"
+  echo "graph_vlabel response in sec"
+  echo "graph_period minute"
+  echo "graph_category network"
+  echo "graph_args --base 1000 --lower-limit 0"
+  for port in $SMTP_PORTS; do
+    if [[ $port ]]; then
+      if [[ $port = "25" ]]; then
+        suffix=""
+      else
+        suffix="_$port"
+      fi
+      echo "host$suffix.label smtp port $port"
+
+      # default warning time begins at half the timeout
+      eval "export host${suffix}_warning=\${host${suffix}_warning:-:$((TIMEOUT_SECONDS / 2))}"
+      # default when we get values bigger than 99% of timeout we mark the value as critical
+      eval "export host${suffix}_critical=\${host${suffix}_critical:-:$((TIMEOUT_SECONDS * 99 / 100))}"
+      print_warning "host${suffix}"
+      print_critical "host${suffix}"
+      if [ "$curl_with_smtp_support" == "1" ]; then
+        # if we have curl, all non-zero exit codes indicate an error
+        eval "export status${suffix}_warning=\${status${suffix}_warning:-0:0}"
+        echo "status$suffix.label smtp port $port check status"
+        print_warning "status${suffix}"
+        print_critical "status${suffix}"
+      fi
+    fi
+  done
 
 elif [ "$1" == "autoconf" ]; then
 
-        if [ -x /usr/bin/time ] && [ -x /usr/bin/nc ]; then
-                echo "yes"
-        else
-                echo "no (/usr/bin/time or /usr/bin/nc missing)"
-        fi
-        exit 0
+  if [ "$take_the_time" != "" ] && [ -x "$nc_executable" ]; then
+    echo "yes"
+  else
+    echo "no (/usr/bin/time or /usr/bin/nc missing)"
+  fi
+  exit 0
 
 else
-
-        response=`echo HELO localhost | /usr/bin/time -f "%e" nc -C -w 120 $host 25 2>&1 | tail -n 1`
-        echo "host.value $response"
-
+  for port in $SMTP_PORTS; do
+    if [[ $port ]]; then
+      if [[ $port = "25" ]]; then
+        suffix=""
+      else
+        suffix="_$port"
+      fi
+      if [ "$curl_with_smtp_support" == "1" ]; then
+        value=$(take_the_time curl --silent -X "$SMTP_COMMAND" --max-time "$TIMEOUT_SECONDS" "smtp://$host:$port/")
+        status=$?
+      else
+        # Note: "HELO localhost" only works if the SMTP server terminates the connection when presenting the HELO line
+        # if you have troubles here, try installing curl (with smtp support), and we will use a proper smtp client
+        # implementation. alternatively you can also set the SMTP_COMMAND environment variable to QUIT
+        value=$(echo "$SMTP_COMMAND" | take_the_time "$nc_executable" -C -w "$TIMEOUT_SECONDS" "$host" "$port")
+        # with the simple echo command we would need to check a lot of conditions to determine a successful status
+        # if you want this feature, install curl instead
+        status=""
+      fi
+      echo "host$suffix.value $value"
+      if [ -n "$status" ]; then
+        echo "status$suffix.value $status"
+      fi
+    fi
+  done
 fi

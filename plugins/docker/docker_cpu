@@ -16,22 +16,38 @@ Root privilege required to execute docker command.
 1. Create a new file named "docker" inside the folder /etc/munin/plugin-conf.d/
 2. Docker file content:
 
-[docker_cpu]
-user root
+ [docker_cpu]
+ user root
+
+To enable warnings / critical for single containers you can define them like this to warn when
+the container starts using 80% of a CPU core and emit a critical when 100% is used:
+
+ [docker_cpu]
+ user root
+ env.my_container_warning :80
+ env.my_container_critical :100
+
+To enable warnings / critical for all containers based on the number of configured cpus you can set
+warning_percent and critical_percent as integers.
+
+ [docker_cpu]
+ user root
+ env.warning_percent 90
+ env.critical_percent 99
 
 =head1 MAGIC MARKERS
 
-  #%# family=auto
-  #%# capabilities=autoconf
+ #%# family=auto
+ #%# capabilities=autoconf
 
 =head1 VERSION
 
-  v.0.1
+ v.0.2
 
 =head1 AUTHOR
 
-Copyright (C) 2015 Samuel Cantero.
-Email: scanterog at gmail dot com
+Copyright (C) 2015 Samuel Cantero <scanterog at gmail dot com>
+Copyright (C) 2024 Andreas Perhab, WT-IO-IT GmbH <andreas.perhab@wt-io-it.at>
 
 =head1 LICENSE
 
@@ -54,8 +70,39 @@ if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
 
 $docker =~ s/\s+$//;
 
+my $nanoSecondsInSecond=1000000000;
 my @containers = split "\n" , `$docker ps --no-trunc=true`;
 my $result;
+
+sub print_warning {
+   my $name = $_[0];
+   my $ncpu;
+   my $type;
+   if (@_ > 1) {
+      $ncpu = $_[1];
+   }
+   if (@_ > 2) {
+      $type = $_[2];
+   } else {
+      $type = 'warning'
+   }
+   if ($ENV{$_[0].'_'.$type}) {
+      my @defined_warnings = split(/:/, $ENV{$name.'_'.$type});
+      for my $i (0 .. $#defined_warnings) {
+         if ($defined_warnings[$i]) {
+            $defined_warnings[$i] = $defined_warnings[$i] * $nanoSecondsInSecond;
+         }
+      }
+      print "${name}.${type} ".join(":", @defined_warnings)."\n";
+   } elsif ($ENV{$type.'_percent'} && $ncpu) {
+      my $percent_warning = ($ncpu * $ENV{$type.'_percent'} * $nanoSecondsInSecond);
+      print "${name}.${type} :$percent_warning\n";
+   }
+}
+
+sub print_critical {
+   print_warning($_[0], 0, 'critical')
+}
 
 for my $i (1 .. $#containers)
 {
@@ -81,11 +128,69 @@ for my $i (1 .. $#containers)
          push @result, {'name'=>$name, 'label'=>$label, 'total_cpu_ns'=>$total_cpu_ns, 'ncpu'=>$#ncpu};
       }
    }
+   elsif (open($file, '<', "/sys/fs/cgroup/system.slice/docker-$id.scope/cpu.stat"))
+   {
+      # handle cpu stats with cgroup v2
+      # hexdump -C /sys/fs/cgroup/system.slice/docker-01fc4fa4d6cf7ad66efabc818dd1d99cc51fd8cebf6ba2345988b145029df09a.scope/cpu.stat
+      # 00000000  75 73 61 67 65 5f 75 73  65 63 20 32 35 37 36 33  |usage_usec 25763|
+      # 00000010  37 34 31 0a 75 73 65 72  5f 75 73 65 63 20 32 30  |741.user_usec 20|
+      # 00000020  37 34 31 35 37 37 0a 73  79 73 74 65 6d 5f 75 73  |741577.system_us|
+      # 00000030  65 63 20 35 30 32 32 31  36 33 0a 6e 72 5f 70 65  |ec 5022163.nr_pe|
+      # 00000040  72 69 6f 64 73 20 30 0a  6e 72 5f 74 68 72 6f 74  |riods 0.nr_throt|
+      # 00000050  74 6c 65 64 20 30 0a 74  68 72 6f 74 74 6c 65 64  |tled 0.throttled|
+      # 00000060  5f 75 73 65 63 20 30 0a                           |_usec 0.|
+      # 00000068
+      my $total_cpu_ns = <$file>;
+      $total_cpu_ns =~ s/^usage_usec ([0-9]+).*/$1/;
+      $total_cpu_ns *= 1000;
+      close $file;
+      my $ncpu = 0;
+      if (open($file, '<', "/sys/fs/cgroup/system.slice/docker-$id.scope/cpu.max")) {
+         # compute ncpu for docker NanoCpus (docker compose: deploy.resources.limit.cpus: "1.0")
+         # hexdump -C /sys/fs/cgroup/system.slice/docker-f50da4b6c4c6207e875047036a7e56c77c54a8aefa2ea6a0e58bc738852f4514.scope/cpu.max
+         # 00000000  31 30 30 30 30 30 20 31  30 30 30 30 30 0a        |100000 100000.|
+         # 0000000e
+         #
+         # no limit set
+         # 00000000  6d 61 78 20 31 30 30 30  30 30 0a                 |max 100000.|
+         # 0000000b
+         my $cpu_max = <$file>;
+         $cpu_max =~ s/\s.*\n$//;
+         if ($cpu_max ne "max") {
+            $ncpu = $cpu_max / 100000;
+         }
+      }
+      if ($ncpu == 0 && open($file, '<', "/sys/fs/cgroup/system.slice/docker-$id.scope/cpuset.cpus.effective"))
+      {
+         # hexdump -C /sys/fs/cgroup/system.slice/docker-5915a2718628754f9185a052b96c4ac4249692269ad03c54f9037cd9e530f93c.scope/cpuset.cpus.effective
+         # 00000000  30 2d 31 31 0a                                    |0-11.|
+         # 00000005
+         #
+         # docker run --cpuset-cpus 0,2,3,5,6,7,8 --rm bash sleep 60
+         # 00000000  30 2c 32 2d 33 2c 35 2d  38 0a                    |0,2-3,5-8.|
+         # 0000000a
+         my $cpus = <$file>;
+         $cpus =~ s/\s+$//;
+         close $file;
+         for $c (split /,/, $cpus)
+         {
+            @cpu_range = split /-/, $c;
+            if ($#cpu_range == 0)
+            {
+               $ncpu += 1;
+            }
+            else
+            {
+               $ncpu += $cpu_range[1] - $cpu_range[0] + 1;
+            }
+         }
+      }
+      push @result, {'name'=>$name, 'label'=>$label, 'total_cpu_ns'=>$total_cpu_ns, 'ncpu'=>$ncpu};
+   }
 }
 
 if (defined $ARGV[0] and $ARGV[0] eq "config")
 {
-   my $nanoSecondsInSecond=1000000000;
    my $graphlimit = 1;
    foreach(@result){
       if ($$_{'ncpu'} || 1 > $graphlimit){
@@ -108,6 +213,8 @@ if (defined $ARGV[0] and $ARGV[0] eq "config")
       print "$$_{'name'}.min 0\n";
       print "$$_{'name'}.type DERIVE\n";
       print "$$_{'name'}.cdef $$_{'name'},$nanoSecondsInSecond,/\n";
+      print_warning($$_{'name'}, $$_{'ncpu'});
+      print_critical($$_{'name'});
    }
    exit 0;
 }

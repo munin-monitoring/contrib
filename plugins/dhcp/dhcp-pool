@@ -29,6 +29,9 @@
 #       config    (required)
 #
 # Version 1.0, 2-12-2008
+#
+#%# family=auto
+#%# capabilities=autoconf
 
 use POSIX;
 use Time::Local;
@@ -38,7 +41,17 @@ my $CONFFILE = exists $ENV{'conffile'} ? $ENV{'conffile'} : "/etc/dhcpd.conf";
 my $LEASEFILE = exists $ENV{'leasefile'} ? $ENV{'leasefile'} : "/var/lib/dhcp/dhcpd.leases";
 
 if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
-
+    if (-e ${CONFFILE} and -e ${LEASEFILE}) {
+	my %pools;
+	%pools = determine_pools();
+	if (%pools) {
+	    print "yes\n";
+	} else {
+	    print "no (no pools defined in config)\n";
+	}
+    } else {
+	print "no (no config or lease file)\n";
+    }
 }
 elsif ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
     my (%pools, $start, $label);
@@ -53,12 +66,12 @@ elsif ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
     %pools = determine_pools();
 
     # Print a label for each pool
-    foreach $start (keys %pools) {
+    foreach $start (sort (keys %pools)) {
 	$label = ip2string($start);
 	$label =~ s/\./\_/g;
-	print "$label.label Pool ".ip2string($start)."\n";
-	print "$label.warning 75\n";
-	print "$label.critical 100\n";
+	print "_$label.label Pool " . ip2string($start) . " - " . ip2string($start + $pools{$start} - 1) . "\n";
+	print "_$label.warning 90\n";
+	print "_$label.critical 100\n";
     }
 }
 else {
@@ -83,7 +96,7 @@ else {
 	}
 	$label = ip2string($start);
 	$label =~ s/\./\_/g;
-	print "$label.value ".sprintf("%.1f", 100*($size-$free)/$size)."\n";
+	print "_$label.value ".sprintf("%.1f", 100*($size-$free)/$size)."\n";
     }
 }
 
@@ -147,6 +160,8 @@ sub determine_active_leases {
 	}
 	elsif ($line =~ /ends \d ([\d]{4})\/([\d]{2})\/([\d]{2}) ([\d]{2}):([\d]{2}):([\d]{2})/) {
 	    $enddate = mktime($6, $5, $4, $3, $2-1, $1-1900, 0, 0);
+	}
+	elsif ($line =~ /binding state active/) {
 	    if (defined($enddate) && defined($startdate) && defined($lease)) {
 		if ($startdate < time() && $enddate > time()) {
 		    push (@activeleases, $lease);

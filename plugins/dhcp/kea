@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to monitor Kea DHCP server.
+
+=head1 NAME
+
+kea - monitor Kea DHCP server
+
+=head1 APPLICABLE SYSTEMS
+
+Systems with Kea DHCP4 or DHCP6 server running.
+See https://www.isc.org/kea/ for more information.
+
+=head1 CONFIGURATION
+
+This shows the default configuration of this plugin. You can override
+the control socket URLs. Note that you most probably need to configure
+"user root" to be able to talk to Kea socket.
+
+  [kea]
+  user root
+  env.url4 /run/kea/kea4-ctrl-socket
+  env.url6 /run/kea/kea6-ctrl-socket
+
+If you have Kea Control Agent running you can also use it's HTTP interface.
+
+  [kea]
+  env.url4 http://localhost:8000/
+  env.url6 http://localhost:8000/
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import json
+import os
+import socket
+import sys
+import unicodedata
+import requests
+
+
+def safe_label(name):
+    """Return safe label name."""
+    # Convert ä->a as isalpha('ä') is true
+    value = unicodedata.normalize('NFKD', name)
+    value = value.encode('ASCII', 'ignore').decode('utf-8')
+
+    # Remove non-alphanumeric chars
+    value = ''.join(char.lower() if char.isalnum() else '_' for char in value)
+
+    # Add leading "_" if it starts with number
+    if value[:1].isnumeric():
+        return f'_{value}'
+    return value
+
+
+def kea_talk(url, command, ipv):
+    """Send single command to Kea and return json reply."""
+    try:
+        if url.startswith('http'):  # HTTP to Control Agent
+            response = requests.post(url, timeout=30, json={
+                'command': command,
+                'service': [f'dhcp{ipv}'],
+            })
+            data = response.json()
+        else:  # Unix socket to daemon
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                sock.connect(url)
+                sock.send(f'{{"command": "{command}"}}'.encode('utf-8'))
+                data = json.loads(sock.recv(65535).decode('utf-8'))
+    except (OSError, ValueError, TypeError):
+        return {}
+    if 'arguments' not in data:
+        return {}
+    return data
+
+
+def read_data():
+    """Get config and statistics from Kea."""
+    subnets = {}
+    stats = {}
+    for ipv in (4, 6):
+        # Get configuration and statistics
+        url = os.getenv(f'url{ipv}', f'/run/kea/kea{ipv}-ctrl-socket')
+        conf = kea_talk(url, 'config-get', ipv)
+        stats[ipv] = stat = kea_talk(url, 'statistic-get-all', ipv)
+        if not conf or not stat:
+            continue
+
+        # Parse subnets
+        for subnet in conf['arguments'][f'Dhcp{ipv}'][f'subnet{ipv}']:
+            subid = subnet['id']
+            key = 'addresses' if ipv == 4 else 'nas'
+            used = stat['arguments'][f'subnet[{subid}].assigned-{key}'][0][0]
+            subnets[subnet['subnet']] = used
+
+    return subnets, stats
+
+
+def config(data):
+    """Print plugin config."""
+    subnets, stats = data
+    print('multigraph kea_usage')
+    print('graph_title Kea subnet usage')
+    print('graph_category network')
+    print('graph_vlabel leases')
+    print('graph_args --lower-limit 0 --base 1000')
+    for subnet in subnets:
+        label = safe_label(subnet)
+        print(f'{label}.label Subnet {subnet}')
+
+    if stats[4]:
+        print('multigraph kea_dhcp4_rate')
+        print('graph_title Kea DCHP4 rate')
+        print('graph_category network')
+        print('graph_vlabel packets / ${graph_period}')
+        print('graph_args --lower-limit 0 --base 1000')
+        for description in ('Discover received',
+                            'Offer sent',
+                            'Request received',
+                            'ACK sent',
+                            'NAK sent'):
+            label = description.split()[0].lower()
+            print(f'{label}.label {description}')
+            print(f'{label}.type DERIVE')
+            print(f'{label}.min 0')
+
+    if stats[6]:
+        print('multigraph kea_dhcp6_rate')
+        print('graph_title Kea DCHP6 rate')
+        print('graph_category network')
+        print('graph_vlabel packets / ${graph_period}')
+        print('graph_args --lower-limit 0 --base 1000')
+        for description in ('Solicit received',
+                            'Renew received',
+                            'Advertise sent',
+                            'Request received',
+                            'Reply sent'):
+            label = description.split()[0].lower()
+            print(f'{label}.label {description}')
+            print(f'{label}.type DERIVE')
+            print(f'{label}.min 0')
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch(data)
+
+
+def fetch(data):
+    """Print values."""
+    subnets, stats = data
+    print('multigraph kea_usage')
+    for subnet, used in subnets.items():
+        print(f'{safe_label(subnet)}.value {used}')
+
+    if stats[4]:
+        stat = stats[4]['arguments']
+        print('multigraph kea_dhcp4_rate')
+        print(f'discover.value {stat["pkt4-discover-received"][0][0]}')
+        print(f'offer.value {stat["pkt4-offer-sent"][0][0]}')
+        print(f'request.value {stat["pkt4-request-received"][0][0]}')
+        print(f'ack.value {stat["pkt4-ack-sent"][0][0]}')
+        print(f'nak.value {stat["pkt4-nak-sent"][0][0]}')
+
+    if stats[6]:
+        stat = stats[6]['arguments']
+        print('multigraph kea_dhcp6_rate')
+        print(f'solicit.value {stat["pkt6-solicit-received"][0][0]}')
+        print(f'renew.value {stat["pkt6-renew-received"][0][0]}')
+        print(f'advertise.value {stat["pkt6-advertise-sent"][0][0]}')
+        print(f'request.value {stat["pkt6-request-received"][0][0]}')
+        print(f'reply.value {stat["pkt6-reply-sent"][0][0]}')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if read_data()[0] else 'no (no Kea statistics)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config(read_data())
+    else:
+        fetch(read_data())

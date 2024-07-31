@@ -14,10 +14,6 @@ Any system with a local chronyd service.
 
 No configuration.
 
-=head1 MAGIC MARKERS
-
-  #%# family=auto
-  #%# capabilities=autoconf
 
 =head1 VERSION
 
@@ -44,11 +40,20 @@ Revision 0.4 2016/11/10 Lars Kruse
   switch from "bash" to "sh"
   fix exit code of failing "autoconf"
 
+
 =head1 AUTHOR
 
-  joti
-  zjttoefs
-  Lars Kruse <devel@sumpfralle.de>
+Copyright (C) 2008 joti
+
+Copyright (C) 2014 zjttoefs
+
+Copyright (C) 2016 Lars Kruse <devel@sumpfralle>
+
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
 
 =cut
 
@@ -106,14 +111,14 @@ if [ "$1" = "config" ]; then
 	exit 0
 fi
 
-chrony_status="$("$CHRONYC" tracking)"
+chrony_status="$("$CHRONYC" -n tracking)"
 echo "$fields" | while read fieldname factor regex label; do
 	status_line="$(echo "$chrony_status" | grep -i -- "$regex " | cut -d ":" -f 2-)"
 	if [ -z "$status_line" ]; then
 		value="U"
 	else
 		# the keyword "slow" indicates negative values
-		value="$(echo "$status_line" | awk '{ /slow/ ? SIGN=-1 : SIGN=1; print $1 * SIGN * '"$factor"' }')"
+		value="$(echo "$status_line" | awk '{ /slow/ ? (SIGN=-1) : (SIGN=1); print $1 * SIGN * '"$factor"' }')"
 	fi
 	echo "${fieldname}.value $value"
 done

@@ -16,9 +16,19 @@ The plugin uses nvme(1) from the nvme-cli project to read status from
 the NVMe devices.  This requires root access.
 
   [nvme]
-     user root
+    user root
 
-The plugin does not support alerting.
+When setting alert levels per device, use graph and basename of device
+name, e.g., 'nvme0n1', to make environment variable:
+
+    env.nvme_usage_nvme0n1_warning 5:
+    env.nvme_usage_warning 8:
+
+If your device names change on reboot you can also use the labels
+(based on serial numbers) to set the warning and critical labels
+
+    env.nvme_usage_SN_1234567_warning 8:101
+    env.nvme_usage_SN_1234567_critical 5:101
 
 =head1 INTERPRETATION
 
@@ -30,6 +40,8 @@ This reports how much of capacity is allocated in each NVMe
 "namespace".  The report is in percent.  This number may not have much
 relation to actual use, e.g., if deleted data areas have not been
 trimmed/discarded.
+
+Default warning and critical: '95', '98'
 
 =head2 nvme_bytes
 
@@ -43,6 +55,8 @@ It is a good idea to compare these numbers to I/O counters from
 diskstats.  If they are much higher, look into whether the write
 amplification can be due to suboptimal I/O request sizes.
 
+This graph does not support alerting.
+
 =head2 nvme_writecycles
 
 This graphs is intended to give an indication of how much life there
@@ -53,6 +67,16 @@ experienced.
 
 A prosumer NVMe will handle a few thousand writes to each cell before
 the error rate gets out of hand.
+
+No default values for warning and critical.
+
+=head2 nvme_spare
+
+All NVMe has set a side reserve space to remap media errors.  This
+graphs how much is left in percent, taken directly from smart-log
+output.
+
+Default warning and critical: '10:', '3:'
 
 =head1 MAGIC MARKERS
 
@@ -65,11 +89,12 @@ None known.
 
 =head1 VERSION
 
-  1.0
+  1.2
 
 =head1 AUTHOR
 
 Kjetil Torgrim Homme <kjetil.homme@redpill-linpro.com>
+Andreas Perhab, WT-IO-IT GmbH <andreas.perhab@wt-io-it.at>
 
 =head1 LICENSE
 
@@ -80,6 +105,7 @@ GPLv2
 use strict;
 use Munin::Plugin;
 use IPC::Cmd qw(can_run);
+use File::Basename;
 
 # Check that multigraph is supported
 need_multigraph();
@@ -99,6 +125,10 @@ sub autoconf_problem {
 sub run_nvme {
     my (@cmd) = @_;
     my @lines;
+    # make sure we cancel all LC_ variables for number formatting
+    # to get rid of thousands dots e.g. use 8814484 instead of 8.814.484 or 8,814,484
+    # and also get rid of scientific formatting e.g. 1.168384e-06
+    $ENV{LC_ALL} = "C";
     if (can_run('nvme') && open(my $nvme, '-|', 'nvme', @cmd)) {
         @lines = <$nvme>;
         close($nvme);
@@ -121,9 +151,19 @@ sub human_to_bytes {
 }
 
 sub nvme_list {
+    # version < 2
     # Node             SN                   Model                                    Namespace Usage                      Format           FW Rev
     # ---------------- -------------------- ---------------------------------------- --------- -------------------------- ---------------- --------
     # /dev/nvme1n1     S464NB0K601188N      Samsung SSD 970 EVO 2TB                  1         695.50  GB /   2.00  TB    512   B +  0 B   1B2QEXE7
+    # version > 2
+    # Node                  Generic               SN                   Model                                    Namespace Usage                      Format           FW Rev
+    # --------------------- --------------------- -------------------- ---------------------------------------- --------- -------------------------- ---------------- --------
+    # /dev/nvme1n1          /dev/ng1n1            23103F009522         Micron_3400_MTFDKBA1T0TFH                1           1.02  TB /   1.02  TB    512   B +  0 B   P7MU002
+    # /dev/nvme0n1          /dev/ng0n1            23103F00956D         Micron_3400_MTFDKBA1T0TFH                1           1.02  TB /   1.02  TB    512   B +  0 B   P7MU002
+    # version 2.5 (Namespace prefixed with 0x)
+    # Node                  Generic               SN                   Model                                    Namespace  Usage                      Format           FW Rev
+    # --------------------- --------------------- -------------------- ---------------------------------------- ---------- -------------------------- ---------------- --------
+    # /dev/nvme0n1          /dev/ng0n1            50026B7684E7EA69     KINGSTON SKC2500M82000G                  0x1          1,36  TB /   2,00  TB    512   B +  0 B   S7781101
     my %devices;
 
     my $recognised_output;
@@ -131,9 +171,23 @@ sub nvme_list {
     for (run_nvme('list')) {
         ++$lineno;
         if (m:^Node\s+SN\s+Model\s+Namespace Usage:) {
+            # version < 2 header
             ++$recognised_output;
+        } elsif (m:^Node\s+Generic\s+SN\s+Model\s+Namespace\s+Usage\s+:) {
+            # version 2 header
+            ++$recognised_output;
+        } elsif (m|^(/\S+)\s+(/\S+)\s+(\S+)\s+(\S.*\S)\s{3,}((?:0x)?\d+)\s+(\S+\s+.B)\s+/\s+(\S+\s+.B)|) {
+            # version 2 data (first 2 columns start with /)
+            $devices{'SN_'.$3} = {
+                device    => $1,
+                sn        => $3,
+                model     => $4,
+                namespace => $5,
+                usage     => human_to_bytes($6),
+                capacity  => human_to_bytes($7),
+            };
         } elsif (m:^(/\S+)\s+(\S+)\s+(\S.*\S)\s{3,}(\d+)\s+(\S+\s+.B)\s+/\s+(\S+\s+.B):) {
-            $devices{$2} = {
+            $devices{'SN_'.$2} = {
                 device    => $1,
                 sn        => $2,
                 model     => $3,
@@ -155,10 +209,26 @@ sub nvme_list {
 sub smart_log {
     my ($dev) = @_;
     my %info;
+    # version < 2
+    # Smart Log for NVME device:nvme0 namespace-id:ffffffff
+    # ...
+    # data_units_read                     : 92220078
+    # data_units_written                  : 203504195
+    # ...
+    # version > 2
+    # Smart Log for NVME device:nvme0 namespace-id:ffffffff
+    # ...
+    # Data Units Read                           : 72034055 (36.88 TB)
+    # Data Units Written                        : 82741919 (42.36 TB)
+    # ...
     for (run_nvme('smart-log', $dev)) {
         next if /^Smart Log/;
         if (/(.*?)\s+:\s+(.*)/) {
             my ($var, $value) = ($1, $2);
+            # remove version 2 human readable numbers in brackets ... (1.2 GB)
+            if ($value =~ / \([0-9.]+ [KMGTP]?B\)$/) {
+                $value =~ s/ \([0-9.]+ [KMGTP]?B\)$//
+            }
             $var =~ s/\s/_/g;
             if ($value =~ /^\d+(,\d\d\d)+$/) {
                 $value =~ s/,//g;
@@ -167,6 +237,17 @@ sub smart_log {
         }
     }
     return \%info;
+}
+
+sub my_print_thresholds {
+    my ($label, $graph, $device, $warn_default, $crit_default) = @_;
+    my $dev = basename($device);
+    my ($warn_label, $crit_label) = get_thresholds($graph, "${graph}_${label}_warning", "${graph}_${label}_critical",
+                                       $warn_default, $crit_default);
+    my ($warn, $crit) = get_thresholds($graph, "${graph}_${dev}_warning", "${graph}_${dev}_critical",
+                                       $warn_label, $crit_label);
+    print "${label}.warning $warn\n" if defined $warn;
+    print "${label}.critical $crit\n" if defined $crit;
 }
 
 use Data::Dumper;
@@ -200,12 +281,14 @@ graph_category disk
 graph_info How much space is used
 EOF
     for (@sn) {
+        my $device = $list->{$_}->{device};
         print <<"EOF";
-$_.label $list->{$_}->{device} used
+$_.label $device used
 $_.type GAUGE
 $_.max 100
 $_.min 0
 EOF
+        my_print_thresholds($_, 'nvme_usage', $device, '95', '98');
     }
     print <<'EOF';
 multigraph nvme_bytes
@@ -238,11 +321,31 @@ graph_category disk
 graph_info How much data has been written in lifetime divided by capacity
 EOF
     for (@sn) {
+        my $device = $list->{$_}->{device};
         print <<"EOF";
-$_.label $list->{$_}->{device} write cycles
+$_.label $device write cycles
 $_.type GAUGE
 $_.min 0
 EOF
+        my_print_thresholds($_, 'nvme_writecycles', $device);
+    }
+    print <<'EOF';
+multigraph nvme_spare
+graph_title NVME Available spare blocks
+graph_order $sn_list
+graph_vlabel Percent
+graph_category disk
+graph_info Spare capacity for replacing bad blocks
+EOF
+    for (@sn) {
+        my $device = $list->{$_}->{device};
+        print <<"EOF";
+$_.label $device spare capacity
+$_.type GAUGE
+$_.min 0
+$_.max 100
+EOF
+        my_print_thresholds($_, 'nvme_spare', $device, '10:', '3:');
     }
 } else {
     for (@sn) {
@@ -267,7 +370,16 @@ EOF
         my $info = $list->{$_};
 
         # The unit size reported is 1000 blocks.
-        my $cycles = $info->{smart}->{data_units_read} * 512_000 / $info->{capacity};
+        my $cycles = $info->{smart}->{data_units_written} * 512_000 / $info->{capacity};
         print "$_.value $cycles\n";
+    }
+    print "multigraph nvme_spare\n";
+    for (@sn) {
+        my $info = $list->{$_};
+
+        # The unit size reported is 1000 blocks.
+        my $spare = $info->{smart}->{available_spare};
+        $spare =~ s/%//;
+        print "$_.value $spare\n";
     }
 }

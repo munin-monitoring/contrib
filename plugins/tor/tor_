@@ -1,58 +1,74 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 '''
 =head1 NAME
+
 tor_
 
 =head1 DESCRIPTION
+
 Wildcard plugin that gathers some metrics from the Tor daemon
-https://github.com/daftaupe/munin-tor
+(https://github.com/daftaupe/munin-tor).
 
 Derived from https://github.com/mweinelt/munin-tor
 
-This plugin requires the stem library : https://stem.torproject.org/
-This plugin requires the GeoIP library : https://www.maxmind.com for the countries plugin
+This plugin requires the stem library (https://stem.torproject.org/).
 
-Available plugins :
-tor_bandwidth    # Graph the glabal bandwidth
-tor_connections  # Graph the number of connexions
-tor_countries    # Graph the countries represented our connexions
-tor_dormant      # Graph if tor is dormant or not
-tor_flags        # Graph the different flags of the relay
-tor_routers      # Graph the number of routers seen by the relay
-tor_traffic      # Graph the read/written traffic
+This plugin requires the GeoIP library (https://www.maxmind.com) for the countries plugin.
+
+Available plugins:
+
+=over 4
+
+=item tor_bandwidth   - graph the glabal bandwidth
+
+=item tor_connections - graph the number of connexions
+
+=item tor_countries   - graph the countries represented our connexions
+
+=item tor_dormant     - graph if tor is dormant or not
+
+=item tor_flags       - graph the different flags of the relay
+
+=item tor_routers     - graph the number of routers seen by the relay
+
+=item tor_traffic     - graph the read/written traffic
+
+=back
 
 =head2 CONFIGURATION
-The default configuration is below
-[tor_*]
-user toranon # or any other user/group that is running tor
-group toranon
-env.torcachefile munin_tor_country_stats.json
-env.torconnectmethod port
-env.torgeoippath /usr/share/GeoIP/GeoIP.dat
-env.tormaxcountries 15
-env.torport 9051
-env.torsocket /var/run/tor/control
 
-To make it connect through a socket modify this way
-[tor_*]
-user toranon # or any other user/group that is running tor
-group toranon
-env.torcachefile munin_tor_country_stats.json
-env.torconnectmethod socket
-env.torgeoippath /usr/share/GeoIP/GeoIP.dat
-env.tormaxcountries 15
-env.torport 9051
-env.torsocket /var/run/tor/control
+The default configuration is:
+
+ [tor_*]
+ user toranon # or any other user/group that is running tor
+ group toranon
+ env.torcachefile munin_tor_country_stats.json
+ env.torconnectmethod port
+ env.torgeoippath /usr/share/GeoIP/GeoIP.dat
+ env.tormaxcountries 15
+ env.torport 9051
+ env.torsocket /var/run/tor/control
+
+To make it connect through a socket, you simply need to change C<torconnectmethod>:
+
+ env.torconnectmethod socket
 
 =head1 COPYRIGHT
+
 MIT License
 
+SPDX-License-Identifier: MIT
+
 =head1 AUTHOR
+
 Pierre-Alain TORET <pierre-alain.toret@protonmail.com>
 
 =head1 MAGIC MARKERS
-  #%# family=auto
-  #%# capabilities=autoconf suggest
+
+ #%# family=auto
+ #%# capabilities=autoconf suggest
+
+=cut
 '''
 
 import collections
@@ -65,10 +81,11 @@ try:
     import stem
     import stem.control
     import stem.connection
-except ImportError:
+    missing_dependency_error = None
+except ImportError as exc:
     # missing dependencies are reported via "autoconf"
     # thus failure is acceptable here
-    pass
+    missing_dependency_error = str(exc)
 
 default_torcachefile = 'munin_tor_country_stats.json'
 default_torconnectmethod = 'port'
@@ -142,29 +159,24 @@ class TorPlugin(object):
                 print('{}.{} {}'.format(label, key, val))
 
     @staticmethod
-    def autoconf():
+    def get_autoconf_status():
         try:
             import stem
-
         except ImportError as e:
-            print('no (failed to import the required python module "stem": {})'.format(e))
-
+            return 'no (failed to import the required python module "stem": {})'.format(e)
         try:
             import GeoIP  # noqa: F401
-
         except ImportError as e:
-            print('no (failed to import the required python module "GeoIP": {})'.format(e))
-
+            return 'no (failed to import the required python module "GeoIP": {})'.format(e)
         try:
             with gen_controller() as controller:
                 try:
                     authenticate(controller)
-                    print('yes')
+                    return 'yes'
                 except stem.connection.AuthenticationFailure as e:
-                    print('no (Authentication failed: {})'.format(e))
-
-        except stem.connection:
-            print('no (Connection failed)')
+                    return 'no (Authentication failed: {})'.format(e)
+        except stem.SocketError:
+            return 'no (Connection failed)'
 
     @staticmethod
     def suggest():
@@ -297,15 +309,16 @@ class TorCountries(TorPlugin):
 
     def fetch(self):
         """Generate metrics"""
-
+        # Fallback if cache_dir_name is not set, unreadable or any other error
+        countries_num = self.top_countries()
         # If possible, read cached data instead of doing the processing twice
-        try:
-            with open(self.cache_dir_name) as f:
-                countries_num = json.load(f)
-        except (IOError, ValueError):
-            # Fallback if cache_dir_name is not set, unreadable or any other
-            # error
-            countries_num = self.top_countries()
+        if self.cache_dir_name:
+            try:
+                with open(self.cache_dir_name) as f:
+                    countries_num = json.load(f)
+            except (IOError, ValueError):
+                # use the fallback value above
+                pass
 
         for c, v in countries_num:
             print("%s.value %d" % (c, v))
@@ -500,12 +513,16 @@ def main():
         param = 'fetch'
 
     if param == 'autoconf':
-        TorPlugin.autoconf()
+        print(TorPlugin.get_autoconf_status())
         sys.exit()
     elif param == 'suggest':
         TorPlugin.suggest()
         sys.exit()
     else:
+        if missing_dependency_error is not None:
+            print("Failed to run tor_ due to missing dependency: {}"
+                  .format(missing_dependency_error), file=sys.stderr)
+            sys.exit(1)
         # detect data provider
         if __file__.endswith('_bandwidth'):
             provider = TorBandwidth()

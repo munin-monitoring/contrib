@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+# pylint: disable=invalid-name
+# pylint: enable=invalid-name
+# pylint: disable=consider-using-f-string
+
+"""Munin plugin to monitor Knot DNS server.
+
+=head1 NAME
+
+knot - monitor Knot DNS server statistics
+
+=head1 APPLICABLE SYSTEMS
+
+Systems with Knot DNS server installed.
+
+=head1 CONFIGURATION
+
+This plugin requires config:
+
+    [knot]
+    user root
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import os
+import subprocess
+import sys
+import time
+from collections import defaultdict
+
+
+CONFIG = {
+    # 'edns-presence': {},
+    # 'flag-presence': {},
+    'query-size': {
+        'title': 'query counts grouped by size',
+        'vlabel': 'queries / second',
+        'info': '',
+    },
+    'query-type': {
+        'title': 'query types',
+        'vlabel': 'queries / second',
+        'info': '',
+    },
+    'reply-nodata': {
+        'title': 'no-data replies',
+        'vlabel': 'replies / second',
+        'info': '',
+    },
+    'reply-size': {
+        'title': 'reply counts grouped by size',
+        'vlabel': 'replies / second',
+        'info': '',
+    },
+    'request-bytes': {
+        'title': 'request bytes',
+        'vlabel': 'bytes / second',
+        'info': '',
+    },
+    'request-protocol': {
+        'title': 'request protocols',
+        'vlabel': 'requests / second',
+        'info': '',
+    },
+    'response-bytes': {
+        'title': 'response bytes',
+        'vlabel': 'bytes / second',
+        'info': '',
+    },
+    'response-code': {
+        'title': 'response codes',
+        'vlabel': 'responses / second',
+        'info': '',
+    },
+    'server-operation': {
+        'title': 'operations',
+        'vlabel': 'operations / second',
+        'info': '',
+    },
+    'cookies': {
+        'title': 'cookies',
+        'vlabel': 'queries / second',
+        'info': '',
+    },
+    'rrl': {
+        'title': 'response rate limiting',
+        'vlabel': 'queries / second',
+        'info': '',
+    },
+}
+
+
+def _merge_replysize(values):
+    """Merge reply-size 512..65535 stats."""
+    if 'reply-size' not in values:
+        return
+
+    total = 0
+    todel = []
+    for key in values['reply-size']:
+        if int(key.split('-')[0]) >= 512:
+            total += values['reply-size'][key]
+            todel.append(key)
+    for key in todel:
+        del values['reply-size'][key]
+    values['reply-size']['512-65535'] = total
+
+
+def get_stats():
+    """Get statistics."""
+    # Get status output
+    try:
+        output = subprocess.run(['knotc', '--force', 'stats'],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, check=False,
+                                encoding='utf-8', errors='ignore').stdout
+    except FileNotFoundError:
+        return {}
+
+    # After server reboot output can be almost empty. Use cached results
+    # instead, needed for plugin config when using munin-async.
+    cachename = os.path.join(os.getenv('MUNIN_PLUGSTATE'), 'knot.state')
+    if len(output) > 2048:
+        with open(cachename, 'wt', encoding='utf-8') as cache:
+            cache.write(output)
+    elif (
+            os.path.exists(cachename) and
+            os.stat(cachename).st_mtime > time.time() - 900
+    ):
+        with open(cachename, 'rt', encoding='utf-8') as cache:
+            output = cache.read()
+
+    # Parse output. Keep graph labels in knotc-order.
+    values = defaultdict(dict)
+    for line in output.splitlines():
+        # Parse line to key1.key2 = value
+        if ' = ' not in line:
+            continue
+        key, value = line.split(' = ', 1)
+        if key.startswith('mod-stats.'):
+            # "mod-stats.server-operation[axfr] = 7"
+            key1, key2 = key[10:-1].split('[', 1)
+        elif key.startswith(('mod-cookies.', 'mod-rrl.')):
+            # "mod-cookies.presence = 94647"
+            key1, key2 = key[4:].split('.', 1)
+        else:
+            continue
+
+        # Parse value
+        try:
+            values[key1][key2] = int(value)
+        except ValueError:
+            continue
+
+    _merge_replysize(values)
+    return values
+
+
+def _clean_key(key):
+    """Convert knotc key to Munin label."""
+    key = key.lower().replace('-', '_')
+    if key[0].isdigit():
+        key = '_' + key
+    return key
+
+
+def print_config(values):
+    """Print plugin config."""
+    for key_graph in sorted(CONFIG):
+        if key_graph not in values:
+            continue
+
+        # Basic data
+        print('multigraph knot_{}'.format(key_graph.replace('-', '')))
+        print('graph_title Knot {}'.format(CONFIG[key_graph]['title']))
+        print('graph_vlabel {}'.format(CONFIG[key_graph]['vlabel']))
+        info = CONFIG[key_graph]['info']
+        if info:
+            print('graph_info {}'.format(info))
+        print('graph_category dns')
+        print('graph_args --base 1000 --lower-limit 0')
+
+        # Keys
+        for key_raw in values[key_graph]:
+            key_clean = _clean_key(key_raw)
+            print('{}.label {}'.format(key_clean, key_raw))
+            print('{}.type DERIVE'.format(key_clean))
+            print('{}.min 0'.format(key_clean))
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        print_values(values)
+
+
+def print_values(values):
+    """Print plugin values."""
+    for key_graph in sorted(CONFIG):
+        if key_graph not in values:
+            continue
+
+        print('multigraph knot_{}'.format(key_graph.replace('-', '')))
+        for key_raw in values[key_graph]:
+            key_clean = _clean_key(key_raw)
+            print('{}.value {}'.format(key_clean, values[key_graph][key_raw]))
+
+
+def main(args):
+    """Do it all main program."""
+    values = get_stats()
+    if len(args) > 1 and args[1] == 'autoconf':
+        print('yes' if values else 'no (knot is not running)')
+    elif len(args) > 1 and args[1] == 'config':
+        print_config(values)
+    else:
+        print_values(values)
+
+
+if __name__ == '__main__':
+    main(sys.argv)

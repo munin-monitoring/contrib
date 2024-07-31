@@ -1,62 +1,74 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
+"""
+=head1 NAME
 
-# This is a monitoring plugin for twemproxy (aka: nutcracker)
-# config in /etc/munin/plugin-conf.d/nutcracker.conf
-#
-# [nutcracker_*]
-# env.NUTCRACKER_STATS_HOST 127.0.0.1
-# env.NUTCRACKER_STATS_PORT 22222
-#
-# any questions to edgarmveiga at gmail dot com
-#
+nutcracker_requests_ - monitor twemproxy (aka: nutcracker)
 
+
+=head1 CONFIGURATION
+
+Config in /etc/munin/plugin-conf.d/nutcracker.conf:
+
+ [nutcracker_*]
+ env.NUTCRACKER_STATS_HOST 127.0.0.1
+ env.NUTCRACKER_STATS_PORT 22222
+
+
+=head1 AUTHORS
+
+Copyright 2013 Edgar Veiga <edgarmveiga@gmail.com>
+
+=cut
+"""
+
+
+import json
 import socket
-import sys
 import os
+import sys
 
-try:
-    import json
-except ImportError:
-    import simplejson as json
 
 def get_stats():
-    data = '';
+    data = ''
 
-    HOST = os.environ.get('NUTCRACKER_STATS_HOST', '127.0.0.1');
+    HOST = os.environ.get('NUTCRACKER_STATS_HOST', '127.0.0.1')
     PORT = int(os.environ.get('NUTCRACKER_STATS_PORT', 22222))
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect((HOST, PORT))
 
     file = s.makefile('r')
-    data = file.readline();
+    data = file.readline()
     s.close()
 
-    return json.loads(data);
+    return json.loads(data)
+
 
 def process_data():
-    data = get_stats();
+    data = get_stats()
     # get pools
-    for key, value in data.iteritems():
-        if(type(value) == dict):
+    for key, value in data.items():
+        if isinstance(value, dict):
             total = 0
             # get server requests
             for pool_key, pool_value in value.items():
-                if(type(pool_value) == dict):
+                if isinstance(pool_value, dict):
                     total += pool_value["requests"]
-            print "requests_"+key+".value"+" "+str(total)
+            print("requests_" + key + ".value" + " " + str(total))
+
 
 def process_config():
-    print "graph_title Nutcracker requests/s"
-    print "graph_category other"
-    print "graph_vlabel requests/s"
+    print("graph_title Nutcracker requests/s")
+    print("graph_category other")
+    print("graph_vlabel requests/s")
 
-    data = get_stats();
+    data = get_stats()
     for key, value in data.items():
-        if(type(value) == dict):
-            print "requests_"+key+".label "+key
-            print "requests_"+key+".type COUNTER"
-            print "requests_"+key+".min 0"
+        if isinstance(value, dict):
+            print("requests_" + key + ".label " + key)
+            print("requests_" + key + ".type COUNTER")
+            print("requests_" + key + ".min 0")
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "config":

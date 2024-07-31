@@ -1,52 +1,60 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
-import sys, re
-from beanstalk import serverconn, protohandler
+import os
+import sys
 
-# Temporary workaround until my patch is merged.
-if not protohandler._namematch.match('ABZDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-+/;.$_()'):
-    protohandler._namematch = re.compile(r'^[a-zA-Z0-9+\(\)/;.$_][a-zA-Z0-9+\(\)/;.$_-]{0,199}$')
+from pystalk import BeanstalkClient
 
 STATES = ['ready', 'reserved', 'urgent', 'delayed', 'buried']
 
-def connect(host='localhost', port=11300):
-    return serverconn.ServerConn(host, port)
+
+def connect():
+    return BeanstalkClient(
+        os.getenv('host', 'localhost'),
+        os.getenv('port', '11300'),
+    )
+
 
 def config():
     c = connect()
-    tubes = c.list_tubes()['data']
+    tubes = c.list_tubes()
     print_config(tubes)
+
 
 def print_config(tubes, graph_title='Beanstalkd jobs', graph_vlabel='count'):
     for tube in tubes:
-        print 'multigraph job_count_' + tube
-        print 'graph_title %s (%s)' % (graph_title, tube,)
-        print 'graph_order ' + ' '.join(STATES)
-        print 'graph_vlabel ' + graph_vlabel
+        print(f'multigraph job_count_{tube}')
+        print(f'graph_title {graph_title} ({tube})')
+        print(f'graph_order {" ".join(STATES)}')
+        print(f'graph_vlabel {graph_vlabel}')
         for state in STATES:
-            print '%s.label %s' % (state, state,)
-        print
+            print(f'{state}.label {state}')
+        print()
+
 
 def run():
     c = connect()
-    tubes = c.list_tubes()['data']
+    tubes = c.list_tubes()
     print_values(tubes, c)
+
 
 def print_values(tubes, c):
     for tube in tubes:
-        print 'multigraph job_count_' + tube
-        stats = c.stats_tube(tube)['data']
+        print(f'multigraph job_count_{tube}')
+        stats = c.stats_tube(tube)
         for state in STATES:
             key = 'current-jobs-' + state
             value = stats[key]
-            print '%s.value %d' % (state, value,)
-        print
+            print(f'{state}.value {value}')
+        print()
+
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "config":
         config()
     else:
         run()
+
 
 if __name__ == "__main__":
     main()

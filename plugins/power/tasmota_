@@ -1,0 +1,368 @@
+#!/bin/bash
+
+: << =cut
+
+=head1 NAME
+
+tasmota_ - logs voltage, energy usage, power, power factor and current logged from tasmota power switches
+
+To install the plugin, copy or move the plugin to /usr/share/munin/plugins/ set
+the chmod to 755 and create a symbolic link:
+ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_voltage
+ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_energy
+ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_power
+ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_powerfactor
+ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_current
+
+Plugin also implements suggests, so if you have nodeattr installed and
+/etc/genders populated with "tasmota" as well as "powermon",
+"DS18B20","SCD40", "PMS5003" or "millivolts" flags for those tasmota
+devices that implement energy or temperature monitoring, you can run
+an ansible play like this to set up your links:
+https://github.com/spacelama/ansible-initial-server-setup/tree/master/roles/monitoring/tasks
+
+=head1 APPLICABLE SYSTEMS
+
+Any host that can access tasmota systems and has "jq" installed.  Can
+auto suggest values if nodeattr genders (debian: apt install genders)
+installed and configured with tasmota, powermon, DS18B20, SCD40,
+PMS5003, millivolts flags.
+
+=head1 AUTHOR
+
+Tim Connors <tconnors@rather.puzzling.org>
+
+=head1 LICENSE
+
+GPLv2 or later
+
+=head1 MAGICK MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+cached_curl=none
+# runs curl on "Status $1", and parses through jq -c "$2", setting the value in "$res"
+# Caches the curl results for when we're plotting multiple (power) values
+#  -- don't forget to make sure we're not being called in a subshell!
+get_status() {
+    if [ "$cached_curl" = none ] ; then
+        # run curl, cache the result, and if there was an error, set value to "U"
+        if ! cached_curl=$( curl --max-time 5 -fsS --data-urlencode "cmnd=Status $1" "http://$DEVICE/cm" ) ; then
+            cached_curl='{}'
+        fi
+    fi
+    res=$( echo "$cached_curl" | jq -c -r "$2" )
+    if [ "$res" = null ] ; then
+        res=U
+    fi
+}
+
+DEVICE=$(basename "$0" | cut -d_ -f2)
+FUNCTION=$(basename "$0" | cut -d_ -f3)
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+if [ "$1" = "autoconf" ]; then
+    if ! which curl > /dev/null 2>&1 ; then
+        echo "no (no curl)"
+        exit 0
+    fi
+    if ! which jq > /dev/null 2>&1 ; then
+        echo "no (no jq)"
+        exit 0
+    fi
+
+    echo yes && exit 0
+fi
+
+if [ "$1" = "suggest" ]; then
+    nodeattr -n '(tasmota || beken) && powermon' | while read -r device ; do
+        for i in voltage power powerfactor current energy ; do
+            echo "${device}_${i}"
+        done
+    done
+    nodeattr -n '(tasmota || beken) && DS18B20' | while read -r device ; do
+        for i in DS18B20 ; do
+            echo "${device}_${i}"
+        done
+    done
+    nodeattr -n '(tasmota || beken) && SCD40' | while read -r device ; do
+        for i in SCD40 ; do
+            echo "${device}_${i}"
+        done
+    done
+    nodeattr -n '(tasmota || beken) && PMS5003' | while read -r device ; do
+        for i in PMS5003 ; do
+            echo "${device}_${i}"
+        done
+    done
+    nodeattr -n '(tasmota || beken) && millivolts' | while read -r device ; do
+        for i in millivolts ; do
+            echo "${device}_${i}"
+        done
+    done
+    nodeattr -n '(tasmota || beken) && switch' | while read -r device ; do
+        for i in switch ; do
+            echo "${device}_${i}"
+        done
+    done
+    nodeattr -n '(tasmota || beken) && dimmer' | while read -r device ; do
+        for i in dimmer ; do
+            echo "${device}_${i}"
+        done
+    done
+    exit
+fi
+
+voltage() {
+    axis=Volts
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Voltage: $DEVICE"
+        echo "graph_vlabel Volts"
+        echo "graph_args --base 1000 -l 0"
+
+        echo "$axis.label Voltage"
+    else
+        get_status 8 ".StatusSNS.ENERGY.Voltage"
+        echo "$axis.value $res"
+    fi
+}
+
+current() {
+    axis=Current
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Current: $DEVICE"
+        echo "graph_vlabel Amps"
+        echo "graph_args --base 1000 -l 0"
+
+        echo "$axis.label Current"
+    else
+        get_status 8 ".StatusSNS.ENERGY.Current"
+        echo "$axis.value $res"
+    fi
+}
+
+power() {
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Power: $DEVICE"
+        echo "graph_vlabel Watts"
+        echo "graph_args --base 1000 -l 0"
+
+        for axis in ApparentPower ReactivePower Power ; do
+            echo "$axis.label $axis"
+            echo "$axis.type GAUGE"
+            echo "$axis.min 0"
+
+            print_thresholds "$axis"
+        done
+    else
+        for axis in ApparentPower ReactivePower Power ; do
+            get_status 8 ".StatusSNS.ENERGY.$axis"
+            echo "$axis.value $res"
+        done
+    fi
+}
+
+powerfactor() {
+    axis=PowerFactor
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Power factor: $DEVICE"
+        echo "graph_vlabel Power Factor"
+        echo "graph_args --base 1000 -l 0"
+
+        echo "$axis.min 0"
+        echo "$axis.max 1"
+        echo "$axis.label Power Factor"
+    else
+        get_status 8 ".StatusSNS.ENERGY.Factor"
+        echo "$axis.value $res"
+    fi
+}
+
+energy() {
+    axis=Energy
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Energy: $DEVICE"
+        echo "graph_args --base 1000"
+
+        echo "graph_vlabel kWh"
+        echo "$axis.label Energy"
+        echo "$axis.draw AREA"
+    else
+        get_status 8 ".StatusSNS.ENERGY.Total"
+        echo "$axis.value $res"
+    fi
+}
+
+DS18B20() {
+    axis=Temperature
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Temperature: $DEVICE"
+        echo "graph_args --base 1000"
+
+        echo "graph_vlabel °C"
+        echo "$axis.label Temperature"
+        echo "$axis.type GAUGE"
+        #echo "$axis.min 0"
+    else
+        get_status 10 ".StatusSNS.DS18B20.Temperature"
+        echo "$axis.value $res"
+    fi
+}
+
+SCD40() {
+    axis=CO2
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Carbon Dioxide: $DEVICE"
+        echo "graph_args --base 1000"
+
+        echo "graph_vlabel PPM"
+        echo "$axis.label Carbon Dioxide"
+        echo "$axis.type GAUGE"
+    else
+        get_status 8 ".StatusSNS.SCD40.CarbonDioxide"
+        echo "$axis.value $res"
+    fi
+}
+
+PMS5003() {
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Particulate Pollution: $DEVICE"
+        echo "graph_args --base 1000"
+
+        for v in 'PB1=<1μm PPD' 'PB2_5=<2.5μm PPD' 'PB10=<10μm PPD' ; do
+            axis=$( echo "$v" | cut -d= -f 1 )
+            lab=$( echo "$v" | cut -d= -f 2 )
+
+            echo "$axis.label $lab"
+            echo "$axis.type GAUGE"
+            echo "$axis.min 0"
+        done
+    else
+        for v in 'PB1="PB1"' 'PB2_5="PB2.5"' 'PB10="PB10"' ; do
+            axis=$( echo "$v" | cut -d= -f 1 )
+            field=$( echo "$v" | cut -d= -f 2 )
+            get_status 8 ".StatusSNS.PMS5003.$field"
+            echo "$axis.value $res"
+        done
+    fi
+}
+
+millivolts() {
+    axis=Volts
+    if [ "$1" = "config" ]; then
+        limits=
+#        # man rrdgraph for relevant --limit args
+#        if [ -n "$lower" ] ; then
+#            limits="$limits --lower-limit $lower --rigid --allow-shrink"
+#            limits="$limits --lower-limit $lower --rigid --alt-autoscale"
+#        fi
+#        if [ -n "$upper" ] ; then
+#            limits="$limits --upper-limit $upper --rigid"
+#        fi
+        echo "graph_title Tasmota Volts: $DEVICE"
+#        echo "graph_args --base 1000$limits"
+        echo "graph_args --base 1000 --alt-autoscale --alt-y-grid"
+
+        echo "graph_vlabel Volts"
+        echo "$axis.label V"
+        echo "$axis.type GAUGE"
+    else
+        get_status 8 ".StatusSNS.ANALOG.Range"
+        if [ "$res" != U ] ; then
+            res=$( echo "$res" | awk '{printf "%0.3f", $1/1000}' )
+        fi
+        echo "$axis.value $res"
+    fi
+}
+
+switch() {
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Switch: $DEVICE"
+        echo "graph_args --base 1000 -l 0"
+    fi
+
+    for v in POWER POWER{1,2,3,4,5,6,7,8,9} ; do
+        axis=$( echo "$v" | cut -d= -f 1 )
+        lab=$(  echo "$v" | cut -d= -f 2 )
+        get_status 11 ".StatusSTS.$v"
+
+        if [ "$res" != U ] || [ -e $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen ] ; then
+            # if we've ever seen an axis, then we want to keep
+            # telling munin we are capable of reading that axis,
+            # even if the device is currently unpowered
+            mkdir -p $MUNIN_PLUGSTATE/tasmota
+            touch $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen
+
+            if [ "$1" = "config" ]; then
+                echo "$axis.label $lab"
+                echo "$axis.type GAUGE"
+                echo "$axis.min 0"
+            else
+                case "$res" in
+                    ON)
+                        res=1
+                        ;;
+                    OFF)
+                        res=0
+                        ;;
+                    U) # assume off, since if it doesn't have power to get wifi, then it's not going to have power output
+                        res=0
+                        ;;
+                esac
+
+                echo "$axis.value $res"
+            fi
+        fi
+    done
+}
+
+dimmer() {
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Dimmer: $DEVICE"
+        echo "graph_args --base 1000 -l 0"
+    fi
+
+    for v in Channel{1,2,3,4} ; do
+        axis=$( echo "$v" | cut -d= -f 1 )
+        lab=$(  echo "$v" | cut -d= -f 2 )
+        get_status 11 ".StatusSTS.$v"
+
+        if [ "$res" != U ] || [ -e $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen ] ; then
+            # if we've ever seen an axis, then we want to keep
+            # telling munin we are capable of reading that axis,
+            # even if the device is currently unpowered
+            mkdir -p $MUNIN_PLUGSTATE/tasmota
+            touch $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen
+
+            if [ "$1" = "config" ]; then
+                echo "$axis.label $lab"
+                echo "$axis.type GAUGE"
+                echo "$axis.min 0"
+            else
+                if [ "$res" = U ] ; then
+                    res=0 # assume 0 power, since if it doesn't have power to get wifi, then it's not going to have power output
+                fi
+
+                echo "$axis.value $res"
+            fi
+        fi
+    done
+}
+
+case "$FUNCTION" in
+    voltage|power|powerfactor|current|energy|DS18B20|SCD40|PMS5003|millivolts|switch|dimmer)
+        $FUNCTION "$1"
+        ;;
+    *)
+        echo "Unknown Function"
+        ;;
+esac
+
+if [ "$1" = "config" ] ; then
+    echo "graph_category sensors"
+    print_thresholds "$axis"
+fi

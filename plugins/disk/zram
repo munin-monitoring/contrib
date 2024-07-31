@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to monitor zram devices.
+
+=head1 NAME
+
+zram - monitor zram devices
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems with zram devices.
+
+=head1 CONFIGURATION
+
+No configuration is required for this plugin.
+
+Optionally you may specify specific warning and critical levels:
+
+    [zram]
+    env.df_dev_zram0_warning 98
+    env.df_dev_zram0_critical 99
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+"""
+
+import os
+import subprocess
+import sys
+import unicodedata
+
+
+def safename(name):
+    """Return safe variable name."""
+    # Convert ä->a as isalpha('ä') is true
+    value = unicodedata.normalize('NFKD', name)
+    value = value.encode('ASCII', 'ignore').decode('utf-8')
+
+    # Remove non-alphanumeric chars
+    return ''.join(char.lower() if char.isalnum() else '_' for char in value)
+
+
+def run_binary(arg):
+    """Run binary and return output."""
+    try:
+        return subprocess.run(arg, stdout=subprocess.PIPE, check=False,
+                              encoding='utf-8', errors='ignore').stdout
+    except FileNotFoundError:
+        return ''
+
+
+def parse_unit(value):
+    """Parse "1.60G" to bytes."""
+    unit = value[-1]
+    number = float(value[:-1])
+    if unit == 'T':
+        return number * 1024 * 1024 * 1024 * 1024
+    if unit == 'G':
+        return number * 1024 * 1024 * 1024
+    if unit == 'M':
+        return number * 1024 * 1024
+    if unit == 'K':
+        return number * 1024
+    return number
+
+
+def warning_critical(graph, name, warning=None, critical=None):
+    """Print warning/critical config entries."""
+    warning = os.environ.get(f'{graph}{name}_warning', warning)
+    critical = os.environ.get(f'{graph}{name}_critical', critical)
+    if warning and warning != ':':
+        print(f'{name}.warning {warning}')
+    if critical and critical != ':':
+        print(f'{name}.critical {critical}')
+
+
+def find_zram():
+    """Return list of found zram devices."""
+    zram = []
+    for line in sorted(run_binary(['zramctl']).splitlines()):
+        if not line.startswith('/dev/'):
+            continue
+        items = line.split()
+        if len(items) == 7:  # Not mounted, use device name
+            mount = items[0]
+        else:
+            mount = items[7]
+            if mount == '[SWAP]':
+                mount = 'Swap'
+        zram.append((safename(items[0]),    # 0, device
+                     parse_unit(items[2]),  # 1, disksize
+                     parse_unit(items[3]),  # 2, data
+                     parse_unit(items[5]),  # 3, total
+                     mount))                # 4, mountpoint
+    return zram
+
+
+def config(zram):
+    """Print plugin config."""
+    # Similar to df plugin
+    print('multigraph zram_df')
+    print('graph_title zram usage in percent')
+    print('graph_info zram device usage in percent.')
+    print('graph_category disk')
+    print('graph_vlabel %')
+    print('graph_args --lower-limit 0 --upper-limit 100')
+    print('graph_scale no')
+    for item in zram:
+        print(f'{item[0]}.label {item[4]}')
+        warning_critical('df', item[0], 92, 98)
+
+    # Compression ratio:
+    # 100 = compresses to few bytes only
+    # 0 = stays same (or increases, this happens if metadata grows)
+    print('multigraph zram_compression')
+    print('graph_title zram compression ratio')
+    print('graph_info zram data compression ratio.')
+    print('graph_category disk')
+    print('graph_vlabel %')
+    print('graph_args --lower-limit 0 --upper-limit 100')
+    for item in zram:
+        print(f'{item[0]}.label {item[4]}')
+        warning_critical('compression', item[0])
+
+    # Real memory usage
+    print('multigraph zram_memory')
+    print('graph_title zram memory usage')
+    print('graph_info zram device compressed memory usage.')
+    print('graph_category disk')
+    print('graph_vlabel bytes')
+    print('graph_args --base 1024 --lower-limit 0')
+    first = True
+    for item in zram:
+        print(f'{item[0]}.label {item[4]}')
+        warning_critical('memory', item[0])
+        print(f'{item[0]}.draw {"STACK" if first else "AREA"}')
+        first = False
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch(zram)
+
+
+def fetch(zram):
+    """Print values."""
+    print('multigraph zram_df')
+    for item in zram:
+        print(f'{item[0]}.value {100 * item[2] / item[1]:.3f}')
+
+    print('multigraph zram_compression')
+    for item in zram:
+        if item[3] >= item[2]:  # Empty or size increases
+            print(f'{item[0]}.value 0')
+        else:
+            print(f'{item[0]}.value {100 - 100 * (item[3] / item[2])}')
+
+    print('multigraph zram_memory')
+    for item in zram:
+        print(f'{item[0]}.value {item[3]}')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if find_zram() else 'no (no zram devices found)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config(find_zram())
+    else:
+        fetch(find_zram())

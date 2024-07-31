@@ -78,9 +78,9 @@ RSNAPSHOT_DESCRIPTION=${rsnapshot_description:-Backup Duration}
 get_latest_process_log() {
     tac "$LOG_FILE" \
         | awk '
-            BEGIN { in_process = 0; }
-            / '"$RSNAPSHOT_OPERATION_NAME"': completed[, ]/ { in_process = 1; }
-            / '"$RSNAPSHOT_OPERATION_NAME"': started$/ { if (in_process == 1) exit; }
+            BEGIN { in_process = 0; is_finished = 0; }
+            / '"$RSNAPSHOT_OPERATION_NAME"': completed[, ]/ { if (is_finished == 0) in_process = 1; }
+            / '"$RSNAPSHOT_OPERATION_NAME"': started$/ { if (in_process == 1) { in_process = 0; is_finished = 1; }}
             { if (in_process == 1) print($0); }' \
         | tac
 }
@@ -106,7 +106,7 @@ get_backups_with_duration() {
             if [ -n "${backup_name:-}" ]; then
                 printf '%s\t%d\t%s\n' "$backup_name" "$((parsed_timestamp - backup_start))" "${backup_errors:-}"
             fi
-            break
+            cat >/dev/null
         fi
     done | sort
 }

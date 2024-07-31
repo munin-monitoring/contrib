@@ -33,12 +33,19 @@ please use the environment variables 'mpd_host' and 'mpd_port' to connect.
 Also, if your netcat(1) binary is anywhere else than /bin/nc please define
 it using the 'netcat' environment variable.
 
+Different netcat implementations use different flags. In the MPD command
+protocol, it is up to the client to close the connection, so you want to use
+a timeout flag. For instance, Fedora/Debian will use ncat, which uses '-w'
+as a timeout option.
+You can configure this using the 'netcat_args' environment variable.
+
 =head2 CONFIGURATION EXAMPLE
 
  [mpdstats_*]
   env.mpd_host 192.168.0.43
   env.mpd_port 6606
   env.netcat /usr/local/bin/nc
+  env.netcat_args -w 2
 
 =head1 AUTHOR
 
@@ -73,6 +80,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 MPDHOST=${mpd_host:-localhost}
 MPDPORT=${mpd_port:-6600}
 NCBIN=${netcat:-$(which nc)}
+NCARGS=${netcat_args:-""}
 
 ACTION="$(basename "$0" | sed 's/^.*_//')"
 
@@ -81,9 +89,10 @@ ACTION="$(basename "$0" | sed 's/^.*_//')"
 #
 
 do_autoconf () {
+    # shellcheck disable=SC2086
     if [ -z "$NCBIN" ] ; then
         echo "no (missing netcat program ('nc'))"
-    elif ! echo version | "$NCBIN" "$MPDHOST" "$MPDPORT" >/dev/null 2>&1; then
+    elif ! echo stats | "$NCBIN" $NCARGS "$MPDHOST" "$MPDPORT" >/dev/null 2>&1; then
         echo "no (connection failed)"
     else
         echo "yes"
@@ -93,7 +102,8 @@ do_autoconf () {
 
 
 get_mpd_stats_keys() {
-    echo stats | "$NCBIN" "$MPDHOST" "$MPDPORT" | awk 'BEGIN {FS=":"} /^[^ ]+:/ {print $1}'
+    # shellcheck disable=SC2086
+    echo stats | "$NCBIN" $NCARGS "$MPDHOST" "$MPDPORT" | awk 'BEGIN {FS=":"} /^[^ ]+:/ {print $1}'
 }
 
 
@@ -102,7 +112,8 @@ print_mpd_stat_value() {
     local fieldname
     local stat_value
     fieldname="$(clean_fieldname "$key")"
-    stat_value="$(echo stats | "$NCBIN" "$MPDHOST" "$MPDPORT" | awk "/^${key}:/ {print \$2}")"
+    # shellcheck disable=SC2086
+    stat_value="$(echo stats | "$NCBIN" $NCARGS "$MPDHOST" "$MPDPORT" | awk "/^${key}:/ {print \$2}")"
     echo "${fieldname}.value $stat_value"
 }
 

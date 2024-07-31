@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 #
 # This plugin shows the statistics of every source currently connected to the Icecast2 server.
 # See the Icecast2_ plugin for collecting data of specific mountpoints.
@@ -108,9 +108,17 @@ def _get_json_statistics():
 
 def get_sources():
     sources = []
-    for source in _get_json_statistics()["icestats"]["source"]:
+    if type(_get_json_statistics()["icestats"]["source"]) == dict:
+        source = _get_json_statistics()["icestats"]["source"]
         path_name = source["listenurl"].split("/")[-1]
         sources.append({"name": path_name,
+                        "fieldname": clean_fieldname(path_name),
+                        "listeners": source["listeners"],
+                        "duration_days": get_iso8601_age_days(source["stream_start_iso8601"])})
+    else:
+        for source in _get_json_statistics()["icestats"]["source"]:
+            path_name = source["listenurl"].split("/")[-1]
+            sources.append({"name": path_name,
                             "fieldname": clean_fieldname(path_name),
                             "listeners": source["listeners"],
                             "duration_days": get_iso8601_age_days(source["stream_start_iso8601"])})

@@ -1,21 +1,46 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
-# vim: set fileencoding=utf-8
-#
-# Munin plugin to show io by vm
-#
-# Copyright Maxence Dunnewind, Rodolphe Quiédeville
-#
-# License : GPLv3
-#
-# parsed environment variables:
-# vmsuffix: part of vm name to be removed
-#
-#%# capabilities=autoconf
-#%# family=contrib
+#!/usr/bin/env python3
+"""
+=encoding utf8
 
-import re, os, sys
+=head1 NAME
+
+kvm_io - show IO usage of VM
+
+
+=head1 CONFIGURATION
+
+Parsed environment variables:
+
+ vmsuffix: part of VM name to be removed
+
+
+=head1 LICENSE
+
+GPLv3
+
+SPDX-License-Identifier: GPL-3.0-only
+
+
+=head1 AUTHORS
+
+Maxence Dunnewind
+
+Rodolphe Quiédeville
+
+
+=head1 MAGIC MARKERS
+
+ #%# capabilities=autoconf
+ #%# family=contrib
+
+=cut
+"""
+
+import re
+import os
+import sys
 from subprocess import Popen, PIPE
+
 
 def config(vm_names):
     ''' Print the plugin's config
@@ -25,21 +50,21 @@ def config(vm_names):
 graph_vlabel Bytes read(-)/written(+) per second
 graph_category virtualization
 graph_info This graph shows the block device I/O used of virtual machines
-graph_args --base 1024
-    """
-    print base_config
+graph_args --base 1024"""
+    print(base_config)
 
     for vm in vm_names:
-        print "%s_read.label %s" % (vm, vm)
-        print "%s_read.type COUNTER" % vm
-        print "%s_read.min 0" % vm
-        print "%s_read.info I/O used by virtual machine %s" % (vm, vm)
-        print "%s_read.graph no" % vm
-        print "%s_write.label %s" % (vm, vm)
-        print "%s_write.type COUNTER" % vm
-        print "%s_write.min 0" % vm
-        print "%s_write.negative %s_read" % (vm, vm)
-        print "%s_write.info I/O used by virtual machine %s" % (vm, vm)
+        print("%s_read.label %s" % (vm, vm))
+        print("%s_read.type COUNTER" % vm)
+        print("%s_read.min 0" % vm)
+        print("%s_read.info I/O used by virtual machine %s" % (vm, vm))
+        print("%s_read.graph no" % vm)
+        print("%s_write.label %s" % (vm, vm))
+        print("%s_write.type COUNTER" % vm)
+        print("%s_write.min 0" % vm)
+        print("%s_write.negative %s_read" % (vm, vm))
+        print("%s_write.info I/O used by virtual machine %s" % (vm, vm))
+
 
 def clean_vm_name(vm_name):
     ''' Replace all special chars
@@ -49,32 +74,32 @@ def clean_vm_name(vm_name):
     # suffix part defined in conf
     suffix = os.getenv('vmsuffix')
     if suffix:
-        vm_name = re.sub(suffix,'',vm_name)
+        vm_name = re.sub(suffix, '', vm_name)
     # proxmox uses kvm with -name parameter
     parts = vm_name.split('\x00')
     if (parts[0].endswith('kvm')):
         try:
-            return parts[parts.index('-name')+1]
+            vm_name = parts[parts.index('-name') + 1]
         except ValueError:
             pass
-    return re.sub(r"[^a-zA-Z0-9_]", "_", vm_name)
+    return re.sub(r"(^[^A-Za-z_]|[^A-Za-z0-9_])", "_", vm_name)
+
 
 def fetch(vms):
     ''' Fetch values for a list of pids
     @param dictionary {kvm_pid: cleaned vm name}
     '''
-    res = {}
     for pid in vms:
-        f = open("/proc/%s/io" % pid, "r")
-        for line in f.readlines():
-            if "read_bytes" in line:
-                read = line.split()[1]
-                print "%s_read.value %s" % (vms[pid], read)
-            if "write_bytes" in line:
-                write = line.split()[1]
-                print "%s_write.value %s" % (vms[pid], write)
-                break
-        f.close()
+        with open("/proc/%s/io" % pid.decode(), "r") as f:
+            for line in f.readlines():
+                if "read_bytes" in line:
+                    read = line.split()[1]
+                    print("%s_read.value %s" % (vms[pid], read))
+                if "write_bytes" in line:
+                    write = line.split()[1]
+                    print("%s_write.value %s" % (vms[pid], write))
+                    break
+
 
 def detect_kvm():
     ''' Check if kvm is installed
@@ -83,15 +108,17 @@ def detect_kvm():
     kvm.communicate()
     return not bool(kvm.returncode)
 
+
 def find_vm_names(pids):
     '''Find and clean vm names from pids
     @return a dictionary of {pids : cleaned vm name}
     '''
     result = {}
     for pid in pids:
-        cmdline = open("/proc/%s/cmdline" % pid, "r")
-        result[pid] = clean_vm_name(re.sub(r"^.*guest=([a-zA-Z0-9.-_-]*).*$",r"\1", cmdline.readline()))
+        with open("/proc/%s/cmdline" % pid.decode(), "r") as cmdline:
+            result[pid] = clean_vm_name(re.sub(r"^.*guest=([a-zA-Z0-9.-_-]*).*$", r"\1", cmdline.readline()))
     return result
+
 
 def list_pids():
     ''' Find the pid of kvm processes
@@ -100,13 +127,14 @@ def list_pids():
     pid = Popen("pidof qemu-kvm qemu-system-x86_64 kvm", shell=True, stdout=PIPE)
     return pid.communicate()[0].split()
 
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         if sys.argv[1] in ['autoconf', 'detect']:
             if detect_kvm():
-                print "yes"
+                print("yes")
             else:
-                print "no"
+                print("no (detect_kvm failed - is kvm installed?)")
         elif sys.argv[1] == "config":
             config(find_vm_names(list_pids()).values())
         else:

@@ -7,12 +7,17 @@ ircstats  - Plugin to graph data about an IRC network and a single IRC server
 
 =head1 CONFIGURATION
 
-- ENV{SERVER} to point to the server to connect to, defaults to localhost.
-- ENV{NICK} nickname to use, defaults to munin-$HASH.
+- env.SERVER to point to the server to connect to, defaults to localhost.
+- env.PORT port to use, defaults to 6667.
+- env.NICK nickname to use, defaults to munin-$HASH.
+- env.USESSL 0 or 1 values to enable SSL/TLS, defaults to 0.
+- env.USEIPV6 0 or 1 to enable IPv6 use, defaults to 0.
 
 =head1 USAGE
 
 This plugin connects to an IRC server.
+
+It requires POE::Component::IRC and POE::Component::SSLify if you use SSL/TLS.
 
 =head1 AUTHOR
 
@@ -35,9 +40,11 @@ use Digest::MD5 qw(md5_hex);
 my $nickname = $ENV{NICK} || 'munin-'.md5_hex(rand().time());
 my $ircname = "Munin statistics gathering from $ENV{FQDN}";
 my $server = $ENV{SERVER} || 'localhost';
+my $port = $ENV{PORT} || 6667;
+my $usessl = $ENV{USESSL} || 0;
+my $useipv6 = $ENV{USEIPV6} || 0;
 
 if($ARGV[0] and $ARGV[0] eq "config") {
-    print "host_name $server\n";
     print "graph_title ircd status - $server\n";
     print "graph_category chat\n";
     print "graph_order clients channels servers localclients clientmax localclientmax localservers opers unknownconns\n";
@@ -70,8 +77,10 @@ my $irc = POE::Component::IRC->spawn(
    nick => $nickname,
    ircname => $ircname,
    server => $server,
+   port => $port,
    raw => 0,
-   useipv6 => 0,
+   UseSSL => $usessl,
+   useipv6 => $useipv6,
 ) or die "Oh noooo! $!";
 
 POE::Session->create(

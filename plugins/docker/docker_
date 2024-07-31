@@ -4,8 +4,9 @@
 
 docker_ - Docker wildcard-plugin to monitor a L<Docker|https://www.docker.com> host.
 
-This wildcard plugin provides at the moment only the suffixes C<containers>, C<images>, C<status>,
-C<volumes>, C<cpu>, C<memory> and C<network>.
+This wildcard plugin provides series C<containers>, C<images>, C<status>,
+C<volumes>, C<cpu>, C<memory> and C<network> as separate graphs. It also
+supports a C<multi> suffix that provides all of those as a multigraph.
 
 =head1 INSTALLATION
 
@@ -14,11 +15,18 @@ C<volumes>, C<cpu>, C<memory> and C<network>.
 
 =over 2
 
+If you want all the graphs as a multigraph, create a single multi symlink.
+
+    ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_multi
+
+Or choose a subset of those you want.
+
     ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_containers
     ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_cpu
     ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_images
     ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_memory
     ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_network
+    ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_size
     ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_status
     ln -s /usr/share/munin/plugins/docker_ /etc/munin/plugins/docker_volumes
 
@@ -44,7 +52,7 @@ which if matched will exclude the matching containers from the memory and cpu gr
 
 For example
 
-env.EXCLUDE_CONTAINER_NAME runner
+ env.EXCLUDE_CONTAINER_NAME runner
 
 Would exclude all containers with the word "runner" in the name.
 
@@ -52,26 +60,31 @@ Would exclude all containers with the word "runner" in the name.
 =over 2
 
     [docker_*]
-    user root
-    env.DOCKER_HOST unix://var/run/docker.sock
+    group docker
+    env.DOCKER_HOST unix://run/docker.sock
     env.EXCLUDE_CONTAINER_NAME regexp
 
 =back
+
+You may need to pick a different group depending on the name schema of your
+distribution.  Or maybe use "user root", if nothing else works.
 
 =head1 AUTHORS
 
 This section has been reverse-engineered from git logs
 
-* Codimp <contact@lithio.fr>: original rewrite
-* Rowan Wookey <admin@rwky.net>: performance improvement
-* Olivier Mehani <shtrom@ssji.net>: Network support, ClientWrapper, gerenal
-  cleanup
+Codimp <contact@lithio.fr>: original rewrite
+
+Rowan Wookey <admin@rwky.net>: performance improvement
+
+Olivier Mehani <shtrom@ssji.net>: Network support, ClientWrapper, general cleanup, multigraph
 
 =head1 MAGIC MARKERS
 
-#%# family=auto
-#%# capabilities=autoconf suggest
+ #%# family=auto
+ #%# capabilities=autoconf suggest multigraph
 
+=cut
 """
 
 import os
@@ -100,6 +113,14 @@ def sorted_by_creation_date(func):
     return sorted_func
 
 
+def clean_fieldname(text):
+    if text == "root":
+        # "root" is a magic (forbidden) word
+        return "_root"
+    else:
+        return re.sub(r"(^[^A-Za-z_]|[^A-Za-z0-9_])", "_", text)
+
+
 class ClientWrapper:
     """
     A small wrapper for the docker client, to centralise some parsing logic,
@@ -116,17 +137,17 @@ class ClientWrapper:
         if exclude_re:
             self.exclude = re.compile(exclude_re)
 
-    @cached_property
-    @sorted_by_creation_date
-    def containers(self):
-        return self.client.containers.list()
+    @property
+    def api(self):
+        return self.client.api
 
     @cached_property
     @sorted_by_creation_date
     def all_containers(self):
-        return [c for c in self.client.containers.list(all=True)
-                if not self.exclude
-                or not self.exclude.search(c.name)]
+        return [
+            c for c in self.client.containers.list(all=True)
+            if (c.status == 'running') and (not self.exclude or not self.exclude.search(c.name))
+        ]
 
     @cached_property
     @sorted_by_creation_date
@@ -167,22 +188,23 @@ class ClientWrapper:
         return self.client.volumes.list()
 
 
-def container_summary(container):
+def container_summary(container, *args):
     summary = container.name
-    attributes = container_attributes(container)
+    attributes = container_attributes(container, *args)
     if attributes:
         summary += f' ({attributes})'
     return summary
 
 
-def container_attributes(container):
+def container_attributes(container, *args):
     attributes = container.image.tags
     attributes.append(container.attrs['Created'])
-    return ', '.join(attributes)
+    return ', '.join(attributes + list(args))
 
 
 def print_containers_status(client):
     running = []
+    unhealthy = []
     paused = []
     created = []
     restarting = []
@@ -191,7 +213,11 @@ def print_containers_status(client):
     dead = []
     for container in client.all_containers:
         if container.status == 'running':
-            running.append(container)
+            state = client.api.inspect_container(container.name)['State']
+            if state.get('Health', {}).get('Status') == 'unhealthy':
+                unhealthy.append(container)
+            else:
+                running.append(container)
         elif container.status == 'paused':
             paused.append(container)
         elif container.status == 'created':
@@ -206,18 +232,20 @@ def print_containers_status(client):
             dead.append(container)
     print('running.value', len(running))
     print('running.extinfo', ', '.join(container_summary(c) for c in running))
+    print('unhealthy.value', len(unhealthy))
+    print('unhealthy.extinfo', (', '.join(container_summary(c) for c in unhealthy)) or '-')
     print('paused.value', len(paused))
-    print('paused.extinfo', ', '.join(container_summary(c) for c in paused))
+    print('paused.extinfo', (', '.join(container_summary(c) for c in paused)) or '-')
     print('created.value', len(created))
-    print('created.extinfo', ', '.join(container_summary(c) for c in created))
+    print('created.extinfo', (', '.join(container_summary(c) for c in created)) or '-')
     print('restarting.value', len(restarting))
-    print('restarting.extinfo', ', '.join(container_summary(c) for c in restarting))
+    print('restarting.extinfo', (', '.join(container_summary(c) for c in restarting)) or '-')
     print('removing.value', len(removing))
-    print('removing.extinfo', ', '.join(container_summary(c) for c in removing))
+    print('removing.extinfo', (', '.join(container_summary(c) for c in removing)) or '-')
     print('exited.value', len(exited))
-    print('exited.extinfo', ', '.join(container_summary(c) for c in exited))
+    print('exited.extinfo', (', '.join(container_summary(c) for c in exited)) or '-')
     print('dead.value', len(dead))
-    print('dead.extinfo', ', '.join(container_summary(c) for c in dead))
+    print('dead.extinfo', (', '.join(container_summary(c) for c in dead)) or '-')
 
 
 def image_summary(image):
@@ -247,7 +275,7 @@ def get_container_stats(container, q):
 def parallel_container_stats(client):
     proc_list = []
     stats = {}
-    for container in client.containers:
+    for container in client.all_containers:
         q = Queue()
         p = Process(target=get_container_stats, args=(container, q))
         proc_list.append({'proc': p, 'queue': q, 'container': container})
@@ -258,46 +286,251 @@ def parallel_container_stats(client):
     return stats.items()
 
 
+def print_containers_size(client):
+    for container in client.api.df()['Containers']:
+        size = container['SizeRw'] if 'SizeRw' in container else 0
+        # first char of name is always / so we skip it
+        clean_container_name = clean_fieldname(container['Names'][0][1:])
+        print(clean_container_name + '.value', size)
+
+
 def print_containers_cpu(client):
     for container, stats in parallel_container_stats(client):
-        cpu_count = len(stats["cpu_stats"]["cpu_usage"]["percpu_usage"])
         cpu_percent = 0.0
         cpu_delta = (float(stats["cpu_stats"]["cpu_usage"]["total_usage"])
                      - float(stats["precpu_stats"]["cpu_usage"]["total_usage"]))
         system_delta = (float(stats["cpu_stats"]["system_cpu_usage"])
                         - float(stats["precpu_stats"]["system_cpu_usage"]))
         if system_delta > 0.0:
-            cpu_percent = cpu_delta / system_delta * 100.0 * cpu_count
-        print(container.name + '.value', cpu_percent)
-        print(container.name + '.extinfo', container_attributes(container))
+            cpu_percent = cpu_delta / system_delta * 100.0 * os.cpu_count()
+        clean_container_name = clean_fieldname(container.name)
+        print(clean_container_name + '.value', cpu_percent)
+        print(clean_container_name + '.extinfo', container_attributes(container))
 
 
 def print_containers_memory(client):
     for container, stats in parallel_container_stats(client):
-        print(container.name + '.value', stats['memory_stats']['stats']['total_rss'])
-        print(container.name + '.extinfo', container_attributes(container))
+        if 'total_rss' in stats['memory_stats']['stats']:  # cgroupv1 only?
+            memory_usage = stats['memory_stats']['stats']['total_rss']
+            extinfo = 'Resident Set Size'
+        else:
+            memory_usage = stats['memory_stats']['usage']
+            extinfo = 'Total memory usage'
+        clean_container_name = clean_fieldname(container.name)
+        print(clean_container_name + '.value', memory_usage)
+        print(clean_container_name + '.extinfo', container_attributes(container, extinfo))
 
 
 def print_containers_network(client):
     for container, stats in parallel_container_stats(client):
         tx_bytes = 0
         rx_bytes = 0
-        for data in stats['networks'].values():
-            tx_bytes += data['tx_bytes']
-            rx_bytes += data['rx_bytes']
-        print(container.name + '_up.value', tx_bytes)
-        print(container.name + '_down.value', rx_bytes)
-        print(container.name + '.extinfo', container_attributes(container))
+        if "networks" in stats:
+            for data in stats['networks'].values():
+                tx_bytes += data['tx_bytes']
+                rx_bytes += data['rx_bytes']
+        clean_container_name = clean_fieldname(container.name)
+        print(clean_container_name + '_up.value', tx_bytes)
+        print(clean_container_name + '_down.value', rx_bytes)
+        print(clean_container_name + '_up.extinfo', container_attributes(container))
 
 
 def volume_summary(volume):
     summary = f"{volume.short_id}"
     if volume.attrs['Labels']:
-        summary += " ({', '.join(volume.attrs['Labels'])})"
+        summary += f" ({', '.join(volume.attrs['Labels'])})"
     return summary
 
 
+def status(client, mode):
+    if mode == "config":
+        print("graph_title Docker status")
+        print("graph_vlabel containers")
+        print("graph_category virtualization")
+        print("graph_total All containers")
+        print("running.label RUNNING")
+        print("running.draw AREASTACK")
+        print("running.info Running containers can be manipulated with "
+              "`docker container [attach|kill|logs|pause|restart|stop] <NAME>` or "
+              "commands run in them with `docker container exec "
+              "[--detach|--interactive,--privileged,--tty] <NAME> <COMMAND>`"
+              )
+        print("unhealthy.label UNHEALTHY")
+        print("unhealthy.draw AREASTACK")
+        print("unhealthy.warning 1")
+        print("unhealthy.info Unhealthy containers can be restarted with "
+              "`docker container restart <NAME>`")
+        print("paused.label PAUSED")
+        print("paused.draw AREASTACK")
+        print("paused.info Paused containers can be resumed with "
+              "`docker container unpause <NAME>`")
+        print("created.label CREATED")
+        print("created.draw AREASTACK")
+        print("created.info New containers can be created with "
+              "`docker container create --name <NAME> <IMAGE_ID >` or "
+              "`docker container run --name <NAME> <IMAGE_ID> <COMMAND>`")
+        print("restarting.label RESTARTING")
+        print("restarting.draw AREASTACK")
+        print("restarting.info Containers can be restarted with "
+              "`docker container restart <NAME>`")
+        print("removing.label REMOVING")
+        print("removing.draw AREASTACK")
+        print("removing.info Containers can be removed with "
+              "`docker container rm <NAME>`")
+        print("exited.label EXITED")
+        print("exited.draw AREASTACK")
+        print("exited.info Exited containers can be started with "
+              "`docker container start [--attach] <NAME>`")
+        print("dead.label DEAD")
+        print("dead.draw AREASTACK")
+        print("dead.warning 1")
+        print("dead.info Dead containers can be started with "
+              "`docker container start <NAME>`")
+    else:
+        print_containers_status(client)
+
+
+def containers(client, mode):
+    if mode == "config":
+        print("graph_title Docker containers")
+        print("graph_vlabel containers")
+        print("graph_category virtualization")
+        print("containers_quantity.label Containers")
+    else:
+        print('containers_quantity.value', len(client.all_containers))
+
+
+def images(client, mode):
+    if mode == "config":
+        print("graph_title Docker images")
+        print("graph_vlabel images")
+        print("graph_category virtualization")
+        print("graph_total All images")
+        print("intermediate_quantity.label Intermediate images")
+        print("intermediate_quantity.draw AREASTACK")
+        print("intermediate_quantity.info All unused images can be deleted with "
+              "`docker image prune --all`")
+        print("images_quantity.label Images")
+        print("images_quantity.draw AREASTACK")
+        print("images_quantity.info Images can be used in containers with "
+              "`docker container create --name <NAME> <IMAGE_ID >` or "
+              "`docker container run --name <NAME> <IMAGE_ID> <COMMAND>`")
+        print("dangling_quantity.label Dangling images")
+        print("dangling_quantity.draw AREASTACK")
+        print("dangling_quantity.info Dangling images can be deleted with "
+              "`docker image prune`"
+              "or tagged with `docker image tag <IMAGE_ID> <NAME>`")
+        print("dangling_quantity.warning 10")
+    else:
+        print_images_count(client)
+
+
+def volumes(client, mode):
+    if mode == "config":
+        print("graph_title Docker volumes")
+        print("graph_vlabel volumes")
+        print("graph_category virtualization")
+        print("volumes_quantity.label Volumes")
+        print("volumes_quantity.draw AREASTACK")
+        print("volumes_quantity.info Unused volumes can be deleted with "
+              "`docker volume prune`")
+    else:
+        print('volumes_quantity.value', len(client.volumes))
+        print('volumes_quantity.extinfo', ', '.join(volume_summary(v) for v in client.volumes))
+
+
+def size(client, mode):
+    if mode == "config":
+        print("graph_title Docker containers size")
+        print("graph_args --base 1024 -l 0")
+        print("graph_vlabel Bytes")
+        print("graph_category virtualization")
+        print("graph_info This graph shows docker container size.")
+        print("graph_total Total container size")
+        for container in client.all_containers:
+            fieldname = clean_fieldname(container.name)
+            print("{}.label {}".format(fieldname, container.name))
+            print("{}.draw AREASTACK".format(fieldname))
+            print("{}.info {}".format(fieldname, container_attributes(container)))
+    else:
+        print_containers_size(client)
+
+
+def cpu(client, mode):
+    if mode == "config":
+        graphlimit = str(os.cpu_count() * 100)
+        print("graph_title Docker containers CPU usage")
+        print("graph_args --base 1000 -r --lower-limit 0 --upper-limit " + graphlimit)
+        print("graph_scale no")
+        print("graph_period second")
+        print("graph_vlabel CPU usage (%)")
+        print("graph_category virtualization")
+        print("graph_info This graph shows docker container CPU usage.")
+        print("graph_total Total CPU usage")
+        for container in client.all_containers:
+            fieldname = clean_fieldname(container.name)
+            print("{}.label {}".format(fieldname, container.name))
+            print("{}.draw AREASTACK".format(fieldname))
+            print("{}.info {}".format(fieldname, container_attributes(container)))
+    else:
+        print_containers_cpu(client)
+
+
+def network(client, mode):
+    if mode == "config":
+        print("graph_title Docker containers network usage")
+        print("graph_args --base 1024 -l 0")
+        print("graph_vlabel bits in (-) / out (+) per ${graph_period}")
+        print("graph_category virtualization")
+        print("graph_info This graph shows docker container network usage.")
+        print("graph_total Total network usage")
+        for container in client.all_containers:
+            fieldname = clean_fieldname(container.name)
+            print("{}_down.label {}_received".format(fieldname, container.name))
+            print("{}_down.type DERIVE".format(fieldname))
+            print("{}_down.min 0".format(fieldname))
+            print("{}_down.graph no".format(fieldname))
+            print("{}_down.cdef {}_down,8,*".format(fieldname, fieldname))
+            print("{}_up.label {}".format(fieldname, container.name))
+            print("{}_up.draw LINESTACK1".format(fieldname))
+            print("{}_up.type DERIVE".format(fieldname))
+            print("{}_up.min 0".format(fieldname))
+            print("{}_up.negative {}_down".format(fieldname, fieldname))
+            print("{}_up.cdef {}_up,8,*".format(fieldname, fieldname))
+            print("{}_up.info {}".format(fieldname, container_attributes(container)))
+    else:
+        print_containers_network(client)
+
+
+def memory(client, mode):
+    if mode == "config":
+        print("graph_title Docker containers memory usage")
+        print("graph_args --base 1024 -l 0")
+        print("graph_vlabel Bytes")
+        print("graph_category virtualization")
+        print("graph_info This graph shows docker container memory usage.")
+        print("graph_total Total memory usage")
+        for container in client.all_containers:
+            fieldname = clean_fieldname(container.name)
+            print("{}.label {}".format(fieldname, container.name))
+            print("{}.draw AREASTACK".format(fieldname))
+            print("{}.info {}".format(fieldname, container_attributes(container)))
+    else:
+        print_containers_memory(client)
+
+
 def main():
+    series = [
+        'containers',
+        'cpu',
+        'images',
+        'memory',
+        'network',
+        'status',
+        'size',
+        'volumes',
+    ]
+
     try:
         mode = sys.argv[1]
     except IndexError:
@@ -318,155 +551,28 @@ def main():
         sys.exit(1)
 
     if mode == "suggest":
-        print("cpu")
-        print("images")
-        print("memory")
-        print("network")
-        print("status")
-        print("volumes")
+        # The multigraph covers all other graphs,
+        # so we only need to suggest one
+        print("multi")
         sys.exit(0)
 
     client = ClientWrapper(client,
                            exclude_re=os.getenv('EXCLUDE_CONTAINER_NAME'))
 
-    if wildcard == "status":
-        if mode == "config":
-            print("graph_title Docker status")
-            print("graph_vlabel containers")
-            print("graph_category virtualization")
-            print("graph_total All containers")
-            print("running.label RUNNING")
-            print("running.draw AREASTACK")
-            print("running.info Running containers can be manipulated with "
-                  "`docker container [attach|kill|logs|pause|restart|stop] <NAME>` or "
-                  "commands run in them with `docker container exec "
-                  "[--detach|--interactive,--privileged,--tty] <NAME> <COMMAND>`"
-                  )
-            print("paused.label PAUSED")
-            print("paused.draw AREASTACK")
-            print("paused.info Paused containers can be resumed with "
-                  "`docker container unpause <NAME>`")
-            print("created.label CREATED")
-            print("created.draw AREASTACK")
-            print("created.info New containers can be created with "
-                  "`docker container create --name <NAME> <IMAGE_ID >` or "
-                  "`docker container run --name <NAME> <IMAGE_ID> <COMMAND>`")
-            print("restarting.label RESTARTING")
-            print("restarting.draw AREASTACK")
-            print("restarting.info Containers can be restarted with "
-                  "`docker container restart <NAME>`")
-            print("removing.label REMOVING")
-            print("removing.draw AREASTACK")
-            print("removing.info Containers can be removed with "
-                  "`docker container rm <NAME>`")
-            print("exited.label EXITED")
-            print("exited.draw AREASTACK")
-            print("exited.info Exited containers can be started with "
-                  "`docker container start [--attach] <NAME>`")
-            print("dead.label DEAD")
-            print("dead.draw AREASTACK")
-            print("dead.warning 1")
-            print("dead.info Dead containers can be started with "
-                  "`docker container start <NAME>`")
-        else:
-            print_containers_status(client)
-    elif wildcard == "containers":
-        if mode == "config":
-            print("graph_title Docker containers")
-            print("graph_vlabel containers")
-            print("graph_category virtualization")
-            print("containers_quantity.label Containers")
-        else:
-            print('containers_quantity.value', len(client.containers))
-    elif wildcard == "images":
-        if mode == "config":
-            print("graph_title Docker images")
-            print("graph_vlabel images")
-            print("graph_category virtualization")
-            print("graph_total All images")
-            print("intermediate_quantity.label Intermediate images")
-            print("intermediate_quantity.draw AREASTACK")
-            print("intermediate_quantity.info All unused images can be deleted with "
-                  "`docker image prune --all`")
-            print("images_quantity.label Images")
-            print("images_quantity.draw AREASTACK")
-            print("images_quantity.info Images can be used in containers with "
-                  "`docker container create --name <NAME> <IMAGE_ID >` or "
-                  "`docker container run --name <NAME> <IMAGE_ID> <COMMAND>`")
-            print("dangling_quantity.label Dangling images")
-            print("dangling_quantity.draw AREASTACK")
-            print("dangling_quantity.info Dangling images can be deleted with "
-                  "`docker image prune`"
-                  "or tagged with `docker image tag <IMAGE_ID> <NAME>`")
-            print("dangling_quantity.warning 10")
-        else:
-            print_images_count(client)
-    elif wildcard == "volumes":
-        if mode == "config":
-            print("graph_title Docker volumes")
-            print("graph_vlabel volumes")
-            print("graph_category virtualization")
-            print("volumes_quantity.label Volumes")
-            print("volumes_quantity.draw AREASTACK")
-            print("volumes_quantity.info Unused volumes can be deleted with "
-                  "`docker volume prune`")
-        else:
-            print('volumes_quantity.value', len(client.volumes))
-            print('volumes_quantity.extinfo', ', '.join(volume_summary(v) for v in client.volumes))
-    elif wildcard == "cpu":
-        if mode == "config":
-            graphlimit = str(os.cpu_count() * 100)
-            print("graph_title Docker containers CPU usage")
-            print("graph_args --base 1000 -r --lower-limit 0 --upper-limit " + graphlimit)
-            print("graph_scale no")
-            print("graph_period second")
-            print("graph_vlabel CPU usage (%)")
-            print("graph_category virtualization")
-            print("graph_info This graph shows docker container CPU usage.")
-            print("graph_total Total CPU usage")
-            for container in client.all_containers:
-                print("{}.label {}".format(container.name, container.name))
-                print("{}.draw AREASTACK".format(container.name))
-                print("{}.info {}".format(container.name, container_attributes(container)))
-        else:
-            print_containers_cpu(client)
-    elif wildcard == "memory":
-        if mode == "config":
-            print("graph_title Docker containers memory usage")
-            print("graph_args --base 1024 -l 0")
-            print("graph_vlabel Bytes")
-            print("graph_category virtualization")
-            print("graph_info This graph shows docker container memory usage.")
-            print("graph_total Total memory usage")
-            for container in client.all_containers:
-                print("{}.label {}".format(container.name, container.name))
-                print("{}.draw AREASTACK".format(container.name))
-                print("{}.info {}".format(container.name, container_attributes(container)))
-        else:
-            print_containers_memory(client)
-    elif wildcard == "network":
-        if mode == "config":
-            print("graph_title Docker containers network usage")
-            print("graph_args --base 1024 -l 0")
-            print("graph_vlabel bits in (-) / out (+) per ${graph_period}")
-            print("graph_category virtualization")
-            print("graph_info This graph shows docker container network usage.")
-            print("graph_total Total network usage")
-            for container in client.all_containers:
-                print("{}_down.label {}_received".format(container.name, container.name))
-                print("{}_down.type DERIVE".format(container.name))
-                print("{}_down.min 0".format(container.name))
-                print("{}_down.graph no".format(container.name))
-                print("{}_down.cdef {}_down,8,*".format(container.name, container.name))
-                print("{}_up.label {}".format(container.name, container.name))
-                print("{}_up.draw LINESTACK1".format(container.name))
-                print("{}_up.type DERIVE".format(container.name))
-                print("{}_up.min 0".format(container.name))
-                print("{}_up.negative {}_down".format(container.name, container.name))
-                print("{}_up.cdef {}_up,8,*".format(container.name, container.name))
-                print("{}_up.info {}".format(container.name, container_attributes(container)))
-        else:
-            print_containers_network(client)
+    if wildcard in series:
+        # dereference the function name by looking in the globals()
+        # this assumes that the function name matches the series name exactly
+        # if this were to change, a different approach would be needed,
+        # most likely using a Dict of series name string to callable
+        globals()[wildcard](client, mode)
+    elif wildcard == 'multi':
+        for s in series:
+            print(f'multigraph docker_{s}')
+            # ditto
+            globals()[s](client, mode)
+    else:
+        print(f'unknown series ({wildcard})', file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == '__main__':

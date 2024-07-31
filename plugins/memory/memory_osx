@@ -1,0 +1,101 @@
+#!/bin/sh
+# -*- sh -*-
+
+# shellcheck disable=SC2046
+
+: << =cut
+
+=head1 NAME
+
+memory - Plugin to measure memory on osx.
+
+=head1 NOTES
+
+This plugin runs the vm_stat command once per interval, to discover memory usage on OSX.
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+if [ "$1" = "autoconf" ]; then
+    if [ "$(uname)" = "Darwin" ]; then
+        echo yes
+        exit 0
+    else
+        echo "no (uname does not report 'Darwin')"
+        exit 0
+    fi
+fi
+
+dehumanise() {
+    echo "$1" | sed -e "s/K/*1024/g;s/M/*1024*1024/;s/G/*1024*1024*1024/;s/T/*1024*1024*1024*1024/"
+}
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title Memory'
+        echo "graph_order wired app compressed cached free swap_used swap_free"
+        echo "graph_args --base 1024 -r --lower-limit 0"
+        echo 'graph_vlabel Bytes'
+        echo 'graph_category system'
+        echo 'wired.label wired'
+        echo 'wired.draw AREASTACK'
+        echo 'wired.min 0'
+        echo 'wired.info Wired memory'
+        echo 'app.label app'
+        echo 'app.draw AREASTACK'
+        echo 'app.min 0'
+        echo "app.info Application memory"
+        echo 'compressed.label compressed'
+        echo 'compressed.draw AREASTACK'
+        echo 'compressed.min 0'
+        echo 'compressed.info Compressed memory'
+        echo 'cached.label cached'
+        echo 'cached.draw AREASTACK'
+        echo 'cached.min 0'
+        echo 'cached.info Cached memory'
+        echo 'free.label free'
+        echo 'free.draw AREASTACK'
+        echo 'free.min 0'
+        echo 'free.info Free memory'
+        echo 'swap_used.label swap_used'
+        echo 'swap_used.draw AREASTACK'
+        echo 'swap_used.min 0'
+        echo 'swap_used.info Swap used'
+        echo 'swap_free.label swap_free'
+        echo 'swap_free.draw AREASTACK'
+        echo 'swap_free.min 0'
+        echo 'swap_free.info Swap free'
+
+        exit 0
+fi
+
+PAGESIZE=$(pagesize)
+VMSTATINFO=$(vm_stat)
+MEM_FREE=$(echo "$VMSTATINFO" | awk '/Pages free: / { print substr($3, 1, length($3)-1) }')
+MEM_WIRED=$(echo "$VMSTATINFO" | awk '/Pages wired down: / { print substr($4, 1, length($4)-1) }')
+MEM_ANONYMOUS=$(echo "$VMSTATINFO" | awk '/Anonymous pages: / { print substr($3, 1, length($3)-1) }')
+MEM_PURGEABLE=$(echo "$VMSTATINFO" | awk '/Pages purgeable: / { print substr($3, 1, length($3)-1) }')
+MEM_COMPRESSED=$(echo "$VMSTATINFO" | awk '/Pages occupied by compressor: / { print substr($5, 1, length($5)-1) }')
+MEM_FILEBACKED=$(echo "$VMSTATINFO" | awk '/File-backed pages: / { print substr($3, 1, length($3)-1) }')
+#
+MEM_APP=$( echo "$MEM_ANONYMOUS $MEM_PURGEABLE" | awk '{ print $1 - $2 }')
+MEM_CACHED=$( echo "$MEM_FILEBACKED $MEM_PURGEABLE" | awk '{ print $1 + $2 }')
+#
+SWAPINFO=$(sysctl vm.swapusage)
+SWAP_USED=$(echo "$SWAPINFO" | awk '/vm.swapusage: / { print substr($7, 1, length($7)) }')
+SWAP_FREE=$(echo "$SWAPINFO" | awk '/vm.swapusage: / { print substr($10, 1, length($10)) }')
+#
+echo "wired.value" $(( MEM_WIRED * PAGESIZE ))
+echo "app.value" $(( MEM_APP * PAGESIZE ))
+echo "compressed.value" $(( MEM_COMPRESSED * PAGESIZE ))
+echo "cached.value" $(( MEM_CACHED * PAGESIZE ))
+echo "free.value" $(( MEM_FREE * PAGESIZE ))
+echo "swap_used.value" $( dehumanise "$SWAP_USED" | bc )
+echo "swap_free.value" $( dehumanise "$SWAP_FREE" | bc )

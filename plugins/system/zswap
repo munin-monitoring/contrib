@@ -1,0 +1,97 @@
+#!/bin/sh
+#%# family=auto
+
+: << EOF
+=head1 NAME
+
+zswap - Outputs various metrics about zswap.
+
+=head1 NOTES
+
+ See https://www.kernel.org/doc/html/latest/admin-guide/mm/zswap.html for more Information.
+
+=head1 CONFIGURATION
+
+This Plugin has to be run as root:
+
+  [zswap]
+    user root
+
+=head1 AUTHOR
+
+Michael Grote - git.mgrote.net
+
+=head1 LICENSE
+
+GPLv3 or later
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+EOF
+
+
+# Variables
+SYSFS_ZSWAP_DIR="/sys/kernel/debug/zswap"
+
+# Link to Descriptions: https://kruyt.org/telegraf-zswap/
+print_labels () {
+cat << EOF
+graph_title zswap
+graph_category system
+duplicate_entry.label duplicate entry
+pool_limit_hit.label pool limit hit
+pool_total_size.label pool total size
+reject_alloc_fail.label reject alloc fail
+reject_compress_poor.label reject compress poor
+reject_kmemcache_fail.label reject kmemcache fail
+reject_reclaim_fail.label reject reclaim fail
+same_filled_pages.label same filled pages
+stored_pages.label stored pages
+written_back_pages.label written back pages
+duplicate_entry.info
+pool_limit_hit.info the zswap pool limit has been reached
+pool_total_size.info
+reject_alloc_fail.info
+reject_compress_poor.info reject pages due to poor compression policy (cumulative) (see max_compressed_page_size sysfs attribute)
+reject_kmemcache_fail.info rejected pages due to kmem failure (cumulative)
+reject_reclaim_fail.info
+same_filled_pages.info "Some of the pages in zswap are same-value filled pages (i.e. contents of the page have same value or repetitive pattern)."
+stored_pages.info number of compressed pages stored in zswap
+written_back_pages.info
+EOF
+}
+
+
+
+# wenn parameter = ...
+if [ "$1" = "autoconf" ]; then
+  # check if File contains a "Y"
+  if ! grep -q Y "/sys/module/zswap/parameters/enabled"; then
+    echo "no (zswap not enabled)"
+    exit 0
+  fi
+  echo yes
+  exit 0
+fi
+
+if [ "$1" = "config" ]; then
+  # setze label
+  print_labels
+  exit 0
+fi
+
+echo duplicate_entry.value "$(cat "$SYSFS_ZSWAP_DIR/duplicate_entry")"
+echo pool_limit_hit.value "$(cat "$SYSFS_ZSWAP_DIR/pool_limit_hit")"
+echo pool_total_size.value "$(cat "$SYSFS_ZSWAP_DIR/pool_total_size")"
+echo reject_alloc_fail.value "$(cat "$SYSFS_ZSWAP_DIR/reject_alloc_fail")"
+echo reject_compress_poor.value "$(cat "$SYSFS_ZSWAP_DIR/reject_compress_poor")"
+echo reject_kmemcache_fail.value "$(cat "$SYSFS_ZSWAP_DIR/reject_kmemcache_fail")"
+echo reject_reclaim_fail.value "$(cat "$SYSFS_ZSWAP_DIR/reject_reclaim_fail")"
+echo same_filled_pages.value "$(cat "$SYSFS_ZSWAP_DIR/same_filled_pages")"
+echo stored_pages.value "$(cat "$SYSFS_ZSWAP_DIR/stored_pages")"
+echo written_back_pages.value "$(cat "$SYSFS_ZSWAP_DIR/written_back_pages")"

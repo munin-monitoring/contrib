@@ -9,6 +9,9 @@ dnsresponse - Plugin to monitor DNS resolution times.
 
 Any unix system.
 
+Dependencies:
+ - Net::DNS: https://metacpan.org/pod/Net::DNS e.g. libnet-dns-perl
+
 =head1 CONFIGURATION
 
 The following shows the default configuration.
@@ -16,6 +19,14 @@ The following shows the default configuration.
   [dnsresponse_*]
     env.site www.google.com
     env.times 20
+    env.verify no
+    env.timeout 30
+
+Where the plugin suffix represents the DNS-Server which should be queried.
+env.site: which domain-name should be queried.
+env.times: how often a value should be queried.
+env.verify: yes: check that we get a response back from the server and show the number of verified responses
+env.timeout: timeout in seconds to use when querying servers
 
 =head1 INTERPRETATION
 
@@ -37,6 +48,7 @@ $Id: dnsresponse_ 61 2009-04-14 09:11:00Z stsimb $
 =head1 AUTHOR
 
 Copyright (c) 2009 by Sotiris Tsimbonis.
+Copyright (c) 2023 by Andreas Perhab, WT-IO-IT GmbH.
 
 =head1 LICENSE
 
@@ -50,9 +62,11 @@ GPLv2
 use strict;
 use warnings;
 
-my $DEBUG=0;
+my $DEBUG = exists $ENV{'MUNIN_DEBUG'} ? $ENV{'MUNIN_DEBUG'} : 0;
 my $site = exists $ENV{'site'} ? $ENV{'site'} : "www.google.com";
 my $times = exists $ENV{'times'} ? $ENV{'times'} : "20";
+my $verify = exists $ENV{'verify'} ? lc($ENV{'verify'}) eq "yes" : 0;
+my $timeout = exists $ENV{'timeout'} ? $ENV{'timeout'} : 30;
 my $resconf="/etc/resolv.conf";
 
 use File::Basename;
@@ -68,6 +82,7 @@ if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
 	print "graph_scale no\n";
 	print "graph_category dns\n";
 	print "graph_info Time taken by $dnsip to resolve $site $times times.\n";
+	print "graph_info Time taken by $dnsip to resolve $site.\n";
 	#my @val = ("min", "avg", "median", "max");
 	my @val = ("avg", "median", "stddev");
 	my $value;
@@ -81,20 +96,17 @@ if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
 #		print "$value.type DERIVE\n";
 #		print "$value.min 0\n";
 #		print "$value.warning 100\n";
+		if ($value ne "stddev") {
+			print "$value.warning ".($timeout*1000)."\n";
+		}
 #		print "$value.critical 600\n";
 	}
-	exit 0;
-}
-
-if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
-	my $ret;
-	if (! eval "require Net::DNS;") { $ret .= "Net::DNS not found. "; }
-	if (! eval "require Time::HiRes;") { $ret .= "Time::HiRes not found. "; }
-	if (! -s $resconf) { $ret .= "$resconf not found. "; }
-	if ($ret) {
-		print "no ($ret)\n";
-	} else {
-		print "yes\n";
+	if ( $verify ) {
+		print "verified.label Responses\n";
+		print "verified.info Number of responses received (sent $times queries)\n";
+		print "verified.min 0\n";
+		print "verified.warning $times:\n";
+		print "verified.critical 1:\n";
 	}
 	exit 0;
 }
@@ -125,15 +137,25 @@ my $res = Net::DNS::Resolver->new(
 	recurse     => 1,
 	debug       => $DEBUG,
 );
+# as we send multiple queries a retry in the DNS resolver would multiply the timeout value
+$res->retry(0);
+# set retrans time and udp timeout to the same time to effectively act as a timeout value
+$res->retrans($timeout);
+$res->udp_timeout($timeout);
 
 my $i;
 my @restimes;
+my @verified_answers;
 for ($i=1; $i<=$times; $i++) {
 	my $t0 = [gettimeofday];
 	my $answer = $res->send($site);
 	my $elapsed = tv_interval ($t0);
 	push(@restimes, $elapsed);
 	print "DBG: count $i elapsed $elapsed\n" if ($DEBUG>0);
+	if ($verify && $answer && $answer->string =~ /^;; (Answer|Response) received.*/) {
+		print "DBG: answer verified\n" if ($DEBUG>0);
+		push(@verified_answers, $answer)
+	}
 }
 
 
@@ -150,6 +172,9 @@ print "avg.value $average\n";
 print "median.value $median\n";
 print "stddev.value $stddev\n";
 #print "max.value $max\n";
+if ($verify) {
+	print "verified.value " . scalar(@verified_answers) . "\n";
+}
 
 sub mean {
 	my $result;

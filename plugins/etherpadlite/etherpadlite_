@@ -1,0 +1,95 @@
+#!/bin/sh
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+etherpadlite_ - Monitor number of pads with etherpad-lite plugin called ep_pads_stats
+
+=head1 APPLICABLE SYSTEMS
+
+Etherpad-Lite instances
+
+=head1 CONFIGURATION
+
+Requires installed ep_pads_stats 
+(https://www.npmjs.com/package/ep_pads_stats) plugin and an installed 
+jq, a command-line json processor.
+
+This is a wildcard plugin. To monitor a etherpad-lite instance, link
+etherpadlite_<instancename> to this file.
+
+ [etherpadlite_instancename]
+ env.url http://127.0.0.1:9001/stats.json
+
+=head1 AUTHOR
+
+Copyright (C) 2020 Sebastian L. (https://momou.ch)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+STATS_URL=${url:-"http://127.0.0.1:9001/stats.json"}
+INSTANCENAME="${0##*etherpadlite_}"
+CLEANINSTANCE="$(clean_fieldname "$INSTANCENAME")"
+
+print_json_data() {
+	local FIRST="$1"
+	[ -z "$FIRST" ] && exit 0
+	shift 1
+	for KEY in "$@"; do
+		VALUE=$(echo "$FIRST" | jq -cr ".$KEY")
+		echo "${KEY}.value $VALUE"
+	done
+}
+
+case $1 in
+
+    autoconf)
+        if [ -x /usr/bin/curl ]; then
+		if [ -x /usr/bin/jq ]; then
+			curl -s -f -m 2 -I "$STATS_URL" | grep -iq "Content-Type: application/json" && echo "yes" && exit 0 || echo "no (invalid or empty response from ep_pad_stats plugin ($STATS_URL))" && exit 0
+		else
+			echo "no (jq not found)" && exit 0
+		fi
+	else
+		echo "no (/usr/bin/curl not found)" && exit 0
+        fi
+        ;;
+
+   config)
+
+cat << EOM
+multigraph etherpadlite_$CLEANINSTANCE
+graph_title Etherlite-Pads on $CLEANINSTANCE instance
+graph_args --base 1000 -l 0
+graph_printf %.0lf
+graph_vlabel available pads
+graph_info number of available pads
+padsCount.label active pads
+padsCount.info number of active pads
+padsCount.min 0
+blankPads.label blank pads
+blankPads.info number of blank pads
+blankPads.min 0
+EOM
+	exit 0
+        ;;
+
+esac
+
+JSONSTATS=$(curl -s -f -m 2 "$STATS_URL")
+echo "multigraph etherpadlite_$CLEANINSTANCE"
+print_json_data "$JSONSTATS" padsCount blankPads

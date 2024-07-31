@@ -1,0 +1,480 @@
+#!/usr/bin/env python3
+
+# Copyright 2020 Nathaniel Clark <nathaniel.clark@misrule.us>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Library General Public License as published by
+# the Free Software Foundation; version 2 only
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Library General Public License for more details.
+#
+# You should have received a copy of the GNU Library General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
+
+"""
+=head1 NAME
+
+arris-sb8200 - Health monitoring plugin for Arris SB8200 Cable Modem
+
+=head1 DESCRIPTION
+
+This provides the following multigraphs:
+
+=over 4
+
+=item upstream and downstream power levels
+
+=item downstream signal to noise ratio
+
+=item downstream error counts
+
+=item uptime
+
+=back
+
+The values are retrieved from the cable modem's status web pages at
+192.168.100.1. So, this plugin must be installed on a munin node
+which can access those pages.
+
+=head1 CONFIGURATION
+
+Make sure 192.168.100.1 is accessible through your firewall.
+
+To have this register with munin as it's own host set the "env.hostname" in config.
+Also ensure that the hostname set is listed in munin.conf.
+
+Password is required to be set, user will default to "admin" if left unset.
+
+ [arris*]
+ env.hostname modem
+ env.user     admin
+ env.password UserConfiguredPassword
+
+=head1 REQUIRES
+
+This requires the following non-default python plug-ins:
+
+=over4
+
+=item requests - for HTTPS processing with cookies
+
+=item lxml - for HTML processing
+
+=back
+
+=head1 TESTING
+
+Developed and tested with:
+firmware:         AB01.02.053.05_051921_193.0A.NSH
+hardware version: 7
+
+=head1 VERSION
+
+0.0.1
+
+=head1 AUTHOR
+
+Nathaniel Clark <nathaniel.clark@misrule.us>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=contrib
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import re
+import os
+import sys
+import base64
+
+# Extra Packages
+# SB8200 has bad SSL cert, ignore warnings
+import requests
+requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
+from lxml import html
+
+
+# Auth Flow
+# AUTH = base64("{user}:{password}")
+# GET $STATUS_URL + "login_"+AUTH -> TEXTBLOB
+# GET $URL + "ct_" + TEXTBLOB -> Status page
+
+HOSTNAME = os.getenv("hostname", None)
+
+
+class Modem:
+    STATUS_URL = "https://192.168.100.1/cmconnectionstatus.html?"
+    INFO_URL = "https://192.168.100.1/cmswinfo.html?"
+    login_key = None
+
+    def __init__(self):
+        # save cookies in Session
+        self.session = requests.Session()
+        user = os.getenv("user", "admin")
+        password = os.getenv("password", None)
+        auth = base64.b64encode(bytes(user + ":" + password, "utf-8"))
+        try:
+            resp = self.session.get(
+                self.STATUS_URL + "login_" + auth.decode("utf-8"), verify=False
+            )
+        except OSError as e:
+            print("failed to contact router", file=sys.stderr)
+            raise (e)
+        if not resp.ok:
+            print(
+                "failed to get status page %d: %s" % (resp.status, resp.reason),
+                file=sys.stderr,
+            )
+            return
+        self.rxblank = re.compile(r"[\x00\n\r\t ]+", re.MULTILINE)
+        self.rxcomment = re.compile(r"<!--.*?-->")
+        self.rxscript = re.compile(r"<script.*?</script>", re.MULTILINE)
+        self.login_key = resp.text
+
+    def _process_url(self, url):
+        """
+        Extract simpleTables from page at URL
+        """
+        if self.login_key is None:
+            return []
+        try:
+            resp = self.session.get(url + "ct_" + self.login_key, verify=False)
+        except OSError:
+            print("failed to contact router", file=sys.stderr)
+            return []
+        if not resp.ok:
+            print(
+                "failed to get status page %d: %s" % (resp.status, resp.reason),
+                file=sys.stderr,
+            )
+            return []
+        data = self.rxscript.sub(
+            "", self.rxcomment.sub("", self.rxblank.sub(" ", resp.text))
+        )
+        dom = html.fromstring(data)
+        return dom.xpath('//table[contains(@class, "simpleTable")]')
+
+    def status(self):
+        return self._process_url(self.STATUS_URL)
+
+    def info(self):
+        return self._process_url(self.INFO_URL)
+
+
+# Sets maximum number of channels
+UPCOUNT = 8
+DOWNCOUNT = 32
+# DOWNCOUNT should be 32, I have observed "extra" channels with
+# modulation type of "Other" which only ever have errors
+
+if os.getenv("password", None) is None:
+    print("Set password.", file=sys.stderr)
+
+if len(sys.argv) == 2:
+    if sys.argv[1] == "config":
+        if HOSTNAME:
+            print("host_name {0}\n".format(HOSTNAME))
+
+        # UPTIME
+        print(
+            """multigraph arris_uptime
+graph_title Modem Uptime
+graph_category system
+graph_args --base 1000 -l 0
+graph_vlabel uptime in days
+graph_scale no
+graph_category system
+graph_info This graph shows the number of days that the the host is up and running so far.
+uptime.label uptime
+uptime.info The system uptime itself in days.
+uptime.draw AREA
+"""
+        )
+
+        # POWER
+        print(
+            """multigraph arris_power
+graph_title Arris Power (dBmV)
+graph_vlabel Power (dBmV)
+graph_category network"""
+        )
+        for i in range(1, DOWNCOUNT + 1):
+            print("down_{0}.label Down Ch {1}".format(i, i))
+            print("down_{0}.type GAUGE".format(i))
+            print("down_{0}.draw LINE1".format(i))
+        for i in range(1, UPCOUNT + 1):
+            print("up_{0}.label Up Ch {1}".format(i, i))
+            print("up_{0}.type GAUGE".format(i))
+            print("up_{0}.draw LINE1".format(i))
+
+        for i in range(1, DOWNCOUNT + 1):
+            name = "down_{0}".format(i)
+            print("\nmultigraph arris_power.{0}".format(name))
+            print("graph_title Downstream Power for Channel {0} (dBmV)".format(i))
+            print("graph_category network")
+            print("power.label dBmV")
+            print("power.type GAUGE")
+            print("power.draw LINE1")
+        for i in range(1, UPCOUNT + 1):
+            name = "up_{0}".format(i)
+            print("\nmultigraph arris_power.{0}".format(name))
+            print("graph_title Upstream Power for Channel {0} (dBmV)".format(i))
+            print("graph_category network")
+            print("power.label dBmV")
+            print("power.type GAUGE")
+            print("power.draw LINE1")
+
+        # SNR
+        print("\nmultigraph arris_snr")
+        print("graph_title Arris Signal-to-Noise Ratio (dB)")
+        print("graph_vlabel SNR (dB)")
+        print("graph_category network")
+        for i in range(1, DOWNCOUNT + 1):
+            print("down_{0}.label Ch {1}".format(i, i))
+            print("down_{0}.type GAUGE".format(i))
+            print("down_{0}.draw LINE1".format(i))
+
+        for i in range(1, DOWNCOUNT + 1):
+            name = "down_{0}".format(i)
+            print("\nmultigraph arris_snr.{0}".format(name))
+            print("graph_title SNR on Channel {0} (dB)".format(i))
+            print("graph_vlabel SNR (dB)")
+            print("graph_category network")
+            print("snr.label dB")
+            print("snr.type GAUGE")
+            print("snr.draw LINE1")
+
+        # ERRORS
+        print(
+            """
+multigraph arris_error
+graph_title Arris Channel Errors
+graph_category network
+graph_args --base 1000
+graph_vlabel errors/sec
+graph_category network
+corr.label Corrected
+corr.type DERIVE
+corr.min 0
+uncr.label Uncorrectable
+uncr.type DERIVE
+uncr.min 0
+uncr.warning 1"""
+        )
+
+        for i in range(1, DOWNCOUNT + 1):
+            name = "down_{0}".format(i)
+            print("\nmultigraph arris_error.{0}".format(name))
+            print("graph_title Channel {0} Errors".format(i))
+            print("graph_args --base 1000")
+            print("graph_vlabel errors/sec")
+            print("graph_category network")
+            print("corr.label Correctable")
+            print("corr.type DERIVE")
+            print("corr.min 0")
+            print("uncr.label Uncorrectable")
+            print("uncr.type DERIVE")
+            print("uncr.min 0")
+            print("uncr.warning 1")
+
+        sys.exit(0)
+
+    if sys.argv[1] == "autoconfig":
+
+        def check(url):
+            from lxml import html
+
+            resp = request.urlopen(url)
+            html.fromstring("<html>")
+            return resp
+
+        try:
+            resp = check(STATUS_URL)
+        except ImportError:
+            print("no (missing lxml module)")
+        except OSError:
+            print("no (no router)")
+        else:
+            if resp.status == 200:
+                print("yes")
+            else:
+                print("no (Bad status code: %d)" % resp.status_code)
+        sys.exit(0)
+
+
+print("multigraph arris_uptime")
+modem = Modem()
+arr = modem.info()
+if not arr:
+    # login doesn't work first time?
+    modem = Modem()
+    arr = modem.info()
+if arr:
+    trs = arr[1].findall("tr")
+    # drop title
+    trs.pop(0)
+
+    date = "".join(trs[0].findall("td")[1].itertext()).strip()
+
+    arr = date.split(" ")
+    rx = re.compile(r"[hms]")
+    days = int(arr[0])
+    hms = rx.sub("", arr[2]).split(":")
+
+    seconds = ((days * 24 + int(hms[0])) * 60 + int(hms[1])) * 60 + int(float(hms[2]))
+    print("uptime.value {0}".format(seconds / 86400.0))
+else:
+    print("uptime.value U")
+
+
+arr = modem.status()
+if arr:
+    downstream = arr[1]
+    upstream = arr[2]
+
+    trs = downstream.findall("tr")
+    # drop title
+    # trs.pop(0)
+
+    headings = ["".join(x.itertext()).strip() for x in trs.pop(0).findall("td")]
+    # SB8200 FW AB01.02.053.05_051921_193.0A.NSH
+    # outputs BAD html in that the there is not second <tr> for th table
+    #    <table class='simpleTable'>
+    # <tr><th colspan=8><strong>Downstream Bonded Channels</strong></th></tr>
+    #  <td><strong>Channel ID</strong></td>
+    #  <td><strong>Lock Status</strong></td>
+    #  <td><strong>Modulation</strong></td>
+    #  <td><strong>Frequency</strong></td>
+    #  <td><strong>Power</strong></td>
+    #  <td><strong>SNR/MER</strong></td>
+    #  <td><strong>Corrected</strong></td>
+    #  <td><strong>Uncorrectables</strong></td>
+    # </tr>
+    if not headings:
+        headings = [
+            "Channel ID",
+            "Lock Status",
+            "Modulation",
+            "Frequency",
+            "Power",
+            "SNR/MER",
+            "Corrected",
+            "Uncorrectables",
+        ]
+else:
+    trs = []
+    headings = []
+
+# Summation Graphs
+correct = 0
+uncorr = 0
+power = {"up": ["U"] * UPCOUNT, "down": ["U"] * DOWNCOUNT}
+snr = ["U"] * DOWNCOUNT
+channel = 0
+for row in trs:
+    data = dict(
+        zip(headings, ["".join(x.itertext()).strip() for x in row.findall("td")])
+    )
+    if data["Modulation"] == "Other":
+        continue
+    uncorr += int(data["Uncorrectables"])
+    correct += int(data["Corrected"])
+
+    print("\nmultigraph arris_power.down_{0}".format(channel + 1))
+    value = data["Power"].split(" ")[0]
+    print("power.value {0}".format(value))
+    power["down"][channel] = value
+
+    print("multigraph arris_snr.down_{0}".format(channel + 1))
+    value = data["SNR/MER"].split(" ")[0]
+    print("snr.value {0}".format(value))
+    snr[channel] = value
+
+    print("multigraph arris_error.down_{0}".format(channel + 1))
+    print("corr.value {0}".format(data["Corrected"]))
+    print("uncr.value {0}".format(data["Uncorrectables"]))
+    channel += 1
+
+# Fill missing
+for i in range(len(trs), DOWNCOUNT):
+    print("\nmultigraph arris_power.down_{0}".format(i + 1))
+    print("power.value U")
+
+    print("multigraph arris_snr.down_{0}".format(i + 1))
+    print("snr.value U")
+
+    print("multigraph arris_error.down_{0}".format(i + 1))
+    print("corr.value U")
+    print("uncr.value U")
+
+print("multigraph arris_error")
+if arr:
+    print("corr.value {0}".format(correct))
+    print("uncr.value {0}".format(uncorr))
+else:
+    print("corr.value U")
+    print("uncr.value U")
+
+print("multigraph arris_snr")
+for i in range(0, DOWNCOUNT):
+    print("down_{0}.value {1}".format(i + 1, snr[i]))
+
+if arr:
+    trs = upstream.findall("tr")
+    # drop title
+    trs.pop(0)
+
+    # headings = ["".join(x.itertext()).strip() for x in trs.pop(0).findall("td")]
+
+    # Same issue as above
+    #    <table class='simpleTable'>
+    # <tr><th colspan=7><strong>Upstream Bonded Channels</strong></th></tr>
+    #       <td><strong>Channel</strong></td>
+    #       <td><strong>Channel ID</strong></td>
+    #       <td><strong>Lock Status</strong></td>
+    #       <td><strong>US Channel Type</td>
+    #       <td><strong>Frequency</strong></td>
+    #       <td><strong>Width</strong></td>
+    #       <td><strong>Power</strong></td>
+    #    </tr>
+    headings = [
+        "Channel",
+        "Channel ID",
+        "Lock Status",
+        "US Channel Type",
+        "Frequency",
+        "Width",
+        "Power",
+    ]
+
+for row in trs:
+    data = dict(
+        zip(headings, ["".join(x.itertext()).strip() for x in row.findall("td")])
+    )
+    channel = int(data["Channel"])
+    print("multigraph arris_power.up_{0}".format(channel))
+    value = data["Power"].split(" ")[0]
+    print("power.value {0}".format(value))
+    power["up"][channel - 1] = value
+
+# Fill missing
+for i in range(len(trs), UPCOUNT):
+    print("multigraph arris_power.up_{0}".format(i + 1))
+    print("power.value U")
+
+print("multigraph arris_power")
+for i in range(0, DOWNCOUNT):
+    print("down_{0}.value {1}".format(i + 1, power["down"][i]))
+for i in range(0, UPCOUNT):
+    print("up_{0}.value {1}".format(i + 1, power["up"][i]))
