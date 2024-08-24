@@ -1,0 +1,103 @@
+#!/usr/bin/env perl
+
+# Parameters supported:
+#
+# config
+# autoconf
+#
+# Magic markers:
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use warnings;
+use LWP;
+use JSON qw/decode_json/;
+
+=head1 NAME
+
+elasticsearch_docs - A munin plugin that collects document stats of your elasticsearch instances
+
+=head1 APPLICABLE SYSTEMS
+
+Elasticsearch
+
+=head1 CONFIGURATION
+
+None
+
+=head1 BUGS
+
+None known so far. If you find any, let me know.
+
+=head1 AUTHOR
+
+Tomas Doran (t0m) - c<< <bobtfish@bobtfish.net> >>
+Kentaro Yoshida - https://github.com/y-ken
+Rowan Wookey - https://www.rwky.net
+
+=head1 LICENSE
+
+MIT
+
+=cut
+
+my $url = exists $ENV{'url'} ? $ENV{'url'} : 'http://localhost:9200';
+
+my $ua = LWP::UserAgent->new;
+$ua->timeout(10);
+
+sub autoconf {
+    my $res  = $ua->get( $url, 'Content-Type' => 'application/json' );
+    my $data = do {
+        local $@;
+        eval { decode_json( $res->content ) }
+    };
+    if ( $data->{version}->{number} ) {
+        print("yes\n");
+    }
+    else {
+        print("no\n");
+    }
+    exit(0);
+}
+
+if ( $ARGV[0] and $ARGV[0] eq 'autoconf' ) {
+    autoconf();
+}
+
+sub get_json_from_url {
+    my $uri = shift;
+    my $res = $ua->get( $url . $uri, 'Content-Type' => 'application/json' );
+    Carp::confess( $res->code . " for " . $uri ) unless $res->is_success;
+    my $data = do {
+        local $@;
+        eval { decode_json( $res->content ) }
+    };
+    die( "Could not decode JSON from: " . $res->content ) unless $data;
+    return $data;
+}
+
+my $data   = get_json_from_url("/_nodes");
+my $t_data = get_json_from_url("/_nodes/stats");
+my %out    = ( num_docs => 0, deleted_docs => 0 );
+
+foreach my $full_node_name ( keys %{ $data->{nodes} } ) {
+    next unless $t_data->{nodes}{$full_node_name};
+    $out{num_docs}     += $t_data->{nodes}{$full_node_name}{indices}{docs}{count};
+    $out{deleted_docs} += $t_data->{nodes}{$full_node_name}{indices}{docs}{deleted};
+}
+
+if ( $ARGV[0] and $ARGV[0] eq 'config' ) {
+    print "graph_title elasticsearch documents\n";
+    print "graph_category elasticsearch\n";
+
+    foreach my $name ( keys %out ) {
+        print "$name.label $name\n" . "$name.type GAUGE\n";
+    }
+}
+else {
+    foreach my $name ( keys %out ) {
+        print "$name.value " . $out{$name} . "\n";
+    }
+}
