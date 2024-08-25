@@ -1,0 +1,108 @@
+#!/usr/bin/env perl
+
+# Parameters supported:
+#
+# config
+# autoconf
+#
+# Magic markers:
+#%# family=auto
+#%# capabilities=autoconf
+
+use strict;
+use warnings;
+use LWP;
+use JSON qw/decode_json/;
+
+=head1 NAME
+
+elasticsearch_cluster_health - A munin plugin that collects health stats of your elasticsearch instances
+
+=head1 APPLICABLE SYSTEMS
+
+Elasticsearch
+
+=head1 CONFIGURATION
+
+None
+
+=head1 BUGS
+
+None known so far. If you find any, let me know.
+
+=head1 AUTHOR
+
+Rowan Wookey - https://www.rwky.net
+
+=head1 LICENSE
+
+MIT
+
+=cut
+
+my $url = exists $ENV{'url'} ? $ENV{'url'} : 'http://localhost:9200';
+
+my $ua = LWP::UserAgent->new;
+$ua->timeout(10);
+
+sub autoconf {
+    my $res  = $ua->get( $url, 'Content-Type' => 'application/json' );
+    my $data = do {
+        local $@;
+        eval { decode_json( $res->content ) }
+    };
+    if ( $data->{version}->{number} ) {
+        print("yes\n");
+    }
+    else {
+        print("no\n");
+    }
+    exit(0);
+}
+
+if ( $ARGV[0] and $ARGV[0] eq 'autoconf' ) {
+    autoconf();
+}
+
+sub get_json_from_url {
+    my $uri = shift;
+    my $res = $ua->get( $url . $uri, 'Content-Type' => 'application/json' );
+    Carp::confess( $res->code . " for " . $uri ) unless $res->is_success;
+    my $data = do {
+        local $@;
+        eval { decode_json( $res->content ) }
+    };
+    die( "Could not decode JSON from: " . $res->content ) unless $data;
+    return $data;
+}
+
+my $data = get_json_from_url("/_cluster/health");
+
+if ( $ARGV[0] and $ARGV[0] eq 'config' ) {
+    print "graph_title elasticsearch cluster health\n";
+    print "graph_category elasticsearch\n";
+    print "graph_scale no\n";
+    print "green.label green\n" . "green.type GAUGE\n" . "green.draw AREA\n";
+    print "yellow.label yellow\n" . "yellow.type GAUGE\n" . "yellow.draw AREA\n";
+    print "red.label red\n" . "red.type GAUGE\n" . "red.draw AREA\n";
+}
+else {
+    if ( $data->{status} eq "green" ) {
+        print "green.value 1\n";
+    }
+    else {
+        print "green.value 0\n";
+    }
+    if ( $data->{status} eq "yellow" ) {
+        print "yellow.value 1\n";
+    }
+    else {
+        print "yellow.value 0\n";
+    }
+    if ( $data->{status} eq "red" ) {
+        print "red.value 1\n";
+    }
+    else {
+        print "red.value 0\n";
+    }
+}
