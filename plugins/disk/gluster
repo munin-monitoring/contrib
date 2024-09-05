@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to monitor Gluster volume and brick status.
+
+=head1 NAME
+
+gluster - monitor Gluster volume and brick status
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems with Gluster volumes.
+
+=head1 CONFIGURATION
+
+This plugin must be run as root:
+
+  [gluster]
+  user root
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+"""
+
+import os
+import subprocess
+import sys
+import xml.etree.ElementTree
+
+
+def run_command(command):
+    """Run gluster command and return it's output as etree."""
+    try:
+        text = subprocess.run(['gluster', '--mode=script', '--xml'] + command,
+                              check=False, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, encoding='utf-8').stdout
+    except FileNotFoundError:
+        return None
+    try:
+        return xml.etree.ElementTree.fromstring(text)
+    except xml.etree.ElementTree.ParseError:
+        return None
+
+
+def safe_name(name):
+    """Return safe variable name."""
+    value = ''.join(char.lower() if char.isalnum() else '' for char in name)
+    return value or 'root'  # "/" is "root"
+
+
+def brick_name(name):
+    """Return short version of brick's name, strip domain from hostname."""
+    if ':/' not in name:
+        return name
+    host, path = name.split(':', 1)
+    return f'{host.split(".")[0]}:{path}'
+
+
+def find_volumes(need_details):
+    """Find gluster volumes."""
+    # gluster --mode=script --xml volume info all
+    tree = run_command(['volume', 'info', 'all'])
+    if not tree:
+        return None
+    volumes = []
+    for volume in tree.findall('volInfo/volumes/volume'):
+        value = {
+            'name': volume.find('name').text,
+            'uuid': volume.find('id').text,
+            'status': volume.find('status').text == '1',
+            'bricks': [],
+        }
+        for brick in volume.findall('bricks/brick'):
+            value['bricks'].append({
+                'name': brick_name(brick.find('name').text),
+                'uuid': brick.find('hostUuid').text,
+                'status': False,
+                'disk_total': 0,
+                'disk_free': 0,
+                'inode_total': 0,
+                'inode_free': 0,
+                'heal_pending': 'U',
+                'heal_split': 'U',
+                'heal_healing': 'U',
+            })
+        volumes.append(value)
+
+    # Don't get detailed status unless needed. It can be slow.
+    if not need_details:
+        return volumes
+
+    # gluster --mode=script --xml volume status all detail
+    tree = run_command(['volume', 'status', 'all', 'detail'])
+    for node in tree.findall('volStatus/volumes/volume/node'):
+        uuid = node.find('peerid').text
+        for volume in volumes:
+            for brick in volume['bricks']:
+                if brick['uuid'] == uuid:
+                    brick.update({
+                        'status': node.find('status').text == '1',
+                        'disk_total': int(node.find('sizeTotal').text),
+                        'disk_free': int(node.find('sizeFree').text),
+                        'inode_total': int(node.find('inodesTotal').text),
+                        'inode_free': int(node.find('inodesFree').text),
+                    })
+
+    # gluster --mode-script --xml volume heal <volumename> info summary
+    for volume in volumes:
+        tree = run_command(['volume', 'heal', volume['name'], 'info',
+                            'summary'])
+        for node in tree.findall('healInfo/bricks/brick'):
+            uuid = node.attrib['hostUuid']
+            for brick in volume['bricks']:
+                if brick['uuid'] == uuid:
+                    brick.update({
+                        'heal_pending': node.find(
+                            'numberOfEntriesInHealPending').text,
+                        'heal_split': node.find(
+                            'numberOfEntriesInSplitBrain').text,
+                        'heal_healing': node.find(
+                            'numberOfEntriesPossiblyHealing').text,
+                    })
+    return volumes
+
+
+def print_status(config):
+    """Print config or values."""
+    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-statements
+    both = os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1'
+    volumes = find_volumes(not config or both)
+    if not volumes:
+        return
+
+    # Volume started, all bricks are online
+    print('multigraph gluster_status')
+    if config or both:
+        print('graph_title Gluster volume status')
+        print('graph_vlabel Status')
+        print('graph_category disk')
+        print('graph_info Status: 0 = Stopped, 1 = Degraded, 2 = OK')
+        print('graph_args --lower-limit 0 --upper-limit 2')
+        print('graph_scale no')
+    for volume in volumes:
+        name = safe_name(volume['name'])
+        if config or both:
+            print(f'{name}.label Volume {volume["name"]}')
+            print(f'{name}.warning 2:')
+        if not config or both:
+            status = int(volume['status'])
+            if status and all(brick['status'] for brick in volume['bricks']):
+                status = 2
+            print(f'{name}.value {status}')
+
+    # Brick heal status
+    for volume in volumes:
+        name = safe_name(volume['name'])
+        print(f'multigraph gluster_heal_{name}')
+        if config or both:
+            print(f'graph_title Gluster volume {name} brick status')
+            print('graph_vlabel Entries')
+            print('graph_category disk')
+            print('graph_args --base 1000 --lower-limit 0')
+            for brick in volume['bricks']:
+                bname = safe_name(brick['uuid'])
+                print(f'{bname}_pending.label {brick["name"]} '
+                      'in heal pending')
+                print(f'{bname}_pending.warning 0')
+                print(f'{bname}_split.label {brick["name"]} '
+                      'in split-brain')
+                print(f'{bname}_split.warning 0')
+                print(f'{bname}_healing.label {brick["name"]} '
+                      'possibly healing')
+                print(f'{bname}_healing.warning 0')
+        if not config or both:
+            for brick in volume['bricks']:
+                bname = safe_name(brick['uuid'])
+                print(f'{bname}_pending.value {brick["heal_pending"]}')
+                print(f'{bname}_split.value {brick["heal_split"]}')
+                print(f'{bname}_healing.value {brick["heal_healing"]}')
+
+    # Brick disk/inode free
+    for gtype in ('disk', 'inode'):
+        for volume in volumes:
+            name = safe_name(volume['name'])
+            print(f'multigraph gluster_df_{gtype}_{name}')
+            if config or both:
+                print(f'graph_title Gluster volume {name} {gtype} usage '
+                      'in percent')
+                print('graph_vlabel %')
+                print('graph_category disk')
+                print('graph_args --lower-limit 0 --upper-limit 100')
+                print('graph_scale no')
+                for brick in volume['bricks']:
+                    bname = safe_name(brick['uuid'])
+                    print(f'{bname}.label {brick["name"]}')
+            if not config or both:
+                for brick in volume['bricks']:
+                    bname = safe_name(brick['uuid'])
+                    if not brick[f'{gtype}_total']:
+                        print(f'{bname}.value U')
+                    else:
+                        value = (100 - 100 * brick[f'{gtype}_free'] /
+                                 brick[f'{gtype}_total'])
+                        print(f'{bname}.value {value}')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if find_volumes(False) else
+              'no (no Gluster volumes found)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        print_status(True)
+    else:
+        print_status(False)
