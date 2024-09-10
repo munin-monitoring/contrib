@@ -36,17 +36,23 @@ GPLv2
 import os
 import subprocess
 import sys
+import time
 import xml.etree.ElementTree
 
 
 def run_command(command):
     """Run gluster command and return it's output as etree."""
-    try:
-        text = subprocess.run(['gluster', '--mode=script', '--xml'] + command,
-                              check=False, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, encoding='utf-8').stdout
-    except FileNotFoundError:
-        return None
+    for _dummy_retry in range(3):
+        try:
+            text = subprocess.run(['gluster', '--mode=script', '--xml'] +
+                                  command, check=False, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE,
+                                  encoding='utf-8').stdout
+        except FileNotFoundError:
+            return None
+        if text.count('\n') > 10:
+            break
+        time.sleep(2)  # Sleep and retry
     try:
         return xml.etree.ElementTree.fromstring(text)
     except xml.etree.ElementTree.ParseError:
