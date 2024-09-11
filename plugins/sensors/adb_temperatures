@@ -1,0 +1,80 @@
+#!/bin/bash
+# -*- sh -*-
+
+: << =cut
+
+=head1 NAME
+
+ADB temperatures - Plugin to monitor the Andorid temperatures.
+
+=head1 AUTHOR
+
+Marcin Depa <m.depa91@gmail.com>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGICK MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+if [ "$1" = "autoconf" ]; then
+        echo yes
+        exit 0
+fi
+
+all_values=$(adb shell 'cat /sys/class/thermal/thermal_zone*/type /sys/class/thermal/thermal_zone*/temp')
+lines_len=$(echo "$all_values" | wc -l)
+half_len=$((lines_len / 2))
+
+types=$(echo "$all_values" | head -n $half_len)
+temperatures=$(echo "$all_values" | tail -n $half_len)
+declare -A arr
+for i in  $(seq 1 $half_len); do
+        type=$(echo "$types" | sed -n "$i"p)
+        temperature=$(echo "$temperatures" | sed -n "$i"p)
+        if [ -z "$temperature" ]; then
+                continue
+        fi
+        if [[ "$type" == "tsens_tz_sensor"* ]]; then
+                continue
+        fi
+        value_wo_minus=$(echo "$temperature" | tr -d '-')
+        if [ "${#value_wo_minus}" -ge 5 ]; then
+                temperature=$((temperature/1000))
+        elif [ "${#value_wo_minus}" -ge 3 ]; then
+                temperature=$((temperature/10))
+        fi
+        arr[$type]=$temperature
+done
+
+if [ "$1" = "config" ]; then
+        echo 'graph_title ADB temperatures'
+        echo 'graph_vlabel °C'
+        echo 'graph_scale no'
+        echo 'graph_category sensors'
+        echo 'graph_info Temperatures of connected Android phone using ADB.'
+        for key in "${!arr[@]}"; do
+                type=$key
+                echo "$type.label $type"
+        done
+        exit 0
+fi
+
+for key in "${!arr[@]}"; do
+        type=$key
+        temp=${arr[$key]}
+        temp_wo_minus=$(echo "$temp" | tr -d '-')
+        if [ "${#temp_wo_minus}" -ge 5 ]; then
+                temp=$((temp/1000))
+        elif [ "${#temp_wo_minus}" -ge 3 ]; then
+                temp=$((temp/10))
+        fi
+        echo "$type.value $temp"
+done
