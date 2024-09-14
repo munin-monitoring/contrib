@@ -9,6 +9,9 @@
 # - Stephane Enten <tuf@delyth.net>
 # - Steve Schnepp <steve.schnepp@pwkf.org>
 # - pcy <pcy@ulyssis.org> (make 'Connected Users' DERIVE, check existence of logfile in autoconf)
+# - Stephan Kleber <stephan@kleber.space>: journald support inspired by the sshd_log plugin
+#
+# This plugin requires read permission for the logfile or journald.
 #
 # Parameters understood:
 #
@@ -17,7 +20,10 @@
 #
 # Config variables:
 #
-#       logfile        - Where to find the syslog file
+#       logfile        - Where to find the syslog file or "journald" to use journald.
+#       journalctlargs - space separated list of arguments to pass to
+#                        journalctl to get the sshd logs.
+#                        default: "-u dovecot"
 #
 # Add the following line to a file in /etc/munin/plugin-conf.d:
 # 	env.logfile /var/log/your/logfile.log
@@ -31,11 +37,30 @@
 # Configuration
 ######################
 LOGFILE=${logfile:-/var/log/mail.log}
+JOURNALCTL_ARGS=${journalctlargs:--u dovecot}
+TYPE=${type:-GAUGE}
 ######################
 
+if [ "$LOG" = "journald" -a "$TYPE" = "DERIVE" ]; then
+        TYPE=ABSOLUTE
+fi
+
 if [ "$1" = "autoconf" ]; then
-	[ -f "$LOGFILE" ] && echo yes || echo "no (logfile $LOGFILE not found)"
-	exit 0
+        if [ "$LOGFILE" = "journald" ]; then
+                # shellcheck disable=SC2086,SC2034
+                if journalctl --no-pager --quiet --lines=1 $JOURNALCTL_ARGS | read -r DUMMY; then
+                        echo "yes"
+                else
+                        echo "no (journald empty log for '$JOURNALCTL_ARGS' not found)"
+                fi
+        else
+                if [ -r "$LOGFILE" ]; then
+                        echo "yes"
+                else
+                        echo "no (logfile '$LOGFILE' not readable)"
+                fi
+        fi
+        exit 0
 fi
 
 if [ "$1" = "config" ]; then
@@ -53,76 +78,52 @@ if [ "$1" = "config" ]; then
 	done
 
 	echo 'connected.label Connected Users'
-	echo "connected.type DERIVE"
+	echo "connected.type ABSOLUTE"
 
 	exit 0
 fi
 
+if [ "$LOGFILE" = "journald" -a "$TYPE" = "ABSOLUTE" ]; then
+        CURSOR_FILE="$MUNIN_STATEFILE"
+        # read cursor
+        # format: "journald-cursor <cursor>"
+        CURSOR=
+        if [ -f "$CURSOR_FILE" ]; then
+                CURSOR=$(awk '/^journald-cursor / {print $2}' "$CURSOR_FILE")
+        fi
+else
+        CURSOR_FILE=
+fi
+
+if [ "$LOGFILE" = "journald" ]; then
+        # shellcheck disable=SC2086
+        if [ "$TYPE" = "ABSOLUTE" ]; then
+                journalctl --no-pager --quiet --show-cursor ${CURSOR:+"--after-cursor=$CURSOR"} $JOURNALCTL_ARGS
+        else
+                journalctl --no-pager --quiet --since=$(date -dlast-sunday +%Y-%m-%d) $JOURNALCTL_ARGS
+        fi
+else
+        cat "$LOGFILE"
+fi | \
+    awk -v cursor_file="$CURSOR_FILE" -v connected="$(doveadm who -1 | expr $(wc -l) - 1)" 'BEGIN{c["login_total"]=0;c["connected"]=connected;c["login_tls"]=0;c["login_ssl"]=0;c["login_imap"]=0;c["login_pop3"]=0; }
+     /dovecot\[.*Login/{c["login_total"]++}
+     /dovecot\[.*Login.*TLS/{c["login_tls"]++}
+     /dovecot\[.*Login.*SSL/{c["login_ssl"]++}
+     /dovecot\[.*imap.*Login/{c["login_imap"]++}
+     /dovecot\[.*pop3.*Login/{c["login_pop3"]++}a
+     END{if (cursor_file != "") { print "journald-cursor " $3 > cursor_file }; 
+     for(i in c){print i".value " c[i]} }'
+
 ######################
 # Total Logins
-######################
-echo -en "login_total.value "
-VALUE=$(egrep -c '[dovecot]?.*Login' $LOGFILE)
-if [ ! -z "$VALUE" ]; then
-	echo "$VALUE"
-else
-	echo "0"
-fi
-echo -n
-######################
+# use doveadm instead of     
+#     /dovecot\[.*Disconnected/{c["connected"]++}
+# and
+#     {c["connected"]=c["login_total"]-c["connected"]};  {if (c["connected"] < 0) {c["connected"] = 0}};
 # Connected Users
-######################
-DISCONNECTS=$(egrep -c '[dovecot]?.*Disconnected' $LOGFILE)
-CONNECTS=$(egrep -c '[dovecot]?.*Login' $LOGFILE)
-VALUE=$(( CONNECTS - DISCONNECTS ))
-if [ -z "$VALUE" ] || [ "$VALUE" -lt 0 ]; then
-	VALUE=0
-fi
-echo -en "connected.value "
-echo $VALUE
-echo -n
-######################
+#   VALUE=$(( CONNECTS - DISCONNECTS ))
 # TLS Logins
-######################
-echo -en "login_tls.value "
-VALUE=$(egrep -c '[dovecot]?.*Login.*TLS' $LOGFILE)
-if [ ! -z "$VALUE" ]; then
-	echo "$VALUE"
-else
-	echo "0"
-fi
-echo -n
-######################
 # SSL Logins
-######################
-echo -en "login_ssl.value "
-VALUE=$(egrep -c '[dovecot]?.*Login.*SSL' $LOGFILE)
-if [ ! -z "$VALUE" ]; then
-	echo "$VALUE"
-else
-	echo "0"
-fi
-echo -n
-######################
 # IMAP Logins
-######################
-echo -en "login_imap.value "
-VALUE=$(egrep -c '[dovecot]?.*imap.*Login' $LOGFILE)
-if [ ! -z "$VALUE" ]; then
-	echo "$VALUE"
-else
-	echo "0"
-fi
-echo -n
-######################
 # POP3 Logins
 ######################
-echo -en "login_pop3.value "
-VALUE=$(egrep -c '[dovecot]?.*pop3.*Login' $LOGFILE)
-if [ ! -z "$VALUE" ]; then
-	echo "$VALUE"
-else
-	echo "0"
-fi
-echo -n
-
