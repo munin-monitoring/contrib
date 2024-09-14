@@ -68,7 +68,7 @@ if ($ARGV[0] and $ARGV[0] eq "config") {
 	if ($stats_type eq "cache") {
 		print "graph_title Amavis cache hit / miss ratio\n";
 		print "graph_args --lower-limit 0 --upper-limit 100 --rigid\n";
-		print "graph_category antivirus\n";
+		print "graph_category spamfilter\n";
 		print "graph_info The ratio of cache hits and misses for AMaViSd-new.\n";
 		print "graph_order hits misses\n";
 		print "graph_scale no\n";
@@ -83,7 +83,7 @@ if ($ARGV[0] and $ARGV[0] eq "config") {
 		print "misses.min 0\n";
 	} elsif ($stats_type eq "content") {
 		print "graph_title Amavis scanned mails\n";
-		print "graph_category antivirus\n";
+		print "graph_category spamfilter\n";
 		print "graph_period minute\n";
 		print "graph_vlabel msgs / \${graph_period}\n";
 		foreach my $type (qw(total clean spam spammy virus)) {
@@ -99,7 +99,7 @@ if ($ARGV[0] and $ARGV[0] eq "config") {
 	} elsif ($stats_type eq "time") {
 		print "graph_title Amavis average scan time\n";
 		print "graph_info Average time spent in each phase of the mail scanning process, per mail.\n";
-		print "graph_category antivirus\n";
+		print "graph_category spamfilter\n";
 		print "graph_vlabel sec / mail\n";
 		print "graph_scale no\n";
 
@@ -163,9 +163,12 @@ for my $k (sort keys %values) {
 if ($stats_type eq "cache") {
 	my $hits = $values{'CacheHits'};
 	my $misses = $values{'CacheMisses'};
-	my $misses_ratio = $misses * 100.00 / ($hits + $misses);
-	my $hits_ratio = $hits * 100.00 / ($hits + $misses);
-
+	my $misses_ratio = 0;
+	my $hits_ratio = 0;
+	if ($hits + $misses > 0) {
+		$misses_ratio = $misses * 100.00 / ($hits + $misses);
+		$hits_ratio = $hits * 100.00 / ($hits + $misses);
+	}
 	printf("hits.value %.1f\n", $hits_ratio);
 	printf("misses.value %.1f\n", $misses_ratio);
 } elsif ($stats_type eq "content") {
