@@ -20,10 +20,10 @@
 #
 # Config variables:
 #
-#       logfile        - Where to find the syslog file or "journald" to use journald.
-#       journalctlargs - space separated list of arguments to pass to
-#                        journalctl to get the sshd logs.
-#                        default: "-u dovecot"
+#   logfile        - Where to find the syslog file or "journald" to use journald.
+#   journalctlargs - space separated list of arguments to pass to
+#                    journalctl to get the sshd logs.
+#                    default: "-u dovecot"
 #
 # Add the following line to a file in /etc/munin/plugin-conf.d:
 # 	env.logfile /var/log/your/logfile.log
@@ -42,70 +42,70 @@ TYPE=${type:-GAUGE}
 ######################
 
 if [ "$LOG" = "journald" -a "$TYPE" = "DERIVE" ]; then
-        TYPE=ABSOLUTE
+  TYPE=ABSOLUTE
 fi
 
 if [ "$1" = "autoconf" ]; then
-        if [ "$LOGFILE" = "journald" ]; then
-                # shellcheck disable=SC2086,SC2034
-                if journalctl --no-pager --quiet --lines=1 $JOURNALCTL_ARGS | read -r DUMMY; then
-                        echo "yes"
-                else
-                        echo "no (journald empty log for '$JOURNALCTL_ARGS' not found)"
-                fi
-        else
-                if [ -r "$LOGFILE" ]; then
-                        echo "yes"
-                else
-                        echo "no (logfile '$LOGFILE' not readable)"
-                fi
-        fi
-        exit 0
+  if [ "$LOGFILE" = "journald" ]; then
+    # shellcheck disable=SC2086,SC2034
+    if journalctl --no-pager --quiet --lines=1 $JOURNALCTL_ARGS | read -r DUMMY; then
+      echo "yes"
+    else
+      echo "no (journald empty log for '$JOURNALCTL_ARGS' not found)"
+    fi
+  else
+    if [ -r "$LOGFILE" ]; then
+      echo "yes"
+    else
+      echo "no (logfile '$LOGFILE' not readable)"
+    fi
+  fi
+  exit 0
 fi
 
 if [ "$1" = "config" ]; then
-	echo 'graph_title Dovecot Logins'
-	echo 'graph_category mail'
-	echo 'graph_args --base 1000 -l 0'
-	echo 'graph_vlabel Login Counters'
+  echo 'graph_title Dovecot Logins'
+  echo 'graph_category mail'
+  echo 'graph_args --base 1000 -l 0'
+  echo 'graph_vlabel Login Counters'
 
-	for t in Total TLS SSL IMAP POP3
-	do
-		field=$(echo $t | tr '[:upper:]' '[:lower:]')
-		echo "login_$field.label $t Logins"
-		echo "login_$field.type DERIVE"
-		echo "login_$field.min 0"
-	done
+  for t in Total TLS SSL IMAP POP3
+  do
+    field=$(echo $t | tr '[:upper:]' '[:lower:]')
+    echo "login_$field.label $t Logins"
+    echo "login_$field.type DERIVE"
+    echo "login_$field.min 0"
+  done
 
-	echo 'connected.label Connected Users'
-	echo "connected.type ABSOLUTE"
+  echo 'connected.label Connected Users'
+  echo "connected.type ABSOLUTE"
 
-	exit 0
+  exit 0
 fi
 
 if [ "$LOGFILE" = "journald" -a "$TYPE" = "ABSOLUTE" ]; then
-        CURSOR_FILE="$MUNIN_STATEFILE"
-        # read cursor
-        # format: "journald-cursor <cursor>"
-        CURSOR=
-        if [ -f "$CURSOR_FILE" ]; then
-                CURSOR=$(awk '/^journald-cursor / {print $2}' "$CURSOR_FILE")
-        fi
+  CURSOR_FILE="$MUNIN_STATEFILE"
+  # read cursor
+  # format: "journald-cursor <cursor>"
+  CURSOR=
+  if [ -f "$CURSOR_FILE" ]; then
+    CURSOR=$(awk '/^journald-cursor / {print $2}' "$CURSOR_FILE")
+  fi
 else
-        CURSOR_FILE=
+  CURSOR_FILE=
 fi
 
 if [ "$LOGFILE" = "journald" ]; then
-        # shellcheck disable=SC2086
-        if [ "$TYPE" = "ABSOLUTE" ]; then
-                journalctl --no-pager --quiet --show-cursor ${CURSOR:+"--after-cursor=$CURSOR"} $JOURNALCTL_ARGS
-        else
-        journalctl --no-pager --quiet --since=$(date -dlast-sunday +%Y-%m-%d) $JOURNALCTL_ARGS
-        fi
+  # shellcheck disable=SC2086
+  if [ "$TYPE" = "ABSOLUTE" ]; then
+    journalctl --no-pager --quiet --show-cursor ${CURSOR:+"--after-cursor=$CURSOR"} $JOURNALCTL_ARGS
+  else
+    journalctl --no-pager --quiet --since=$(date -dlast-sunday +%Y-%m-%d) $JOURNALCTL_ARGS
+  fi
 else
         cat "$LOGFILE"
 fi | \
-    awk -v cursor_file="$CURSOR_FILE" -v connected="$(doveadm who -1 | expr $(wc -l) - 1)" 'BEGIN{c["login_total"]=0;c["connected"]=connected;c["login_tls"]=0;c["login_ssl"]=0;c["login_imap"]=0;c["login_pop3"]=0; }
+  awk -v cursor_file="$CURSOR_FILE" -v connected="$(doveadm who -1 | expr $(wc -l) - 1)" 'BEGIN{c["login_total"]=0;c["connected"]=connected;c["login_tls"]=0;c["login_ssl"]=0;c["login_imap"]=0;c["login_pop3"]=0; }
      /dovecot\[.*Login/{c["login_total"]++}
      /dovecot\[.*Login.*TLS/{c["login_tls"]++}
      /dovecot\[.*Login.*SSL/{c["login_ssl"]++}
@@ -117,9 +117,9 @@ fi | \
 ######################
 # Total Logins
 # use doveadm instead of     
-#     /dovecot\[.*Disconnected/{c["connected"]++}
+#   /dovecot\[.*Disconnected/{c["connected"]++}
 # and
-#     {c["connected"]=c["login_total"]-c["connected"]};  {if (c["connected"] < 0) {c["connected"] = 0}};
+#   {c["connected"]=c["login_total"]-c["connected"]};  {if (c["connected"] < 0) {c["connected"] = 0}};
 # Connected Users
 #   VALUE=$(( CONNECTS - DISCONNECTS ))
 # TLS Logins
