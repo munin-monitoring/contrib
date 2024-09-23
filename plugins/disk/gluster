@@ -33,7 +33,9 @@ GPLv2
 =cut
 """
 
+import json
 import os
+import pathlib
 import subprocess
 import sys
 import time
@@ -42,17 +44,18 @@ import xml.etree.ElementTree
 
 def run_command(command):
     """Run gluster command and return it's output as etree."""
-    for _dummy_retry in range(3):
+    full_cmd = ['gluster', '--mode=script', '--xml'] + command
+    for sleep_retry in (1, 2, 3, 4, 5):  # retry for 15 seconds
         try:
-            text = subprocess.run(['gluster', '--mode=script', '--xml'] +
-                                  command, check=False, stdout=subprocess.PIPE,
+            text = subprocess.run(full_cmd, check=False,
+                                  stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE,
                                   encoding='utf-8').stdout
         except FileNotFoundError:
             return None
         if text.count('\n') > 10:
             break
-        time.sleep(2)  # Sleep and retry
+        time.sleep(sleep_retry)
     try:
         return xml.etree.ElementTree.fromstring(text)
     except xml.etree.ElementTree.ParseError:
@@ -140,6 +143,26 @@ def find_volumes(need_details):
     return volumes
 
 
+def print_avg(label, value):
+    """Use state file to print average value instead of gauge."""
+    # Read previous values from state file
+    statefile = pathlib.Path(os.getenv('MUNIN_PLUGSTATE')) / 'gluster.json'
+    try:
+        state = json.loads(statefile.read_text('utf-8'))
+    except (FileNotFoundError, json.decoder.JSONDecodeError):
+        state = {}
+
+    # Add current value to state file
+    values = state.get(label, []) + [int(value)]
+    while len(values) > 3:  # Keep current + 2 previous = 15 minutes
+        del values[0]
+    state[label] = values
+    statefile.write_text(json.dumps(state, indent=2), 'utf-8')
+
+    # Print average value
+    print(f'{label}.value {sum(values) / len(values)}')
+
+
 def print_status(config):
     """Print config or values."""
     # pylint: disable=too-many-branches
@@ -162,12 +185,12 @@ def print_status(config):
         name = safe_name(volume['name'])
         if config or both:
             print(f'{name}.label Volume {volume["name"]}')
-            print(f'{name}.warning 2:')
+            print(f'{name}.warning 1.01:')
         if not config or both:
             status = int(volume['status'])
             if status and all(brick['status'] for brick in volume['bricks']):
                 status = 2
-            print(f'{name}.value {status}')
+            print_avg(name, status)
 
     # Brick heal status
     for volume in volumes:
@@ -182,19 +205,19 @@ def print_status(config):
                 bname = safe_name(brick['uuid'])
                 print(f'{bname}_pending.label {brick["name"]} '
                       'in heal pending')
-                print(f'{bname}_pending.warning 0')
+                print(f'{bname}_pending.warning 0.99')
                 print(f'{bname}_split.label {brick["name"]} '
                       'in split-brain')
-                print(f'{bname}_split.warning 0')
+                print(f'{bname}_split.warning 0.99')
                 print(f'{bname}_healing.label {brick["name"]} '
                       'possibly healing')
-                print(f'{bname}_healing.warning 0')
+                print(f'{bname}_healing.warning 0.99')
         if not config or both:
             for brick in volume['bricks']:
                 bname = safe_name(brick['uuid'])
-                print(f'{bname}_pending.value {brick["heal_pending"]}')
-                print(f'{bname}_split.value {brick["heal_split"]}')
-                print(f'{bname}_healing.value {brick["heal_healing"]}')
+                print_avg(f'{bname}_pending', brick['heal_pending'])
+                print_avg(f'{bname}_split', brick['heal_split'])
+                print_avg(f'{bname}_healing', brick['heal_healing'])
 
     # Brick disk/inode free
     for gtype in ('disk', 'inode'):
