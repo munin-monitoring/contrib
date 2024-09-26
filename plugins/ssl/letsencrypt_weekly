@@ -25,6 +25,15 @@ You can configure the warning and critical limits for this plugin:
   # critical when more than 50 certificates have been requested in the last week
   env.critical :50
 
+If you have multiple letsencrypt directories e.g. one running in docker, you can configure them seperated by spaces:
+
+  [letsencrypt_weekly]
+  # run with a user that is able to read /etc/letsencrypt/csr/ files and at least list directories in
+  # /etc/letsencrypt/archive/
+  user root
+  # monitor the server as well as the docker volume letsencrypt_certs
+  env.letsencrypt_dirs /etc/letsencrypt/ /var/lib/docker/volumes/letsencrypt_certs/_data/
+
 =head1 AGGREGATION CONFIGURATION
 
 When you have multiple servers issuing certficates for the same registered domain you can aggregate the numbers with
@@ -86,13 +95,24 @@ GPLv2
 
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
+if [ "$MUNIN_DEBUG" == "1" ] ; then
+  set -x
+fi
+
 warning=${warning:-:40}
 critical=${critical:-:50} #letsencrypt doesn't allow more than 50 certificates per week
 # see https://letsencrypt.org/docs/rate-limits/
+letsencrypt_dirs=${letsencrypt_dirs:-/etc/letsencrypt}
 
+csr_directories=()
+archive_directories=()
+for letsencrypt_dir in ${letsencrypt_dirs}; do
+	csr_directories+=("${letsencrypt_dir%/}/csr/")
+	archive_directories+=("${letsencrypt_dir%/}/archive/")
+done
 
 get_files_and_domains() {
-	find /etc/letsencrypt/csr/ -mtime -7 -type f -print0 2>/dev/null | xargs -0 -I pem bash -c 'echo -n "pem "; openssl req -in pem -text -noout | grep DNS: | sed "s/.*DNS://g"'
+	find "${csr_directories[@]}" -mtime -7 -type f -print0 2>/dev/null | xargs -0 -I pem bash -c 'echo -n "pem "; openssl req -in pem -text -noout | grep DNS: | sed "s/.*DNS://g"'
 }
 
 get_registered_domains() {
@@ -100,8 +120,17 @@ get_registered_domains() {
 	local TRIM_SUBDOMAIN
 	REMOVE_PATH='s,.*/,,;'
 	TRIM_SUBDOMAIN='s/.*\.\([a-z0-9-]\+\.[a-z]\+\)/\1/;'
-	find /etc/letsencrypt/archive/ -mindepth 1 -maxdepth 1 | sed "$REMOVE_PATH $TRIM_SUBDOMAIN" | sort | uniq
+	find "${archive_directories[@]}" -mindepth 1 -maxdepth 1 | sed "$REMOVE_PATH $TRIM_SUBDOMAIN" | sort | uniq
 }
+
+if [ "$MUNIN_DEBUG" = "1" ] ; then
+	set +x
+	echo "files:"
+	get_files_and_domains
+	echo "registered domains:"
+	get_registered_domains
+	set -x
+fi
 
 if [ "$1" = "autoconf" ] ; then
 	test -d /etc/letsencrypt/csr/ && echo "yes" || echo "no (directory /etc/letsencrypt/csr does not exist)"
@@ -138,7 +167,7 @@ elif [ "$1" = "" ] ; then
 		file=${file_domain% *}
 		domain=${file_domain#* }
 		registered_domain_key=$(echo "$domain" | sed 's/.*\.\([a-z0-9-]\+\.[a-z]\+\)/\1/;s/[-.]/_/g')
-		previous_certs=$(find "/etc/letsencrypt/archive/$domain" -name 'cert*.pem' -not -cnewer "$file" | wc -l)	
+		previous_certs=$(find "${archive_directories[@]}" -path "*/$domain/*" -name 'cert*.pem' -not -cnewer "$file" | wc -l)
 		if [ "$previous_certs" -gt 0 ] ; then
 			value_key="${registered_domain_key}_renewal_weekly.value "
 		else
