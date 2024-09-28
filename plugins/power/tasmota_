@@ -16,9 +16,9 @@ ln -s /usr/share/munin/plugins/tasmota_ /etc/munin/plugins/tasmota_hostname_curr
 
 Plugin also implements suggests, so if you have nodeattr installed and
 /etc/genders populated with "tasmota" as well as "powermon",
-"DS18B20","SCD40", "PMS5003" or "millivolts" flags for those tasmota
-devices that implement energy or temperature monitoring, you can run
-an ansible play like this to set up your links:
+"DS18B20", "temperature", "SCD40", "PMS5003" or "millivolts" flags for
+those tasmota devices that implement energy or temperature monitoring,
+you can run an ansible play like this to set up your links:
 https://github.com/spacelama/ansible-initial-server-setup/tree/master/roles/monitoring/tasks
 
 =head1 APPLICABLE SYSTEMS
@@ -84,33 +84,8 @@ if [ "$1" = "suggest" ]; then
             echo "${device}_${i}"
         done
     done
-    nodeattr -n '(tasmota || beken) && DS18B20' | while read -r device ; do
-        for i in DS18B20 ; do
-            echo "${device}_${i}"
-        done
-    done
-    nodeattr -n '(tasmota || beken) && SCD40' | while read -r device ; do
-        for i in SCD40 ; do
-            echo "${device}_${i}"
-        done
-    done
-    nodeattr -n '(tasmota || beken) && PMS5003' | while read -r device ; do
-        for i in PMS5003 ; do
-            echo "${device}_${i}"
-        done
-    done
-    nodeattr -n '(tasmota || beken) && millivolts' | while read -r device ; do
-        for i in millivolts ; do
-            echo "${device}_${i}"
-        done
-    done
-    nodeattr -n '(tasmota || beken) && switch' | while read -r device ; do
-        for i in switch ; do
-            echo "${device}_${i}"
-        done
-    done
-    nodeattr -n '(tasmota || beken) && dimmer' | while read -r device ; do
-        for i in dimmer ; do
+    for i in temperature DS18B20 SCD40 PMS5003 millivolts switch dimmer ; do
+        nodeattr -n "(tasmota || beken) && $i" | while read -r device ; do
             echo "${device}_${i}"
         done
     done
@@ -126,7 +101,7 @@ voltage() {
 
         echo "$axis.label Voltage"
     else
-        get_status 8 ".StatusSNS.ENERGY.Voltage"
+        get_status 8 '.StatusSNS["ENERGY"].Voltage'
         echo "$axis.value $res"
     fi
 }
@@ -140,7 +115,7 @@ current() {
 
         echo "$axis.label Current"
     else
-        get_status 8 ".StatusSNS.ENERGY.Current"
+        get_status 8 '.StatusSNS["ENERGY"].Current'
         echo "$axis.value $res"
     fi
 }
@@ -160,7 +135,7 @@ power() {
         done
     else
         for axis in ApparentPower ReactivePower Power ; do
-            get_status 8 ".StatusSNS.ENERGY.$axis"
+            get_status 8 '.StatusSNS["ENERGY"].$axis'
             echo "$axis.value $res"
         done
     fi
@@ -177,7 +152,7 @@ powerfactor() {
         echo "$axis.max 1"
         echo "$axis.label Power Factor"
     else
-        get_status 8 ".StatusSNS.ENERGY.Factor"
+        get_status 8 '.StatusSNS["ENERGY"].Factor'
         echo "$axis.value $res"
     fi
 }
@@ -192,12 +167,12 @@ energy() {
         echo "$axis.label Energy"
         echo "$axis.draw AREA"
     else
-        get_status 8 ".StatusSNS.ENERGY.Total"
+        get_status 8 '.StatusSNS["ENERGY"].Total'
         echo "$axis.value $res"
     fi
 }
 
-DS18B20() {
+temperature() {
     axis=Temperature
     if [ "$1" = "config" ]; then
         echo "graph_title Tasmota Temperature: $DEVICE"
@@ -208,9 +183,39 @@ DS18B20() {
         echo "$axis.type GAUGE"
         #echo "$axis.min 0"
     else
-        get_status 10 ".StatusSNS.DS18B20.Temperature"
+        get_status 10 '.StatusSNS["ANALOG"].Temperature1'
         echo "$axis.value $res"
     fi
+}
+
+DS18B20() {
+    if [ "$1" = "config" ]; then
+        echo "graph_title Tasmota Temperature: $DEVICE"
+        echo "graph_args --base 1000"
+
+        echo "graph_vlabel °C"
+    fi
+
+    for i in '' `seq 1 9` ; do
+        axis=Temperature$i
+        if [ "$1" = "config" ]; then
+            get_status 10 ".StatusSNS[\"DS18B20${i:+-$i}\"].Temperature"
+            if [ "$res" != U ] ; then
+                echo "$axis.label Temperature${i:+ $i}"
+                echo "$axis.type GAUGE"
+                #echo "$axis.min 0"
+            fi
+        else
+            get_status 10 ".StatusSNS[\"DS18B20${i:+-$i}\"].Temperature"
+            if [ "$res" != U ] ; then # should only echo U if there's
+                                      # not a valid temperature where
+                                      # there once was, but we don't
+                                      # immediately know which ones
+                                      # are intended to be valid
+                echo "$axis.value $res"
+            fi
+        fi
+    done
 }
 
 SCD40() {
@@ -223,7 +228,7 @@ SCD40() {
         echo "$axis.label Carbon Dioxide"
         echo "$axis.type GAUGE"
     else
-        get_status 8 ".StatusSNS.SCD40.CarbonDioxide"
+        get_status 8 '.StatusSNS["SCD40"].CarbonDioxide'
         echo "$axis.value $res"
     fi
 }
@@ -245,7 +250,7 @@ PMS5003() {
         for v in 'PB1="PB1"' 'PB2_5="PB2.5"' 'PB10="PB10"' ; do
             axis=$( echo "$v" | cut -d= -f 1 )
             field=$( echo "$v" | cut -d= -f 2 )
-            get_status 8 ".StatusSNS.PMS5003.$field"
+            get_status 8 '.StatusSNS["PMS5003"].$field'
             echo "$axis.value $res"
         done
     fi
@@ -271,7 +276,7 @@ millivolts() {
         echo "$axis.label V"
         echo "$axis.type GAUGE"
     else
-        get_status 8 ".StatusSNS.ANALOG.Range"
+        get_status 8 '.StatusSNS["ANALOG"].Range'
         if [ "$res" != U ] ; then
             res=$( echo "$res" | awk '{printf "%0.3f", $1/1000}' )
         fi
@@ -288,7 +293,7 @@ switch() {
     for v in POWER POWER{1,2,3,4,5,6,7,8,9} ; do
         axis=$( echo "$v" | cut -d= -f 1 )
         lab=$(  echo "$v" | cut -d= -f 2 )
-        get_status 11 ".StatusSTS.$v"
+        get_status 11 ".StatusSTS[\"$v\"]"
 
         if [ "$res" != U ] || [ -e $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen ] ; then
             # if we've ever seen an axis, then we want to keep
@@ -329,7 +334,7 @@ dimmer() {
     for v in Channel{1,2,3,4} ; do
         axis=$( echo "$v" | cut -d= -f 1 )
         lab=$(  echo "$v" | cut -d= -f 2 )
-        get_status 11 ".StatusSTS.$v"
+        get_status 11 ".StatusSTS[\"$v\"]"
 
         if [ "$res" != U ] || [ -e $MUNIN_PLUGSTATE/tasmota/$DEVICE.$FUNCTION.$v.seen ] ; then
             # if we've ever seen an axis, then we want to keep
@@ -354,7 +359,7 @@ dimmer() {
 }
 
 case "$FUNCTION" in
-    voltage|power|powerfactor|current|energy|DS18B20|SCD40|PMS5003|millivolts|switch|dimmer)
+    voltage|power|powerfactor|current|energy|temperature|DS18B20|SCD40|PMS5003|millivolts|switch|dimmer)
         $FUNCTION "$1"
         ;;
     *)
