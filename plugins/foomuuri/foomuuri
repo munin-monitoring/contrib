@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+
+"""Munin plugin to graph Foomuuri statistics.
+
+=head1 NAME
+
+foomuuri - graph Foomuuri statistics.
+
+=head1 APPLICABLE SYSTEMS
+
+Linux systems with Foomuuri running.
+
+=head1 CONFIGURATION
+
+This plugin must be run as root.
+
+    [foomuuri]
+    user root
+
+    # Optional: counter names to graph, wildcards are supported
+    env.counter_names *
+
+    # Optional: set names to graph, wildcards are supported
+    env.set_names _lograte*
+
+    # Optional: monitor statistics filename
+    env.monitor_statistics /var/lib/foomuuri/monitor.statistics
+
+=head1 AUTHOR
+
+Kim B. Heino <b@bbbs.net>
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf
+
+=cut
+
+"""
+
+import fnmatch
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import unicodedata
+from collections import Counter
+
+
+def safename(name):
+    """Return safe variable name."""
+    # Convert ä->a as isalpha('ä') is true
+    value = unicodedata.normalize('NFKD', name)
+    value = value.encode('ASCII', 'ignore').decode('utf-8')
+
+    # Remove non-alphanumeric chars
+    return ''.join(char.lower() if char.isalnum() else '_' for char in value)
+
+
+def read_stats():
+    """Read Foomuuri monitor statistics file."""
+    # Monitor
+    filename = os.getenv('monitor_statistics',
+                         '/var/lib/foomuuri/monitor.statistics')
+    try:
+        monitor = json.loads(pathlib.Path(filename).read_text('utf-8'))
+    except (FileNotFoundError, ValueError):
+        monitor = {}
+
+    # Read Foomuuri ruleset from nft
+    try:
+        nftdata = json.loads(subprocess.run(
+            ['nft', '--json', 'list', 'table', 'inet', 'foomuuri'],
+            stdout=subprocess.PIPE, check=False, encoding='utf-8').stdout)
+    except (OSError, ValueError):
+        nftdata = {}
+
+    # Set size - merge IPv4 and IPv6 to single value
+    sets = Counter()
+    names = os.getenv('set_names', '_lograte*').split()
+    for item in nftdata.get('nftables', {}):
+        if 'set' in item:
+            name = item['set']['name'][:-2]  # Without _4
+            if any(fnmatch.fnmatch(name, matcher) for matcher in names):
+                sets.update({name: len(item['set'].get('elem', []))})
+
+    # Named counters
+    counters = {}
+    names = os.getenv('counter_names', '*').split()
+    for item in nftdata.get('nftables', {}):
+        if 'counter' in item:
+            name = item['counter']['name']
+            if any(fnmatch.fnmatch(name, matcher) for matcher in names):
+                counters[name] = {
+                    'bytes': item['counter']['bytes'],
+                    'packets': item['counter']['packets'],
+                }
+
+    # Return data
+    ret = {}
+    if monitor:
+        ret['monitor'] = monitor
+    if sets:
+        ret['set'] = sets
+    if counters:
+        ret['counter'] = counters
+    return ret
+
+
+def print_labels(labels, *, warning=None, derive=False):
+    """Print config labels."""
+    for label in sorted(labels):
+        safe = safename(label)
+        print(f'{safe}.label {label}')
+        if warning:
+            print(f'{safe}.warning {warning}')
+        if derive:
+            print(f'{safe}.type DERIVE')
+            print(f'{safe}.min 0')
+
+
+def config(stats):
+    """Print plugin config."""
+    if 'monitor' in stats:
+        print('multigraph foomuuri_monitor_time')
+        print('graph_title Foomuuri Monitor Ping Latency')
+        print('graph_info Average network round trip time.')
+        print('graph_category network')
+        print('graph_vlabel ms')
+        print_labels(stats['monitor'])
+
+        print('multigraph foomuuri_monitor_loss')
+        print('graph_title Foomuuri Monitor Ping Packet Loss')
+        print('graph_info Average ping packet loss.')
+        print('graph_category network')
+        print('graph_vlabel %')
+        print('graph_args --lower-limit 0')
+        print_labels(stats['monitor'], warning='5')
+
+        print('multigraph foomuuri_monitor_status')
+        print('graph_title Foomuuri Monitor Target Status')
+        print('graph_info Current status: 0=down, 1=up.')
+        print('graph_category network')
+        print('graph_vlabel status')
+        print('graph_args --lower-limit 0 --upper-limit 1')
+        print_labels(stats['monitor'], warning='1:')
+
+    if 'set' in stats:
+        print('multigraph foomuuri_set_size')
+        print('graph_title Foomuuri Set Size')
+        print('graph_info Number of elements in set.')
+        print('graph_category network')
+        print('graph_vlabel elements')
+        print_labels(stats['set'])
+
+    if 'counter' in stats:
+        print('multigraph foomuuri_counter_bytes')
+        print('graph_title Foomuuri Counter Bytes')
+        print('graph_info Counter bytes value.')
+        print('graph_category network')
+        print('graph_vlabel bytes')
+        print('graph_args --base 1024')
+        print_labels(stats['counter'], derive=True)
+
+        print('multigraph foomuuri_counter_packets')
+        print('graph_title Foomuuri Counter Packets')
+        print('graph_info Counter packets value.')
+        print('graph_category network')
+        print('graph_vlabel packets')
+        print_labels(stats['counter'], derive=True)
+
+    if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
+        fetch(stats)
+
+
+def fetch(stats):
+    """Print plugin values."""
+    # pylint: disable=too-many-branches
+    if 'monitor' in stats:
+        print('multigraph foomuuri_monitor_time')
+        for name, value in stats['monitor'].items():
+            times = [item for item in value['time'] if item is not None]
+            if not times:  # No stats or 100% loss
+                print(f'{safename(name)}.value U')
+            else:
+                print(f'{safename(name)}.value {sum(times) / len(times)}')
+
+        print('multigraph foomuuri_monitor_loss')
+        for name, value in stats['monitor'].items():
+            if not value['time']:  # No stats
+                print(f'{safename(name)}.value U')
+            else:
+                loss = sum(1 for item in value['time'] if item is None)
+                print(f'{safename(name)}.value '
+                      f'{loss * 100 / len(value["time"])}')
+
+        print('multigraph foomuuri_monitor_status')
+        for name, value in stats['monitor'].items():
+            print(f'{safename(name)}.value {int(value["state"])}')
+
+    if 'set' in stats:
+        print('multigraph foomuuri_set_size')
+        for name, value in stats['set'].items():
+            print(f'{safename(name)}.value {value}')
+
+    if 'counter' in stats:
+        print('multigraph foomuuri_counter_bytes')
+        for name, value in stats['counter'].items():
+            print(f'{safename(name)}.value {value["bytes"]}')
+
+        print('multigraph foomuuri_counter_packets')
+        for name, value in stats['counter'].items():
+            print(f'{safename(name)}.value {value["packets"]}')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        print('yes' if read_stats() else 'no (Foomuuri is not running)')
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config(read_stats())
+    else:
+        fetch(read_stats())
