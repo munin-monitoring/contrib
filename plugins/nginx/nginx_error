@@ -15,18 +15,18 @@ Any host running nginx, with bash version > 4.0
 
 =head1 CONFIGURATION
 
-This shows the default configuration of this plugin.  You can override
-the log file path and the logpattern.
+This shows the default configuration of this plugin. You can override
+the log file path, the logpattern and the awk_script.
 Additionally you may want to adjust 'group' (or 'user') based on the
 permissions required for reading the log file.
 
   [nginx_error]
-        group          adm
-	env.logpath    /var/log/nginx
-	env.logpattern a.*.log
+  group          adm
+  env.logpath    /var/log/nginx
+  env.logpattern a.*.log
+  env.awk_script {print $9}
 
-	Nginx must also be configured to log accesses in "combined" log format (default)
-
+Nginx must also be configured to log accesses in "combined" log format (default) or the awk_script adapted for your log format
 
 =head1 USAGE
 
@@ -59,6 +59,9 @@ None known.
 
 
 =head1 VERSION
+
+1.2 - 2024/10/29
+      * add env variable awk_script to support other log formats
 
 1.1 - 2018/01/20
       * add 'dirty config' capability support
@@ -101,6 +104,8 @@ else
 fi
 
 log="$logpath/$log_filename"
+# shellcheck disable=SC2016
+awk_script=${awk_script:-'{print $9}'}
 
 # declaring an array with http status codes, we are interested in
 declare -A http_codes
@@ -122,7 +127,7 @@ http_codes[503]='Service Unavailable'
 do_fetch () {
   local count status_code
   declare -A line_counts
-  values="$(awk '{print $9}' "$log" | sort | uniq -c)"
+  values="$(awk "$awk_script" "$log" | sort | uniq -c)"
   # Log files may be empty due to logrotation
   if [ -n "$values" ]; then
     while read -r count status_code; do
