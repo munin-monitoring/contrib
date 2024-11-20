@@ -11,8 +11,11 @@ if ARGV.length != 1 || ARGV.first != 'config'
   raise 'Error: plugin designed for the dirtyconfig protocol, must be run with the config argument'
 end
 
-address = ENV.fetch('address', nil)
+basename = File.basename($0)
+address = basename.split('tesla_wall_connector_').last
 raise 'Error: address not set' if address.nil?
+
+fieldname = basename.gsub(/[^A-Za-z0-9_]/, '_')
 
 uri_prefix = "http://#{address}/api/1/"
 responses = {}
@@ -28,8 +31,8 @@ responses = {}
 end
 
 puts <<~MUNIN
-  multigraph tesla_wall_connector_times
-  graph_title Tesla Wall Connector Times
+  multigraph #{fieldname}_times
+  graph_title Tesla Wall Connector #{address} Times
   graph_args --base 1000 --lower-limit 0
   graph_scale no
   graph_vlabel Time (days)
@@ -51,8 +54,8 @@ puts <<~MUNIN
   session.draw LINE2
   session.value #{responses['vitals']['session_s'] / 86_400.0}
 
-  multigraph tesla_wall_connector_power
-  graph_title Tesla Wall Connector Power Output
+  multigraph #{fieldname}_power
+  graph_title Tesla Wall Connector #{address} Power Output
   graph_args --base 1000 --lower-limit 0
   graph_vlabel Power (W)
   graph_category tesla
@@ -61,8 +64,8 @@ puts <<~MUNIN
   power.min 0
   power.value #{(responses['vitals']['session_energy_wh'] * 3600.0).round}
 
-  multigraph tesla_wall_connector_cycles
-  graph_title Tesla Wall Connector Cycle Counts
+  multigraph #{fieldname}_cycles
+  graph_title Tesla Wall Connector #{address} Cycle Counts
   graph_args --base 1000 --lower-limit 0
   graph_scale no
   graph_category tesla
@@ -87,8 +90,8 @@ puts <<~MUNIN
   thermal_foldbacks.draw LINE2
   thermal_foldbacks.value #{responses['lifetime']['thermal_foldbacks']}
 
-  multigraph tesla_wall_connector_voltage
-  graph_title Tesla Wall Connector Voltages
+  multigraph #{fieldname}_voltage
+  graph_title Tesla Wall Connector #{address} Voltages
   graph_category tesla
   graph_vlabel Voltage (V)
   grid.label Grid
@@ -107,8 +110,8 @@ puts <<~MUNIN
   relay_coil.type GAUGE
   relay_coil.value #{responses['vitals']['relay_coil_v']}
 
-  multigraph tesla_wall_connector_frequency
-  graph_title Tesla Wall Connector Frequency
+  multigraph #{fieldname}_frequency
+  graph_title Tesla Wall Connector #{address} Frequency
   graph_category tesla
   graph_args --base 1000 --lower-limit 0
   graph_vlabel Frequency (Hz)
@@ -116,8 +119,8 @@ puts <<~MUNIN
   grid.type GAUGE
   grid.value #{responses['vitals']['grid_hz']}
 
-  multigraph tesla_wall_connector_current
-  graph_title Tesla Wall Connector Currents
+  multigraph #{fieldname}_current
+  graph_title Tesla Wall Connector #{address} Currents
   graph_category tesla
   graph_args --base 1000 --lower-limit 0
   graph_vlabel Current (A)
@@ -137,8 +140,8 @@ puts <<~MUNIN
   N.type GAUGE
   N.value #{responses['vitals']['currentN_a']}
 
-  multigraph tesla_wall_connector_temperature
-  graph_title Tesla Wall Connector Temperatures
+  multigraph #{fieldname}_temperature
+  graph_title Tesla Wall Connector #{address} Temperatures
   graph_category tesla
   graph_vlabel Temperature (°C)
   pcba.label PCBA
@@ -151,8 +154,8 @@ puts <<~MUNIN
   mcu.type GAUGE
   mcu.value #{responses['vitals']['mcu_temp_c']}
 
-  multigraph tesla_wall_connector_wifi
-  graph_title Tesla Wall Connector Wi-Fi
+  multigraph #{fieldname}_wifi
+  graph_title Tesla Wall Connector #{address} Wi-Fi
   graph_category tesla
   signal_strength.label Signal strength
   signal_strength.type GAUGE
@@ -173,34 +176,40 @@ __END__
 
 =head1 NAME
 
-tesla_wall_connector - Munin plugin for graphing data from Tesla Wall
+tesla_wall_connector_ - Munin wildcard plugin for graphing data from Tesla Wall
 Connector electric vehicle charging stations.
 
 =head1 CONFIGURATION
 
-Configuration in C</etc/munin/plugin-conf.d/munin-node>:
+=head2 WILDCARD PLUGIN
 
- [tesla_wall_connector]
-   # IP address or hostname of your Tesla Wall Connector
-   env.address 10.0.0.136
+This is a wildcard plugin. The wildcard suffix in the symlink is the hostname or
+IP address of the Wall Connector that you want to monitor.
+
+Examples:
+
+=over
+
+=item tesla_wall_connector_wallconnector.example.com
+
+=item tesla_wall_connector_203.0.113.1
+
+=item tesla_wall_connector_2001:db8::1
+
+=back
 
 =head1 NOTES
 
 Requires the multigraph and dirtyconfig capabilities available in munin 2.0
 and newer.
 
-Developed and tested with Tesla Wall Connector generation 3 firmware
-version 22.7.0+gbc6c1736fa3426, part number 1457768-02-G (from
+Developed and tested with Tesla Wall Connector generation 3 firmware version
+24.36.3+g3f585e7b51cc72, part numbers 1457768-02-G and 1457768-02-H (from
 C</api/1/version>).
-
-=head1 KNOWN ISSUES
-
-The Tesla Wall Connector stops responding to queries on its REST
-API during charging for unknown reasons.
 
 =head1 AUTHOR
 
-Copyright © 2022 Kenyon Ralph <kenyon@kenyonralph.com>
+Copyright © Kenyon Ralph <kenyon@kenyonralph.com>
 
 =head1 LICENSE
 
