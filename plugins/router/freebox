@@ -231,9 +231,12 @@ get_data() {
 	SWITCH_DOWN=$(get_line_column "Switch" "NF-3" <<< "${INFO}")
 	SWITCH_UP=$(get_line_column "Switch" "NF-1" <<< "${INFO}")
 
-	DHCP_CLIENTS=$(sed -nE '/Attributions dhcp/,/Redirections de ports/{s/^\s*([0-9A-F:]{17}).*$/\1/p}' <<< "${INFO}" | wc -l)
-	REDIRECT_TCP=$(sed -nE '/Redirections de ports/,/Interfaces réseau/{s/^\s*(TCP).*$/\1/p}' <<< "${INFO}" | wc -l)
-	REDIRECT_UDP=$(sed -nE '/Redirections de ports/,/Interfaces réseau/{s/^\s*(UDP).*$/\1/p}' <<< "${INFO}" | wc -l)
+	DHCP_CLIENTS_LIST=$(sed -nE '/Attributions dhcp/,/Redirections de ports/{s/^\s*([0-9A-F:]{17})\s*([0-9a-z\.:]+).*$/\2 (\1);/p}' <<< "${INFO}" | sort -n)
+	DHCP_CLIENTS=$(wc -l <<< "${DHCP_CLIENTS_LIST}")
+	REDIRECT_TCP_LIST=$(sed -nE '/Redirections de ports/,/Interfaces réseau/{s/^\s*TCP\s+(\w+)\s+([0-9a-z\.:]+)\s+(\w+).*$/\1->\2:\3;/p}' <<< "${INFO}" | sort -n)
+	REDIRECT_TCP=$(wc -l <<< "${REDIRECT_TCP_LIST}")
+	REDIRECT_UDP_LIST=$(sed -nE '/Redirections de ports/,/Interfaces réseau/{s/^\s*UDP\s+(\w+)\s+([0-9a-z\.:]+)\s+(\w+).*$/\1->\2:\3;/p}' <<< "${INFO}" | sort -n)
+	REDIRECT_UDP=$(wc -l <<< "${REDIRECT_UDP_LIST}")
 
 	if [ -z "${UPTIME_DAYS:-}" ]; then
 		UPTIME_DAYS=0
@@ -448,8 +451,11 @@ graph_data() {
 			;;
 		.users)
 			echo "dhcp.value ${DHCP_CLIENTS:-U}"
+			echo "dhcp.extinfo $(echo ${DHCP_CLIENTS_LIST:-U})"
 			echo "redirect_tcp.value ${REDIRECT_TCP:-U}"
+			echo "redirect_tcp.extinfo $(echo ${REDIRECT_TCP_LIST:-U})"
 			echo "redirect_udp.value ${REDIRECT_UDP:-U}"
+			echo "redirect_udp.extinfo $(echo ${REDIRECT_UDP_LIST:-U})"
 			;;
 		*)
 			echo "main_wan.value ${WAN_UP:-U}"
