@@ -26,11 +26,20 @@ if [ "$rndc" = "" ]; then
 	rndc="/usr/sbin/rndc"
 fi
 
-# Blank the stats file (else stats are appended not replaced)
-rm ${stat_file}
+# only renew stats if older than 4 minutes
+if [ "$refresh_minutes" = "" ]; then
+	refresh_minutes=4
+fi
 
-# Ask to bind to build new one
-${rndc} stats
+if [ "$(find "$(dirname "$stat_file")" -mindepth 1 -maxdepth 1 -cmin -"$refresh_minutes" -name "$(basename "$stat_file")" )" == "" ] ; then
+	if [ -e "${stat_file}" ] ; then
+		# Blank the stats file (else stats are appended not replaced)
+		rm "${stat_file}"
+	fi
+
+	# Ask to bind to build new one
+	${rndc} stats
+fi
 
 # The section we are looking for in the stats.
 section="Resolver Statistics"
