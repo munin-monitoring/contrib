@@ -29,8 +29,14 @@ if(!empty($apc_fn_name))
       $tmp =  call_user_func($apc_fn_name . "_sma_info");
       $ret["memory"] = 100-(($tmp["avail_mem"] / $tmp["seg_size"])*100);
       $tmp = apcu_cache_info();
-      $ret["hits"] = ($tmp["num_hits"] / ( $tmp["num_hits"]+$tmp["num_misses"]) ) * 100;
-      $ret["misses"] = ($tmp["num_misses"] / ( $tmp["num_hits"]+$tmp["num_misses"]) ) * 100;
+      if (($tmp["num_hits"]+$tmp["num_misses"]) > 0)
+      {
+          $ret["hits"] = ($tmp["num_hits"] / ( $tmp["num_hits"]+$tmp["num_misses"]) ) * 100;
+          $ret["misses"] = ($tmp["num_misses"] / ( $tmp["num_hits"]+$tmp["num_misses"]) ) * 100;
+      } else {
+          $ret["hits"] = 0;
+          $ret["misses"] = 0;
+      }
       break;
   }
 
