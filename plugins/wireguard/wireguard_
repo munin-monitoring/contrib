@@ -13,7 +13,11 @@ wireguard_ - Wildcard-plugin to monitor wireguard peer count and traffic
 
 The following environment variables are used by this plugin
 
- active_threshold_m       - threshold to count the connection as inactive (default 3 minutes)
+ active_threshold_m     - threshold to count the connection as inactive (default 3 minutes)
+ peer_naming            - configure how peers will be labelled in the graphs. Options are:
+                            pubkey (default), pubkey_full, endpoint, allowedips, mapping
+ peer_name_map          - used when peer_naming is set to mapping. Should be in a bash array
+                          format without brackets. See example below
 
 The plugin needs to run as root to be able to call the wg show
 command.  This is configured like this:
@@ -30,6 +34,44 @@ wireguard_<interface> to this file. For example,
 
 will monitor wg0.
 
+=head2 PEER NAMING
+
+Set the environment variable peer_naming to a comma separated list
+of naming options in descending order of preference. A naming option
+is ignored if it returns an empty string or '(none)'
+
+Explanation of the supported peer_naming options:
+
+    pubkey          - The last 8 characters of the peer's public key
+    pubkey_full     - The peer's full public key (44 characters)
+    endpoint        - The endpoint ip address and port of the peer
+    allowedips      - The allowed ip addresses of the peer
+    mapping         - A mapping with custom peer names, see below
+
+Example:
+
+  [wireguard_*]
+      user root
+      peer_naming endpoint,allowedips
+
+Will label a peer by it's endpoint if set, otherwise by it's allowedips
+
+=head3 SPECIFY PEER NAMES MANUALLY
+
+When using a mapping for peer names, you need to define the peer_name_map
+environment variable. This takes a space separated key/value mapping with a
+semi-colon (:) as assignment operator. The key should either be the full
+public key of the peer or the last 8 characters of the peer's public key.
+
+  [wireguard_*]
+      user root
+      peer_naming mapping,allowedips
+      peer_name_map "+GCynSM=":"Peer1" "b9FjbupGC7fomO5U4jL5Irt1ZV5rq4c+utGKj53HXgU=":"Peer Two"
+
+The above example will show the label 'Peer1' for a peer with a public key that
+ends with '+GCynSM='. It will use the name 'Peer Two' for the peer with public
+key 'b9FjbupGC7fomO5U4jL5Irt1ZV5rq4c+utGKj53HXgU='. All other peer's will be
+labelled by their allowedips
 
 =head1 AUTHOR
 
@@ -59,7 +101,7 @@ function wg_exists {
 
 function wg_interfaces {
     show_all=$1
-    for iface in $(wg show interfaces | tr " " "\n"); do
+    for iface in $(wg show interfaces | tr " " "\n" | sort); do
         # Filter interfaces if needed
         if [ -z "$show_all" ] \
             && [ -n "$INTERFACE" ] \
@@ -91,10 +133,82 @@ function wg_peers {
     done
 }
 
+# When calling this method pass a argument as returned by the wg_peers function
+# Ie it expects as first argument a string with the following values separated
+# by a semicolon: public-key, preshared-key, endpoint, allowed-ips,
+# latest-handshake, transfer-rx, transfer-tx, persistent-keepalive
+function peer_name {
+    IFS=',' read -ra naming_options <<< "$1"
+    peer_config="$2"
+
+    for naming_option in "${naming_options[@]}"; do
+        peer_name=""
+
+        case "$naming_option" in
+            pubkey_full)
+                IFS=';' read -ra peer <<< "$2"
+                peer_name="${peer[0]}"
+                ;;
+            pubkey)
+                IFS=';' read -ra peer <<< "$2"
+                peer_name="${peer[0]: -8}"
+                ;;
+            endpoint)
+                IFS=';' read -ra peer <<< "$2"
+                peer_name="${peer[1]}"
+                ;;
+            allowedips)
+                IFS=';' read -ra peer <<< "$2"
+                peer_name="${peer[2]}"
+                ;;
+            mapping)
+                if [ -z "$peer_name_map" ]; then
+                    continue
+                fi
+
+                declare -a peer_arr="($peer_name_map)"
+                declare -A peer_map
+                for item in "${peer_arr[@]}"; do
+                    key=${item%%:*}
+                    value=${item#*:}
+
+                    peer_map[$key]="$value"
+                done
+
+                # Check if full pubkey exists in mapping
+                needle=$(peer_name pubkey_full "$2")
+                peer_name="${peer_map[$needle]}"
+                if [ -z "$peer_name" ]; then
+                    # Check if unsafe/raw pubkey hash exists in mapping
+                    needle=$(peer_name pubkey "$2" unsafe)
+                    peer_name="${peer_map[$needle]}"
+                fi
+
+                if [ -z "$peer_name" ]; then
+                    # Check if safe pubkey hash exists in mapping
+                    needle=$(peer_name pubkey "$2")
+                    peer_name="${peer_map[$needle]}"
+                fi
+                ;;
+        esac
+
+        if [ -n "$peer_name" ] && [ "$peer_name" != "(none)" ]; then
+            echo "$peer_name"
+            break
+        fi
+    done
+}
+
+function peer_id {
+    peer_public_key="$(peer_name pubkey "$1")"
+
+    safe_peer_id "$peer_public_key"
+}
+
 function safe_peer_id {
     unsafe_peer_id=$1
 
-    echo "${unsafe_peer_id//[.:]/_}"
+    echo "${unsafe_peer_id//[^a-zA-Z0-9-]/_}"
 }
 
 case $1 in
@@ -123,11 +237,11 @@ EOF
         for iface in $(wg_interfaces); do
             # List config for all interfaces
             cat <<EOF
-pc_on_$iface.label $iface
-pc_on_$iface.info Interface $iface
+pc_on_$iface.label $iface (all)
+pc_on_$iface.info Number of configured peer's on interface $iface
 pc_on_$iface.min 0
-apc_on_$iface.label Active on $iface
-apc_on_$iface.info Active on $iface
+apc_on_$iface.label $iface (active)
+apc_on_$iface.info Active peers on interface $iface
 apc_on_$iface.min 0
 EOF
         done
@@ -145,9 +259,9 @@ graph_info This graph shows the traffic per peer on the $iface wireguard interfa
 
 EOF
 
-            for line in $(wg_peers "$iface"); do
-                read -r -a peer <<< "$(echo "$line" | tr ';' ' ')"
-		        peer_id=$(safe_peer_id "${peer[2]}")
+            for peer_config in $(wg_peers "$iface"); do
+		        peer_id=$(peer_id "$peer_config")
+                peer_name=$(peer_name "${peer_naming:-pubkey}" "$peer_config")
 
                 # List config for up/down values for each peer
                 cat <<EOF
@@ -156,7 +270,7 @@ down_${peer_id}.type DERIVE
 down_${peer_id}.graph no
 down_${peer_id}.cdef down_${peer_id},8,*
 down_${peer_id}.min 0
-up_${peer_id}.label ${peer[2]}
+up_${peer_id}.label $peer_name
 up_${peer_id}.type DERIVE
 up_${peer_id}.negative down_${peer_id}
 up_${peer_id}.cdef up_${peer_id},8,*
@@ -169,13 +283,13 @@ EOF
     *)
         # Collect & print current monitoring values
         echo "multigraph wireguard_peercount"
-	active_threshold=$(date --date="${active_threshold_m:-3} min ago" +%s)
+	    active_threshold="$(date --date="${active_threshold_m:-3} min ago" +%s)"
 
         for iface in $(wg_interfaces); do
             iface_peers=$(wg_peers "$iface")
 
             peer_count=$(wc -l <<< "$iface_peers")
-            active_peer_count=$(awk -F";" -v threshold=$active_threshold '$5 > threshold' <<< "$iface_peers" | wc -l)
+            active_peer_count=$(awk -F";" -v threshold="$active_threshold" '$5 > threshold' <<< "$iface_peers" | wc -l)
 
             echo "pc_on_$iface.value $peer_count"
             echo "apc_on_$iface.value $active_peer_count"
@@ -185,10 +299,9 @@ EOF
         for iface in $(wg_interfaces); do
             echo "multigraph wireguard_peertraffic_$iface"
 
-            for line in $(wg_peers "$iface"); do
-                read -r -a peer <<< "$(echo "$line" | tr ';' ' ')"
-
-                peer_id=$(safe_peer_id "${peer[2]}")
+            for peer_config in $(wg_peers "$iface"); do
+                IFS=";" read -r -a peer <<< "$peer_config"
+                peer_id=$(peer_id "$peer_config")
 
                 echo "down_${peer_id}.value ${peer[5]}"
                 echo "up_${peer_id}.value ${peer[6]}"
