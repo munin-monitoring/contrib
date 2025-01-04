@@ -13,7 +13,7 @@ naxsi - monitor naxsi rule hits
 Following config is needed:
 
     [naxsi_exceptions]
-    env.nginx_error_log_file /var/log/nginx/error.log
+    env.nginx_error_log_files /var/log/nginx/error.log /var/log/nginx/error2.log
     env.warning_level 2
     env.critical_level 20
 
@@ -59,16 +59,19 @@ def run_binary(args):
 
 
 def get_values():
-    logfile=os.environ.get('nginx_error_log_file')
-    if not logfile:
+    logfile=os.environ.get('nginx_error_log_files', '').split(' ')
+
+    if not logfiles:
         raise ValueError('no nginx err log file configured')
 
-    output = run_binary([
-        'logtail',
-        # '-t',  # FIXME test mode,: remove
-        '-f',
-        logfile ]
-    )
+    output = ''
+    for logfile in logfiles:
+        output += run_binary([
+            'logtail',
+            # '-t',  # FIXME test mode,: remove
+            '-f',
+            logfile ]
+        )
 
 
     with open(state_file, 'rt') as f:
