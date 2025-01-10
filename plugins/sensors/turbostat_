@@ -1,0 +1,217 @@
+#!/bin/bash
+# -*- sh -*-
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+turbostat_ - Multigraph plugin that monitors processor statistics using the turbostat tool
+
+=head1 DESCRIPTION
+
+turbostat reports processor topology, frequency, idle power-state statistics, temperature
+and power on X86 processors. This plugin monitors those statistics with munin
+
+STATUS: as most statistics reported by turbostat can also already be monitored by other munin 
+plugins, currently only monitoring package watts is implemented.
+
+NOTE: turbostat is a live monitoring tool and does not provide a way to aggregate statistics
+between measurements. So similar to other munin plugins, note that values monitored using
+turbostat are only snapshots on the moment that this plugin runs and might not tell you
+anything about what happened between two measurements.
+
+=head1 INSTALLATION
+
+On debian systems turbostat is provided by the linux-tools-generic package. If you are running a custom
+kernel, you can also build turbostat as follows:
+
+$ apt-get install build-essential git libcap-dev 
+$ cd /usr/local/src
+$ git clone --depth=1 -b "v$(uname -r | cut -d- -f1)" git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
+$ cd linux-stable/tools/power/x86/turbostat
+$ make
+$ ./turbostat
+
+=head1 CONFIGURATION
+
+Turbostat needs to be run as root
+
+The following environment variables are used by this plugin
+
+  TURBOSTAT_PATH	- Path to the turbostat executable if not in PATH
+
+[turbostat_*]
+user root
+env.TURBOSTAT_PATH /usr/local/src/linux-stable/tools/power/x86/turbostat/turbostat
+
+=head1 REQUIREMENTS
+
+- turbostat utility (see INSTALLATION)
+
+=head1 AUTHOR
+
+Copyright (C) 2025 pimlie
+
+=head1 LICENSE
+
+MIT
+
+=head1 MAGIC MARKERS
+
+ #%# family=auto
+ #%# capabilities=autoconf,suggest
+
+=cut
+
+if [ -n "$MUNIN_LIBDIR" ]; then
+	. "$MUNIN_LIBDIR/plugins/plugin.sh"
+fi
+
+PLUGIN_BASE="$(basename "$0")"
+
+SUPPORTED_GRAPH_TYPES=("watt")
+
+WATT_COLS=("PkgWatt" "CorWatt" "GFXWatt" "RAMWatt")
+WATT_COL_LABELS=("Whole" "Core part" "Graphics" "RAM")
+
+# Check if turbostat exists
+function turbostat_exists {
+	if [ -n "$TURBOSTAT_PATH" ]; then
+		if [ ! -f "$TURBOSTAT_PATH" ] || [ ! -x "$TURBOSTAT_PATH" ]; then
+			return 1
+		fi
+	elif command -v turbostat >/dev/null; then
+		TURBOSTAT_PATH="turbostat"
+	else
+		return 1
+	fi
+
+	# Check if we can really run turbostat, because the command might be
+	# executable but only return a WARNING that it needs to be installed
+	$TURBOSTAT_PATH --help >/dev/null 2>&1
+	if [ $? -gt 1 ]; then
+		return 1
+	fi
+
+	return 0
+}
+
+# Emit config for package watt graph
+function emit_watt_graph {
+	local col label
+
+	cat <<EOS
+graph_title Package watts
+graph_args --base 1000 -l 0
+graph_vlabel Watt
+graph_category sensors
+graph_info Shows watts consumed by hw package
+update_rate 60
+EOS
+	for key in ${!WATT_COLS[*]}; do
+		col="${WATT_COLS[$key]}"
+		label=${WATT_COL_LABELS[$key]}
+
+		cat <<EOS
+$col.label $label
+$col.min 0
+EOS
+	done
+}
+
+# Emit package watt values from turbostat
+function emit_watt_values {
+	IFS=' ' read -ra watts < <($TURBOSTAT_PATH --Summary --quiet --show "$(join , "${WATT_COLS[@]}")" -n 1 | tail -n 1 | xargs)
+	unset IFS
+	for key in ${!WATT_COLS[*]}; do
+		emit_value "${WATT_COLS[$key]}" "${watts[$key]}"
+	done
+}
+
+# Emit multigraph header
+function emit_multigraph_base {
+	if [ -z "$1" ]; then
+		echo "multigraph $PLUGIN_BASE"
+	else
+		echo "multigraph ${PLUGIN_BASE}${1//-/_}"
+	fi
+}
+
+# Emit value for process
+function emit_value {
+	local graph_name
+	graph_name="$1"
+
+	echo "${graph_name}.value $2"
+}
+
+# Check if string equals config
+function is_config {
+	if [ "$1" == "config" ]; then
+		return 0
+	fi
+
+	return 1
+}
+
+# Check if element exists in array
+function in_array {
+	local e match
+	match="$1"
+	shift
+	for e; do [[ "$e" == "$match" ]] && return 0; done
+	return 1
+}
+
+# Join array elements by separator
+function join {
+	local IFS="$1"
+	shift
+	echo "$*"
+}
+
+# Check if graph was requested
+function is_requested_graph {
+	if [ -z "$1" ] || [ "$1" == "$2" ] ; then
+		return 0
+	fi
+
+	return 1
+}
+
+case $1 in
+	autoconf)
+		if turbostat_exists; then
+			echo "yes"
+		else
+			echo "no (turbostat command not found)"
+		fi
+		;;
+	suggest)
+		if turbostat_exists; then
+			echo "watt"
+		fi
+		;;
+	*)
+		GRAPH_TYPE=${0##*turbostat_}
+
+		for TYPE in "${SUPPORTED_GRAPH_TYPES[@]}"; do
+			if ! is_requested_graph "$GRAPH_TYPE" "$TYPE"; then
+				continue
+			fi
+
+			emit_multigraph_base "$TYPE"
+
+			case "$TYPE" in
+				watt)
+					if is_config "$1"; then
+						emit_watt_graph
+					else
+						emit_watt_values
+					fi
+			esac
+		done
+		;;
+esac
