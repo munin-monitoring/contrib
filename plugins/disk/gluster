@@ -143,7 +143,7 @@ def find_volumes(need_details):
     return volumes
 
 
-def print_avg(label, value):
+def print_avg(label, value, reset):
     """Use state file to print average value instead of gauge."""
     # Read previous values from state file
     statefile = pathlib.Path(os.getenv('MUNIN_PLUGSTATE')) / 'gluster.json'
@@ -153,9 +153,16 @@ def print_avg(label, value):
         state = {}
 
     # Add current value to state file
-    values = state.get(label, []) + [int(value)]
-    while len(values) > 3:  # Keep current + 2 previous = 15 minutes
-        del values[0]
+    count = 6 if reset else 3   # Keep 3 or 6: 15 minutes or 30 minutes
+    if value == '0' and reset:  # Single ok resets avg
+        values = [0] * count
+    else:
+        if value == 'U':        # Node is down
+            value = '0'
+        values = state.get(label, []) + [int(value)]
+        while len(values) > count:
+            del values[0]
+
     state[label] = values
     statefile.write_text(json.dumps(state, indent=2), 'utf-8')
 
@@ -190,7 +197,7 @@ def print_status(config):
             status = int(volume['status'])
             if status and all(brick['status'] for brick in volume['bricks']):
                 status = 2
-            print_avg(name, status)
+            print_avg(name, status, False)
 
     # Brick heal status
     for volume in volumes:
@@ -215,9 +222,9 @@ def print_status(config):
         if not config or both:
             for brick in volume['bricks']:
                 bname = safe_name(brick['uuid'])
-                print_avg(f'{bname}_pending', brick['heal_pending'])
-                print_avg(f'{bname}_split', brick['heal_split'])
-                print_avg(f'{bname}_healing', brick['heal_healing'])
+                print_avg(f'{bname}_pending', brick['heal_pending'], True)
+                print_avg(f'{bname}_split', brick['heal_split'], True)
+                print_avg(f'{bname}_healing', brick['heal_healing'], True)
 
     # Brick disk/inode free
     for gtype in ('disk', 'inode'):
