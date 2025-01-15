@@ -187,6 +187,11 @@ class ClientWrapper:
     def volumes(self):
         return self.client.volumes.list()
 
+    @cached_property
+    @sorted_by_creation_date
+    def dangling_volumes(self):
+        return self.client.volumes.list(filters={'dangling': True})
+
 
 def container_summary(container, *args):
     summary = container.name
@@ -430,13 +435,27 @@ def volumes(client, mode):
         print("graph_title Docker volumes")
         print("graph_vlabel volumes")
         print("graph_category virtualization")
+        print("graph_total All volumes")
         print("volumes_quantity.label Volumes")
         print("volumes_quantity.draw AREASTACK")
-        print("volumes_quantity.info Unused volumes can be deleted with "
+        print("dangling_quantity.label Unused volumes")
+        print("dangling_quantity.draw AREASTACK")
+        print("dangling_quantity.info Unused volumes can be deleted with "
               "`docker volume prune`")
+        print("dangling_quantity.warning 10")
     else:
-        print('volumes_quantity.value', len(client.volumes))
-        print('volumes_quantity.extinfo', ', '.join(volume_summary(v) for v in client.volumes))
+        all_volumes = client.volumes
+        dangling = client.dangling_volumes
+
+        volumes = list(
+            set(all_volumes)
+                .difference(set(dangling))
+        )
+
+        print('volumes_quantity.value', len(volumes))
+        print('volumes_quantity.extinfo', ', '.join(volume_summary(v) for v in volumes))
+        print('dangling_quantity.value', len(dangling))
+        print('dangling_quantity.extinfo', ', '.join(volume_summary(i) for i in dangling))
 
 
 def size(client, mode):
