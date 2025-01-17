@@ -15,6 +15,8 @@
     [redis]
     env.host1 127.0.0.1
     env.port1 6379
+    env.tls1 on
+    env.tls_verify1 on
     env.password1 password
     env.title_prefix1 redis-1
     env.host2 /run/redis.sock
@@ -26,6 +28,8 @@
     * port - the redis port to connect to
     * password - the password to use with the AUTH command
     * title_prefix - a prefix to put before the title of the graph, this is strongly recommended for multiple instances
+    * tls enable TLS connections if "on"
+    * tls_verify verify the certificate in TLS connections if "on" (defaults to on if TLS is "on")
 
     Graphs:
     This generates multigraphs for:
@@ -40,7 +44,8 @@
 
 =head COPYRIGHT
 
-    Copyright (C) 2020 Rowan Wookey <https://www.rwky.net/>
+    Copyright (C) 2024 Rowan Wookey <https://www.rwky.net/>
+    Copyright (C) 2024 Hector Solans <https://www.bekodo.com>
     Copyright (C) 2009 Gleb Voronich <http://stanly.net.ua/>
 
 =head LICENSE
@@ -69,17 +74,22 @@
 use strict;
 use IO::Socket::INET;
 use IO::Socket::UNIX;
+use IO::Socket::SSL;
 
 my %INSTANCES;
 my $HOST;
 my $PORT;
 my $PASSWORD;
+my $TLS;
+my $TLS_VERIFY;
 
 for (my $i = 1; $ENV{"host$i"}; $i++)
 {
     $HOST = exists $ENV{"host$i"} ? $ENV{"host$i"} : "127.0.0.1";
     $PORT = exists $ENV{"port$i"} ? $ENV{"port$i"} : 6379;
     $PASSWORD = exists $ENV{"password$i"} ? $ENV{"password$i"} : undef;
+    $TLS = exists $ENV{"tls$i"} ? $ENV{"tls$i"} : "off";
+    $TLS_VERIFY = exists $ENV{"tls_verify$i"} ? $ENV{"tls_verify$i"} : "on";
     my $TITLE_PREFIX = exists $ENV{"title_prefix$i"} ? $ENV{"title_prefix$i"} . ": " : "";
     my $SOCK = &get_conn();
     $INSTANCES{"instance$i"} = {
@@ -87,7 +97,9 @@ for (my $i = 1; $ENV{"host$i"}; $i++)
         PORT => $PORT,
         PASSWORD => $PASSWORD,
         TITLE_PREFIX => $TITLE_PREFIX,
-        SOCK => $SOCK
+        SOCK => $SOCK,
+        TLS => $TLS,
+        TLS_VERIFY => $TLS_VERIFY,
     };
 }
 
@@ -410,19 +422,26 @@ sub get_conn {
             Type => SOCK_STREAM(),
             Peer => $HOST,
         );
-    }else{
-
+    } elsif ($TLS eq "on") {
+        my $verify = $TLS_VERIFY eq "on" ? SSL_VERIFY_PEER : SSL_VERIFY_NONE;
+        $sock = IO::Socket::SSL->new(
+            PeerAddr => $HOST,
+            PeerPort => $PORT,
+            Timeout  => 10,
+            Proto    => 'tcp',
+            SSL_verify_mode => $verify,
+        ) or die "Unable to connect to $HOST:$PORT TLS: $SSL_ERROR";
+    } else {
         $sock = IO::Socket::INET->new(
             PeerAddr => $HOST,
             PeerPort => $PORT,
-            Timeout => 10,
-            Proto => 'tcp'
-        );
+            Timeout  => 10,
+            Proto    => 'tcp',
+        ) or die "Unable to connect to $HOST:$PORT TLS: $SSL_ERROR";
     }
-
-	if (! defined($sock)) {
-         die "can't read socket: $!";
-	}
+    if (! defined($sock)) {
+        die "can't read socket: $!";
+    }
 
     if ( defined( $PASSWORD )  ) {
         print $sock "AUTH ", $PASSWORD, "\r\n";
@@ -435,6 +454,7 @@ sub get_conn {
 sub get_info{
     my $sock = $_[0];
     print $sock "INFO\r\n";
+    # Reply is in the format $<length>\r\n<data>\r\n
     my $result = <$sock> || die "can't read socket: $!";
 
     my $rep;
@@ -442,7 +462,7 @@ sub get_info{
     read($sock, $rep, substr($result,1)+2) || die "can't read from socket: $!";
 
     my $hash;
-    foreach (split(/\r\n/, substr($rep, 0, -2))) {
+    foreach (split(/\r\n/, substr($rep, 0, -2))) {  #Delete the lasts \r\n
         my ($key,$val) = split(/:/, $_, 2);
         if (defined($key)) {
             $hash->{$key} = $val;
