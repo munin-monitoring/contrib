@@ -1,0 +1,86 @@
+#!/usr/bin/env sh
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+jellyfin_sessions - Monitor active sessions on a jellyfin media system
+
+=head1 APPLICABLE SYSTEMS
+
+Jellyfin media system
+
+=head1 CONFIGURATION
+
+Requires a api key for the plugin and an installed jq, a command-line json 
+processor.
+
+You may specify the URL where to get the statistics.
+
+ url      - URL of jellyfin
+ max_time - Timeout curl - defaults to 3 seconds
+ interval - Interval in seconds to check
+ api_key  - API key from jellyfin
+
+ [jellyfin_sessions]
+ env.url http://127.0.0.1:8096
+ env.max_time 3
+ env.interval 600
+ env.api_key <API_KEY>
+
+=head1 AUTHOR
+
+Copyright (C) 2025 Sebastian L. (https://momou.ch)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+url=${url:-"http://127.0.0.1:8096"}
+url_sessions="$url/Sessions"
+max_time=${max_time:-3}
+interval=${interval:-600}
+api_key=${api_key:-}
+
+case $1 in
+	autoconf)
+		if [ -x "$(command -v curl)" ]; then
+			if [ -x "$(command -v jq)" ]; then
+				if [ -z "$api_key" ]; then
+					echo "no (api_key not set)" && exit 1
+				else
+					curl -s -f -m "$max_time" -H "Authorization: MediaBrowser Token=$api_key" -I -X GET "$url_sessions" | grep -iq "Content-Type: application/json" && echo "yes" && exit 0 || echo "no (invalid or empty response from api endpoint ($url_sessions))" && exit 1
+				fi
+			else
+				echo "no (jq not found)" && exit 1
+			fi
+		else
+			echo "no (curl not found)" && exit 0
+		fi
+	;;
+
+    config)
+        echo "graph_title Sessions on Jellyfin system"
+        echo "graph_vlabel sessions"
+        echo "sessions.label sessions"
+        exit 0
+    ;;
+esac
+
+if active_sessions=$(curl -s -f -m "$max_time" -H "Authorization: MediaBrowser Token=$api_key" -X GET "$url_sessions"?activeWithinSeconds="$interval" | jq '. | length') | grep -E "[0-9]+"; then
+	echo "sessions.value $active_sessions"
+else
+	echo "sessions.value U"
+fi
+
