@@ -79,13 +79,23 @@ case $1 in
         echo "sessions.label sessions"
         echo "sessions.info Active sessions on jellyfin"
         echo "sessions.min 0"
+        echo "plays.label plays"
+        echo "plays.info Active plays on jellyfin"
+        echo "plays.min 0"
+        echo "transcodes.label transcodes"
+        echo "transcodes.info Active transcodes on jellyfin"
+        echo "transcodes.min 0"
         exit 0
     ;;
 esac
 
-if active_sessions=$(curl -s -f -m "$max_time" -H "Authorization: MediaBrowser Token=$api_key" -X GET "$url_sessions"?activeWithinSeconds="$interval" | jq '. | length' | grep -E "[0-9]+"); then
-	echo "sessions.value $active_sessions"
+if active_sessions=$(curl -s -f -m "$max_time" -H "Authorization: MediaBrowser Token=$api_key" -X GET "$url_sessions"?activeWithinSeconds="$interval"); then
+	echo "sessions.value $(echo "$active_sessions" | jq -r '. | length')"
+	echo "plays.value $(echo "$active_sessions" | grep -o '"PlayMethod":' | wc -l)"
+
+	echo "transcodes.value $(echo "$active_sessions" | grep -o '"PlayMethod":"Transcode"' | wc -l)"
 else
 	echo "sessions.value U"
+	echo "plays.value U"
+	echo "transcodes.value U"
 fi
-
