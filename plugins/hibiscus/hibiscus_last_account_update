@@ -1,0 +1,99 @@
+#!/bin/bash
+# -*- sh -*-
+set -e
+set -o pipefail
+
+: << =cut
+
+=head1 NAME
+
+hibiscus_last_account_update - Age of the last bank account update
+
+Connects to the database of a "Hibiscus Server" homebanking instance.
+Checks bank accounts and returns the balance ("Saldo") update date of
+the account that was updated least recently.
+
+This script helps to get notified when the automatic updates stopped
+because a TAN needs to be entered manually after 90 days.
+
+=head1 CONFIGURATION
+
+=head2 ENVIRONMENT VARIABLES
+
+ host      - Hostname of MySQL/MariaDB server
+ user      - Database user
+ password  - Database password
+ database  - Database name
+ mysql     - MySQL/MariaDB binary
+ host_name - To put the graph onto a different host
+
+=head2 CONFIGURATION EXAMPLE
+
+  [hibiscus_*]
+  env.user hibiscususer
+  env.password thisismypassword
+  env.mysql /usr/bin/mariadb
+
+=head1 REQUIREMENTS
+
+"bash" and "mysql"/"mariadb" are required.
+
+"bash" instead of "sh" needed because of "set -o pipefail", which is not
+supported in Debian 12 yet.
+
+=head1 SEE ALSO
+
+https://www.willuhn.de/products/hibiscus-server/
+
+=head1 AUTHOR
+Christian Weiske <cweiske@cweiske.de>
+
+=head1 LICENSE
+
+AGPL-3.0-only https://spdx.org/licenses/AGPL-3.0-only.html
+
+=head1 MAGIC MARKERS
+
+#%# family=manual
+
+=cut
+
+# variables
+database=${database:-hibiscus}
+host=${host:-localhost}
+user=${user:-}
+pass=${password:-}
+mysql=${mysql:-/usr/bin/mysql}
+host_name=${host_name:-}
+
+
+case $1 in
+   config)
+       echo "graph_title Hibiscus last account update"
+       echo "graph_vlabel Age in hours"
+       echo "graph_args --base 1000 -l 0"
+       echo "graph_category banking"
+       echo "graph_order age"
+       echo "age.label Oldest account update age"
+       echo "age.draw AREA"
+       echo "age.warning 72"
+       if [ -n "$host_name" ]; then
+           echo "host_name $host_name"
+       fi
+       exit 0;;
+esac
+
+age_hours=$(
+    echo "\
+        SELECT HOUR(TIMEDIFF(NOW(), saldo_datum)) AS age\
+        FROM konto\
+        WHERE flags IS NULL\
+        ORDER BY age DESC\
+        LIMIT 1"\
+        | $mysql\
+              --skip-ssl\
+              --skip-column-names\
+              -h"$host" -u"$user" -p"$password"\
+              "$database"
+)
+echo "age.value $age_hours"
