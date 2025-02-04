@@ -1,0 +1,95 @@
+#!/usr/bin/env sh
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+languagetool_check - Monitor checks made over languagetool
+
+=head1 APPLICABLE SYSTEMS
+
+LanguageTool server
+
+=head1 CONFIGURATION
+
+Plugin has to run as root, uses journalctl and presumes that languagetool 
+is running as languagetool.service systemd service. You may specify the 
+languages (short codes) which get checked. 
+
+ languages        - Languages to include in graph
+ interval_minutes - Minutes to include in journalctl log
+
+ [languagetool_checks]
+ user root
+ env.languages de fr it en es
+ env.interval_minutes 5
+
+=head1 AUTHOR
+
+Copyright (C) 2025 Sebastian L. (https://momou.ch)
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=autoconf
+
+=cut
+
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+languages="${languages:-en}"
+interval_minutes=${interval_minutes:-5}
+
+case $1 in
+	autoconf)
+		if [ -x "$(command -v journalctl)" ]; then
+			if [ "$(systemctl is-enabled languagetool)" != "enabled" ]; then
+				echo "no (languagetool.service not enabled)" && exit 1
+			fi
+		else
+			echo "no (journalctl not found)" && exit 1
+		fi
+	;;
+
+    config)
+        echo "graph_title Checks on languagetool"
+        echo "graph_category appserver"
+        echo "graph_vlabel languagetool checks"
+        echo "graph_info Current checks on languagetool"
+        echo "graph_args --base 1000 --lower-limit 0"
+        echo "checks.label checks"
+        echo "checks.info Active checks on languagetool"
+        echo "checks.min 0"
+		for language in $languages; do
+			echo "$language.label $language"
+			echo "$language.info Checks for language $language"
+        		echo "$language.min 0"
+		done
+        exit 0
+    ;;
+esac
+
+journalctl_log=$(journalctl --since "$interval_minutes min ago" -u languagetool)
+if [ "$(echo "$journalctl_log" | grep -c "Check done:")" = "0" ]; then
+	echo "checks.value 0"
+	for language in $languages; do
+		echo "$language.value 0"
+	done
+elif journalctl_log=$(echo "$journalctl_log" | grep "Check done:"); then
+	echo "checks.value $(echo "$journalctl_log" | grep -c "Check done:")"
+	for language in $languages; do
+		value=$(echo "$journalctl_log" | grep -E "Check done: [0-9]+ chars, $language" | wc -l)
+		echo "$language.value $value"
+	done
+else
+	echo "checks.value U"
+	for language in $languages; do
+		echo "$language.value U"
+	done
+fi
