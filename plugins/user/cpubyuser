@@ -92,26 +92,9 @@ OTHER_PRINT=""
 [ -z "$OTHER_FIELD" ] || OTHER_PRINT="print \"$(clean_fieldname "$OTHER_FIELD")\", others_sum;"
 
 ps ax --format "%cpu user" | tail +2 | \
-	awk -v USERS="$USERS" '
-		# Store the CPU usage of each process - the mapping to the
-		# user happens later. We cannot use the second column
-		# (username) directly, since it may be abbreviated (ending
-		# with "+").
-		{ CPU_USER[$2]=$1 }
-		END {
-			others_sum = 0
-			split(USERS, user_array)
-			for (user in CPU_USER) {
-				m = match(USERS,user)
-				if (m != 0) {
-					_user=user
-					gsub(/[-.]/,"_",_user);
-					print _user, (CPU_USER[user])
-				} else
-					others_sum += CPU_USER[user]
-			}
-			'"$OTHER_PRINT"'
-		}' | while read -r user count; do
-			# apply fieldname cleanup
-			echo "$(clean_fieldname "$user").value $count"
-		done
+awk '{
+    arr[$2]+=$1
+   }
+   END {
+     for (key in arr) printf("%s.value %s\n", key, arr[key])
+   }' | sort -k1,1
