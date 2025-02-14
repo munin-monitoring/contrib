@@ -177,25 +177,29 @@ ROOMS=$(fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVE
 REPORTS=$(fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}/v1/event_reports" | jq .total)
 
 echo "multigraph synapse_users_${CLEANHOMESERVER}"
-if total="$(jq -r .total "$USERS_FILE" | grep -E "^[0-9]+$")"; then
-	puppets="$(jq -r '.users[] | select(.deactivated==false) | select(.user_type!="bot")' "$USERS_FILE" | grep -c '"last_seen_ts": null')"
-	bots="$(jq -r '.users[] | select(.deactivated==false)' "$USERS_FILE" | grep -c '"user_type": "bot"')"
-	virtual_users=$(( puppets + bots ))
-	total_registered=$(( total - virtual_users ))
-	active="$(jq -r < "$USERS_FILE" | grep -c '"deactivated": false')"
-	active_users=$(( active - virtual_users ))
-	echo total_registered.value "$total_registered"
-	echo active_users.value "$active_users"
-	echo bots.value "$bots"
+if total_number="$(jq -r .total "$USERS_FILE" | grep -E "^[0-9]+$")"; then
+	puppets="$(jq -r '.users[] | select(.user_type!="bot") | select(.user_type!="support") | select(.last_seen_ts==null)' "$USERS_FILE")"
+	bots="$(jq -r '.users[] | select(.user_type=="bot")' "$USERS_FILE")"	
+	users="$(jq -r '.users[] | select(.user_type!="support") | select(.user_type!="bot") | select(.last_seen_ts!=null)' "$USERS_FILE")"
+
+	puppets_number="$(echo "$puppets" | grep -c '"last_seen_ts": null')"
+	bots_number="$(echo "$bots" | grep -c '"user_type": "bot"')"
+	virtual_users_number=$(( puppets_number + bots_number ))
+	total_registered_number=$(( total_number - virtual_users_number ))
+
 	# Convert to miliseconds
 	time_ms=$(($(date +%s) * 1000))
 	interval_ms=$((INTERVAL * 1000))
 	time_interval_ago=$(( time_ms - interval_ms ))
-	last_seen_times_ms=$(jq -r '.users[] | select(.user_type!="bot") | select(.deactivated==true)' "$USERS_FILE" | grep -E "\"last_seen_ts\": [0-9]+")
-	online_users="$(echo "$last_seen_times_ms" | awk -v "count=0" -F": " '$2 > "'$time_interval_ago'" {count++} END {print count}')"
-	echo online_users.value "$online_users"
-	echo deactivated_users.value "$(grep -c '"deactivated": false' "$USERS_FILE")"
-	echo erased_users.value "$(grep -c '"erased": true' "$USERS_FILE")"
+	last_seen_times_ms=$(echo "$users" | jq -r 'select(.deactivated==false)' | grep -E "\"last_seen_ts\": [0-9]+")
+	online_users_number="$(echo "$last_seen_times_ms" | awk -v "count=0" -F": " '$2 > "'$time_interval_ago'" {count++} END {print count}')"
+	
+	echo total_registered.value "$total_registered_number"
+	echo active_users.value "$(echo "$users" | grep -c '"deactivated": false')"
+	echo bots.value "$(echo "$bots" | grep -c '"deactivated": false')"
+	echo online_users.value "$online_users_number"
+	echo deactivated_users.value "$(echo "$users" | grep -c '"deactivated": true')"
+	echo erased_users.value "$(echo "$users" | grep -c '"erased": true')"
 else
 	echo "total_registered.value U"
 	echo "active_users.value U"
