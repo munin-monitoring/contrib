@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+
+# Wildcard-plugin to monitor a Huawei SUN 2000 inverter with SDongle
+# through Modbus TCP
+#
+# To monitor an inverter, link sun2000_<ip-or-hostname> to this file.
+# E.g.
+#  ln -s /usr/share/munin/plugins/sun2000_ \
+#        /etc/munin/plugins/sun2000_192.168.1.2
+#  ...will monitor the dongle with ip 192.168.1.2
+#
+# prerequisite is pymodbus library, install with 'pip3 install pymodbus[all]'
+#
+# Can have following configuration in plugin-conf.d/munin-node:
+#   [sun2000_*]
+#   env.MODBUS_PORT 502
+#   env.HAS_BATTERY 0
+#   env.ADDITIONAL_INVERTERS
+#
+# Parameters
+#       MODBUS_PORT - Specifies the TCP-Port of the sun2000 smart dongle.
+#                     Defaults to 502
+#       HAS_BATTERY - If the inverter has battery storage attached, set to 1
+#                     for additional graphs. Defaults to 0
+#       ADDITIONAL_INVERTERS - if you have additional inverters attached, put
+#                              their modbus id(s) comma-separated here (e.g.
+#                              16,32). Usually the first additional slave
+#                              inverter does have id 16
+#
+# The same parameters can also be specified on a per-inverter basis, eg:
+#   [sun2000_inverter1]
+#   env.MODBUS_PORT 503
+#
+# Author: Roland Steinbach  <roland@netzblick.de>
+# Copyright (c) 2023 Roland Steinbach  <roland@netzblick.de>
+#
+# Permission to use, copy, and modify this software with or without fee
+# is hereby granted, provided that this entire notice is included in
+# all source code copies of any software which is or includes a copy or
+# modification of this software.
+#
+# THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR
+# IMPLIED WARRANTY. IN PARTICULAR, NONE OF THE AUTHORS MAKES ANY
+# REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE
+# MERCHANTABILITY OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR
+# PURPOSE.
+#
+#
+# Magic markers
+#  #%# capabilities=autoconf
+#  #%# family=auto
+
+
+import logging
+from time import sleep
+import os
+import sys
+
+from pymodbus import pymodbus_apply_logging_config
+
+# --------------------------------------------------------------------------- #
+# import the various client implementations
+# --------------------------------------------------------------------------- #
+from pymodbus.client import ModbusTcpClient
+from pymodbus.transaction import ModbusSocketFramer
+
+plugin_name = list(os.path.split(sys.argv[0]))[1]
+PORT = os.environ.get('MODBUS_PORT') or 502
+HASBATTERY = os.environ.get('HAS_BATTERY') or 0
+ADDINV = os.environ.get('ADDITIONAL_INVERTERS') or []
+if (len(ADDINV) != 0):
+    ADDINV = ADDINV.split(",")
+plugin_version = "0.6"
+
+
+def get_sun2000_ip(plugin_name):
+    try:
+        name = plugin_name.split('_', 1)[1]
+        return name
+    except Exception:
+        logging.verbose("IP not found!")
+        sys.exit(1)
+
+
+def to_I32(i):
+    if (len(i) != 2):
+        return 0
+    else:
+        i = ((i[0] << 16) + i[1])
+        i = i & 0xffffffff
+        return (i ^ 0x80000000) - 0x80000000
+
+
+def to_U32(i):
+    if (len(i) != 2):
+        return 0
+    else:
+        return ((i[0] << 16) + i[1])
+
+
+def to_str(s):
+    str = ""
+    for i in range(0, len(s)):
+        high, low = divmod(s[i], 0x100)
+        str = str + chr(high) + chr(low)
+    return str
+
+
+def to_I16(i):
+    i = i[0] & 0xffff
+    return (i ^ 0x8000) - 0x8000
+
+
+def print_config():
+    print("multigraph sun2000_green")
+    print("graph_title SUN2000 pct green power")
+    print("graph_order power1 pctgreen1")
+    print("graph_category sensors")
+    print("graph_vlabel Green Power (%)")
+    print("graph_args -l 0 -u 100")
+    print("graph_info Percentage of green power")
+    print("pctgreen1.label Green power (%)")
+    print("pctgreen1.colour 00cccc")
+    print("")
+    print("multigraph sun2000_plant")
+    print("graph_title SUN2000 PowerPlant")
+    print("graph_order power1 watt1 usage1")
+    print("graph_category sensors")
+    print("graph_vlabel Power (W)")
+    print("graph_scale yes")
+    print("graph_info Solar IN/Out Values in W. + = sending, - = getting")
+    print("power1.label Solar power (W)")
+    print("power1.colour 00cc00")
+    print("watt1.label Grid (W)")
+    print("watt1.colour cc3300")
+    print("usage1.label Used power (W)")
+    print("usage1.colour 0000cc")
+    if (HASBATTERY != 0):
+        print("bat1.label Battery (W)")
+        print("bat1.colour eeee00")
+        print("")
+        print("multigraph sun2000_battery")
+        print("graph_title SUN2000 storage battery")
+        print("graph_order pct1")
+        print("graph_category sensors")
+        print("graph_vlabel State of charge (%)")
+        print("graph_args -l 0 -u 100")
+        print("graph_info State of charge")
+        print("pct1.label State of charge (%)")
+        print("pct1.min 0")
+        print("pct1.max 100")
+
+
+logging.basicConfig()
+_logger = logging.getLogger(__file__)
+_logger.setLevel(logging.ERROR)
+pymodbus_apply_logging_config(logging.ERROR)
+ip = get_sun2000_ip(plugin_name)
+
+client = ModbusTcpClient(ip,
+                         port=PORT,
+                         framer=ModbusSocketFramer,
+                         timeout=5,
+                         retry_on_empty=False,
+                         close_comm_on_error=True,)
+client.connect()
+sleep(5)
+
+if len(sys.argv) > 1:
+    if sys.argv[1] == "config":
+        print_config()
+        sys.exit(0)
+    elif sys.argv[1] == "autoconf":
+        print('yes')
+        sys.exit(0)
+    elif sys.argv[1] == "version":
+        print('sun2000_ Munin plugin, version ' + plugin_version)
+        sys.exit(0)
+    elif sys.argv[1] != "":
+        logging.verbose('unknown argument "' + sys.argv[1] + '"')
+        sys.exit(1)
+
+if client.connect():
+    power1 = 0
+    bat1 = 0
+    watt1 = 0
+    usage1 = 0
+    pctgreen1 = 0
+    APPD = client.read_holding_registers(32064, 2, 1)  # Power from solar
+    if hasattr(APPD, "registers"):
+        power1 = to_I32(APPD.registers)
+    if (len(ADDINV) > 0):
+        for i in range(0, len(ADDINV)):
+            APPD = client.read_holding_registers(32064, 2, int(ADDINV[i]))
+            if hasattr(APPD, "registers"):
+                power1 += to_I32(APPD.registers)
+    # Watt to/from Grid (>0 = feeding, <0 = getting)
+    APPD = client.read_holding_registers(37113, 2, 1)
+    if hasattr(APPD, "registers"):
+        watt1 = to_I32(APPD.registers)
+    if (HASBATTERY != 0):
+        # Watt to/from battery (>0 = charge, <0 = discharge)
+        APPD = client.read_holding_registers(37001, 2, 1)
+        if hasattr(APPD, "registers"):
+            bat1 = to_I32(APPD.registers)
+        APPD = client.read_holding_registers(37004, 1, 1)  # battery SOC
+        if hasattr(APPD, "registers"):
+            pct1 = (to_I16(APPD.registers) / 10)
+    usage1 = abs(int(power1) - int(bat1) - int(watt1))
+    if (watt1 > 0):
+        pctgreen1 = 100
+    elif watt1 + usage1 > 0:
+        pctgreen1 = 100 - (abs(watt1) / usage1 * 100)
+    print("multigraph sun2000_green")
+    print("pctgreen1.value", pctgreen1)
+    print("")
+    print("multigraph sun2000_plant")
+    print("power1.value", -(power1))
+    print("watt1.value", watt1)
+    print("usage1.value", usage1)
+    if (HASBATTERY != 0):
+        print("bat1.value", bat1)
+        print("")
+        print("multigraph sun2000_battery")
+        print("pct1.value", pct1)
