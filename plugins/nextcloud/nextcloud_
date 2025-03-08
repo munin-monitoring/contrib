@@ -27,24 +27,35 @@ nextcloud_<nextcloud-domain> to this file. You can even append a port
 Set username and password in your munin-node configuration
 
 	[nextcloud_cloud.domain.tld]
-	env.username <nexcloud_user>
-	env.password <nextcloud_password>
+	env.username <nexcloud_user>      # XXX: use serverinfo_token instead
+	env.password <nextcloud_password> # XXX: ditto
+	env.serverinfo_token <nextcloud_serverinfo_token>
 	env.api_path <default: /ocs/v2.php/apps/serverinfo/api/v1/info>
 	env.scheme <default: https>
 	env.timeout <default: 2s>
 	env.updates_warning <default: 1>
 
-It's advised to set an app password (for this plugin) in your nextcloud 
-instance and not to use the "real" password of your nextcloud user.
+It's advised to use a serverinfo token, or at least to set an app password (for
+this plugin) in your nextcloud instance and not to use the "real" password of
+your nextcloud user.
+
+You can generate a token with, e.g.,
+
+  TOKEN=$(openssl rand -hex 32)
+
+and then set it with
+
+  ./occ config:app:set serverinfo token --value ${TOKEN}
+
 
 =head1 AUTHOR
 
 Copyright (C) 2020 Sebastian L. (https://momou.ch),
-		   Olivier Mehani <shtrom+munin@ssji.net>
+	      2020,2025 Olivier Mehani <shtrom+munin@ssji.net>
 
 =head1 LICENSE
 
-GPLv2
+SPDX-License-Identifier: GPL-2.0
 
 =head1 MAGIC MARKERS
 
@@ -66,11 +77,18 @@ SCHEME="${scheme:-https}://"
 TIMEOUT="${timeout:-2}"
 UPDATES_WARNING="${updates_warning:-1}"
 CLEANDOMAIN="$(clean_fieldname "${DOMAIN}")"
-USERNAME="${username:-}"
-PASSWORD="${password:-}"
+
+SERVERINFO_TOKEN="${serverinfo_token}"
+if [ -z "${SERVERINFO_TOKEN}" ]; then
+	USERNAME="${username:-}"
+	PASSWORD="${password:-}"
+fi
 
 fetch_url () {
-    curl -s -f -m "${TIMEOUT}" "$@"
+	curl -s -f -m "${TIMEOUT}" \
+		${SERVERINFO_TOKEN:+-H "NC-Token: ${SERVERINFO_TOKEN}"} \
+		${USERNAME:+-u "${USERNAME}:${PASSWORD}"} \
+		"$@"
 }
 
 case $1 in
@@ -81,7 +99,7 @@ case $1 in
 	    elif [ ! -x "$(command -v jq)" ]; then
 		    echo "no (jq not found)"
 	    else
-		    fetch_url -I -u "${USERNAME}:${PASSWORD}" -I "${SCHEME}${DOMAIN}${API_PATH}" \
+		    fetch_url -I "${SCHEME}${DOMAIN}${API_PATH}" \
 			    | grep -iq "Content-Type: application/json" \
 			    && echo "yes" \
 			    || echo "no (invalid or empty response from nextcloud serverinfo api)"
@@ -204,8 +222,7 @@ EOM
 esac
 
 
-# users
-fetch_url -u "${USERNAME}:${PASSWORD}" "${SCHEME}${DOMAIN}${API_PATH}" \
+fetch_url "${SCHEME}${DOMAIN}${API_PATH}" \
 	| sed 's/\\/\\\\/g' \
 	| jq -r '.ocs.data
 		| @text "
