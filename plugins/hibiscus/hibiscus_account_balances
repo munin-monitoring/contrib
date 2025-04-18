@@ -1,0 +1,148 @@
+#!/bin/bash
+# -*- sh -*-
+set -e
+set -o pipefail
+
+: << =cut
+
+=head1 NAME
+
+hibiscus_account_balances - Show all account balances
+
+Connects to the database of a "Hibiscus Server" homebanking instance.
+
+This script helps to get notified when the balance of accounts
+drop below a threshold value.
+
+=head1 CONFIGURATION
+
+=head2 ENVIRONMENT VARIABLES
+
+  host      - Hostname of MySQL/MariaDB server
+  user      - Database user
+  password  - Database password
+  database  - Database name
+  mysql     - MySQL/MariaDB binary
+  host_name - To put the graph onto a different host
+  warning   - Warning threshold for all accounts
+  critical  - Critical threshold for all accounts
+  acct_X_warning  - Warning threshold for a single account with ID X
+  acct_X_critical - Critical threshold for a single account with ID X
+  label_filter    - String to remove from account labels
+  graph_title     - Title of the graph in munin
+  include   - Comma-separated list of account IDs to include in the account list
+  exclude   - Comma-separated list of account IDs to remove from the list
+
+Warning/critical thresholds value examples:
+-"500:" for a balance lower than 500
+-"1000" for a balance over 1000
+-"1000:2000" for a balance outside 1000 and 2000
+
+The account IDs are shown at the end of the labels: "Accountlabel #23".
+
+=head2 CONFIGURATION EXAMPLE
+
+  [hibiscus_*]
+  env.user hibiscususer
+  env.password thisismypassword
+  env.mysql /usr/bin/mariadb
+
+=head1 REQUIREMENTS
+
+"bash" and "mysql"/"mariadb" are required.
+
+"bash" instead of "sh" needed because of "set -o pipefail", which is not
+supported in Debian 12 yet.
+
+=head1 SEE ALSO
+
+https://www.willuhn.de/products/hibiscus-server/
+
+=head1 AUTHOR
+Christian Weiske <cweiske@cweiske.de>
+
+=head1 LICENSE
+
+AGPL-3.0-only https://spdx.org/licenses/AGPL-3.0-only.html
+
+=head1 MAGIC MARKERS
+
+#%# family=manual
+
+=cut
+
+# variables
+database=${database:-hibiscus}
+host=${host:-localhost}
+user=${user:-}
+pass=${password:-}
+mysql=${mysql:-/usr/bin/mysql}
+host_name=${host_name:-}
+label_filter=${label_filter:-}
+graph_title=${graph_title:-Hibiscus account balances}
+include=${include:-}
+exclude=${exclude:-}
+
+
+case $1 in
+    config)
+        echo "graph_title ${graph_title}"
+        echo "graph_vlabel Value in EUR"
+        echo "graph_args --base 1000"
+        echo "graph_category banking"
+
+        if [ ! -z "$include" ]; then
+            include="AND id IN ($include)"
+        fi
+        if [ ! -z "$exclude" ]; then
+            exclude="AND id NOT IN ($exclude)"
+        fi
+
+        echo "\
+            SELECT\
+                id,\
+                IF(kategorie IS NULL, bezeichnung, CONCAT(kategorie, ': ', bezeichnung)) AS label\
+            FROM konto\
+            WHERE flags IS NULL $include $exclude\
+            ORDER BY label"\
+            | $mysql\
+                  --batch\
+                  --skip-ssl\
+                  --skip-column-names\
+                  -h"$host" -u"$user" -p"$password"\
+                  "$database"\
+            | while read acctid acctlabel; do
+                if [ ! -z "$label_filter" ]; then
+                    echo "acct_$acctid.label $acctlabel #$acctid" | sed "s/$label_filter//"
+                else
+                    echo "acct_$acctid.label $acctlabel #$acctid"
+                fi
+                echo "acct_$acctid.draw LINE"
+                warnvar="acct_${acctid}_warning"
+                acctwarning=${!warnvar:-${warning:-}}
+                if [ ! -z "$acctwarning" ]; then
+                    echo "acct_$acctid.warning $acctwarning"
+                fi
+            done
+        if [ -n "$host_name" ]; then
+            echo "host_name $host_name"
+        fi
+        exit 0;;
+esac
+
+echo "\
+    SELECT\
+        id,\
+        saldo\
+    FROM konto\
+    WHERE flags IS NULL\
+    ORDER BY id"\
+    | $mysql\
+          --batch\
+          --skip-ssl\
+          --skip-column-names\
+          -h"$host" -u"$user" -p"$password"\
+          "$database"\
+    | while read acctid acctbalance; do
+        echo "acct_$acctid.value $acctbalance"
+    done
