@@ -34,6 +34,7 @@ Set username and password in your munin-node configuration
 	env.scheme <default: https>
 	env.timeout <default: 2s>
 	env.updates_warning <default: 1>
+	env.check_app_updates <default: true>
 
 It's advised to use a serverinfo token, or at least to set an app password (for
 this plugin) in your nextcloud instance and not to use the "real" password of
@@ -71,14 +72,25 @@ if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
     set -x
 fi
 
-API_PATH="${api_path:-/ocs/v2.php/apps/serverinfo/api/v1/info}?format=json&skipApps=false"
+CHECK_APP_UPDATES="${check_app_updates:-true}"
+APP_UPDATES_CONFIG=""
+APP_UPDATES_VALUE=""
+API_PATH="${api_path:-/ocs/v2.php/apps/serverinfo/api/v1/info}?format=json&skipApps=$check_app_updates"
 DOMAIN="${0##*nextcloud_}"
 SCHEME="${scheme:-https}://"
 TIMEOUT="${timeout:-2}"
-UPDATES_WARNING="${updates_warning:-1}"
 CLEANDOMAIN="$(clean_fieldname "${DOMAIN}")"
 
-SERVERINFO_TOKEN="${serverinfo_token}"
+if [ "$CHECK_APP_UPDATES" != "false" ]; then
+	UPDATES_WARNING="${updates_warning:-1}"
+	APP_UPDATES_CONFIG="num_updates_available.label available app updates
+num_updates_available.info number of available app updates
+num_updates_available.min 0
+num_updates_available.warning ${UPDATES_WARNING}"
+	APP_UPDATES_VALUE="num_updates_available.value \(.nextcloud.system.apps.num_updates_available)"
+fi
+
+SERVERINFO_TOKEN="${serverinfo_token:-}"
 if [ -z "${SERVERINFO_TOKEN}" ]; then
 	USERNAME="${username:-}"
 	PASSWORD="${password:-}"
@@ -208,10 +220,7 @@ graph_printf %.0lf
 graph_vlabel apps
 graph_info number of installed and updatable apps
 graph_category cloud
-num_updates_available.label available app updates
-num_updates_available.info number of available app updates
-num_updates_available.min 0
-num_updates_available.warning ${UPDATES_WARNING}
+$APP_UPDATES_CONFIG
 num_installed.label installed apps
 num_installed.info number of installed apps
 num_installed.min 0
@@ -257,6 +266,7 @@ db_size.value \(.server.database.size)
 
 multigraph nextcloud_apps_'"${CLEANDOMAIN}"'
 num_installed.value \(.nextcloud.system.apps.num_installed)
-num_updates_available.value \(.nextcloud.system.apps.num_updates_available)
+'"$APP_UPDATES_VALUE"'
+
 "' \
 	| sed 's/ null$/ U/'
