@@ -127,7 +127,7 @@ class ClientWrapper:
     and support caching.
 
     In addition, when the exclude_re parameter is not None,
-    any container which name is matched by the RE will not be excluded from reports.
+    any container which name is matched by the RE will be excluded from reports.
     """
     client = None
     exclude = None
@@ -146,7 +146,7 @@ class ClientWrapper:
     def all_containers(self):
         return [
             c for c in self.client.containers.list(all=True)
-            if (c.status == 'running') and (not self.exclude or not self.exclude.search(c.name))
+            if not self.exclude or not self.exclude.search(c.name)
         ]
 
     @cached_property
@@ -281,6 +281,8 @@ def parallel_container_stats(client):
     proc_list = []
     stats = {}
     for container in client.all_containers:
+        if container.status != 'running':
+            continue
         q = Queue()
         p = Process(target=get_container_stats, args=(container, q))
         proc_list.append({'proc': p, 'queue': q, 'container': container})
@@ -292,7 +294,11 @@ def parallel_container_stats(client):
 
 
 def print_containers_size(client):
+    include_containers = [container.id for container in client.all_containers]
     for container in client.api.df()['Containers']:
+        # exclude containers not in all_containers
+        if container['Id'] not in include_containers:
+            continue
         size = container['SizeRw'] if 'SizeRw' in container else 0
         # first char of name is always / so we skip it
         clean_container_name = clean_fieldname(container['Names'][0][1:])
