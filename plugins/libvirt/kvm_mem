@@ -61,15 +61,20 @@ def fetch(vms):
     res = {}
     for pid in vms:
         try:
-            cmdline = open("/proc/%s/cmdline" % pid, "r")
-            amount = re.sub(r"^.*-m\x00(.*)\x00-smp.*$",r"\1", cmdline.readline())
-            amount = int(amount) * 1024 * 1024
-            print("%s_mem.value %s" % (vms[pid], amount))
-        except:
-            cmdline = open("/proc/%s/cmdline" % pid, "r")
-            amount = re.sub(r"^.*-m\x00(\d+).*$",r"\1", cmdline.readline())
-            amount = int(amount) * 1024 * 1024
-            print("%s_mem.value %s" % (vms[pid], amount))
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                line = f.read().replace(b'\x00', b' ')
+                match = re.search(rb"-m\s+size=(\d+)k", line)
+                if match:
+                    amount = int(match.group(1)) * 1024
+                else:
+                    match = re.search(rb"-m\s+size=(\d+)", line)
+                    if match:
+                        amount = int(match.group(1)) * 1024 * 1024
+                    else:
+                        raise ValueError(f"Memory size not found in {line}")
+            print(f"{vms[pid]}_mem.value {amount}")
+        except Exception as e:
+            print(f"Error extracting memory for PID {pid}: {e}", file=sys.stderr)
 
 def detect_kvm():
     ''' Check if kvm is installed
