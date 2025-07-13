@@ -1,0 +1,169 @@
+#!/usr/bin/env sh
+# shellcheck shell=dash
+
+set -e
+
+: << =cut
+
+=head1 NAME
+
+mas_ - Monitor users on a matrix authentication service over admin API
+
+=head1 APPLICABLE SYSTEMS
+
+Matrix authentication service (currently only with matrix-synapse systems)
+
+=head1 CONFIGURATION
+
+Requires installed curl and jq, a command-line json processor.
+
+This is a wildcard plugin. It monitors some simple values over the admin API
+of matrix authentication service. Link mas_<masurl> to this file. The admin 
+endpoint has to be reachable from the plugin. The adminapi endpoint on the 
+matrix authentication service has to be enabled and a client (with client_id 
+and client_id) has to be configured accordingly.
+
+  ln -s /usr/share/munin/plugins/mas_ \
+        /etc/munin/plugins/mas_domain.tld
+
+Set parameters in your munin-node configuration
+
+	[mas_masurl]
+	env.client_id <client_id>
+	env.client_secret <client_secret>
+	env.bot_names <list of bot names>
+	env.port <port>
+	env.scheme <default: https>
+	env.timeout <default: 2s>
+
+To monitor a matrix authentication service instance on localhost you need 
+following:
+
+  ln -s /usr/share/munin/plugins/mas_ \
+        /etc/munin/plugins/mas_localhost
+
+	[mas_localhost]
+	env.client_id <client_id>
+	env.client_secret <client_secret>
+	env.port 8081
+	env.scheme http
+
+=head1 AUTHOR
+
+Copyright (C) 2025 Sebastian L. (https://momou.ch),
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+ #%# capabilities=autoconf
+
+=cut
+
+# shellcheck disable=SC1090
+. "$MUNIN_LIBDIR/plugins/plugin.sh"
+
+if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
+    set -x
+fi
+
+CLIENT_ID="${client_id:-}"
+CLIENT_SECRET="${client_secret:-}"
+PORT="${port:-443}"
+QUERY_LIMIT="${query_limit:-10000}"
+MASSERVER="${0##*mas_}"
+SCHEME="${scheme:-https}://"
+TIMEOUT="${timeout:-2}"
+CLEANMASSERVER="$(clean_fieldname "${MASSERVER}")"
+
+get_access_token () {
+	ACCESS_TOKEN=$(curl -s -f -m "${TIMEOUT}" -u "$CLIENT_ID:$CLIENT_SECRET" -d "grant_type=client_credentials&scope=urn:mas:admin" "${SCHEME}${MASSERVER}/oauth2/token" | jq -r '.access_token')
+}
+
+fetch_url () {
+	get_access_token
+    curl -s -f -m "${TIMEOUT}" "$@"
+}
+
+case $1 in
+
+    autoconf)
+	    if [ ! -x "$(command -v curl)" ]; then
+		    echo "no (curl not found)"
+	    elif [ ! -x "$(command -v jq)" ]; then
+		    echo "no (jq not found)"
+	    else
+	    		get_access_token
+		    fetch_url -I -H "Authorization: Bearer ${ACCESS_TOKEN}" -I "${SCHEME}${MASSERVER}:${PORT}/api/admin/v1/users" \
+			    | grep -iq "Content-Type: application/json" \
+			    && echo "yes" \
+			    || echo "no (invalid or empty response from matrix authentication service admin api)"
+	    fi
+	    exit 0
+	    ;;
+   config)
+
+cat << EOM
+multigraph mas_users_${CLEANMASSERVER}
+graph_title Users on ${MASSERVER} (matrix authentication service)
+graph_args --base 1000 -l 0
+graph_printf %.0lf
+graph_vlabel users
+graph_info users
+graph_category chat
+registered.label registered users
+registered.info registered users
+registered.min 0
+active.label active users
+active.info active users
+active.min 0
+bots.label active bots
+bots.info active bots
+bots.min 0
+deactivated.label deactivated users
+deactivated.info deactivated users
+deactivated.min 0
+sessions.label user sessions
+sessions.info user sessions
+sessions.min 0
+sessions.draw LINE2
+EOM
+	exit 0
+        ;;
+
+esac
+
+mktemp_command="${mktemp_command:-/usr/bin/mktemp}"
+USERS_FILE=$($mktemp_command) || exit 73
+trap 'rm -f "$USERS_FILE"' EXIT
+
+get_access_token
+fetch_url -g -H "Authorization: Bearer ${ACCESS_TOKEN}" "${SCHEME}${MASSERVER}:${PORT}/api/admin/v1/users?page[first]=${QUERY_LIMIT}" > "$USERS_FILE"
+sessions=$(fetch_url -g -H "Authorization: Bearer ${ACCESS_TOKEN}" "${SCHEME}${MASSERVER}:${PORT}/api/admin/v1/user-sessions?filter[status]=active&page[first]=${QUERY_LIMIT}" | jq .meta[])
+
+echo "multigraph mas_users_${CLEANMASSERVER}" 
+if total="$(jq -r .meta[] "$USERS_FILE" | grep -E "^[0-9]+$")"; then
+	if [ -n "$bot_names" ]; then
+		bot_names_grep=$(echo "$bot_names" | tr ' ' '|')
+		bot_names_grep="$bot_names_grep|"
+	fi
+	active_bots=$(jq '.data[] | select(.attributes.locked_at == null)' "$USERS_FILE" | grep -cE "\"username\": \"${bot_names_grep}.*bot\"")
+	deactivated_users=$(jq '.data[] | select(.attributes.locked_at != null)' "$USERS_FILE" | grep -E "\"username\": \"" | { grep -vcE "\"${bot_names_grep}.*bot\"" || true; })
+	registered_users=$(( total - active_bots ))
+	active_users=$(( registered_users - deactivated_users ))	
+
+	echo registered.value "$registered_users"
+	echo active.value "$active_users"
+	echo bots.value "$active_bots"
+	echo deactivated.value "$deactivated_users"
+	echo sessions.value "$sessions"
+else
+	echo "registered.value U"
+	echo "active.value U"
+	echo "bots.value U"
+	echo "deactivated.value U"
+	echo "sessions.value U"
+fi
