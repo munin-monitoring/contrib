@@ -21,6 +21,10 @@ This is a wildcard plugin. It monitors some simple values over the admin API
 of synapse matrix homeserver. Link synapse_<homeserverurl> to this file. The 
 admin endpoint has to be reachable from the plugin.
 
+If matrix authentication service is used, env.disable_users has to be set to 
+false and the env.auth_token has to be a compatibility token from the matrix 
+authentication service.
+
   ln -s /usr/share/munin/plugins/synapse_ \
         /etc/munin/plugins/synapse_domain.tld
 
@@ -28,6 +32,7 @@ Set parameters in your munin-node configuration
 
 	[synapse_homeserverurl]
 	env.auth_token <auth_token>
+	env.disable_users <default: false>
 	env.interval <seconds>
 	env.port <port>
 	env.admin_api_path <default: /_synapse/admin>
@@ -47,6 +52,9 @@ To monitor a synapse instance on localhost you need following:
 
 It's advised to use a dedicated munin bot account (user_type bot) with admin 
 rights on your matrix synapse server for this plugin.
+
+If matrix authentication service is enabled on the matrix synapse server, 
+disable the users check and use a compatibility token.
 
 =head1 AUTHOR
 
@@ -71,6 +79,7 @@ if [ "${MUNIN_DEBUG:-0}" = 1 ]; then
 fi
 
 AUTH_TOKEN="${auth_token:-}"
+DISABLE_USERS="${disable_users:-false}"
 INTERVAL="${interval:-300}"
 PORT="${port:-443}"
 ADMIN_API_PATH="${admin_api_path:-/_synapse/admin}"
@@ -101,8 +110,9 @@ case $1 in
 	    exit 0
 	    ;;
    config)
-
-cat << EOM
+		USERS_CONFIG=""
+		if [ "$DISABLE_USERS" != "true" ]; then
+			USERS_CONFIG="
 multigraph synapse_users_${CLEANHOMESERVER}
 graph_title Synapse users on ${HOMESERVER}
 graph_args --base 1000 -l 0
@@ -128,7 +138,11 @@ deactivated_users.info deactivated users
 deactivated_users.min 0
 erased_users.label erased users
 erased_users.info erased users
-erased_users.min 0
+erased_users.min 0"
+		fi
+
+cat << EOM
+$USERS_CONFIG
 multigraph synapse_rooms_${CLEANHOMESERVER}
 graph_title Synapse spaces and rooms on ${HOMESERVER}
 graph_args --base 1000 -l 0
@@ -168,45 +182,48 @@ EOM
 
 esac
 
-mktemp_command="${mktemp_command:-/usr/bin/mktemp}"
-USERS_FILE=$($mktemp_command) || exit 73
-trap 'rm -f "$USERS_FILE"' EXIT
-
-fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}/v2/users?deactivated=true&limit=${QUERY_LIMIT}" > "$USERS_FILE"
+if [ "$DISABLE_USERS" != "true" ]; then
+	mktemp_command="${mktemp_command:-/usr/bin/mktemp}"
+	USERS_FILE=$($mktemp_command) || exit 73
+	trap 'rm -f "$USERS_FILE"' EXIT
+	fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}/v2/users?deactivated=true&limit=${QUERY_LIMIT}" > "$USERS_FILE"
+fi
 ROOMS=$(fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}/v1/rooms?limit=${QUERY_LIMIT}")
 REPORTS=$(fetch_url -H "Authorization: Bearer ${AUTH_TOKEN}" "${SCHEME}${HOMESERVER}:${PORT}${ADMIN_API_PATH}/v1/event_reports" | jq .total)
 
-echo "multigraph synapse_users_${CLEANHOMESERVER}"
-if total_number="$(jq -r .total "$USERS_FILE" | grep -E "^[0-9]+$")"; then
-	puppets="$(jq -r '.users[] | select(.user_type!="bot") | select(.user_type!="support") | select(.last_seen_ts==null)' "$USERS_FILE")"
-	bots="$(jq -r '.users[] | select(.user_type=="bot")' "$USERS_FILE")"	
-	users="$(jq -r '.users[] | select(.user_type!="support") | select(.user_type!="bot") | select(.last_seen_ts!=null)' "$USERS_FILE")"
+if [ "$DISABLE_USERS" != "true" ]; then
+	echo "multigraph synapse_users_${CLEANHOMESERVER}"
+	if total_number="$(jq -r .total "$USERS_FILE" | grep -E "^[0-9]+$")"; then
+		puppets="$(jq -r '.users[] | select(.user_type!="bot") | select(.user_type!="support") | select(.last_seen_ts==null)' "$USERS_FILE")"
+		bots="$(jq -r '.users[] | select(.user_type=="bot")' "$USERS_FILE")"	
+		users="$(jq -r '.users[] | select(.user_type!="support") | select(.user_type!="bot") | select(.last_seen_ts!=null)' "$USERS_FILE")"
 
-	puppets_number="$(echo "$puppets" | grep -c '"last_seen_ts": null')"
-	bots_number="$(echo "$bots" | grep -c '"user_type": "bot"')"
-	virtual_users_number=$(( puppets_number + bots_number ))
-	total_registered_number=$(( total_number - virtual_users_number ))
+		puppets_number="$(echo "$puppets" | grep -c '"last_seen_ts": null')"
+		bots_number="$(echo "$bots" | grep -c '"user_type": "bot"')"
+		virtual_users_number=$(( puppets_number + bots_number ))
+		total_registered_number=$(( total_number - virtual_users_number ))
 
-	# Convert to miliseconds
-	time_ms=$(($(date +%s) * 1000))
-	interval_ms=$((INTERVAL * 1000))
-	time_interval_ago=$(( time_ms - interval_ms ))
-	last_seen_times_ms=$(echo "$users" | jq -r 'select(.deactivated==false)' | grep -E "\"last_seen_ts\": [0-9]+")
-	online_users_number="$(echo "$last_seen_times_ms" | awk -v "count=0" -F": " '$2 > "'$time_interval_ago'" {count++} END {print count}')"
-	
-	echo total_registered.value "$total_registered_number"
-	echo active_users.value "$(echo "$users" | grep -c '"deactivated": false')"
-	echo bots.value "$(echo "$bots" | grep -c '"deactivated": false')"
-	echo online_users.value "$online_users_number"
-	echo deactivated_users.value "$(echo "$users" | grep -c '"deactivated": true')"
-	echo erased_users.value "$(echo "$users" | grep -c '"erased": true')"
-else
-	echo "total_registered.value U"
-	echo "active_users.value U"
-	echo "bots.value U"
-	echo "online_users.value U"
-	echo "deactivated_users.value U"
-	echo "erased_users.value U"
+		# Convert to miliseconds
+		time_ms=$(($(date +%s) * 1000))
+		interval_ms=$((INTERVAL * 1000))
+		time_interval_ago=$(( time_ms - interval_ms ))
+		last_seen_times_ms=$(echo "$users" | jq -r 'select(.deactivated==false)' | grep -E "\"last_seen_ts\": [0-9]+")
+		online_users_number="$(echo "$last_seen_times_ms" | awk -v "count=0" -F": " '$2 > "'$time_interval_ago'" {count++} END {print count}')"
+		
+		echo total_registered.value "$total_registered_number"
+		echo active_users.value "$(echo "$users" | grep -c '"deactivated": false')"
+		echo bots.value "$(echo "$bots" | grep -c '"deactivated": false')"
+		echo online_users.value "$online_users_number"
+		echo deactivated_users.value "$(echo "$users" | grep -c '"deactivated": true')"
+		echo erased_users.value "$(echo "$users" | grep -c '"erased": true')"
+	else
+		echo "total_registered.value U"
+		echo "active_users.value U"
+		echo "bots.value U"
+		echo "online_users.value U"
+		echo "deactivated_users.value U"
+		echo "erased_users.value U"
+	fi
 fi
 
 echo multigraph synapse_rooms_"${CLEANHOMESERVER}"
