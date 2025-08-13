@@ -10,7 +10,7 @@ For now, we have 3 plugins for Prosody:
 
 OpenMetrics plugin to monitor a [Prosody](https://prosody.im) server.
 
-This plugin provides graph `c2s`, `s2s`, `presence`, `http_file_share`, `active_users`, `client_features`, `client_identities`, `cpu`, `memory`, `muc`.
+This plugin provides graph `c2s`, `s2s`, `presence`, `http_file_share`, `active_users`, `client_features`, `client_identities`, `cpu`, `memory`, `muc`, `message_encryption_status`.
 
 ### Install
 
@@ -34,6 +34,7 @@ Some modules need specific Prosody modules to be activated:
 - `client_features`: [`measure_client_features`](https://modules.prosody.im/mod_measure_client_features.html) Prosody module
 - `client_identities`: [`measure_client_identities`](https://modules.prosody.im/mod_measure_client_identities.html) Prosody module
 - `memory`: [`mod_measure_memory`](https://modules.prosody.im/mod_measure_memory.html) Prosody module
+- `message_encryption_status`: [`mod_measure_message_e2ee`](https://modules.prosody.im/mod_measure_message_e2ee.html) Prosody module
 - `presence`: [`mod_measure_client_presence`](https://modules.prosody.im/mod_measure_client_presence.html) Prosody module
 - `http_file_share`: [`mod_http_file_share`](https://prosody.im/doc/modules/mod_http_file_share) Prosody module
 
@@ -42,7 +43,7 @@ You need to create a file named `prosody_openmetrics` placed in the directory `/
 ```
 [prosody_openmetrics]
 env.metrics_url http://localhost:5280/metrics
-env.modules c2s,s2s,presence,http_file_share,active_users,client_features,client_identities,cpu,memory,muc
+env.modules c2s,s2s,presence,http_file_share,active_users,client_features,client_identities,cpu,memory,muc,message_encryption_status
 env.hosts example.com,file.example.com
 ```
 
