@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+"""
+=head1 NAME
+
+prosody_openmetrics - Multigraph plugin to monitor Prosody via openmetrics endpoint
+
+=head1 INSTALLATION
+
+- Install Python3 package `prometheus-client`
+- Enable mod_http_openmetrics Prosody module
+- Enable Prosody modules required for some monitoring modules
+- Copy this plugin in your munin plugins directory
+
+=over 2
+
+    ln -s /usr/share/munin/plugins/prosody_openmetrics /etc/munin/plugins/prosody_openmetrics
+
+=back
+
+After the installation you need to restart your munin-node service.
+
+=head1 CONFIGURATION
+
+You need to create a file named prosody_openmetrics placed in the directory
+/etc/munin/plugin-conf.d/ with the following config:
+
+=over 2
+
+    [prosody_openmetrics]
+    env.metrics_url http://localhost:5280/metrics
+    env.modules c2s,s2s,presence,http_file_share,active_users,client_features,client_identities,cpu,memory,muc
+    env.hosts example.com,file.example.com
+
+=back
+
+Some modules need specific Prosody modules to be activated:
+
+- active_users: mod_measure_active_users Prosody module
+- cpu: mod_measure_cpu Prosody module
+- client_features: measure_client_features Prosody module
+- client_identities: measure_client_identities Prosody module
+- memory: mod_measure_memory Prosody module
+- presence: mod_measure_client_presence Prosody module
+- http_file_share: mod_http_file_share Prosody module
+
+=head1 AUTHORS
+
+Codimp <contact@lithio.fr>
+
+=head1 LICENSE
+
+GPLv3
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+"""
+
+from prometheus_client.parser import text_string_to_metric_families
+import urllib.request
+import sys
+import os
+import re
+
+def get_metric(metric_endpoint):
+    request = urllib.request.Request(metric_endpoint, method="GET")
+    with urllib.request.urlopen(request) as connection:
+        if connection.getcode() == 200:
+            data = connection.read().decode('utf-8')
+            return data
+    return None
+
+def filter_metric(metric, family_prefix):
+    samples = []
+    for family in text_string_to_metric_families(metric):
+        if family.name.startswith(family_prefix):
+            for sample in family.samples:
+                samples.append(sample)
+    return samples
+
+def get_data(metric, family_prefix, family_end = '', label = '', label_values = []):
+    data = []
+    metrics = filter_metric(metric, family_prefix + family_end)
+    for sample in metrics:
+        if label and label_values:
+            if sample.labels[label] in label_values:
+                data.append(sample)
+        else:
+            data.append(sample)
+    return data
+
+def format_munin_value(data, hosts = None):
+    result = []
+    data_labels = {}
+    for sample in data:
+        labels = []
+        if ('host' in sample.labels) and (sample.labels['host']):
+            if hosts and (sample.labels['host'] in hosts):
+                labels.append('host')
+            elif not hosts:
+                labels.append('host')
+            else:
+                continue
+        if 'type' in sample.labels:
+            labels.append('type')
+        if 'show' in sample.labels:
+            labels.append('show')
+        if 'ip_family' in sample.labels:
+            labels.append('ip_family')
+        if 'feature' in sample.labels:
+            labels.append('feature')
+        for label in labels:
+            data_labels[label] = sample.labels[label]
+        result.append((sample, labels, sample.value))
+    return result
+
+def construct_name(sample, labels, remove_prefix = ''):
+    name = sample.name
+    for label in labels:
+        name += '_' + re.sub('[^A-Za-z0-9]+', '_', sample.labels[label])
+    if remove_prefix:
+        name = name.removeprefix(remove_prefix)
+    return name
+
+def show_value(data, remove_prefix = ''):
+    for sample, labels, value in data:
+        name = construct_name(sample, labels, remove_prefix)
+        print(f'{name}.value {value}')
+
+def show_config(data, remove_prefix = '', title = '', config_table = {}):
+    for sample, labels, value in data:
+        name = construct_name(sample, labels, remove_prefix)
+        config_labels = []
+        host = 'Global'
+        for label in labels:
+            if label in ['show', 'host', 'ip_family', 'feature']:
+                if config_table:
+                    config_labels.append(config_table[sample.labels[label]])
+                else:
+                    config_labels.append(sample.labels[label])
+        # Concat labels
+        final_label = ' '.join(config_labels)
+        # Hack for client identities with no labels
+        if final_label == '':
+            final_label = name.split('client_identities_')[-1]
+        if title:
+            print(f'{name}.label {title} {final_label}')
+        else:
+            print(f'{name}.label {final_label}')
+
+
+def main():
+    try:
+        mode = sys.argv[1]
+    except IndexError:
+        mode = ""
+    dirtyconfig = os.getenv("MUNIN_CAP_DIRTYCONFIG")
+    if dirtyconfig == "1":
+        dirtyconfig = True
+    else:
+        dirtyconfig = False
+    metric_url = os.environ.get('metric_url', 'http://localhost:5280/metrics')
+    modules = os.environ.get('modules', '').replace(' ', '').split(',')
+    hosts = os.environ.get('hosts', None)
+    if hosts:
+        hosts = hosts.replace(' ', '').split(',')
+
+    metric = get_metric(metric_url)
+
+    for module in modules:
+        if module == "c2s":
+            c2s = get_data(metric, 'prosody_mod_c2s__', 'connections', 'type', ['c2s'])
+            c2s_unbound = get_data(metric, 'prosody_mod_c2s__', 'connections', 'type', ['c2s_unbound'])
+            c2s_unauthed = get_data(metric, 'prosody_mod_c2s__', 'connections', 'type', ['c2s_unauthed'])
+            data_c2s = format_munin_value(c2s, hosts)
+            data_c2s_unbound = format_munin_value(c2s_unbound, hosts)
+            data_c2s_unauthed = format_munin_value(c2s_unauthed, hosts)
+            if mode == "config" or dirtyconfig:
+                print("multigraph prosody_c2s")
+                print("graph_title Prosody C2S Connections")
+                print("graph_vlabel connections")
+                print("graph_category chat")
+                show_config(data_c2s, 'prosody_mod_c2s__', 'Incoming')
+                show_config(data_c2s_unbound, 'prosody_mod_c2s__', 'Incoming Unbound')
+                show_config(data_c2s_unauthed, 'prosody_mod_c2s__', 'Incoming Unauthed')
+            if mode != "config" or dirtyconfig:
+                show_value(data_c2s, 'prosody_mod_c2s__')
+                show_value(data_c2s_unbound, 'prosody_mod_c2s__')
+                show_value(data_c2s_unauthed, 'prosody_mod_c2s__')
+        if module == "s2s":
+            s2s_in = get_data(metric, 'prosody_mod_s2s__', 'connections_inbound', 'type', ['s2sin'])
+            s2s_out = get_data(metric, 'prosody_mod_s2s__', 'connections_outbound', 'type', ['s2sout'])
+            data_s2s_in = format_munin_value(s2s_in, hosts)
+            data_s2s_out = format_munin_value(s2s_out, hosts)
+            if mode == "config" or dirtyconfig:
+                print("multigraph prosody_s2s")
+                print("graph_title Prosody S2S Connections")
+                print("graph_vlabel connections")
+                print("graph_category chat")
+                show_config(data_s2s_in, 'prosody_mod_s2s__', 'Incoming')
+                show_config(data_s2s_out, 'prosody_mod_s2s__', 'Outgoing')
+            if mode != "config" or dirtyconfig:
+                show_value(data_s2s_in, 'prosody_mod_s2s__')
+                show_value(data_s2s_out, 'prosody_mod_s2s__')
+        if module == "presence":
+            presence = get_data(metric, 'prosody_mod_measure_client_presence__', 'presence_client', 'show', ['available', 'away', 'chat', 'dnd', 'invalid', 'unavailable', 'xa'])
+            data_presence = format_munin_value(presence, hosts)
+            config_table = {
+                    'available': 'Available Clients',
+                    'away': 'Away Clients',
+                    'chat': 'Ready for Chat Clients',
+                    'dnd': 'Do Not Disturb Clients',
+                    'invalid': 'Invalid Clients',
+                    'unavailable': 'Unavailable Clients',
+                    'xa': 'Extended Away Clients'
+                    }
+            if mode == "config" or dirtyconfig:
+                print("multigraph prosody_presence")
+                print("graph_title Prosody Client Presence")
+                print("graph_vlabel clients")
+                print("graph_category chat")
+                show_config(data_presence, 'prosody_mod_measure_client_presence__', config_table = config_table)
+            if mode != "config" or dirtyconfig:
+                show_value(data_presence, 'prosody_mod_measure_client_presence__')
+        if module == "http_file_share":
+            http_file_share = get_data(metric, 'prosody_mod_http_file_share__', 'total_storage_bytes')
+            data_http_file_share = format_munin_value(http_file_share, hosts)
+            if mode == "config" or dirtyconfig:
+                print("multigraph prosody_http_file_share")
+                print("graph_title Prosody HTTP File Share")
+                print("graph_vlabel bytes")
+                print("graph_category chat")
+                show_config(data_http_file_share, 'prosody_mod_http_file_share__')
+            if mode != "config" or dirtyconfig:
+                show_value(data_http_file_share, 'prosody_mod_http_file_share__')
+        if module == "active_users":
+            active_users_1d = get_data(metric, 'prosody_mod_measure_active_users__', 'active_users_1d')
+            active_users_7d = get_data(metric, 'prosody_mod_measure_active_users__', 'active_users_7d')
+            active_users_30d = get_data(metric, 'prosody_mod_measure_active_users__', 'active_users_30d')
+            data_active_users_1d = format_munin_value(active_users_1d, hosts)
+            data_active_users_7d = format_munin_value(active_users_7d, hosts)
+            data_active_users_30d = format_munin_value(active_users_30d, hosts)
+            if mode == "config" or dirtyconfig:
+                print("multigraph prosody_active_users")
+                print("graph_title Prosody Active Users")
+                print("graph_vlabel users")
+                print("graph_category chat")
+                show_config(data_active_users_1d, 'prosody_mod_measure_active_users__', 'Last day on')
+                show_config(data_active_users_7d, 'prosody_mod_measure_active_users__', 'Last 7 days on')
+                show_config(data_active_users_30d, 'prosody_mod_measure_active_users__', 'Last 30 days on')
+            if mode != "config" or dirtyconfig:
+                show_value(data_active_users_1d, 'prosody_mod_measure_active_users__')
+                show_value(data_active_users_7d, 'prosody_mod_measure_active_users__')
+                show_value(data_active_users_30d, 'prosody_mod_measure_active_users__')
+        if module == "client_features":
+            client_features = get_data(metric, 'prosody_mod_measure_client_features__', 'features')
+            data_client_features = format_munin_value(client_features, hosts)
+            if mode == "config" or dirtyconfig:
+                print("multigraph prosody_client_features")
+                print("graph_title Prosody Client Features")
+                print("graph_vlabel clients")
+                print("graph_category chat")
+                show_config(data_client_features, 'prosody_mod_measure_client_features__', 'Feature')
+            if mode != "config" or dirtyconfig:
+                show_value(data_client_features, 'prosody_mod_measure_client_features__')
+        if module == "client_identities":
+            client_identities = get_data(metric, 'prosody_client_identities_')
+            data_client_identities = format_munin_value(client_identities, hosts)
+            if mode == "config" or dirtyconfig:
+                print("multigraph prosody_client_identities")
+                print("graph_title Prosody Client Identities")
+                print("graph_vlabel clients")
+                print("graph_category chat")
+                show_config(data_client_identities, 'prosody_')
+            if mode != "config" or dirtyconfig:
+                show_value(data_client_identities, 'prosody_')
+        if module == "cpu":
+            cpu = get_data(metric, 'prosody_cpu_percent')
+            data_cpu = format_munin_value(cpu, hosts)
+            if mode == "config" or dirtyconfig:
+                print("multigraph prosody_cpu")
+                print("graph_title Prosody CPU Usage")
+                print("graph_vlabel percent")
+                print("graph_category chat")
+                show_config(data_cpu, 'prosody_', 'CPU Usage')
+            if mode != "config" or dirtyconfig:
+                show_value(data_cpu, 'prosody_')
+        if module == "memory":
+            memory_rss = get_data(metric, 'prosody_memory_rss')
+            memory_lua = get_data(metric, 'prosody_memory_lua')
+            memory_total = get_data(metric, 'prosody_memory_total')
+            data_memory_rss = format_munin_value(memory_rss, hosts)
+            data_memory_lua = format_munin_value(memory_lua, hosts)
+            data_memory_total = format_munin_value(memory_total, hosts)
+            if mode == "config" or dirtyconfig:
+                print("multigraph prosody_memory")
+                print("graph_title Prosody Memory Usage")
+                print("graph_vlabel percent")
+                print("graph_category chat")
+                show_config(data_memory_rss, 'prosody_', 'RSS')
+                show_config(data_memory_lua, 'prosody_', 'Lua')
+                show_config(data_memory_total, 'prosody_', 'Total')
+            if mode != "config" or dirtyconfig:
+                show_value(data_memory_rss, 'prosody_')
+                show_value(data_memory_lua, 'prosody_')
+                show_value(data_memory_total, 'prosody_')
+        if module == "muc":
+            muc = get_data(metric, 'prosody_mod_muc__', 'live_room')
+            data_muc = format_munin_value(muc, hosts)
+            if mode == "config" or dirtyconfig:
+                print("multigraph prosody_muc")
+                print("graph_title Prosody Room")
+                print("graph_vlabel rooms")
+                print("graph_category chat")
+                show_config(data_muc, 'prosody_')
+            if mode != "config" or dirtyconfig:
+                show_value(data_muc, 'prosody_')
+
+
+if __name__ == "__main__":
+    main()
+    sys.exit(0)
