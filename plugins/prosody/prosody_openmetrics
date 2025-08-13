@@ -28,7 +28,7 @@ You need to create a file named prosody_openmetrics placed in the directory
 
     [prosody_openmetrics]
     env.metrics_url http://localhost:5280/metrics
-    env.modules c2s,s2s,presence,http_file_share,active_users,client_features,client_identities,cpu,memory,muc
+    env.modules c2s,s2s,presence,http_file_share,active_users,client_features,client_identities,cpu,memory,muc,message_encryption_status
     env.hosts example.com,file.example.com
 
 =back
@@ -40,6 +40,7 @@ Some modules need specific Prosody modules to be activated:
 - client_features: measure_client_features Prosody module
 - client_identities: measure_client_identities Prosody module
 - memory: mod_measure_memory Prosody module
+- message_encryption_status: mod_measure_message_e2ee Prosody module
 - presence: mod_measure_client_presence Prosody module
 - http_file_share: mod_http_file_share Prosody module
 
@@ -72,17 +73,17 @@ def get_metric(metric_endpoint):
             return data
     return None
 
-def filter_metric(metric, family_prefix):
+def filter_metric(metric, family_prefix, family_end = ''):
     samples = []
     for family in text_string_to_metric_families(metric):
-        if family.name.startswith(family_prefix):
+        if family.name.startswith(family_prefix) and family.name.endswith(family_end):
             for sample in family.samples:
                 samples.append(sample)
     return samples
 
 def get_data(metric, family_prefix, family_end = '', label = '', label_values = []):
     data = []
-    metrics = filter_metric(metric, family_prefix + family_end)
+    metrics = filter_metric(metric, family_prefix, family_end)
     for sample in metrics:
         if label and label_values:
             if sample.labels[label] in label_values:
@@ -129,15 +130,18 @@ def show_value(data, remove_prefix = ''):
         name = construct_name(sample, labels, remove_prefix)
         print(f'{name}.value {value}')
 
-def show_config(data, remove_prefix = '', title = '', config_table = {}):
+def show_config(data, remove_prefix = '', title = '', label_table = {}, prefix_table = {}):
     for sample, labels, value in data:
         name = construct_name(sample, labels, remove_prefix)
         config_labels = []
         host = 'Global'
+        for prefix in prefix_table:
+            if name.startswith(prefix):
+                config_labels.append(prefix_table[prefix])
         for label in labels:
             if label in ['show', 'host', 'ip_family', 'feature']:
-                if config_table:
-                    config_labels.append(config_table[sample.labels[label]])
+                if label_table:
+                    config_labels.append(label_table[sample.labels[label]])
                 else:
                     config_labels.append(sample.labels[label])
         # Concat labels
@@ -207,7 +211,7 @@ def main():
         if module == "presence":
             presence = get_data(metric, 'prosody_mod_measure_client_presence__', 'presence_client', 'show', ['available', 'away', 'chat', 'dnd', 'invalid', 'unavailable', 'xa'])
             data_presence = format_munin_value(presence, hosts)
-            config_table = {
+            label_table = {
                     'available': 'Available Clients',
                     'away': 'Away Clients',
                     'chat': 'Ready for Chat Clients',
@@ -221,7 +225,7 @@ def main():
                 print("graph_title Prosody Client Presence")
                 print("graph_vlabel clients")
                 print("graph_category chat")
-                show_config(data_presence, 'prosody_mod_measure_client_presence__', config_table = config_table)
+                show_config(data_presence, 'prosody_mod_measure_client_presence__', label_table = label_table)
             if mode != "config" or dirtyconfig:
                 show_value(data_presence, 'prosody_mod_measure_client_presence__')
         if module == "http_file_share":
@@ -317,6 +321,27 @@ def main():
                 show_config(data_muc, 'prosody_')
             if mode != "config" or dirtyconfig:
                 show_value(data_muc, 'prosody_')
+        if module == "message_encryption_status":
+            e2ee = get_data(metric, 'prosody_mod_measure_message_e2ee__', 'total')
+            data_e2ee = format_munin_value(e2ee, hosts)
+            prefix_table = {
+                    'encrypted_total': 'Any encrypted on',
+                    'message_total': 'Any messages on',
+                    'omemo2_total': 'OMEMO:2 on',
+                    'omemo_total': 'OMEMO on',
+                    'openpgp_total': 'Legacy OpenPGP on',
+                    'otr_total': 'OTR on',
+                    'ox_total': 'OpenPGP for XMPP on',
+                    'plain_total': 'Plain text on'
+                    }
+            if mode == "config" or dirtyconfig:
+                print("multigraph prosody_e2ee")
+                print("graph_title Prosody Message Encryption Status")
+                print("graph_vlabel messages since server start")
+                print("graph_category chat")
+                show_config(data_e2ee, 'prosody_mod_measure_message_e2ee__', prefix_table = prefix_table)
+            if mode != "config" or dirtyconfig:
+                show_value(data_e2ee, 'prosody_mod_measure_message_e2ee__')
 
 
 if __name__ == "__main__":
