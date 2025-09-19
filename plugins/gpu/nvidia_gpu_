@@ -130,7 +130,7 @@ if [ "$1" = "config" ]; then
 			;;
 		mem)
 			# First determine total memory of each GPU...
-			gpusTotalMemOutput=$(echo "$smiOutput" | grep -v BAR1 | grep -A 3 "Memory Usage" | grep "Total" | cut -d : -f 2 | tr -d ' ')
+			gpusTotalMemOutput=$(echo "$smiOutput" | grep -v BAR1 | grep -A 3 "FB Memory Usage" | grep "Total" | cut -d : -f 2 | tr -d ' ')
 			gpusTotalMem=''
 			nGpusCounter=0
 			while [ $nGpusCounter -lt "$nGpus" ]
@@ -245,17 +245,20 @@ case $name in
 		valueGpus=$(echo "$smiOutput" | grep "GPU Current Temp" | cut -d : -f 2 | cut -d ' ' -f 2)
 		;;
 	mem)
-		totalMemGpus=$(echo "$smiOutput" | grep -v BAR1 | grep -A 3 "Memory Usage" | grep "Total" | cut -d : -f 2 | cut -d ' ' -f 2)
-		usedMemGpus=$(echo "$smiOutput" | grep -v BAR1 | grep -A 3 "Memory Usage" | grep "Used" | cut -d : -f 2 | cut -d ' ' -f 2)
+		totalMemGpus=$(echo "$smiOutput" | grep -v BAR1 | grep -A 3 "FB Memory Usage" | grep "Total" | cut -d : -f 2 | cut -d ' ' -f 2)
+		usedMemGpus=$(echo "$smiOutput" | grep -v BAR1 | grep -A 3 "FB Memory Usage" | grep "Used" | cut -d : -f 2 | cut -d ' ' -f 2)
 		valueGpus=''
 		nGpusCounter=0
 		while [ $nGpusCounter -lt "$nGpus" ]
 		do
-			totalMemGpu=$(echo "$totalMemGpus" | sed -n $((nGpusCounter+1))p)
-			usedMemGpu=$(echo "$usedMemGpus" | sed -n $((nGpusCounter+1))p)
+			#I think the sed command here ws supposed to do a field split, but it didn't
+			#
+			#usedMemGpu=$(echo "$usedMemGpus" | sed -n $((nGpusCounter+1))p)
+			totalMemGpu=$(echo "$totalMemGpus" | tr '\n' ' ' | cut -d ' ' -f $((nGpusCounter+1)))
+			usedMemGpu=$(echo "$usedMemGpus" | tr '\n' ' ' | cut -d ' ' -f $((nGpusCounter+1)))
 			percentMemUsed=$((usedMemGpu*100/totalMemGpu))
-			valueGpus="${valueGpus}${percentMemUsed}"$'\n'
-			: $((nGpusCounter=nGpusCounter+1))
+			valueGpus="${valueGpus}${percentMemUsed}"$'\n' 
+			: $((nGpusCounter=nGpusCounter+1)) # increment the loop counter
 		done
 		;;
 	fan)
