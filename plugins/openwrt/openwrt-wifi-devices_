@@ -1,0 +1,224 @@
+#!/bin/bash
+# -*- sh -*-
+set -o pipefail
+
+: << =cut
+
+=head1 NAME
+
+openwrt-wifi-devices_ - How many WLAN devices are connected to a OpenWrt router?
+
+Uses the "ubus" RPC interface over HTTP.
+
+Tested with OpenWrt 24.10.4 and 25 (development).
+
+=head1 CONFIGURATION
+
+Configure the hostname by adding the IP address to the symlink name:
+Symlink "openwrt-wifi-devices_" to "openwrt-wifi-devices_192.168.1.1"
+
+When using OpenWrt 25:
+Instead of using the root router password, you can configure
+a user with limited rights in LuCI:
+Create a new "LuCI Login" in the "ACL Settings" with the following permissions
+set to "readonly":
+- luci-base
+- luci-base-network-status
+- luci-mod-status-index (cannot be disabled)
+- luci-mod-status-index-wifi
+- unauthenticated (cannot be disabled)
+
+=head2 ENVIRONMENT VARIABLES
+
+ host      - Hostname of router
+ user      - Web interface username
+ password  - Web interface password
+ host_name - To put the graph onto a different host
+
+=head2 CONFIGURATION EXAMPLE
+
+  [dd-wrt-*]
+  env.user tpli
+  env.password thisismypassword
+
+=head2 HOST MANAGEMENT
+
+You can display the graph on another host (e.g., the actual router) than the
+one running openwrt-wifi-devices.
+To do so, first configure the plugin to use a different hostname.
+
+  env.host_name router
+
+Then configure munin (in /etc/munin/munin-conf or /etc/munin/munin-conf.d)
+to support a new host.
+
+  [example.net;router]
+    address 127.0.0.1
+    use_node_name no
+
+
+=head1 REQUIREMENTS
+
+"bash", "curl" and "jq" are required.
+
+=head1 SEE ALSO
+
+dd-wrt-wifi-devices plugin
+https://github.com/Tafkas/fritzbox-munin
+
+=head1 AUTHOR
+Christian Weiske <cweiske@cweiske.de>
+
+=head1 LICENSE
+
+AGPL-3.0-only https://spdx.org/licenses/AGPL-3.0-only.html
+
+=head1 MAGIC MARKERS
+
+#%# family=manual
+
+=cut
+
+if [ -z "$host" ]; then
+    host=$(basename "$0" | sed 's/openwrt-wifi-devices_//g')
+fi
+user=${user:-root}
+pass=${password:-admin}
+
+case $1 in
+   config)
+       echo "graph_title OpenWrt $host connected WLAN devices"
+       echo "graph_vlabel Number of devices"
+       echo "graph_args --base 1000"
+       echo "graph_category network"
+       echo "graph_order wifi"
+       echo "wifi.label WLAN connections"
+       echo "wifi.type GAUGE"
+       echo "wifi.graph LINE1"
+       if [ -n "$host_name" ]; then
+           echo "host_name $host_name"
+       fi
+       exit 0;;
+esac
+
+# https://openwrt.org/_export/xhtml/docs/techref/ubus
+ubusUrl="http://$host/ubus"
+
+# 1. API call: Login
+loginRequest=$(
+    echo '{
+         "jsonrpc": "2.0",
+         "id": 1,
+         "method": "call",
+         "params": [
+             "00000000000000000000000000000000",
+             "session",
+             "login",
+             {"username": "root", "password": "secret"}
+         ]
+    }'\
+    | jq --arg user "$user" --arg pass "$pass"\
+         '.params[3].username = $user | .params[3].password = $pass'
+)
+loginResponse=$(
+    curl -s\
+        -H 'Content-Type: application/json'\
+        -d "$loginRequest"\
+         "$ubusUrl"
+)
+
+if [ "$(echo "$loginResponse" | jq '.result[0]')" -eq 6 ]; then
+    echo "Error: Permission denied"
+    exit 2
+fi
+
+sessionId=$(echo "$loginResponse" | jq -r '.result[1].ubus_rpc_session')
+
+
+# 2. API call: List of wireless devices
+devicesRequest=$(
+    echo '{
+        "id": 2,
+        "jsonrpc": "2.0",
+        "method": "call",
+        "params": [
+            "4327cfcb2032f9e06093ba04b608a294",
+            "luci-rpc",
+            "getNetworkDevices",
+            {}
+        ]
+    }'\
+    | jq --arg sessionId "$sessionId"\
+         '.params[0] = $sessionId'
+)
+devicesResponse=$(
+    curl -s\
+        -H 'Content-Type: application/json'\
+        -d "$devicesRequest"\
+         "$ubusUrl"
+)
+wirelessDeviceNames=$(
+    echo "$devicesResponse"\
+        | jq -r '.result[1] | to_entries | map(.value | select(.wireless == true)) | .[].name'
+)
+if [ -z "$wirelessDeviceNames" ]; then
+    echo "Error: No network devices found on router"
+    echo "Permission required: luci-base-network-status"
+    echo "$devicesResponse" | jq .error
+    exit 2
+fi
+
+
+# 3. API call: Connected wireless devices
+connectionsRequest='[]'
+
+num=3
+for device in $wirelessDeviceNames; do
+    connectionsRequest=$(
+        echo "$connectionsRequest" \
+            | jq\
+                --arg sessionId "$sessionId"\
+                --arg device "$device"\
+                --arg num "$num"\
+                '. += [
+                    {
+                        "id": $num,
+                        "jsonrpc": "2.0",
+                        "method": "call",
+                        "params": [
+                            $sessionId,
+                            "iwinfo",
+                            "assoclist",
+                            {
+                                "device": $device
+                            }
+                        ]
+                    }
+                ]'
+    )
+    num=$((num + 1))
+done
+
+connectionsResponse=$(
+    curl -s\
+        -H 'Content-Type: application/json'\
+        -d "$connectionsRequest"\
+         "$ubusUrl"
+)
+connectionsCount=$(
+    echo "$connectionsResponse"\
+        | jq '.[].result[1].results'\
+        | jq -s 'reduce .[] as $x ([]; . + $x) | length'
+)
+if [ "$connectionsCount" -eq 0 ]; then
+    errors=$(
+        echo "$connectionsResponse"\
+            | jq -r '.[].error'
+    )
+    echo "Error fetching wireless devices"
+    echo "Permission required: luci-mod-status-index-wifi"
+    echo "$errors"
+    exit 2
+fi
+
+echo "wifi.value $connectionsCount"
