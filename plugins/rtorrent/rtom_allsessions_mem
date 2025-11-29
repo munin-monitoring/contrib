@@ -2,8 +2,8 @@
 #
 # xmlrpc based munin plugin for monitoring rtorrent's memory usage
 # prerequisites:
-#  - rtorrent 0.7.5 or newer compiled with --with-xmlrpc-c
-# check http://libtorrent.rakshasa.no/wiki/RTorrentXMLRPCGuide for further information
+#  - rtorrent 0.7.5 or newer compiled with xmlrpc support
+# check https://github.com/rakshasa/rtorrent/wiki/RPC-Setup-XMLRPC for further information
 #
 # written by Gabor Hudiczius
 # web: http://projects.cyla.homeip.net/rtwi/wiki/rTorrentOMeter
@@ -111,7 +111,7 @@ sub rtorrent_version_lower_than {
 # init rtorrent_version
 rtorrent_version_lower_than();
 
-my $pattern     = qr/<value><(int|i4|i8|ex\.i8)>(\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
+my $pattern     = qr/<value><(?:int|i4|i8|ex\.i8)>(\d+)<\/(?:int|i4|i8|ex\.i8)><\/value>/;
 my $mem         = 0;
 sub construct_line {
 	my $function	= rtorrent_version_lower_than($_[0], '0.9.0') ? 'get_memory_usage' : 'pieces.memory.current';
@@ -123,34 +123,28 @@ sub construct_line {
 	return $line;
 }
 
-if ( ( defined $src ) && ( $src eq "socket" ) ) {
-  for $socket (@sockets)
-  {
-    socket( SOCK, PF_UNIX, SOCK_STREAM, 0 ) or die;
-    connect( SOCK, sockaddr_un( $socket ) ) or die $!;
-    print SOCK construct_line($socket);
-    flush SOCK;
-    while ( $line = <SOCK> ) {
-      if ( $line =~ /$pattern/ ) {
-        $mem = $mem + $2;
-      }
-    }
-    close (SOCK);
-  }
-} else {
-  for $port (@ports)
-  {
-    socket( SOCK, PF_INET, SOCK_STREAM, getprotobyname( "tcp" ) );
-    connect( SOCK, sockaddr_in( $port, inet_aton( $ip ) ) );
-    print SOCK construct_line($port);
-    flush SOCK;
-    while ( $line = <SOCK> ) {
-      if ( $line =~ /$pattern/ ) {
-        $mem = $mem + $2;
-      }
-    }
-    close (SOCK);
-  }
+my $is_socket = ( defined $src ) && ( $src eq "socket" );
+
+foreach my $instance ( $is_socket ? @sockets : @ports ) {
+	socket( SOCK, $is_socket ? PF_UNIX : PF_INET, SOCK_STREAM, $is_socket ? 0 : getprotobyname( "tcp" ) ) or die $!;
+	connect( SOCK, $is_socket ? sockaddr_un( $instance ) : sockaddr_in( $instance, inet_aton( $ip ) ) ) or die $!;
+
+	print SOCK construct_line($instance);
+	flush SOCK;
+
+	my $resp = "";
+	while ( $line = <SOCK> ) {
+		$resp .= $line;
+	}
+
+	close (SOCK);
+
+	# normalize to contain *no* whitespace; this is to accomodate both xmlrpc-c (newlines) and tinyxml2 (single line) responses
+	$resp =~ s/\s+//g;
+
+	if ( $resp =~ /$pattern/ ) {
+		$mem += $1;
+	}
 }
 
 print "mem.value ${mem}\n";

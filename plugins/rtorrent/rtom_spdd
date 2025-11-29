@@ -2,8 +2,8 @@
 #
 # xmlrpc based munin plugin for monitoring rtorrent's upload/download speed
 # prerequisites:
-#  - rtorrent 0.7.5 or newer compiled with --with-xmlrpc-c
-# check http://libtorrent.rakshasa.no/wiki/RTorrentXMLRPCGuide for further information
+#  - rtorrent 0.7.5 or newer compiled with xmlrpc support
+# check https://github.com/rakshasa/rtorrent/wiki/RPC-Setup-XMLRPC for further information
 #
 # written by Gabor Hudiczius
 # web: http://projects.cyla.homeip.net/rtwi/wiki/rTorrentOMeter
@@ -132,7 +132,7 @@ sub rtorrent_version_lower_than {
 	}
 	return version->parse($rtorrent_version) < version->parse($_[0]);
 }
-my $pattern	= qr/<value><(int|i4|i8|ex\.i8)>([-]{0,1}\d+)<\/(int|i4|i8|ex\.i8)><\/value>/;
+my $pattern	= qr/<value><(?:int|i4|i8|ex\.i8)>([-]{0,1}\d+)<\/(?:int|i4|i8|ex\.i8)><\/value>/;
 
 my $function_totalup	= rtorrent_version_lower_than('0.9.0') ? 'get_up_total' : 'throttle.global_up.total';
 my $function_totaldown	= rtorrent_version_lower_than('0.9.0') ? 'get_down_total' : 'throttle.global_down.total';
@@ -156,31 +156,26 @@ if ( ( defined $src ) && ( $src eq "socket" ) ) {
 print SOCK $line;
 flush SOCK;
 
-my $up = -1;
-my $down = -1;
-my $uprate = -1;
-my $downrate = -1;
-while ( ( $up == -1 ) && ( $line = <SOCK> ) ) {
-	if ( $line =~ /$pattern/ ) {
-		$up = $2;
-	}
+my $resp = "";
+while ($line = <SOCK>) {
+	$resp .= $line;
 }
-while ( ( $down == -1 ) && ( $line = <SOCK> ) ) {
-	if ( $line =~ /$pattern/ ) {
-		$down = $2;
-	}
-}
-while ( ( $uprate == -1 ) && ( $line = <SOCK> ) ) {
-	if ( $line =~ /$pattern/ ) {
-		$uprate = $2;
-	}
-}
-while ( ( $downrate == -1 ) && ( $line = <SOCK> ) ) {
-	if ( $line =~ /$pattern/ ) {
-		$downrate = $2;
-	}
-}
+
 close (SOCK);
+
+# normalize to contain *no* whitespace; this is to accomodate both xmlrpc-c (newlines) and tinyxml2 (single line) responses
+$resp =~ s/\s+//g;
+
+my @speeds = ($resp =~ /$pattern/g);
+
+my ($up, $down, $uprate, $downrate) = ('U' x 4);
+
+if ( scalar(@speeds) == 4 ) { # sanity check
+	$up = shift(@speeds);
+	$down = shift(@speeds);
+	$uprate = shift(@speeds);
+	$downrate = shift(@speeds);
+}
 
 print "up.value ${up}\ndown.value ${down}\nuprate.value ${uprate}\ndownrate.value ${downrate}\n";
 
