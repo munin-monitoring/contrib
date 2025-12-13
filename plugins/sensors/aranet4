@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""
+=head1 NAME
+
+aranet4 - Multigraph plugin to monitor Aranet4 devices metrics
+
+This plugin provides graph `co2`, `temperature`, `humidity`, `pressure`, `battery`.
+
+=head1 INSTALLATION
+
+- Your munin-node server need a Bluetooth adapter
+- Your Aranet4 devices need to have "Smart Home integration" enabled
+- Install Python3 package `aranet4`
+- Copy this plugin in your munin plugins directory
+
+=over 2
+
+    ln -s /usr/share/munin/plugins/aranet4 /etc/munin/plugins/aranet4
+
+=back
+
+After the installation you need to restart your munin-node service.
+
+=head1 CONFIGURATION
+
+You need to create a file named aranet4 placed in the directory
+/etc/munin/plugin-conf.d/ with the following config:
+
+=over 2
+
+    [aranet4]
+    env.addresses 00:00:5E:00:53:00=name,00:00:5E:00:53:01
+    env.modules co2,temperature,humidity,pressure,battery
+    env.timeout 10
+    env.temperature_unit Celsius
+    env.pressure_unit hPa
+    env.co2_warning 1000
+    env.co2_critical 1400
+    env.temperature_warning 30
+    env.temperature_critical 40
+    env.humidity_warning 60
+    env.humidity_critical 80
+    env.pressure_warning 1000:
+    env.pressure_critical 980:
+    env.battery_warning 20:
+    env.battery_critical 10:
+
+=back
+
+The `timeout` environment variable is in seconds.
+It is used to abort the bluetooth connection (if a device is unreachable for example).
+
+=back
+
+=head1 AUTHORS
+
+Codimp <contact@lithio.fr>
+
+=head1 LICENSE
+
+GPLv3
+
+=head1 MAGIC MARKERS
+
+ #%# family=manual
+
+=cut
+"""
+
+import sys
+import os
+import aranet4
+import concurrent.futures
+
+
+def run_with_timeout(func, *args, timeout, **kwargs):
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(func, *args, **kwargs)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            return None
+
+def get_device_data(devices, timeout):
+    data = []
+    for device in devices:
+        mesure = run_with_timeout(aranet4.client.get_current_readings, device['mac'], timeout=timeout)
+        if mesure is not None:
+            data.append({'mac': device['mac'], 'name': device['name'], 'mesure': mesure})
+    return data
+
+def get_mac_and_name(addresses):
+    data = []
+    for address in addresses:
+        try:
+            mac,name = address.split('=')
+        except ValueError:
+            mac = address
+            name = None
+        data.append({'mac': mac, 'name': name})
+    return data
+
+def construct_name(data):
+    if data['name'] is None:
+        return data['mesure'].name
+    else:
+        return data['name']
+
+def show_value(data, module = ''):
+    for sample in data:
+        mac = sample['mac'].replace(':', '')
+        value = getattr(sample['mesure'], module)
+        print(f'{mac}_{module}.value {value}')
+
+def show_config(data, module = ''):
+    for sample in data:
+        name = construct_name(sample)
+        mac = sample['mac'].replace(':', '')
+        print(f'{mac}_{module}.label {name}')
+        if os.getenv(module + "_warning") is not None:
+            print(f'{mac}_{module}.warning ' + os.getenv(module + "_warning"))
+        if os.getenv(module + "_critical") is not None:
+            print(f'{mac}_{module}.critical ' + os.getenv(module + "_critical"))
+
+
+def main():
+    try:
+        mode = sys.argv[1]
+    except IndexError:
+        mode = ""
+    dirtyconfig = os.getenv("MUNIN_CAP_DIRTYCONFIG")
+    if dirtyconfig == "1":
+        dirtyconfig = True
+    else:
+        dirtyconfig = False
+    addresses = os.environ.get('addresses', None).replace(' ', '').split(',')
+    modules = os.environ.get('modules', '').replace(' ', '').split(',')
+    timeout = int(os.environ.get('timeout', 10))
+    temperature_unit = os.environ.get('temperature_unit', 'Celsius')
+    pressure_unit = os.environ.get('pressure_unit', 'hPa')
+
+    mac_and_name = get_mac_and_name(addresses)
+    metric = get_device_data(mac_and_name, timeout)
+
+    for module in modules:
+        if module == "co2":
+            if mode == "config" or dirtyconfig:
+                print("multigraph aranet4_co2")
+                print("graph_title Aranet4 CO2 mesure")
+                print("graph_vlabel ppm")
+                print("graph_category sensors")
+                show_config(metric, 'co2')
+            if mode != "config" or dirtyconfig:
+                show_value(metric, 'co2')
+        if module == "temperature":
+            if mode == "config" or dirtyconfig:
+                print("multigraph aranet4_temperature")
+                print("graph_title Aranet4 Temperature mesure")
+                print("graph_vlabel " + temperature_unit)
+                print("graph_category sensors")
+                show_config(metric, 'temperature')
+            if mode != "config" or dirtyconfig:
+                show_value(metric, 'temperature')
+        if module == "humidity":
+            if mode == "config" or dirtyconfig:
+                print("multigraph aranet4_humidity")
+                print("graph_title Aranet4 Humidity mesure")
+                print("graph_vlabel percent")
+                print("graph_category sensors")
+                show_config(metric, 'humidity')
+            if mode != "config" or dirtyconfig:
+                show_value(metric, 'humidity')
+        if module == "pressure":
+            if mode == "config" or dirtyconfig:
+                print("multigraph aranet4_pressure")
+                print("graph_title Aranet4 Pressure mesure")
+                print("graph_vlabel " + pressure_unit)
+                print("graph_category sensors")
+                show_config(metric, 'pressure')
+            if mode != "config" or dirtyconfig:
+                show_value(metric, 'pressure')
+        if module == "battery":
+            if mode == "config" or dirtyconfig:
+                print("multigraph aranet4_battery")
+                print("graph_title Aranet4 Battery mesure")
+                print("graph_vlabel percent")
+                print("graph_category sensors")
+                show_config(metric, 'battery')
+            if mode != "config" or dirtyconfig:
+                show_value(metric, 'battery')
+
+
+if __name__ == "__main__":
+    main()
+    sys.exit(0)
