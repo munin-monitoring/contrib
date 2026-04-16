@@ -100,6 +100,12 @@ def get_iso8601_age_days(datestring):
         return None
 
 
+def get_source_duration_days(source):
+  if source and "duration_days" in source.keys():
+    return get_iso8601_age_days(source["stream_start_iso8601"])
+  return "U"
+
+
 def _get_json_statistics():
     with urllib.request.urlopen(status_url) as conn:
         json_body = conn.read()
@@ -114,14 +120,14 @@ def get_sources():
         sources.append({"name": path_name,
                         "fieldname": clean_fieldname(path_name),
                         "listeners": source["listeners"],
-                        "duration_days": get_iso8601_age_days(source["stream_start_iso8601"])})
+                        "duration_days": get_source_duration_days( source )})
     else:
         for source in _get_json_statistics()["icestats"]["source"]:
             path_name = source["listenurl"].split("/")[-1]
             sources.append({"name": path_name,
                             "fieldname": clean_fieldname(path_name),
                             "listeners": source["listeners"],
-                            "duration_days": get_iso8601_age_days(source["stream_start_iso8601"])})
+                            "duration_days": get_source_duration_days( source )})
     sources.sort(key=lambda item: item["name"])
     return sources
 
