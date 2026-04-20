@@ -1,0 +1,133 @@
+#!/bin/bash
+
+: << =cut
+
+=head1 NAME
+
+Power-Monitor using Shelly 3EM devices.
+
+=head1 CONFIGURATION
+
+Requires 'curl' and 'jq'.
+
+=head1 AUTHOR
+
+Kai Boenke
+
+=head1 LICENSE
+
+Attribution-NonCommercial-ShareAlike 3.0 Unported (CC BY-NC-SA 3.0)
+
+=back
+
+=cut
+
+
+#####
+# Check prerequisites
+###
+if ! command -v "curl" > /dev/null 2>&1; then
+  echo "curl is not installed or not in PATH." >&2
+  exit -1
+fi
+if ! command -v "jq" > /dev/null 2>&1; then
+  echo "jq is not installed or not in PATH." >&2
+  exit -1
+fi
+
+#####
+# Configuration
+###
+PLUGIN_NAME=${0##*/}
+HOST_NAME=$(echo "$PLUGIN_NAME" | cut -d'_' -f2)
+
+BASE_URL="http://${HOST_NAME}/emeter"
+declare -A ENDPOINTS=(
+  ["sensor_a"]="0/3em_data"
+  ["sensor_b"]="1/3em_data"
+  ["sensor_c"]="2/3em_data"
+)
+declare -A LABELS=(
+  ["sensor_a"]="Phase A"
+  ["sensor_b"]="Phase B"
+  ["sensor_c"]="Phase C"
+)
+
+#####
+# Handle Munin-Config
+##
+case $1 in
+  config)
+    # Power Consumption
+    echo "multigraph shelly_power"
+    echo "graph_title Power Consumption"
+    echo "graph_vlabel watt [w]"
+    echo "graph_category sensors"
+    echo "graph_info Current power consumption for each phase."
+    for sensor in "${!LABELS[@]}"; do
+      echo "${sensor}_w.label ${LABELS[$sensor]}"
+      echo "${sensor}_w.warning 800"
+      echo "${sensor}_w.critical 1000"
+    done
+    # Voltages
+    echo "multigraph shelly_voltage"
+    echo "graph_title Voltages"
+    echo "graph_vlabel volt [V]"
+    echo "graph_category sensors"
+    echo "graph_info Current voltages for each phase."
+    for sensor in "${!LABELS[@]}"; do
+      echo "${sensor}_v.label ${LABELS[$sensor]}"
+      echo "${sensor}_v.warning 220:240"
+      echo "${sensor}_v.critical 210:250"
+    done
+    # Power Factor
+    echo "multigraph shelly_pf"
+    echo "graph_title Power Factor"
+    echo "graph_vlabel I/V"
+    echo "graph_category sensors"
+    echo "graph_info Current power factor for each phase."
+    for sensor in "${!LABELS[@]}"; do
+      echo "${sensor}_pf.label ${LABELS[$sensor]}"
+    done
+    exit 0;;
+esac
+
+#####
+# Measurements
+###
+
+echo "multigraph shelly_power"
+for sensor in "${!ENDPOINTS[@]}"; do
+  url="${BASE_URL}/${ENDPOINTS[$sensor]}"
+  response=$(curl -s "$url")
+  if [ $? -eq 0 ]; then
+    power=$(echo "$response" | jq -r '.power')
+    echo "${sensor}_w.value ${power}"
+  else
+    echo "${sensor}_w.value U"
+  fi
+done
+
+echo "multigraph shelly_voltage"
+for sensor in "${!ENDPOINTS[@]}"; do
+  url="${BASE_URL}/${ENDPOINTS[$sensor]}"
+  response=$(curl -s "$url")
+  if [ $? -eq 0 ]; then
+    power=$(echo "$response" | jq -r '.voltage')
+    echo "${sensor}_v.value ${power}"
+  else
+    echo "${sensor}_v.value U"
+  fi
+done
+
+echo "multigraph shelly_pf"
+for sensor in "${!ENDPOINTS[@]}"; do
+  url="${BASE_URL}/${ENDPOINTS[$sensor]}"
+  response=$(curl -s "$url")
+  if [ $? -eq 0 ]; then
+    power=$(echo "$response" | jq -r '.pf')
+    echo "${sensor}_pf.value ${power}"
+  else
+    echo "${sensor}_pf.value U"
+  fi
+done
