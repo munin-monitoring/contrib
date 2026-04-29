@@ -31,7 +31,9 @@ default to C<s/^.*[Ee]xpir.*: //>. Only lines for which a replacement has
 happened will be considered, and the pattern should take care to only output
 one line. While the default RegExp just finds a leader pattern and removes it,
 it is possible to write more complex logic to format the date. The extracted
-date needs to be in a format supported by C<date(1)>'s C<--date> parameter.
+date must be in the exact format C<YYYYMMDDHHMM.SS> (for example,
+C<202604280930.00> for April 28, 2026 09:30:00 UTC).  This is the format
+expected by the internal C<awk> script that calculates the remaining time.
 
 Then create a symlink to enable this plugin:
 
@@ -119,13 +121,22 @@ fetch() {
 		CACHEFILE="${MUNIN_PLUGSTATE}/$(basename "${0}").${FIELDNAME}.cache"
 
 		if [ -z "$(find "${CACHEFILE}" -mmin -"${CACHE_EXPIRY}" 2>/dev/null)" ]; then
-			EXPIRY="$(whois "${NAME}" "${SERVER:+-h${SERVER}}" 2>/dev/null | sed -n "${EXTRACT_RE}p;T;q")" # T;q exits after printing the first match
+			# portable alternative to GNU sed's T;q – exits after first successful substitution
+			EXPIRY="$(whois "${NAME}" "${SERVER:+-h${SERVER}}" 2>/dev/null | sed -n -e "${EXTRACT_RE}p" -e 't quit' -e 'b' -e ': quit' -e 'q')"
 			DELTA_TS=U
 			if [ -n "${EXPIRY}" ]; then
-				EXPIRY_TS="$(date +%s -d "${EXPIRY}")"
+				# POSIX calculation via awk mktime; expects YYYYMMDDHHMM.SS
+				EXPIRY_TS="$(echo "${EXPIRY}" | awk -F'[.]' 'BEGIN { ENVIRON["TZ"] = "UTC" }
+				{
+					y=substr($1,1,4); m=substr($1,5,2); d=substr($1,7,2);
+					h=substr($1,9,2); min=substr($1,11,2); s=$2;
+					if (y ~ /^[0-9]{4}$/) print mktime(y " " m " " d " " h " " min " " s)
+				}')"
 
-				NOW_TS="$(date +%s)"
-				DELTA_TS=$((EXPIRY_TS-NOW_TS))
+				if [ -n "${EXPIRY_TS}" ]; then
+					NOW_TS="$(date +%s)"
+					DELTA_TS=$((EXPIRY_TS-NOW_TS))
+				fi
 			fi
 
 			echo "${FIELDNAME}.value ${DELTA_TS}" > "${CACHEFILE}"
