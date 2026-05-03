@@ -33,6 +33,13 @@ Example:
   #env.traffic_include_re .
   #env.traffic_exclude_re nothing
 
+  # Enable logarithmic scale
+  env.logarithmic_scale 1
+
+  # Set a different minimum (useful when using logarithmic scale to
+  # avoid vertical lines of graph with only peaks from zero)
+  env.minimum 0.01
+
 =head1 AUTHOR
 
 Kim B. Heino <b@bbbs.net>
@@ -117,13 +124,19 @@ def config():
     """Print plugin config."""
     data = collect_data()
 
+    logarithmic_scale = int(os.getenv('logarithmic_scale', 0))
+    minimum = os.getenv('minimum', 0)
+
     counters = filter_data(data, 'bytes')
     if counters:
         print('multigraph nft_counter_bytes')
         print('graph_title nftables counter bytes')
         print('graph_category network')
         print('graph_vlabel bits per ${graph_period}')
-        print('graph_args --base 1024')
+        if logarithmic_scale == 1:
+            print('graph_args --base 1024 --logarithmic')
+        else:
+            print('graph_args --base 1024')
         for counter, value in counters.items():
             if value['family'] == 'inet':
                 print(f'{counter}.label {value["name"]}')
@@ -131,7 +144,7 @@ def config():
                 print(f'{counter}.label {value["family"]} {value["name"]}')
             print(f'{counter}.type DERIVE')
             print(f'{counter}.cdef {counter},8,*')
-            print(f'{counter}.min 0')
+            print(f'{counter}.min {minimum}')
 
     counters = filter_data(data, 'packets')
     if counters:
@@ -139,14 +152,17 @@ def config():
         print('graph_title nftables counter packets')
         print('graph_category network')
         print('graph_vlabel packets per ${graph_period}')
-        print('graph_args --base 1000')
+        if logarithmic_scale == 1:
+            print('graph_args --base 1000 --logarithmic')
+        else:
+            print('graph_args --base 1000')
         for counter, value in counters.items():
             if value['family'] == 'inet':
                 print(f'{counter}.label {value["name"]}')
             else:
                 print(f'{counter}.label {value["family"]} {value["name"]}')
             print(f'{counter}.type DERIVE')
-            print(f'{counter}.min 0')
+            print(f'{counter}.min {minimum}')
 
     pairs = group_traffic(data)
     if pairs:
@@ -159,12 +175,12 @@ def config():
             print(f'{pair}_in.type DERIVE')
             print(f'{pair}_in.graph no')
             print(f'{pair}_in.cdef {pair}_in,8,*')
-            print(f'{pair}_in.min 0')
+            print(f'{pair}_in.min {minimum}')
             print(f'{pair}_out.label {data[f"{pair}_in"]["name"][:-3][:15]}')
             print(f'{pair}_out.type DERIVE')
             print(f'{pair}_out.negative {pair}_in')
             print(f'{pair}_out.cdef {pair}_out,8,*')
-            print(f'{pair}_out.min 0')
+            print(f'{pair}_out.min {minimum}')
 
     if os.environ.get('MUNIN_CAP_DIRTYCONFIG') == '1':
         fetch(data)
