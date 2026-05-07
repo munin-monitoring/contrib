@@ -69,42 +69,42 @@ if (not $ARGV[0] and $ENV{MUNIN_STATS_PLUGINS_RELOAD}) {
     $ARGV[0] = 'reload';
 }
 
-given ($ARGV[0]) {
-    when ("reload") {
-        # Plugin names
-        my @plugs = plugin_names();
+my $command = $ARGV[0] // '';
 
-        # Run all the plugins
-        my $time = plugin_times(@plugs);
+if ($command eq 'reload') {
+    # Plugin names
+    my @plugs = plugin_names();
 
-        write_plugin_times($cache_tmp, $cache, $time);
-    }
-    when ("config") {
-        print <<END;
+    # Run all the plugins
+    my $time = plugin_times(@plugs);
+
+    write_plugin_times($cache_tmp, $cache, $time);
+}
+elsif ($command eq 'config') {
+    print <<END;
 graph_title Munin plugin processing time
 graph_scale yes
 graph_vlabel seconds
 graph_category munin
 graph_info Shows the processing time of munin plugins in seconds
 END
-        for my $plugin (@plugins) {
-            my ($time, $name) = @$plugin;
-            my $fieldname = clean_fieldname($name);
-            print <<END;
+    for my $plugin (@plugins) {
+        my ($time, $name) = @$plugin;
+        my $fieldname = clean_fieldname($name);
+        print <<END;
 $fieldname.label $name
 $fieldname.info The processing time of $name
 $fieldname.draw AREASTACK
 END
-        }
     }
-    default {
-        for my $plugin (@plugins) {
-            my ($time, $name) = @$plugin;
-            my $fieldname = clean_fieldname($name);
-            print <<END;
+}
+else {
+    for my $plugin (@plugins) {
+        my ($time, $name) = @$plugin;
+        my $fieldname = clean_fieldname($name);
+        print <<END;
 $fieldname.value $time
 END
-        }
     }
 }
 
@@ -172,3 +172,4 @@ sub write_plugin_times {
     # with we might have a race condition.
     rename $cache_tmp, $cache;
 }
+
