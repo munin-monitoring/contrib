@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+
+""" Munin plugin to monitor the size and file numbers of a bucket in a S3 compatible storage
+
+=head1 Name
+
+s3_____multi
+
+This plugin should be linked with a name like this
+
+s3_<endpoint>_<region>_<bucket>_<folder>_multi
+
+Where:
+- endpoint is the s3 endpoint. Ex: s3.eu-west-3.amazonaws.com
+- region is the s3 region. Ex: eu-west-3
+- bucket is the name of your bucket
+- folder is optional.
+  If you specify a folder, you will monitor the size of folders inside the specified folder instead of the size of folders at the root of the bucket 
+  folder can only be the name of a folder at the root location of the bucket
+
+Ex: ln -s /path/to/s3_____multi /etc/munin/plugins/s3_s3.eu-west-3.amazonaws.com_eu-west-3_bucket1__multi
+
+=head1 CONFIGURATION
+
+Following config is needed:
+
+    [s3_<endpoint>_<region>_<bucket>_*]
+    env.access_key_id ACCESS_KEY
+    env.secret_access_key SECRET_ACCESS_KEY
+
+Following config is optional
+
+    user munin
+	env.s3hostname 1
+
+running as munin is optional, but if your default user is nobody, you may end up with a write permission erreur when running the plugin with the update_cache parameter
+setting env.s3hostname to any value, will make the plugin to be advertising itself as running on <endpoint>, creating a dedicated entry in munin host list
+If doing so, you MUST update your munin.conf file on the munin master with the following entry
+
+[<endpoint>]
+    address <hostname of munin-node server running the script>
+    use_node_name no
+
+Ex:
+[s3.eu-west-3.amazonaws.com]
+    address myserver.mydomain.tld
+    use_node_name no
+
+Getting the size of a bucket can be (very) long depending of the bucket size.
+The script will not perform the actual check every time munin fetch data (every 5m). At fetch time, it gets data from a local cache
+
+You MUST run the script by yourself to update this cache. To do so, you may want to use a cron entry
+You MUST run the script with munin-run so that the script run with the right user, and get all the environment variable (including MUNIN_PLUGSTATE, MUNIN_CAP_MULTIGRAPH)
+
+Typical command run by cron would be
+sudo -u munin /usr/sbin/munin-run -d s3_s3.eu-west-3.amazonaws.com_eu-west-3_bucket1__multi update_cache
+
+IMPORTANT: You will not get any grpah using you have run the script with the update_cache parameter
+
+=head1 Requirements
+
+Pyhton 3
+boto3 module (pip3 install boto3)
+
+=head1 Todo
+
+Support invocation without bucket name (s3_<endpoint>_<region>___multi) and get a graph with the size/object count of all buckets
+
+=head1 AUTHOR
+
+Jean-Edouard Babin
+https://github.com/jebabin/munin_s3_bucket_size
+
+=head1 LICENSE
+
+GPLv2
+
+=head1 MAGIC MARKERS
+
+ #%# capabilities=multigraph
+
+=cut
+"""
+
+
+import json
+import subprocess
+import os
+import sys
+import stat
+import re
+import boto3
+
+# boto3.set_stream_logger('')
+
+""" This is from a preliminary version which was using the s3cmd tool instead of the boto3 lib
+
+def get_folder_list_s3cmd():
+	process = subprocess.run(['s3cmd', 'ls', 's3://'+bucket + rootdir + '/'], stdout=subprocess.PIPE)
+	return process.stdout.decode('utf-8')
+
+
+def get_folder_info_s3cmd(folder):
+	process = subprocess.run(['s3cmd', 'du', 's3://'+bucket + rootdir + '/' + folder + '/'], stdout=subprocess.PIPE)
+	return process.stdout.decode('utf-8')
+
+
+def update_cache_s3cmd(cache_path):
+	folders = get_folder_list_s3cmd()
+
+	folder_dict = {}
+	for line in folders.split('\n'):
+		if not line.strip():
+			continue
+		match = re.search(r"^\s+DIR\s+.*?\/([^\/]+)\/$", line)
+		if match is not None:
+			folder = match.group(1)
+
+			folder_info = get_folder_info_s3cmd(folder).split('\n')[0]
+			# Create the dict entry even if later the command fail to ensure "config" list all
+			folder_dict[folder] = {}
+			match = re.search(r"^\s*(\d+)\s+(\d+)", folder_info)
+			if match is not None:
+				size = match.group(1)
+				object = match.group(2)
+				folder_dict[folder]['size'] = size
+				folder_dict[folder]['object'] = object
+
+	with open(cache_path, 'w') as cache_file:
+		cache_file.write(json.dumps(folder_dict))
+
+"""
+
+def update_cache(cache_path):
+	s3r = boto3.resource('s3', region_name=region, endpoint_url="https://"+host, aws_access_key_id=access_key_id, aws_secret_access_key=secret_access_key)
+	s3_bucket = s3r.Bucket(bucket)
+
+	total_size = 0
+	folder_dict = {}
+	for object in s3_bucket.objects.filter(Prefix=rootdir + "/"):
+		print(object.key)
+		obj_path = re.sub('^' + rootdir + '/', '', object.key)
+		folder = obj_path.split('/')[0]
+		print(folder)
+		if (folder == ""):
+			continue
+		if folder in folder_dict:
+			folder_dict[folder]['size'] += object.size
+			folder_dict[folder]['object'] += 1
+		else:
+			folder_dict[folder] = {}
+			folder_dict[folder]['size'] = object.size
+			folder_dict[folder]['object'] = 1
+
+#	with open(cache_path, 'w') as cache_file:
+#		cache_file.write(json.dumps(folder_dict))
+
+
+def read_cache(cache_path):
+	if os.path.isfile(cache_path):
+		with open(cache_path) as json_file:
+			data = json.load(json_file)
+		return data
+	else:
+		return None
+
+
+def normalize_name(name):
+    normal_first = re.sub(r'^[^A-Za-z_]', r'_', name)
+    return re.sub(r'[^A-Za-z0-9_]', r'_', normal_first)
+
+
+# Exit if multigraph not supported
+is_multigraph_capable = os.getenv('MUNIN_CAP_MULTIGRAPH')
+if is_multigraph_capable is None:
+	sys.exit(1)
+
+# init vars
+use_s3hostname = None
+host = None
+region = None
+bucket = None
+access_key_id = None
+secret_access_key = None
+rootdir = ""
+
+# deduct vars from file name
+try:
+	# s3_<endpoint>_<region>_<bucket>_<folder>_multi
+	match = re.search(r"^(?:|.*\/)s3_([^_]+)_([^_]+)_([^_]+)_([^_]*)_multi$", sys.argv[0])
+	if match is not None:
+		host = match.group(1)
+		region = match.group(2)
+		bucket = match.group(3)
+		rootdir = match.group(4)
+	else:
+		print("File name doesn't have the exceptect format: s3_<endpoint>_<region>_<bucket>_<folder>_multi")
+		sys.exit(2)
+except Exception as ex:
+	logging.error("Caught exception: %s" % ex)
+
+# set s3 creds
+access_key_id = os.getenv('access_key_id')
+secret_access_key = os.getenv('secret_access_key')
+
+if access_key_id is None:
+	print('access_key_id environement variable is not defined.')
+	sys.exit(3)
+if secret_access_key is None:
+	print('secret_access_key environement variable is not defined.')
+	sys.exit(4)
+
+# use server or s3 hostname ?
+use_s3hostname = os.getenv('s3hostname')
+
+tmpfile = os.getenv('MUNIN_PLUGSTATE') + "/s3_"+host+"_"+region+"_"+bucket+"_"+rootdir+".cache"
+
+
+if len(sys.argv) == 2:
+	if sys.argv[1] == "config":
+		if use_s3hostname is not None:
+			print('host_name %s' % host)
+		data = read_cache(tmpfile)
+		if data is None:
+			sys.exit(0)
+		# Size
+		print('multigraph %s_size' % normalize_name("s3_"+host+"_"+region+"_"+bucket+"_"+rootdir))
+		print('graph_category Disk')
+		if (rootdir == ""):
+			print('graph_title Size of bucket %s' % bucket)
+		else:
+			print('graph_title Size of folder %s in bucket %s' % (rootdir, bucket))
+		print('graph_vlabel bytes')
+		i = 0
+		for folder in data:
+			print('%s.label %s' % (normalize_name(folder), folder[0:45]))
+			if i == 0:
+				print('%s.draw AREA' % normalize_name(folder))
+				i = 1
+			else:
+				print('%s.draw STACK' % normalize_name(folder))
+		print('total.label Total')
+		print('total.draw LINE1')
+
+		# Size per folder
+		for folder in data:
+			print('multigraph %s_size.%s' % (normalize_name("s3_"+host+"_"+region+"_"+bucket+"_"+rootdir), normalize_name(folder)))
+			print('data.label %s' % folder[0:45])
+			print('graph_category Disk')
+			if (rootdir == ""):
+				print('graph_title Folder size inside bucket %s' % bucket)
+			else:
+				print('graph_title Folder size inside folder %s of bucket %s' % (rootdir, bucket))
+			print('graph_vlabel bytes')
+			print('data.draw LINE1')
+
+		# Object
+		print('multigraph %s_object' % normalize_name("s3_"+host+"_"+region+"_"+bucket+"_"+rootdir))
+		print('graph_category Disk')
+		if (rootdir == ""):
+			print('graph_title Objects in bucket %s' % bucket)
+		else:
+			print('graph_title Objects in folder %s of bucket %s' % (rootdir, bucket))
+		print('graph_vlabel # of objects')
+		i = 0
+		for folder in data:
+			print('%s.label %s' % (normalize_name(folder), folder[0:45]))
+			if i == 0:
+				print('%s.draw AREA' % normalize_name(folder))
+				i = 1
+			else:
+				print('%s.draw STACK' % normalize_name(folder))
+		print('total.label Total')
+		print('total.draw LINE1')
+
+		# Object per folder
+		for folder in data:
+			print('multigraph %s_object.%s' % (normalize_name("s3_"+host+"_"+region+"_"+bucket+"_"+rootdir), normalize_name(folder)))
+			print('data.label %s' % folder[0:45])
+			print('graph_category Disk')
+			if (rootdir == ""):
+				print('graph_title Folder objects inisde bucket %s' % bucket)
+			else:
+				print('graph_title Folder objects inside folder %s of bucket %s' % (rootdir, bucket))
+			print('graph_vlabel # of objects')
+			print('data.draw LINE1')
+
+
+	if sys.argv[1] == "update_cache":
+		update_cache(tmpfile)
+
+else:
+	data = read_cache(tmpfile)
+	if data is None:
+		sys.exit(1)
+	size_total = 0
+	object_total = 0
+	for folder in data:
+		size_total = size_total + int(data[folder]['size'])
+		object_total = object_total + int(data[folder]['object'])
+
+	print('multigraph %s_size' % normalize_name("s3_"+host+"_"+region+"_"+bucket+"_"+rootdir))
+	for folder in data:
+		print('%s.value %s' % (normalize_name(folder), data[folder]['size']))
+	print('total.value %s' % size_total)
+	for folder in data:
+		print('multigraph %s_size.%s' % (normalize_name("s3_"+host+"_"+region+"_"+bucket+"_"+rootdir), normalize_name(folder)))
+		print('data.value %s' % data[folder]['size'])
+
+	print('multigraph %s_object' % normalize_name("s3_"+host+"_"+region+"_"+bucket+"_"+rootdir))
+	for folder in data:
+		print('%s.value %s' % (normalize_name(folder), data[folder]['object']))
+	print('data.value %s' % object_total)
+	for folder in data:
+		print('multigraph %s_object.%s' % (normalize_name("s3_"+host+"_"+region+"_"+bucket+"_"+rootdir), normalize_name(folder)))
+		print('data.value %s' % data[folder]['object'])
+
+
