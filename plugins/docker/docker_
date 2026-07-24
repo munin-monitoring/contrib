@@ -308,10 +308,18 @@ def print_containers_size(client):
 def print_containers_cpu(client):
     for container, stats in parallel_container_stats(client):
         cpu_percent = 0.0
-        cpu_delta = (float(stats["cpu_stats"]["cpu_usage"]["total_usage"])
-                     - float(stats["precpu_stats"]["cpu_usage"]["total_usage"]))
-        system_delta = (float(stats["cpu_stats"]["system_cpu_usage"])
-                        - float(stats["precpu_stats"]["system_cpu_usage"]))
+        try:
+            cpu_delta = (float(stats["cpu_stats"]["cpu_usage"]["total_usage"])
+                         - float(stats["precpu_stats"]["cpu_usage"]["total_usage"]))
+            system_delta = (float(stats["cpu_stats"]["system_cpu_usage"])
+                            - float(stats["precpu_stats"]["system_cpu_usage"]))
+        except KeyError:
+            # A starting/restarting container can report incomplete stats
+            # (no precpu_stats/system_cpu_usage yet). Skip it for this run
+            # instead of aborting the whole graph.
+            print(f'docker_: skipping {container.name}: incomplete cpu stats',
+                  file=sys.stderr)
+            continue
         if system_delta > 0.0:
             cpu_percent = cpu_delta / system_delta * 100.0 * os.cpu_count()
         clean_container_name = clean_fieldname(container.name)
@@ -321,12 +329,18 @@ def print_containers_cpu(client):
 
 def print_containers_memory(client):
     for container, stats in parallel_container_stats(client):
-        if 'total_rss' in stats['memory_stats']['stats']:  # cgroupv1 only?
-            memory_usage = stats['memory_stats']['stats']['total_rss']
-            extinfo = 'Resident Set Size'
-        else:
-            memory_usage = stats['memory_stats']['usage']
-            extinfo = 'Total memory usage'
+        try:
+            if 'total_rss' in stats['memory_stats']['stats']:  # cgroupv1 only?
+                memory_usage = stats['memory_stats']['stats']['total_rss']
+                extinfo = 'Resident Set Size'
+            else:
+                memory_usage = stats['memory_stats']['usage']
+                extinfo = 'Total memory usage'
+        except KeyError:
+            # Incomplete stats for a starting/restarting container. Skip it.
+            print(f'docker_: skipping {container.name}: incomplete memory stats',
+                  file=sys.stderr)
+            continue
         clean_container_name = clean_fieldname(container.name)
         print(clean_container_name + '.value', memory_usage)
         print(clean_container_name + '.extinfo', container_attributes(container, extinfo))
@@ -336,10 +350,16 @@ def print_containers_network(client):
     for container, stats in parallel_container_stats(client):
         tx_bytes = 0
         rx_bytes = 0
-        if "networks" in stats:
-            for data in stats['networks'].values():
-                tx_bytes += data['tx_bytes']
-                rx_bytes += data['rx_bytes']
+        try:
+            if "networks" in stats:
+                for data in stats['networks'].values():
+                    tx_bytes += data['tx_bytes']
+                    rx_bytes += data['rx_bytes']
+        except KeyError:
+            # Incomplete stats for a starting/restarting container. Skip it.
+            print(f'docker_: skipping {container.name}: incomplete network stats',
+                  file=sys.stderr)
+            continue
         clean_container_name = clean_fieldname(container.name)
         print(clean_container_name + '_up.value', tx_bytes)
         print(clean_container_name + '_down.value', rx_bytes)
