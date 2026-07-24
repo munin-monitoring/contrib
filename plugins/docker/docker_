@@ -97,7 +97,7 @@ except ImportError:
     # just use the property decorator, without caching
     # This is for backward compatibility with Python<3.8
     cached_property = property
-from multiprocessing import Process, Queue
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def sorted_by_creation_date(func):
@@ -273,23 +273,32 @@ def print_images_count(client):
     print('dangling_quantity.extinfo', (', '.join(image_summary(i) for i in dangling)) or '-')
 
 
-def get_container_stats(container, q):
-    q.put(container.stats(stream=False))
+def get_container_stats(container):
+    # Runs in a worker thread; container.stats(stream=False) is a blocking
+    # HTTP GET to the Docker socket, so threads parallelise it well.
+    return container.stats(stream=False)
 
 
 def parallel_container_stats(client):
-    proc_list = []
+    running = [c for c in client.all_containers if c.status == 'running']
     stats = {}
-    for container in client.all_containers:
-        if container.status != 'running':
-            continue
-        q = Queue()
-        p = Process(target=get_container_stats, args=(container, q))
-        proc_list.append({'proc': p, 'queue': q, 'container': container})
-        p.start()
-    for proc in proc_list:
-        proc['proc'].join()
-        stats[proc['container']] = proc['queue'].get()
+    if not running:
+        return stats.items()
+    # Threads instead of multiprocessing: the work is I/O-bound, and since
+    # Python 3.14 multiprocessing defaults to 'forkserver', which pickles the
+    # worker arguments -- a docker Container can't be pickled (its client holds
+    # an un-picklable lambda), so Process(...) raises PicklingError. Threads
+    # share the client and avoid that entirely, and a failing stats call for a
+    # single container is skipped instead of taking down the whole run.
+    with ThreadPoolExecutor(max_workers=min(len(running), 16)) as executor:
+        futures = {executor.submit(get_container_stats, c): c for c in running}
+        for future in as_completed(futures):
+            container = futures[future]
+            try:
+                stats[container] = future.result()
+            except Exception as e:
+                print(f'docker_: failed to get stats for {container.name}: {e}',
+                      file=sys.stderr)
     return stats.items()
 
 
