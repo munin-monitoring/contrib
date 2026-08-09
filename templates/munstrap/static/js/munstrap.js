@@ -38,11 +38,11 @@ $("div#munin_nodeview_tab>div").each(function (index) {
             key += ':' + id;
         }
 
-        var lastTab = localStorage.getItem(key);
-        if (!lastTab) {
-            lastTab = location.hash;
-        }
-        if (lastTab) {
+    var lastTab = location.hash;
+    if (!lastTab) {
+        lastTab = localStorage.getItem(key);
+    }
+    if (lastTab) {
             $('[href="' + lastTab + '"]').tab('show');
         }
     });
