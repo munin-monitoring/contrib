@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""
+
+=head1 NAME
+
+bbb - monitor Bigbluebutton server (users, rooms, videostreams ...)
+
+=head1 APPLICABLE SYSTEMS
+
+Bigbluebutton server
+
+=head1 CONFIGURATION
+
+No configuration is needed. This script will fetch the secret from the local
+bbb instance
+
+https://docs.bigbluebutton.org/dev/api.html
+
+=head1 AUTHOR
+
+Copyright 2021 Henning Rieger <age@systemausfall.org>
+
+With many thanks to the original Author Bernd Wurst (bwurst.org)
+
+=head1 LICENSE
+GNU General Public License v3.0 or later
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=cut
+"""
+
+import sys
+import subprocess
+import re
+import hashlib
+import urllib.request
+from urllib.error import URLError, HTTPError
+import os
+from xml.etree import ElementTree
+
+bbbconf_path = "/usr/bin/bbb-conf"
+
+
+def config():
+    """ autoconfig values """
+    print("graph_title BigBlueButton")
+    print("graph_vlabel Numbers")
+    print("graph_category other")
+    print("meetings.label Rooms")
+    print("users.label User")
+    print("videostreams.label Videostreams")
+    print("listeners.label Listeners")
+    print("speakers.label Speakers")
+    print("moderators.label Moderators")
+
+
+def bbb_stats():
+    URL = None
+    secret = None
+
+    # find out url and secret from local bbb instance
+    if os.path.exists(bbbconf_path):
+        # Ubuntu 16.04 with Python 3.5 is recommended for bbb 2.2.x
+        if sys.version_info.major == 3 and sys.version_info.minor < 7:
+            tmp = subprocess.run([bbbconf_path, '--secret'],
+                                 stdout=subprocess.PIPE, universal_newlines=True)
+        else:
+            tmp = subprocess.run([bbbconf_path, '--secret'], capture_output=True, text=True)
+        output = tmp.stdout
+
+        for line in output.splitlines():
+            m = re.search('URL: (?P<URL>.*/bigbluebutton/)', line)
+            if m:
+                URL = m.group('URL')
+                continue
+            m = re.search('Secret: (?P<secret>.*)$', line)
+            if m:
+                secret = m.group('secret')
+
+    if not URL or not secret:
+        print('error getting URL and/or secret. Is "bbb-conf --secret" returning it?')
+        sys.exit(1)
+
+    # prepare api request
+    APIURL = URL + 'api/'
+    apimethod = 'getMeetings'
+    querystring = ''
+
+    h = hashlib.sha1((apimethod + querystring + secret).encode('utf-8'))
+    checksum = h.hexdigest()
+
+    if len(querystring) > 0:
+        querystring = querystring + '&'
+
+    requesturl = APIURL + apimethod + '?' + querystring + 'checksum=' + checksum
+
+    # make api request
+    response = urllib.request.urlopen(requesturl)
+    responsedata = response.read()
+    try:
+        tree = ElementTree.fromstring(responsedata)
+    except HTTPError as e:
+        print('There was an error with the recieved data from bbb api.')
+        print('Error code: ', e.code)
+        sys.exit(1)
+    except URLError as e:
+        print('There was an error with the recieved data from bbb api.')
+        print('Reason: ', e.reason)
+        sys.exit(1)
+    else:
+        if tree.find('returncode').text != 'SUCCESS':
+            print('There was an error within the API data')
+            sys.exit(1)
+
+    meetings = tree.find('meetings')
+
+    # get numbers from api response
+    num_meetings = 0
+    num_users = 0
+    num_video = 0
+    num_listeners = 0
+    num_speakers = 0
+    num_moderators = 0
+
+    for m in meetings.iter('meeting'):
+        meetname = m.find('meetingName').text
+        participants = m.find('participantCount').text
+        video = m.find('videoCount').text
+        listeners = m.find('listenerCount').text
+        speakers = m.find('voiceParticipantCount').text
+        moderators = m.find('moderatorCount').text
+
+        meta = m.find('metadata')
+        if meta.find('bbb-context') is not None:
+            meetname = meta.find('bbb-context').text + ' / ' + meetname
+
+        num_meetings += 1
+        num_users += int(participants)
+        num_video += int(video)
+        num_listeners += int(listeners)
+        num_speakers += int(speakers)
+        num_moderators += int(moderators)
+
+    # finally print everything
+    print('meetings.value %2i' % (num_meetings))
+    print('users.value %2i' % (num_users))
+    print('videostreams.value %2i' % (num_video))
+    print('listeners.value %2i' % (num_listeners))
+    print('speakers.value %2i' % (num_speakers))
+    print('moderators.value %2i' % (num_moderators))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'autoconf':
+        if os.path.exists(bbbconf_path):
+            print("yes")
+        else:
+            print("no (%s not found)" % bbbconf_path)
+    elif len(sys.argv) > 1 and sys.argv[1] == 'config':
+        config()
+    else:
+        bbb_stats()
