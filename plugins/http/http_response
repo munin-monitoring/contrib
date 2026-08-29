@@ -9,18 +9,67 @@ http_response - Monitor HTTP response statistics
 
 =head1 CONFIGURATION
 
-The following environment variables are used
+The following environment variables are used:
 
- sites           - Sites to check
-                     - separated by spaces
-                     - can contain basic auth credentials
-                     - defaults to "http://localhost/"
- max_time        - Timeout for each site check in seconds
-                     - defaults to 5 seconds
- short_label     - Switch for shortening the label below the graph
-                     - defaults to false
- follow_redirect - Follow http redirects
-                     - defaults to false
+=over
+
+=item *
+
+sites - The sites to check
+
+=over
+
+=item *
+
+separated by spaces
+
+=item *
+
+can contain basic auth credentials
+
+=item *
+
+defaults to C<http://localhost/>
+
+=back
+
+=item *
+
+max_time - Timeout for each site check in seconds
+
+=over
+
+=item *
+
+defaults to C<5>
+
+=back
+
+=item *
+
+short_label - Switch for shortening the label below the graph
+
+=over
+
+=item *
+
+defaults to C<false>
+
+=back
+
+=item *
+
+follow_redirect - Switch for following http redirects
+
+=over
+
+=item *
+
+defaults to C<false>
+
+=back
+
+=back
 
 =head2 CONFIGURATION EXAMPLE
 
@@ -32,22 +81,57 @@ The following environment variables are used
 
 =head1 PREREQUISITES
 
-This plugin needs at least bash version 4 to run
+This plugin needs at least bash version 4 to run.
 
-=head1 NOTES
+Additionally the following programs must be present on your system:
+
+=over
+
+=item *
+
+awk
+
+=item *
+
+curl
+
+=item *
+
+date
+
+=item *
+
+echo
+
+=item *
+
+mktemp
+
+=back
+
+=head1 SEE ALSO
 
 This plugin unifies the functionalities of the following plugins into one
-multigraph plugin
+multigraph plugin:
 
- http_loadtime     - https://gallery.munin-monitoring.org/plugins/munin/http_loadtime/
- http_responsecode - https://gallery.munin-monitoring.org/plugins/munin-contrib/http_responsecode/
+=over
+
+=item *
+
+L<http_loadtime|https://gallery.munin-monitoring.org/plugins/munin/http_loadtime/>
+
+=item *
+
+L<http_responsecode|https://gallery.munin-monitoring.org/plugins/munin-contrib/http_responsecode/>
+
+=back
 
 In contrast to using these two plugins with the same configuration, this plugin
 performs only one request per site and munin run to gather its statistics.
 
 =head1 AUTHOR
 
-Copyright (C) 2020 Klaus Sperner
+Copyright (C) 2020-2021 Klaus Sperner
 
 =head1 LICENSE
 
@@ -71,6 +155,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 =cut
 
+# shellcheck disable=SC1091
 . "$MUNIN_LIBDIR/plugins/plugin.sh"
 
 readonly uri_regex='^(https?://)([^:]*):(.*)@(.*)$'
@@ -111,19 +196,35 @@ compute_label() {
     fi
 }
 
+check_programs_installed() {
+    for program in "$@"; do
+        if ! hash "$program" 2>/dev/null; then
+            >&2 echo "The plugin http_response needs $program but it is not installed. Aborting."
+            exit 1
+        fi
+    done
+}
+
 if [[ "${BASH_VERSINFO:-0}" -lt 4 ]]; then
-    >&2 echo "The plugin http_response needs at least bash version 4"
+    >&2 echo "The plugin http_response needs at least bash version 4. Aborting."
     exit 1
 fi
+
+check_programs_installed awk curl date echo mktemp
 
 sites=${sites:-"http://localhost/"}
 max_time=${max_time:-5}
 short_label=${short_label:-"false"}
 follow_redirect=${follow_redirect:-"false"}
 
+if [[ ! "$max_time" =~ ^[0-9]+$ ]]; then
+    >&2 echo "Invalid configuration: max_time $max_time must contain only digits. Aborting."
+    exit 1
+fi
+
 if [[ "$1" == "config" ]]; then
     echo 'multigraph http_response_code'
-    echo 'graph_args --base 1000 -l 0 -u 511'
+    echo 'graph_args --base 1000 --lower-limit 0 --upper-limit 511'
     echo 'graph_title HTTP Response Codes'
     echo 'graph_vlabel Response Code'
     echo 'graph_category network'
@@ -131,10 +232,10 @@ if [[ "$1" == "config" ]]; then
     echo 'graph_printf %3.0lf'
     for site in $sites; do
         site_without_credentials=$( strip_credentials_from_url "$site" )
-        siteid="$( clean_fieldname "$site_without_credentials" )"
-        echo "$siteid.label $( compute_label "$site_without_credentials" )"
-        echo "$siteid.info HTTP response code statistics for $site_without_credentials"
-        echo "$siteid.critical 99:399";
+        site_id="$( clean_fieldname "$site_without_credentials" )"
+        echo "$site_id.label $( compute_label "$site_without_credentials" )"
+        echo "$site_id.info HTTP response code statistics for $site_without_credentials"
+        echo "$site_id.critical 99:399";
     done
     echo 'multigraph http_response_time'
     echo 'graph_args --base 1000 -l 0'
@@ -144,9 +245,9 @@ if [[ "$1" == "config" ]]; then
     echo 'graph_info This graph shows HTTP response time statistics'
     for site in $sites; do
         site_without_credentials=$( strip_credentials_from_url "$site" )
-        siteid="$( clean_fieldname "$site_without_credentials" )"
-        echo "$siteid.label $( compute_label "$site_without_credentials" )"
-        echo "$siteid.info HTTP response time statistics for $site_without_credentials"
+        site_id="$( clean_fieldname "$site_without_credentials" )"
+        echo "$site_id.label $( compute_label "$site_without_credentials" )"
+        echo "$site_id.info HTTP response time statistics for $site_without_credentials"
     done
     exit 0
 fi
@@ -159,8 +260,8 @@ for site in $sites; do
     username=$( extract_username_from_url "$site" )
     password=$( extract_password_from_url "$site" )
 
+    configurable_arguments=()
     curl_config_file=""
-    curl_auth_opt=()
     if [ -n "$username" ]; then
         if [ -z "$password" ]; then
             >&2 echo "Invalid configuration: username specified without password"
@@ -169,27 +270,24 @@ for site in $sites; do
         curl_config_file=$(mktemp) || exit 1
         trap 'rm -f "$curl_config_file"' EXIT
         echo "user=${username}:${password}" >> "$curl_config_file"
-        curl_auth_opt=(--config "$curl_config_file")
+        configurable_arguments+=(--config "$curl_config_file")
     fi
 
-    curl_arg=""
-    if $follow_redirect; then
-        curl_arg="--location"
+    if [[ "${follow_redirect,,}" == "true" || "${follow_redirect,,}" == "yes" ]]; then
+        configurable_arguments+=(--location)
     fi
 
-    siteid="$( clean_fieldname "$site_without_credentials" )"
-    statuscode=
-    loadtime=
+    site_id="$( clean_fieldname "$site_without_credentials" )"
     start=$(date +%s.%N)
-    statuscode=$( curl "${curl_auth_opt[@]}" --write-out '%{http_code}' --max-time "$max_time" $curl_arg --silent --output /dev/null "$site_without_credentials" )
-    returncode=$?
-    loadtime=$( echo "$start" "$(date +%s.%N)" | awk '{ print($2 - $1); }' )
-    if [[ $returncode -ne 0 ]]; then
-        loadtime="U"
-        statuscode="U"
+    status_code=$( curl "${configurable_arguments[@]}" --write-out '%{http_code}' --max-time "$max_time" --silent --output /dev/null "$site_without_credentials" )
+    return_code=$?
+    load_time=$( echo "$start" "$(date +%s.%N)" | awk '{ print($2 - $1); }' )
+    if [[ $return_code -ne 0 ]]; then
+        load_time="U"
+        status_code="U"
     fi
-    response_codes+=(["$siteid"]="$statuscode")
-    response_times+=(["$siteid"]="$loadtime")
+    response_codes+=(["$site_id"]="$status_code")
+    response_times+=(["$site_id"]="$load_time")
 
     if [ -n "$curl_config_file" ]; then
         rm -f "$curl_config_file"
@@ -197,12 +295,12 @@ for site in $sites; do
 done
 
 echo 'multigraph http_response_code'
-for siteid in "${!response_codes[@]}"; do
-    echo "${siteid}.value ${response_codes[${siteid}]}"
+for site_id in "${!response_codes[@]}"; do
+    echo "${site_id}.value ${response_codes[${site_id}]}"
 done
 
 echo 'multigraph http_response_time'
-for siteid in "${!response_times[@]}"; do
-    echo "${siteid}.value ${response_times[${siteid}]}"
+for site_id in "${!response_times[@]}"; do
+    echo "${site_id}.value ${response_times[${site_id}]}"
 done
 
