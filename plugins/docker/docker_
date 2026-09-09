@@ -195,6 +195,35 @@ class ClientWrapper:
         return self.client.images.list(filters={'dangling': True})
 
     @cached_property
+    def container_stats(self):
+        """Per-running-container stats, collected once per plugin run.
+
+        cpu/memory/network each used to call stats(stream=False) themselves.
+        That endpoint samples for ~1s per container, so a multi graph paid
+        that cost three times.
+
+        Threads instead of multiprocessing: the work is I/O-bound, and since
+        Python 3.14 multiprocessing defaults to 'forkserver', which pickles the
+        worker arguments -- a docker Container can't be pickled (its client holds
+        an un-picklable lambda), so Process(...) raises PicklingError.
+        """
+        running = [c for c in self.all_containers if c.status == 'running']
+        stats = {}
+        if not running:
+            return stats
+        max_workers = min(len(running), int(os.getenv('DOCKER_STATS_MAX_WORKERS', '16')))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(get_container_stats, c): c for c in running}
+            for future in as_completed(futures):
+                container = futures[future]
+                try:
+                    stats[container] = future.result()
+                except Exception as e:
+                    print(f'docker_: failed to get stats for {container.name}: {e}',
+                          file=sys.stderr)
+        return stats
+
+    @cached_property
     @sorted_by_creation_date
     def volumes(self):
         return self.client.volumes.list()
@@ -214,9 +243,19 @@ def container_summary(container, *args):
 
 
 def container_attributes(container, *args):
-    attributes = container.image.tags
-    attributes.append(container.attrs['Created'])
-    return ', '.join(attributes + list(args))
+    # Use attrs already returned by containers.list(). container.image.tags
+    # triggers GET /images/{id}/json per container, and config repeats it for
+    # cpu/memory/network/size, which makes output look sluggish.
+    config = container.attrs.get('Config') or {}
+    image = config.get('Image') if isinstance(config, dict) else None
+    if not image:
+        image = container.attrs.get('Image')
+    attributes = [image] if image else []
+    created = container.attrs.get('Created')
+    if created:
+        attributes.append(created)
+    attributes.extend(args)
+    return ', '.join(str(a) for a in attributes if a)
 
 
 def print_containers_status(client):
@@ -230,7 +269,7 @@ def print_containers_status(client):
     dead = []
     for container in client.all_containers:
         if container.status == 'running':
-            state = client.api.inspect_container(container.name)['State']
+            state = container.attrs.get('State') or {}
             if state.get('Health', {}).get('Status') == 'unhealthy':
                 unhealthy.append(container)
             else:
@@ -292,27 +331,7 @@ def get_container_stats(container):
 
 
 def parallel_container_stats(client):
-    running = [c for c in client.all_containers if c.status == 'running']
-    stats = {}
-    if not running:
-        return stats.items()
-    # Threads instead of multiprocessing: the work is I/O-bound, and since
-    # Python 3.14 multiprocessing defaults to 'forkserver', which pickles the
-    # worker arguments -- a docker Container can't be pickled (its client holds
-    # an un-picklable lambda), so Process(...) raises PicklingError. Threads
-    # share the client and avoid that entirely, and a failing stats call for a
-    # single container is skipped instead of taking down the whole run.
-    max_workers = min(len(running), int(os.getenv('DOCKER_STATS_MAX_WORKERS', '16')))
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(get_container_stats, c): c for c in running}
-        for future in as_completed(futures):
-            container = futures[future]
-            try:
-                stats[container] = future.result()
-            except Exception as e:
-                print(f'docker_: failed to get stats for {container.name}: {e}',
-                      file=sys.stderr)
-    return stats.items()
+    return client.container_stats.items()
 
 
 def print_containers_size(client):
