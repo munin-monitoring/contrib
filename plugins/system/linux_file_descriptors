@@ -1,0 +1,42 @@
+#!/bin/sh
+
+FILE_NR="/proc/sys/fs/file-nr"
+
+case "$1" in
+    config)
+        echo "graph_title Linux File Descriptors"
+        echo "graph_vlabel File descriptors"
+        echo "graph_category system"
+        echo "allocated.label Allocated"
+        echo "allocated.type GAUGE"
+        echo "allocated.min 0"
+        echo "allocated.draw AREA"
+        echo "unused.label Unused"
+        echo "unused.type GAUGE"
+        echo "unused.min 0"
+        echo "unused.draw STACK"
+        echo "maximum.label Maximum"
+        echo "maximum.type GAUGE"
+        echo "maximum.min 0"
+        echo "maximum.draw LINE"
+        exit 0
+        ;;
+esac
+
+if [ ! -r "$FILE_NR" ]; then
+    exit 1
+fi
+
+set -- $(cat "$FILE_NR")
+
+allocated="$1"
+unused="$2"
+maximum="$3"
+
+case "$allocated:$unused:$maximum" in
+    *[!0-9:]*|:*|*::*) exit 1 ;;
+esac
+
+echo "allocated.value $allocated"
+echo "unused.value $unused"
+echo "maximum.value $maximum"
