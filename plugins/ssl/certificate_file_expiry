@@ -62,9 +62,15 @@ config that handles multiple types of certs where only one pattern is used. defa
 
 Dependencies: openssl
 
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
 =head1 AUTHOR
 
 andreas perhab - andreas.perhab@wt-io-it.at (https://www.wt-io-it.at/)
+marco schmidt - marco.schmidt@gmail.com (autoconf added)
 
 =head1 LICENSE
 
@@ -126,21 +132,50 @@ get_openvpn_inline_cert() {
   # print content between <type> and </type> lines (ca and cert)
   awk 'BEGIN{content=0}/^<\/'"$type"'>$/{content=0}(content==1){ print $0 }/^<'"$type"'>$/{content=1}' < "$file"
 }
+skip_unexpanded_patterns() {
+  # note: if file contains a * (e.g. /etc/letsencrypt/live/*/cert.pem) it might be an unexpanded pattern
+  # to supress errors see IGNORE_UNEXPANDED_PATTERNS above
+  # shellcheck disable=SC2063
+  if [ "$IGNORE_UNEXPANDED_PATTERNS" = "yes" ] \
+    && [ "$1" = "$2" ] \
+    && ! [ -e "$1" ] \
+    && echo "$1" | grep -q "*" ; then
+      # skip unexpanded patterns when IGNORE_UNEXPANDED_PATTERNS is set to yes
+      return 1
+  else
+      return 0
+  fi
+}
+
+if [ "$1" = "autoconf" ] ; then
+  if [ -z "${CERTS}" ]; then
+# no certificates configured
+      echo "no"
+  else
+    for cert in ${CERTS}; do
+      cert_type=${cert%:*}
+      cert_pattern=${cert#*:}
+      for cert_file in $cert_pattern; do
+        skip_unexpanded_patterns "$cert_file" "$cert_pattern" || continue
+        if ! [ -r "$cert_file" ]; then
+# one certificate file is missing
+          echo "no"
+          exit 0
+        fi
+      done
+    done
+# all certificate files found
+    echo "yes"
+  fi
+  exit 0
+fi
 
 for cert in ${CERTS}; do
   cert_type=${cert%:*}
   cert_pattern=${cert#*:}
   for cert_file in $cert_pattern; do
-    # note: if file contains a * (e.g. /etc/letsencrypt/live/*/cert.pem) it might be an unexpanded pattern
-    # to supress errors see IGNORE_UNEXPANDED_PATTERNS above
-    # shellcheck disable=SC2063
-    if [ "$IGNORE_UNEXPANDED_PATTERNS" = "yes" ] \
-      && [ "$cert_file" = "$cert_pattern" ] \
-      && ! [ -e "$cert_file" ] \
-      && echo "$cert_file" | grep -q "*" ; then
-        # skip unexpanded patterns when IGNORE_UNEXPANDED_PATTERNS is set to yes
-        continue
-    fi
+    skip_unexpanded_patterns "$cert_file" "$cert_pattern" || continue
+    [ -r "$cert_file" ] || continue
     if [ "$cert_type" = "openvpn_inline" ] ; then
       for type in "ca" "cert"; do
         cert_name=$(clean_fieldname "$cert_file-$type")
