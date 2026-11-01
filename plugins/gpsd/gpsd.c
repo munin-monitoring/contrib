@@ -33,9 +33,10 @@
 
 #define GPSD_HOST "127.0.0.1"
 #define GPSD_PORT 2947
-#define GPSD_MAX_SATELLITES "16"
-#define GPSD_BUFSIZE 2048
+#define GPSD_MAX_SATELLITES "64"
+#define GPSD_BUFSIZE 8192
 #define GPSD_TIMEOUT 5000
+#define GPSD_SKY_TIMEOUT 100
 #define GPSD_EOL "\r\n"
 #define GPSD_COMMAND_WATCH "?WATCH={\"class\":\"WATCH\",\"enable\":true,\"json\":true}\n"
 
@@ -50,6 +51,7 @@
 #include <stdbool.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <time.h>
 #include <json-c/json.h>
 
 typedef struct {
@@ -59,6 +61,7 @@ typedef struct {
 	char *type;
 	char *min;
 	char *max;
+	double value;
 } metric_t;
 
 typedef struct {
@@ -158,21 +161,11 @@ bool gpsd_process_response(char *line, int fd) {
 		for (size_t p = 0; p < sizeof(plugins) / sizeof(plugin_t); p++) {
 			plugin_t *plugin = &plugins[p];
 
-			printf("multigraph %s\ngraph_title %s\ngraph_category %s\ngraph_vlabel %s\n", plugin->name, plugin->title, plugin->category, plugin->vlabel);
-
 			for (size_t m = 0; m < plugin->count; m++) {
 				metric_t *metric = &plugin->metrics[m];
 
-				printf("%s.label %s\n", metric->key, metric->label);
-				printf("%s.info %s\n", metric->key, metric->info);
-				printf("%s.type %s\n", metric->key, metric->type);
-				if (metric->min)
-					printf("%s.min %s\n", metric->key, metric->min);
-				if (metric->max)
-					printf("%s.max %s\n", metric->key, metric->max);
-
 				json_object_object_get_ex(object, metric->key, &key);
-				printf("%s.value %.2f\n", metric->key, json_object_get_double(key));
+				metric->value = json_object_get_double(key);
 			}
 		}
 
@@ -192,6 +185,7 @@ bool gpsd_read_cb(char *data, ssize_t bytes, int fd) {
 	static ssize_t length = 0;
 	char *response = (char *)&sbuf;
 	ssize_t offset = length;
+	bool complete = false;
 
 	if (bytes + length > GPSD_BUFSIZE) {
 		fputs("read buffer full\n", stderr);
@@ -212,7 +206,7 @@ bool gpsd_read_cb(char *data, ssize_t bytes, int fd) {
 			} while (++offset < length && iscntrl(sbuf[offset]));
 
 			if (gpsd_process_response(response, fd))
-				return true;
+				complete = true;
 
 			response = (char *)&sbuf[offset];
 
@@ -226,12 +220,47 @@ bool gpsd_read_cb(char *data, ssize_t bytes, int fd) {
 	length = strlen(response);
 	memmove(&sbuf, response, length + 1);
 
-	return false;
+	return complete;
+}
+
+static long long gpsd_now_ms(void) {
+	struct timespec ts;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &ts)) {
+		perror("clock_gettime failed");
+		exit(errno);
+	}
+
+	return ((long long)ts.tv_sec * 1000) + ((long long)ts.tv_nsec / 1000000);
+}
+
+void gpsd_print_metrics(void) {
+	for (size_t p = 0; p < sizeof(plugins) / sizeof(plugin_t); p++) {
+		plugin_t *plugin = &plugins[p];
+
+		printf("multigraph %s\ngraph_title %s\ngraph_category %s\ngraph_vlabel %s\n", plugin->name, plugin->title, plugin->category, plugin->vlabel);
+
+		for (size_t m = 0; m < plugin->count; m++) {
+			metric_t *metric = &plugin->metrics[m];
+
+			printf("%s.label %s\n", metric->key, metric->label);
+			printf("%s.info %s\n", metric->key, metric->info);
+			printf("%s.type %s\n", metric->key, metric->type);
+			if (metric->min)
+				printf("%s.min %s\n", metric->key, metric->min);
+			if (metric->max)
+				printf("%s.max %s\n", metric->key, metric->max);
+
+			printf("%s.value %.2f\n", metric->key, metric->value);
+		}
+	}
 }
 
 int main(int argc, const char *argv[]) {
 	struct pollfd fds[1] = {};
 	struct pollfd *gpsd = &fds[0];
+	int timeout = GPSD_TIMEOUT;
+	long long deadline = 0;
 	int p;
 
 	if (argc != 2 || strcmp(argv[1], "config")) {
@@ -242,7 +271,7 @@ int main(int argc, const char *argv[]) {
 	gpsd->fd = gpsd_connect(GPSD_HOST, GPSD_PORT);
 	gpsd->events = POLLIN;
 
-	while ((p = poll(fds, 1, GPSD_TIMEOUT)) > 0) {
+	while ((p = poll(fds, 1, timeout)) > 0) {
 		if (gpsd->revents & (POLLERR | POLLHUP | POLLNVAL)) {
 			int error;
 			socklen_t errorlen = sizeof(error);
@@ -263,7 +292,10 @@ int main(int argc, const char *argv[]) {
 					exit(EXIT_FAILURE);
 				}
 
-				if (gpsd_read_cb((char *)&buffer, bytes, gpsd->fd))
+				if (gpsd_read_cb((char *)&buffer, bytes, gpsd->fd) && !deadline)
+					deadline = gpsd_now_ms() + GPSD_SKY_TIMEOUT;
+
+				if (deadline && (timeout = deadline - gpsd_now_ms()) <= 0)
 					goto done;
 			}
 		} else {
@@ -274,13 +306,15 @@ int main(int argc, const char *argv[]) {
 done:
 	close(gpsd->fd);
 
-	if (!p) {
+	if (!p && !deadline) {
 		fputs("read timeout\n", stderr);
 		exit(EXIT_FAILURE);
 	} else if (p == -1) {
 		perror("poll failed");
 		exit(errno);
 	}
+
+	gpsd_print_metrics();
 
 	exit(EXIT_SUCCESS);
 }
